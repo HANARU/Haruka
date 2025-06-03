@@ -1,0 +1,28 @@
+# ── Build output (CMake / MSVC) — 1.2GB, never track ──
+/build/
+
+# ── Logs (build logs, run output) ──
+/Logs/
+
+# ── Visual Studio / MSVC local ──
+.vs/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+
+# ── Editor per-user state ──
+/Config/editor_layout.txt
+
+# ── Scene saves (user data; run un-ignore if you want scenes versioned) ──
+*.hscene
+
+# ── Claude local (machine-specific) settings ──
+.claude/settings.local.json
+
+# ── OS cruft ──
+Thumbs.db
+Desktop.ini
+.DS_Store
