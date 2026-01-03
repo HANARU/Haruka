@@ -1,0 +1,59 @@
+#version 450
+// GPU frustum culling using bounding spheres
+// Outputs surviving draw commands and an atomic count
+layout(local_size_x = 64) in;
+
+struct BoundSphere { vec4 centerRadius; };  // xyz=center (world), w=radius
+
+struct DrawCmd {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
+
+layout(set = 0, binding = 0) readonly buffer InSpheres  { BoundSphere spheres[]; };
+layout(set = 0, binding = 1) readonly buffer InDraws    { DrawCmd     inDraws[]; };
+layout(set = 0, binding = 2) writeonly buffer OutDraws  { DrawCmd     outDraws[]; };
+layout(set = 0, binding = 3) buffer DrawCount           { uint        drawCount; };
+
+layout(push_constant) uniform CullParams {
+    mat4 viewProj;
+    uint inputCount;
+};
+
+// Gribb-Hartmann frustum plane extraction (Vulkan NDC z=[0,1])
+void extractPlanes(mat4 vp, out vec4 planes[6]) {
+    planes[0] = vec4(vp[0][3]+vp[0][0], vp[1][3]+vp[1][0], vp[2][3]+vp[2][0], vp[3][3]+vp[3][0]); // left
+    planes[1] = vec4(vp[0][3]-vp[0][0], vp[1][3]-vp[1][0], vp[2][3]-vp[2][0], vp[3][3]-vp[3][0]); // right
+    planes[2] = vec4(vp[0][3]+vp[0][1], vp[1][3]+vp[1][1], vp[2][3]+vp[2][1], vp[3][3]+vp[3][1]); // bottom
+    planes[3] = vec4(vp[0][3]-vp[0][1], vp[1][3]-vp[1][1], vp[2][3]-vp[2][1], vp[3][3]-vp[3][1]); // top
+    planes[4] = vec4(vp[0][2],           vp[1][2],           vp[2][2],           vp[3][2]);           // near (Vulkan z>=0)
+    planes[5] = vec4(vp[0][3]-vp[0][2], vp[1][3]-vp[1][2], vp[2][3]-vp[2][2], vp[3][3]-vp[3][2]); // far
+    // Normalize
+    for (int i = 0; i < 6; i++) {
+        float len = length(planes[i].xyz);
+        planes[i] /= len;
+    }
+}
+
+bool sphereInFrustum(vec4 planes[6], vec3 center, float radius) {
+    for (int i = 0; i < 6; i++)
+        if (dot(planes[i].xyz, center) + planes[i].w < -radius) return false;
+    return true;
+}
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= inputCount) return;
+
+    vec4 planes[6];
+    extractPlanes(viewProj, planes);
+
+    BoundSphere bs = spheres[id];
+    if (sphereInFrustum(planes, bs.centerRadius.xyz, bs.centerRadius.w)) {
+        uint outIdx = atomicAdd(drawCount, 1u);
+        outDraws[outIdx] = inDraws[id];
+    }
+}
