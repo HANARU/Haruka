@@ -128,6 +128,7 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
 }
 
 void EditorApp::cleanup() {
+    saveDockLayout();   // 최종 레이아웃(활성 탭 포함)을 종료 시점에 영속화
     // 월드가 에디터보다 오래 살 수 있으므로, this 를 캡처한 리스너를 먼저 뗍니다.
     if (ctx_.world) ctx_.world->onActorDestroyed.remove(actorDestroyedSub_);
     hotReloader_.stop();
@@ -370,7 +371,11 @@ void EditorApp::buildWidgetTree() {
     panelReg_.add("Details",  "Details",        detailsPanel);
     panelReg_.add("Bottom",   "Content Drawer", bottomPanel);
 
-    if (!dockRoot_) buildDefaultDockLayout();
+    // 저장된 레이아웃을 복원하고(등록된 패널 기준으로 검증), 없거나 손상되면 기본 배치로 폴백합니다.
+    // uiScale 변경 등으로 buildWidgetTree 가 재호출될 때는 dockRoot_ 가 이미 살아 있으므로 재로딩하지
+    // 않습니다 — 세션 중 사용자가 바꾼 레이아웃을 디스크 값으로 되돌리지 않기 위함입니다.
+    if (!dockRoot_ && !loadDockLayout())
+        buildDefaultDockLayout();
 
     // ── Menu bar (최상단 크롬) ──────────────────────────────────────────────────
     menuBarBox_ = HNew(HR);
@@ -521,6 +526,111 @@ static void dockNormalize(DockNode* n) {
     for (float& r : n->ratios) r /= sum;
 }
 
+// ── 도크 트리 직렬화 (Phase 0 · 2c) ───────────────────────────────────────────────
+// 노드를 전위 순회로 텍스트화합니다. 각 노드가 자기 자식 수를 명시하므로 재귀 하강으로
+// 모호함 없이 되읽습니다. 저장 대상은 제목이 아니라 **패널 id**(공백 없는 레지스트리 키)라
+// 공백 구분으로 충분합니다.
+//   리프 :  L <activeTab> <count> <id0> <id1> ...
+//   분할 :  S <H|V> <count> <r0> <r1> ...        (뒤에 자식 노드 count 개가 이어짐)
+static void dockSerialize(const DockNode* n, std::ostringstream& o) {
+    if (!n) { o << "L 0 0\n"; return; }             // 방어적: 빈 리프로 기록
+    if (n->isLeaf()) {
+        o << "L " << n->activeTab << ' ' << n->panelIds.size();
+        for (const auto& id : n->panelIds) o << ' ' << id;
+        o << '\n';
+    } else {
+        o << "S " << (n->split == DockNode::Split::Vertical ? 'V' : 'H')
+          << ' ' << n->children.size();
+        for (size_t i = 0; i < n->children.size(); ++i)
+            o << ' ' << ((i < n->ratios.size()) ? n->ratios[i] : 0.f);
+        o << '\n';
+        for (const auto& c : n->children) dockSerialize(c.get(), o);
+    }
+}
+
+// 재귀 하강 파서. 형식 오류·과도한 중첩·비정상 개수는 ok=false 로 표시해 트리 전체를 폐기하고
+// 기본 레이아웃으로 폴백하게 합니다(부분 트리를 억지로 살리지 않음 — 예측 가능성 우선).
+static std::unique_ptr<DockNode> dockParse(std::istringstream& in, int depth, bool& ok) {
+    if (!ok) return nullptr;
+    if (depth > 32) { ok = false; return nullptr; }     // 깊이 폭주(손상 파일) 방어
+    std::string tag;
+    if (!(in >> tag)) { ok = false; return nullptr; }
+    if (tag == "L") {
+        int active = 0, count = 0;
+        if (!(in >> active >> count) || count < 0 || count > 64) { ok = false; return nullptr; }
+        std::vector<std::string> ids;
+        for (int i = 0; i < count; ++i) {
+            std::string id;
+            if (!(in >> id)) { ok = false; return nullptr; }
+            ids.push_back(std::move(id));
+        }
+        return DockNode::makeLeaf(std::move(ids), active);
+    }
+    if (tag == "S") {
+        std::string orient; int count = 0;
+        if (!(in >> orient >> count) || (orient != "H" && orient != "V")
+            || count < 1 || count > 64) { ok = false; return nullptr; }
+        std::vector<float> ratios(count, 0.f);
+        for (int i = 0; i < count; ++i)
+            if (!(in >> ratios[i])) { ok = false; return nullptr; }
+        std::vector<std::unique_ptr<DockNode>> kids;
+        for (int i = 0; i < count; ++i) {
+            auto c = dockParse(in, depth + 1, ok);
+            if (!ok) return nullptr;
+            kids.push_back(std::move(c));
+        }
+        return DockNode::makeSplit(orient == "V" ? DockNode::Split::Vertical
+                                                 : DockNode::Split::Horizontal,
+                                   std::move(kids), std::move(ratios));
+    }
+    ok = false;
+    return nullptr;
+}
+
+// 알 수 없는 패널 id 를 걷어내고(전방 호환), 빈 리프는 제거하며, 자식이 하나만 남은 분할은
+// 접습니다. valid(id) 는 PanelRegistry 조회입니다. 반환 nullptr = 이 서브트리 전체 소멸.
+template <class Valid>
+static std::unique_ptr<DockNode> dockPrune(std::unique_ptr<DockNode> n, const Valid& valid) {
+    if (!n) return nullptr;
+    if (n->isLeaf()) {
+        std::string activeId;   // 살아남으면 활성 탭을 원래 패널로 되돌리기 위해 보관
+        if (n->activeTab >= 0 && n->activeTab < (int)n->panelIds.size())
+            activeId = n->panelIds[n->activeTab];
+        std::vector<std::string> kept;
+        for (auto& id : n->panelIds) if (valid(id)) kept.push_back(id);
+        if (kept.empty()) return nullptr;
+        n->panelIds  = std::move(kept);
+        n->activeTab = 0;
+        for (int i = 0; i < (int)n->panelIds.size(); ++i)
+            if (n->panelIds[i] == activeId) { n->activeTab = i; break; }
+        return n;
+    }
+    std::vector<std::unique_ptr<DockNode>> kids;
+    std::vector<float>                     ratios;
+    for (size_t i = 0; i < n->children.size(); ++i) {
+        auto c = dockPrune(std::move(n->children[i]), valid);
+        if (c) { kids.push_back(std::move(c));
+                 ratios.push_back(i < n->ratios.size() ? n->ratios[i] : 1.f); }
+    }
+    if (kids.empty())    return nullptr;
+    if (kids.size() == 1) return std::move(kids[0]);   // 자식 1 → 분할을 접음
+    n->children = std::move(kids);
+    n->ratios   = std::move(ratios);
+    dockNormalize(n.get());
+    return n;
+}
+
+// 트리 어딘가에 특정 패널 id 가 있는지 검사합니다(뷰포트 필수 패널 보증용).
+static bool dockContains(const DockNode* n, const std::string& id) {
+    if (!n) return false;
+    if (n->isLeaf()) {
+        for (const auto& p : n->panelIds) if (p == id) return true;
+        return false;
+    }
+    for (const auto& c : n->children) if (dockContains(c.get(), id)) return true;
+    return false;
+}
+
 // ── performRedock ────────────────────────────────────────────────────────────────
 // 드롭 시 소스 탭을 빼서 타깃에 붙입니다. Center=탭화, L/R/T/B=분할(부모 방향이 같으면
 // 형제로 삽입, 아니면 타깃을 새 SplitNode 로 감싸기). 소스 리프가 비면 접어 정리합니다.
@@ -575,6 +685,7 @@ void EditorApp::performRedock(DockNode* src, int srcIdx, const std::string& pane
         collapseEmptyLeaf(src);
 
     rebuildDockArea();
+    saveDockLayout();      // 재도킹 결과를 즉시 영속화(비정상 종료에도 보존)
 }
 
 // ── collapseEmptyLeaf ────────────────────────────────────────────────────────────
@@ -596,6 +707,43 @@ void EditorApp::collapseEmptyLeaf(DockNode* leaf) {
     }
 }
 
+// ── 레이아웃 저장/복원 (Phase 0 · 2c) ─────────────────────────────────────────────
+// 도크 트리를 Config/editor_layout.txt 로 저장하고, 부팅 시 복원합니다. 파일이 없거나
+// 파싱·검증에 실패하면 호출부가 기본 레이아웃으로 폴백합니다.
+void EditorApp::saveDockLayout() const {
+    if (!dockRoot_) return;
+    std::error_code ec;
+    fs::create_directories("Config", ec);           // 없으면 생성(실패해도 아래 open 이 처리)
+    std::ofstream f("Config/editor_layout.txt");
+    if (!f) { std::cerr << "[Editor] Layout save failed\n"; return; }
+    std::ostringstream oss;
+    oss << "# Haruka Dock Layout v1\n";
+    dockSerialize(dockRoot_.get(), oss);
+    f << oss.str();
+}
+
+bool EditorApp::loadDockLayout() {
+    std::ifstream f("Config/editor_layout.txt");
+    if (!f) return false;
+    // '#' 주석 줄을 걷어내고 나머지를 토큰 스트림으로 파싱합니다.
+    std::string body, line;
+    while (std::getline(f, line)) {
+        if (!line.empty() && line[0] == '#') continue;
+        body += line; body += '\n';
+    }
+    std::istringstream in(body);
+    bool ok = true;
+    auto parsed = dockParse(in, 0, ok);
+    if (!ok || !parsed) return false;
+    // 등록된 패널만 남깁니다(알 수 없는 id 스킵 — 전방 호환).
+    auto pruned = dockPrune(std::move(parsed),
+        [this](const std::string& id){ return panelReg_.find(id) != nullptr; });
+    // 필수 뷰포트가 사라진 손상 파일이면 기본으로 폴백해 검은 화면(뷰포트 위젯 미배치)을 피합니다.
+    if (!pruned || !dockContains(pruned.get(), "Viewport")) return false;
+    dockRoot_ = std::move(pruned);
+    return true;
+}
+
 // ── Menu bar (Phase 1) ───────────────────────────────────────────────────────────
 void EditorApp::buildMenus() {
     menus_.clear();
@@ -614,7 +762,7 @@ void EditorApp::buildMenus() {
         } },
     }, 0.f });
     menus_.push_back({ "View", {
-        { "Reset Layout", [this]{ buildDefaultDockLayout(); rebuildDockArea(); } },
+        { "Reset Layout", [this]{ buildDefaultDockLayout(); rebuildDockArea(); saveDockLayout(); } },
     }, 0.f });
 }
 
@@ -678,12 +826,19 @@ void EditorApp::rebuildMenuPopup() {
         ->background({0.10f, 0.10f, 0.12f, 1.f})->borderColor(kBorder)->borderThickness(1.f)
         ->content(items);
 
-    // 캐처(전면 투명 버튼) 위에 드롭다운. 바깥 클릭 시 닫힘. (메뉴 전환은 2클릭 — 추후 개선)
+    // 캐처(전면 투명 버튼)로 바깥 클릭을 받아 메뉴를 닫습니다. 단, **메뉴 바 행(y < kMenuBarH)은
+    // 덮지 않습니다** — 캐처가 그 위까지 덮으면 다른 메뉴 버튼 클릭을 캐처가 먼저 삼켜(닫힘만 발생)
+    // 메뉴 전환에 2클릭이 필요했습니다. VBox[ 상단 spacer(kMenuBarH) / 캐처(Fill) ] 로 캐처를 메뉴
+    // 바 아래로만 두면, 메뉴 바 클릭은 spacer(Unhandled)를 통과해 곧장 메뉴 버튼으로 전달됩니다(1클릭).
+    auto catcher = HNew(SVerticalBox)
+        ->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(kMenuBarH))
+        ->addSlot(
+            HNew(SButton)->normalColor({0,0,0,0})->hoveredColor({0,0,0,0})->pressedColor({0,0,0,0})
+                ->onClick([this]{ openMenu_ = -1; rebuildMenuBar(); rebuildMenuPopup(); })
+                ->content(spacer()),
+            SVerticalBox::ESizeRule::Fill);
     auto inner = HNew(SOverlay);
-    inner->addSlot(
-        HNew(SButton)->normalColor({0,0,0,0})->hoveredColor({0,0,0,0})->pressedColor({0,0,0,0})
-            ->onClick([this]{ openMenu_ = -1; rebuildMenuBar(); rebuildMenuPopup(); })
-            ->content(spacer()));
+    inner->addSlot(catcher);
     inner->addSlot(dropdown, EHAlign::Left, EVAlign::Top, HPadding{md.x, s(kMenuBarH)});
     menuPopupHost_->content(inner);
 }
@@ -1597,7 +1752,7 @@ void EditorApp::handleInput(float mouseX, float mouseY,
             prevLeftDown_ = leftDown;
             return;
         }
-        if (!leftDown && dockDragNode_) dockDragNode_ = nullptr;
+        if (!leftDown && dockDragNode_) { dockDragNode_ = nullptr; saveDockLayout(); }   // 드래그 종료 시 비율 영속화
     }
 
     // ── Dock tab drag (re-dock) ──────────────────────────────────────────────────

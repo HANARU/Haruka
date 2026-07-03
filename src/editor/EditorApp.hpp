@@ -267,6 +267,8 @@ private:
     void buildWidgetTree();
     // ── 도킹 ─────────────────────────────────────────────────────────────────
     void buildDefaultDockLayout();                      // dockRoot_ 를 현재 배치로 초기화
+    bool loadDockLayout();                              // Config/editor_layout.txt 복원(성공 시 dockRoot_ 설정)
+    void saveDockLayout() const;                        // dockRoot_ → Config/editor_layout.txt
     void rebuildDockArea();                             // dockRoot_ → dockHost_ 로 조합
     std::shared_ptr<HWidget> buildDockWidget(DockNode* node);   // 노드 재귀 조합
     void rebuildToolbar();
