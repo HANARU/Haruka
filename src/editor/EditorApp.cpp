@@ -27,6 +27,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 static glm::vec3 quatToEulerDeg(const glm::quat& q) {
@@ -431,10 +432,16 @@ void EditorApp::buildDefaultDockLayout() {
 }
 
 // ── rebuildDockArea ──────────────────────────────────────────────────────────────
+// 전방 선언: 정의는 아래 "도크 트리 변형 헬퍼" 절에 있으나 rebuildDockArea 가 먼저 사용합니다.
+static bool dockPanelIsActive(const DockNode* n, const std::string& id);
+
 void EditorApp::rebuildDockArea() {
     dockSplitters_.clear();
     dockTabHits_.clear();
     dockLeafHits_.clear();
+    // 뷰포트가 활성 탭일 때만 그 위젯이 배치되어 viewportFbRect 가 유효합니다. 비활성이면
+    // inViewport 게이팅을 꺼서(아래) stale rect 위 클릭이 픽·오빗·기즈모로 새지 않게 합니다.
+    viewportVisible_ = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Viewport");
     if (dockHost_ && dockRoot_)
         dockHost_->content(buildDockWidget(dockRoot_.get()));
 }
@@ -589,15 +596,21 @@ static std::unique_ptr<DockNode> dockParse(std::istringstream& in, int depth, bo
 
 // 알 수 없는 패널 id 를 걷어내고(전방 호환), 빈 리프는 제거하며, 자식이 하나만 남은 분할은
 // 접습니다. valid(id) 는 PanelRegistry 조회입니다. 반환 nullptr = 이 서브트리 전체 소멸.
+// seen 은 **트리 전체** 기준 중복 제거용입니다. 인앱 재도킹은 "한 패널은 한 리프에만" 불변식을
+// 지키지만(performRedock 이 소스에서 먼저 제거), 로더는 임의의 외부 파일을 받으므로 같은 id 가
+// 두 리프에 실릴 수 있습니다. 그러면 같은 위젯 shared_ptr 이 두 부모에 배치되어 배치·히트테스트가
+// 깨집니다. valid(id) && 첫 등장일 때만 남겨 이를 막습니다.
 template <class Valid>
-static std::unique_ptr<DockNode> dockPrune(std::unique_ptr<DockNode> n, const Valid& valid) {
+static std::unique_ptr<DockNode> dockPrune(std::unique_ptr<DockNode> n, const Valid& valid,
+                                           std::unordered_set<std::string>& seen) {
     if (!n) return nullptr;
     if (n->isLeaf()) {
         std::string activeId;   // 살아남으면 활성 탭을 원래 패널로 되돌리기 위해 보관
         if (n->activeTab >= 0 && n->activeTab < (int)n->panelIds.size())
             activeId = n->panelIds[n->activeTab];
         std::vector<std::string> kept;
-        for (auto& id : n->panelIds) if (valid(id)) kept.push_back(id);
+        for (auto& id : n->panelIds)
+            if (valid(id) && seen.insert(id).second) kept.push_back(id);   // 유효 + 트리 전체 첫 등장만
         if (kept.empty()) return nullptr;
         n->panelIds  = std::move(kept);
         n->activeTab = 0;
@@ -608,7 +621,7 @@ static std::unique_ptr<DockNode> dockPrune(std::unique_ptr<DockNode> n, const Va
     std::vector<std::unique_ptr<DockNode>> kids;
     std::vector<float>                     ratios;
     for (size_t i = 0; i < n->children.size(); ++i) {
-        auto c = dockPrune(std::move(n->children[i]), valid);
+        auto c = dockPrune(std::move(n->children[i]), valid, seen);
         if (c) { kids.push_back(std::move(c));
                  ratios.push_back(i < n->ratios.size() ? n->ratios[i] : 1.f); }
     }
@@ -628,6 +641,18 @@ static bool dockContains(const DockNode* n, const std::string& id) {
         return false;
     }
     for (const auto& c : n->children) if (dockContains(c.get(), id)) return true;
+    return false;
+}
+
+// 특정 패널이 자신이 속한 리프에서 "활성 탭"인지(= 이번 프레임에 실제로 배치되는지) 검사합니다.
+// 비활성이면 그 위젯은 트리에 없어 arrange 되지 않고 geometry 가 stale 해집니다.
+static bool dockPanelIsActive(const DockNode* n, const std::string& id) {
+    if (!n) return false;
+    if (n->isLeaf()) {
+        return n->activeTab >= 0 && n->activeTab < (int)n->panelIds.size()
+            && n->panelIds[n->activeTab] == id;
+    }
+    for (const auto& c : n->children) if (dockPanelIsActive(c.get(), id)) return true;
     return false;
 }
 
@@ -735,9 +760,11 @@ bool EditorApp::loadDockLayout() {
     bool ok = true;
     auto parsed = dockParse(in, 0, ok);
     if (!ok || !parsed) return false;
-    // 등록된 패널만 남깁니다(알 수 없는 id 스킵 — 전방 호환).
+    // 등록된 패널만, 그리고 트리 전체에서 처음 나온 것만 남깁니다(알 수 없는 id 스킵 — 전방 호환,
+    // + 손상 파일의 중복 id 로 같은 위젯이 두 리프에 실리는 것 방지).
+    std::unordered_set<std::string> seen;
     auto pruned = dockPrune(std::move(parsed),
-        [this](const std::string& id){ return panelReg_.find(id) != nullptr; });
+        [this](const std::string& id){ return panelReg_.find(id) != nullptr; }, seen);
     // 필수 뷰포트가 사라진 손상 파일이면 기본으로 폴백해 검은 화면(뷰포트 위젯 미배치)을 피합니다.
     if (!pruned || !dockContains(pruned.get(), "Viewport")) return false;
     dockRoot_ = std::move(pruned);
@@ -1746,13 +1773,25 @@ void EditorApp::handleInput(float mouseX, float mouseY,
             if (i >= 0 && i + 1 < (int)R.size()) {
                 const float sum  = R[i] + R[i + 1];
                 const float minR = 0.06f;
-                const float newL = std::clamp(dockDragStartRatioL_ + dRatio, minR, sum - minR);
-                if (newL != R[i]) { R[i] = newL; R[i + 1] = sum - newL; rebuildDockArea(); }
+                // sum <= 2*minR 이면 clamp 의 상한(sum-minR)이 하한(minR)보다 작아져 std::clamp 의
+                // 전제(lo <= hi)를 위반합니다(MSVC 는 release 에서도 _STL_VERIFY 로 abort). 두 패널이
+                // 이미 최소치 근처라는 뜻이므로 이 경우 리사이즈를 건너뜁니다.
+                if (sum > 2.f * minR) {
+                    const float newL = std::clamp(dockDragStartRatioL_ + dRatio, minR, sum - minR);
+                    if (newL != R[i]) { R[i] = newL; R[i + 1] = sum - newL; rebuildDockArea(); }
+                }
             }
             prevLeftDown_ = leftDown;
             return;
         }
-        if (!leftDown && dockDragNode_) { dockDragNode_ = nullptr; saveDockLayout(); }   // 드래그 종료 시 비율 영속화
+        if (!leftDown && dockDragNode_) {
+            dockDragNode_ = nullptr;
+            saveDockLayout();            // 드래그 종료 시 비율 영속화
+            // 이 프레임의 마우스-업을 소비합니다. 소비하지 않으면 leftJustUp 업 이벤트가 Slate 로
+            // 흘러가 릴리즈 지점의 버튼(Load/Stop/Play 등)이 오발됩니다(드래그-무브·탭 릴리즈와 동일 규약).
+            prevLeftDown_ = leftDown;
+            return;
+        }
     }
 
     // ── Dock tab drag (re-dock) ──────────────────────────────────────────────────
@@ -1947,6 +1986,10 @@ WorldViewport EditorApp::worldVP(float mx, float my, float winW, float winH) con
 }
 
 bool EditorApp::inViewport(float mx, float my, float winW, float winH) const {
+    // 뷰포트가 비활성 탭이면 그 위젯은 배치되지 않아 viewportFbRect 가 stale 합니다. 그 rect 로
+    // 판정하면 뷰포트를 가린 패널의 빈 영역 클릭이 픽·오빗으로, RMB 가 카메라 모드로 새므로
+    // (뷰포트가 화면에 없을 때는) 항상 false 로 게이팅합니다.
+    if (!viewportVisible_) return false;
     // 히트테스트도 프레임버퍼 공간으로 통일합니다. 마우스(윈도 픽셀)를 fb 로 변환해
     // 뷰포트 위젯의 실측 fb rect 와 비교하므로, 도킹·리사이즈·HiDPI 와 무관하게 정확합니다.
     const glm::vec2 fb = mouseToFb(mx, my, winW, winH);

@@ -97,6 +97,10 @@ private:
     PanelRegistry             panelReg_;              // id → {제목, 위젯}
     std::unique_ptr<DockNode> dockRoot_;              // 도크 트리(위젯과 독립, 안정적)
     std::shared_ptr<SBorder>  dockHost_;              // 도크 영역 컨테이너(content 교체)
+    // 뷰포트 패널이 현재 자신의 리프에서 활성 탭(=화면에 배치)인지. rebuildDockArea 에서 갱신.
+    // 비활성(다른 패널과 탭 스택으로 묶여 가려짐)이면 viewportWidget_ 이 arrange 되지 않아
+    // cachedGeometry 가 stale 해지므로, inViewport 게이팅을 꺼서 픽·오빗·기즈모 오라우팅을 막습니다.
+    bool                      viewportVisible_ = true;
 
     // 스플리터 히트존: rebuildDockArea 마다 재생성. 드래그 자체는 노드 기준이라 안정적.
     struct DockSplitterHit {
