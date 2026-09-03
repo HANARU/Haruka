@@ -775,12 +775,14 @@ bool EditorApp::loadDockLayout() {
 void EditorApp::buildMenus() {
     menus_.clear();
     menus_.push_back({ "File", {
+        { "New Scene",  [this]{ deserializeWorld(""); cmdStack_.clear(); } },  // 카메라만 남기고 비움
         { "Save Scene", [this]{ saveScene(); } },
         { "Load Scene", [this]{ loadScene(); } },
     }, 0.f });
     menus_.push_back({ "Edit", {
         { "Undo", [this]{ undo(); } },
         { "Redo", [this]{ redo(); } },
+        { "Delete Selected", [this]{ deleteSelectedActor(); } },
     }, 0.f });
     menus_.push_back({ "Actor", {
         { "Add Empty", [this]{
@@ -796,14 +798,14 @@ void EditorApp::buildMenus() {
 void EditorApp::rebuildMenuBar() {
     if (!menuBarBox_) return;
     menuBarBox_->clearSlots();
+    menuButtons_.assign(menus_.size(), nullptr);   // hover 전환 히트테스트용(menus_ 와 1:1)
     menuBarBox_->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(6.f));
     float x = s(6.f);
     for (int mi = 0; mi < (int)menus_.size(); ++mi) {
         menus_[mi].x = x;                     // 팝업 위치용 x(스케일 픽셀)
         const float w = s(58.f);
         const bool open = (openMenu_ == mi);
-        menuBarBox_->addSlot(
-            HNew(SButton)
+        auto btn = HNew(SButton)
                 ->normalColor (open ? glm::vec4{0.20f, 0.20f, 0.26f, 1.f}
                                     : glm::vec4{0.f,   0.f,   0.f,   0.f})
                 ->hoveredColor({0.18f, 0.18f, 0.22f, 1.f})
@@ -814,8 +816,9 @@ void EditorApp::rebuildMenuBar() {
                     rebuildMenuBar(); rebuildMenuPopup();
                 })
                 ->content(HNew(STextBlock)->text(menus_[mi].name)->fontSize(s(13.f))
-                    ->color(kTextBody)->hAlign(EHAlign::Center)->vAlign(EVAlign::Center)),
-            SHorizontalBox::ESizeRule::Fixed, w);
+                    ->color(kTextBody)->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
+        menuButtons_[mi] = btn;
+        menuBarBox_->addSlot(btn, SHorizontalBox::ESizeRule::Fixed, w);
         x += w;
     }
     menuBarBox_->addSlot(spacer(), SHorizontalBox::ESizeRule::Fill);
@@ -829,14 +832,18 @@ void EditorApp::rebuildMenuPopup() {
     }
     const MenuDef& md = menus_[openMenu_];
 
+    const float rowH  = s(30.f);
+    const float dropW = s(200.f);            // 최소 너비 고정 → Undo/Redo 같은 짧은 항목도 반듯한 박스
+
     auto items = HNew(SVerticalBox);
     for (int k = 0; k < (int)md.items.size(); ++k) {
         items->addSlot(
             HNew(SButton)
-                ->normalColor ({0.14f, 0.14f, 0.17f, 1.f})
-                ->hoveredColor({0.20f, 0.35f, 0.55f, 1.f})
-                ->pressedColor({0.10f, 0.30f, 0.50f, 1.f})
-                ->padding(HPadding{s(16.f), s(6.f)})
+                ->normalColor ({0.11f, 0.11f, 0.14f, 1.f})
+                ->hoveredColor({0.20f, 0.42f, 0.68f, 1.f})
+                ->pressedColor({0.14f, 0.34f, 0.56f, 1.f})
+                ->padding(HPadding{s(18.f), s(7.f)})
+                ->hAlign(EHAlign::Fill)
                 ->onClick([this, k]{
                     if (openMenu_ < 0 || openMenu_ >= (int)menus_.size()) return;
                     if (k < 0 || k >= (int)menus_[openMenu_].items.size()) return;
@@ -847,11 +854,19 @@ void EditorApp::rebuildMenuPopup() {
                 })
                 ->content(HNew(STextBlock)->text(md.items[k].label)->fontSize(s(13.f))
                     ->color(kTextBody)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
-            SVerticalBox::ESizeRule::Fixed, s(28.f));
+            SVerticalBox::ESizeRule::Fixed, rowH);
     }
-    auto dropdown = HNew(SBorder)
-        ->background({0.10f, 0.10f, 0.12f, 1.f})->borderColor(kBorder)->borderThickness(1.f)
-        ->content(items);
+    // 툴바(0.12)보다 확실히 어두운 배경 + 밝은 테두리 → 툴바 위에 "떠 있는" 패널로 읽히게 합니다.
+    // (기존엔 배경 0.10 이 툴바색과 거의 같아 겹치면 글자만 툴바에 얹힌 듯 지저분했습니다.)
+    auto dropdown = HNew(SBox)->widthOverride(dropW)->content(
+        HNew(SBorder)
+            ->background({0.055f, 0.055f, 0.07f, 1.f})
+            ->borderColor({0.34f, 0.34f, 0.40f, 1.f})->borderThickness(1.f)
+            ->content(items));
+    // 드롭 섀도(반투명 검정)를 살짝 어긋나게 깔아 툴바와의 경계를 더 분명히 합니다.
+    auto shadow = HNew(SBox)->widthOverride(dropW)
+        ->heightOverride((float)md.items.size() * rowH)
+        ->content(HNew(SBorder)->background({0.f, 0.f, 0.f, 0.35f}));
 
     // 캐처(전면 투명 버튼)로 바깥 클릭을 받아 메뉴를 닫습니다. 단, **메뉴 바 행(y < kMenuBarH)은
     // 덮지 않습니다** — 캐처가 그 위까지 덮으면 다른 메뉴 버튼 클릭을 캐처가 먼저 삼켜(닫힘만 발생)
@@ -864,9 +879,11 @@ void EditorApp::rebuildMenuPopup() {
                 ->onClick([this]{ openMenu_ = -1; rebuildMenuBar(); rebuildMenuPopup(); })
                 ->content(spacer()),
             SVerticalBox::ESizeRule::Fill);
+    // 슬롯 순서 = z(뒤→앞): 캐처 / 섀도 / 드롭다운. 섀도는 드롭다운보다 (3,3)px 어긋나 깔립니다.
     auto inner = HNew(SOverlay);
     inner->addSlot(catcher);
-    inner->addSlot(dropdown, EHAlign::Left, EVAlign::Top, HPadding{md.x, s(kMenuBarH)});
+    inner->addSlot(shadow,   EHAlign::Left, EVAlign::Top, HPadding{md.x + s(3.f), s(kMenuBarH) + s(3.f)});
+    inner->addSlot(dropdown, EHAlign::Left, EVAlign::Top, HPadding{md.x,          s(kMenuBarH)});
     menuPopupHost_->content(inner);
 }
 
@@ -1730,6 +1747,21 @@ void EditorApp::tickShortcuts() {
 void EditorApp::handleInput(float mouseX, float mouseY,
                              bool leftDown, bool leftJustUp,
                              float scrollDelta, float winW, float winH) {
+    // ── 메뉴 hover 전환 ──────────────────────────────────────────────────────────
+    // 메뉴가 열려 있을 때 다른 메뉴 버튼 위로 마우스를 옮기면 그 메뉴로 전환합니다(표준 메뉴 바
+    // 동작). 버튼 위젯은 프레임 간 유지되므로 직전 프레임의 실측 geometry 로 히트테스트합니다.
+    if (openMenu_ >= 0) {
+        const glm::vec2 mm{ mouseX, mouseY };
+        for (int mi = 0; mi < (int)menuButtons_.size(); ++mi) {
+            if (mi == openMenu_ || !menuButtons_[mi]) continue;
+            if (menuButtons_[mi]->cachedGeometry().contains(mm)) {
+                openMenu_ = mi;
+                rebuildMenuBar(); rebuildMenuPopup();
+                break;
+            }
+        }
+    }
+
     // ── Dock splitter resize ────────────────────────────────────────────────────
     // 도크 트리의 스플리터 핸들을 히트테스트해 분할 비율(ratios)을 조정합니다. 드래그 상태는
     // 위젯이 아니라 노드 기준이라, rebuildDockArea 로 위젯이 갈려도 안정적으로 이어집니다.

@@ -155,6 +155,9 @@ private:
     int                             openMenu_ = -1;      // 열린 메뉴 인덱스(-1=없음)
     std::shared_ptr<SHorizontalBox> menuBarBox_;
     std::shared_ptr<SBorder>        menuPopupHost_;      // 드롭다운 컨테이너(최상위 오버레이)
+    // 메뉴 바 버튼 위젯(menus_ 와 1:1). 메뉴가 열린 상태에서 다른 버튼 위로 hover 하면 그 메뉴로
+    // 전환하기 위해(표준 메뉴 바 동작) handleInput 이 이 위젯들의 geometry 를 히트테스트합니다.
+    std::vector<std::shared_ptr<HWidget>> menuButtons_;
     void buildMenus();
     void rebuildMenuBar();
     void rebuildMenuPopup();
