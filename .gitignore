@@ -19,6 +19,12 @@
 # ── Scene saves (user data; run un-ignore if you want scenes versioned) ──
 *.hscene
 
+# ── Session handoff (transient working notes, paste-in convention) ──
+/SESSION_HANDOFF.md
+
+# ── Machine-specific launcher shortcut (absolute path; kept on disk, not tracked) ──
+/HarukaEngine.lnk
+
 # ── Claude local (machine-specific) settings ──
 .claude/settings.local.json
 
