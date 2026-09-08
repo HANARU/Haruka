@@ -39,6 +39,7 @@
 |---|---|
 | [Vulkan_Single_RHI_Decision.md](Vulkan_Single_RHI_Decision.md) | Vulkan 단일 RHI 채택 근거 |
 | [Memory_Allocator_Decision.md](Memory_Allocator_Decision.md) | 메모리 할당자(존 기반) 결정 |
+| [ECS_Decision.md](ECS_Decision.md) | ECS 도입 보류 근거와 재검토 트리거 |
 | [Engine_Strategy_Evaluation.md](Engine_Strategy_Evaluation.md) | 엔진 전략 평가(범용 코어 + 첫 도메인) |
 | [Threading.md](Threading.md) | 스레드 소유권 규칙(계층 무관 전역 규약) |
 
