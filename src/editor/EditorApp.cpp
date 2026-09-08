@@ -152,6 +152,9 @@ void EditorApp::cleanup() {
 }
 
 // ── tick ───────────────────────────────────────────────────────────────────────
+// 전방 선언: 정의는 아래 "뷰포트 툴바" 절에 있으나 tick 의 휠 라우팅이 먼저 씁니다.
+static float cycleSpeed(float cur, int dir);
+
 void EditorApp::tick(float dt) {
     if (!ctx_.world) return;
 
@@ -212,12 +215,20 @@ void EditorApp::tick(float dt) {
             scroll             = 0.f;
         }
     }
+    // RMB 비행 중 휠은 돌리가 아니라 이동 속도 조절입니다. 카메라 모드를 놓으면
+    // 종전처럼 돌리로 돌아갑니다.
+    if (scroll != 0.f && ctx_.window && ctx_.window->isCameraModeActive()) {
+        camSpeed_ = cycleSpeed(camSpeed_, scroll > 0.f ? 1 : -1);
+        scroll    = 0.f;
+    }
     tickEditorCamera(dt, scroll);
     tickRenameInput();
     tickShortcuts();
 
     // Gizmo hotkeys Q/W/E/R (edge trigger, only when not in camera mode / not typing)
-    if (ctx_.window && !renaming_ && !outlinerSearchFocused_ &&
+    // 드래그 중에는 모드를 바꾸지 않습니다. 바뀌면 UI 와 실제 조작이 어긋나고,
+    // 크기 균등 핸들(axis_ == 3) 상태로 이동·회전 분기에 들어가 축 배열을 넘겨 읽습니다.
+    if (ctx_.window && !renaming_ && !outlinerSearchFocused_ && !gizmo_.isDragging() &&
         !SNumberField::focusedField() && !ctx_.window->isCameraModeActive()) {
         IWindow& win = *ctx_.window;
         bool qNow = win.isKeyDown(HInput::KEY_Q);
@@ -263,6 +274,7 @@ void EditorApp::tick(float dt) {
         // 않습니다. 그러지 않으면 화면에 없는 것을 축 화살표만 보고 움직이게 됩니다.
         Actor* const gizmoTarget =
             (ctx_.selected && ctx_.selected->activeInHierarchy()) ? ctx_.selected : nullptr;
+        gizmo_.setSnap(snap_);
         gizmo_.tick(gizmoTarget, *ctx_.world, wvp, s(18.f),
                     gizmoMode_, worldSpace_, inView, lines, tris);
         buildEditorIcons(*ctx_.world, wvp, lines, tris);
@@ -302,6 +314,22 @@ void EditorApp::tick(float dt) {
         prevSelected2_ = prevSelected_;
         prevSelected_  = ctx_.selected;
     }
+    // 뷰포트 툴바 축약 단계. 더 넓은 구성으로 되돌아갈 때만 여유 폭을 요구해, 스플리터를
+    // 임계 폭 근처에서 끌 때 단계가 매 프레임 오가며 리빌드가 반복되는 것을 막습니다.
+    {
+        int lv = computeVpToolbarLevel();
+        if (vpToolbarLevel_ >= 0 && lv < vpToolbarLevel_) {
+            static constexpr float kUpgrade[5] = { 660.f, 595.f, 540.f, 455.f, 365.f };
+            const float w = viewportFbRect().width / std::max(0.01f, uiScale_);
+            // 여유가 모자라면 한 칸만 덜 펼칩니다. 직전 레벨을 그대로 되돌리면, 폭이
+            // 한 프레임에 크게 뛰었을 때(빠른 드래그·창 최대화) 숨김 단계에 갇혀
+            // 툴바가 영영 돌아오지 않습니다.
+            if (w < kUpgrade[lv]) lv = std::min(vpToolbarLevel_, lv + 1);
+        }
+        if (lv != vpToolbarLevel_) { vpToolbarLevel_ = lv; vpToolbarDirty_ = true; }
+        if (vpToolbarDirty_) { vpToolbarDirty_ = false; rebuildViewportToolbar(); }
+    }
+
     // exchange로 플래그를 먼저 내려야 리빌드 중 도착한 로그가 다음 프레임에 잡힌다
     if (ctx_.logDirty.exchange(false, std::memory_order_acquire))
         rebuildBottomPanel();
@@ -404,12 +432,38 @@ void EditorApp::buildWidgetTree() {
         }))
         ->fontSize(s(12.f))->color({0.85f, 0.90f, 0.85f, 1.f})
         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Top);
+    // 뷰포트 오버레이는 [툴바 / 간격 / 통계 / 남는 공간] 을 한 세로 상자에 쌓습니다.
+    // 통계를 상수 패딩으로 밀어내는 방식이면 폰트·uiScale·툴바 축약 단계가 바뀔 때마다
+    // 어긋나는데, HSlate 에는 클리핑이 없어 글자끼리 경고 없이 그대로 포개집니다.
+    viewportToolbarBox_ = HNew(HR);
+    viewportToolbarBar_ = HNew(BR)
+        ->background({0.08f, 0.09f, 0.11f, 0.82f})
+        ->borderColor(kBorder)->borderThickness(1.f)
+        ->padding(HPadding{s(6.f), s(4.f)})
+        ->content(viewportToolbarBox_);
+    auto vpLayer = HNew(VR)
+        ->addSlot(viewportToolbarBar_, VR::ESizeRule::Auto, 0.f, HPadding{}, EHAlign::Left)
+        ->addSlot(spacer(), VR::ESizeRule::Fixed, s(6.f))
+        ->addSlot(HNew(BR)->background({0.f, 0.f, 0.f, 0.55f})->padding(HPadding{s(6.f), s(4.f)})
+                      ->content(statsText),
+                  VR::ESizeRule::Auto, 0.f, HPadding{}, EHAlign::Left)
+        ->addSlot(spacer(), VR::ESizeRule::Fill)
+        // 기즈모 드래그 값. 툴바 안에 두면 드래그 중 폭이 늘어 사다리 계산이 흔들리므로
+        // 뷰포트 하단에 따로 둡니다. 드래그 중이 아니면 빈 문자열이라 자리를 차지하지 않습니다.
+        ->addSlot(HNew(STextBlock)
+                      ->text(AttrStr([this] { return gizmoReadoutText(); }))
+                      ->fontSize(s(13.f))->color({1.f, 0.85f, 0.35f, 1.f})
+                      ->hAlign(EHAlign::Left)->vAlign(EVAlign::Bottom),
+                  VR::ESizeRule::Auto, 0.f, HPadding{}, EHAlign::Left);
+
     auto viewportPanel = HNew(SOverlay);
     viewportPanel->addSlot(viewportWidget_);
-    viewportPanel->addSlot(
-        HNew(BR)->background({0.f, 0.f, 0.f, 0.55f})->padding(HPadding{s(6.f), s(4.f)})
-            ->content(statsText),
-        EHAlign::Left, EVAlign::Top, HPadding{s(6.f), s(6.f)});
+    // 레이어 슬롯은 반드시 Fill/Fill 입니다. 툴바 크기에 딱 맞춘 슬롯이면 SOverlay 가
+    // 자신을 포함하는 슬롯에만 마우스 이동을 내려보내므로, 커서가 툴바를 벗어나는 순간
+    // 이동 이벤트가 끊겨 버튼 하이라이트가 굳습니다. Fill 이면 뷰포트 어디로 움직여도
+    // 세로 상자가 모든 자식에게 이동을 전달해 hover 가 풀립니다.
+    viewportPanel->addSlot(vpLayer, EHAlign::Fill, EVAlign::Fill,
+                           HPadding{s(kVpToolbarInset), s(kVpToolbarInset)});
 
     // ── Panel: Bottom (internal Content/Log/GPU tabs) ─────────────────────────
     bottomContent_ = HNew(VR);
@@ -453,6 +507,7 @@ void EditorApp::buildWidgetTree() {
         ->padding(HPadding{4.f, 0.f})
         ->content(toolbarBox_);
     rebuildToolbar();
+    rebuildViewportToolbar();
 
     // ── Dock host + root ───────────────────────────────────────────────────────
     // root = SOverlay[ (menuBar / toolbar / dock area) , 메뉴 팝업 , 드롭존 오버레이 ].
@@ -983,38 +1038,8 @@ void EditorApp::rebuildToolbar() {
 
     using HR = SHorizontalBox;
 
-    // ── Gizmo mode buttons ─────────────────────────────────────────────────────
-    auto gizmoBtn = [&](const char* label, int mode) {
-        toolbarBox_->addSlot(
-            HNew(SToggleButton)
-                ->content(HNew(STextBlock)->text(label)->fontSize(s(13.f))->color(kTextBody))
-                ->padding(HPadding{s(12.f), s(6.f)})
-                ->isActive([this, mode]() -> bool { return gizmoMode_ == mode; })
-                ->onClick([this, mode]{ gizmoMode_ = mode; }),
-            HR::ESizeRule::Auto);
-    };
-    gizmoBtn("Q", 0); gizmoBtn("W", 1); gizmoBtn("E", 2); gizmoBtn("R", 3);
-
-    toolbarBox_->addSlot(HNew(SBorder)->background(kBorder), HR::ESizeRule::Fixed, 1.f);
-
-    // World / Local toggle
-    toolbarBox_->addSlot(
-        HNew(SToggleButton)
-            ->content(HNew(STextBlock)->text("World")->fontSize(s(13.f))->color(kTextBody))
-            ->padding(HPadding{s(12.f), s(6.f)})
-            ->isActive([this]() -> bool { return worldSpace_; })
-            ->onClick([this]{ worldSpace_ = true; }),
-        HR::ESizeRule::Auto);
-    toolbarBox_->addSlot(
-        HNew(SToggleButton)
-            ->content(HNew(STextBlock)->text("Local")->fontSize(s(13.f))->color(kTextBody))
-            ->padding(HPadding{s(12.f), s(6.f)})
-            ->isActive([this]() -> bool { return !worldSpace_; })
-            ->onClick([this]{ worldSpace_ = false; }),
-        HR::ESizeRule::Auto);
-
-    toolbarBox_->addSlot(HNew(SBorder)->background(kBorder), HR::ESizeRule::Fixed, 1.f);
-    toolbarBox_->addSlot(spacer(), HR::ESizeRule::Fixed, s(4.f));
+    // 변환 도구(Q/W/E/R)와 World/Local 좌표계는 Phase 2 에서 뷰포트 툴바로 이관했습니다
+    // (rebuildViewportToolbar). 조작 대상 바로 위에 두는 편이 시선 이동이 짧습니다.
 
     // ── Play / Pause / Stop ────────────────────────────────────────────────────
     const bool playing = (playState_ == EPlayState::Playing);
@@ -1071,6 +1096,189 @@ void EditorApp::rebuildToolbar() {
         HR::ESizeRule::Fixed, s(260.f));
 
     toolbarBox_->addSlot(spacer(), HR::ESizeRule::Fixed, s(6.f));
+}
+
+// ── 뷰포트 툴바 (Phase 2) ──────────────────────────────────────────────────────
+// 카메라 이동 속도 프리셋(m/s). 1 unit = 1 meter 규약 기준이며 기본값 5 는 개편 전
+// 하드코딩과 같은 값이라, 아무것도 만지지 않으면 종전과 똑같이 움직입니다.
+static constexpr float kCamSpeeds[] = { 1.f, 2.f, 5.f, 10.f, 20.f, 40.f };
+// 스냅 눈금 프리셋. 1 unit = 1 meter 규약 기준이라, UE 의 uu 값을 그대로 옮기지 않고
+// 미터로 다시 잡았습니다(그대로 옮기면 10 m 스냅이 되어 쓸 수 없습니다).
+static constexpr float kSnapMove[]   = { 0.05f, 0.1f, 0.25f, 0.5f, 1.f, 5.f };
+static constexpr float kSnapRotate[] = { 5.f, 10.f, 15.f, 30.f, 45.f, 90.f };
+static constexpr float kSnapScale[]  = { 0.05f, 0.1f, 0.25f, 0.5f, 1.f };
+
+// 현재 값에 가장 가까운 프리셋을 찾아 dir 만큼 옮깁니다(양끝에서 순환).
+template <size_t N>
+static float cycleFrom(const float (&arr)[N], float cur, int dir) {
+    int   best  = 0;
+    float bestD = std::abs(arr[0] - cur);
+    for (int i = 1; i < (int)N; ++i) {
+        const float d = std::abs(arr[i] - cur);
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    return arr[((best + dir) % (int)N + (int)N) % (int)N];
+}
+
+// 현재 값에 가장 가까운 프리셋을 찾아 dir 만큼 옮깁니다(양끝에서 순환).
+static float cycleSpeed(float cur, int dir) {
+    constexpr int n = (int)(sizeof(kCamSpeeds) / sizeof(kCamSpeeds[0]));
+    int   best = 0;
+    float bestD = std::abs(kCamSpeeds[0] - cur);
+    for (int i = 1; i < n; ++i) {
+        const float d = std::abs(kCamSpeeds[i] - cur);
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    return kCamSpeeds[((best + dir) % n + n) % n];
+}
+
+// 뷰포트 폭에 따른 축약 단계입니다. HSlate 에는 클리핑이 없어서, 넘친 툴바는 이웃 패널
+// 위에 그려지면서 정작 클릭은 조상 컨테이너의 영역 판정에 막혀 죽습니다(아웃라이너에서
+// 겪은 폭 사다리와 같은 유형). 임계값은 레이아웃이 실제로 쓰는 폭 근사
+// (글자 수 x 폰트 크기 x 0.6 + 버튼 좌우 여백)로 계산했으므로, 라벨 문구나 폰트 크기를
+// 바꾸면 이 표도 함께 고쳐야 합니다.
+int EditorApp::computeVpToolbarLevel() const {
+    const HViewportRect r = viewportFbRect();
+    const float w = r.width / std::max(0.01f, uiScale_);
+    // 각 단계가 실제로 요구하는 폭(미스케일, 인셋·바 패딩 포함): 0=620, 1=555, 2=499,
+    // 3=414, 4=328. 임계값은 그보다 넉넉해야 합니다. 임계값이 요구 폭보다 작으면 그
+    // 구간에서 툴바가 뷰포트를 넘어가 이웃 패널에 가려지고, 가려진 칩은 보이지도
+    // 눌리지도 않습니다(클리핑이 없어 그림만 넘고 클릭은 조상에서 걸립니다).
+    if (w >= 640.f) return 0;   // 전체 라벨 + World/Local 두 버튼 + 스냅 토글·값
+    if (w >= 575.f) return 1;   // 도구 라벨 축약
+    if (w >= 520.f) return 2;   // 좌표계를 순환 버튼 하나로
+    if (w >= 435.f) return 3;   // 스냅 값 칩 생략(토글은 유지)
+    if (w >= 345.f) return 4;   // 스냅 그룹 생략 + 카메라 칩 축약
+    return 5;                   // 숨김
+}
+
+// 드래그 중인 기즈모 값. 스냅이 실제로 걸리는지 눈으로 확인시키는 것이 목적입니다.
+std::string EditorApp::gizmoReadoutText() const {
+    int   axis = -1;
+    float v    = 0.f;
+    if (!gizmo_.dragReadout(axis, v)) return {};
+    const char* an = (axis >= 0 && axis <= 2) ? (axis == 0 ? "X" : axis == 1 ? "Y" : "Z") : "";
+    char buf[64];
+    switch (gizmoMode_) {
+        case 1:  std::snprintf(buf, sizeof buf, "Move %s %+.3f m",     an, v); break;
+        case 2:  std::snprintf(buf, sizeof buf, "Rotate %s %+.1f deg", an, v); break;
+        case 3:  std::snprintf(buf, sizeof buf, "Scale %s x%.3f",      an, v); break;
+        default: return {};
+    }
+    return buf;
+}
+
+void EditorApp::rebuildViewportToolbar() {
+    if (!viewportToolbarBox_ || !viewportToolbarBar_) return;
+    viewportToolbarBox_->clearSlots();
+
+    const int lv = std::max(0, vpToolbarLevel_);
+    if (lv >= 5) {
+        // 숨길 때는 슬롯을 비우고 여백까지 없애 실제 크기를 0 으로 만듭니다. 보이지만
+        // 않게 하면(visibility) 컨테이너들이 영역만 보고 이벤트를 계속 삼킵니다.
+        // 테두리도 함께 꺼야 합니다. SBorder 는 크기와 무관하게 테두리를 그리므로,
+        // 크기 0 인 채로 두께가 남으면 좌상단에 작은 점이 찍힙니다.
+        viewportToolbarBar_->padding(HPadding{0.f, 0.f})->borderThickness(0.f);
+        return;
+    }
+    viewportToolbarBar_->padding(HPadding{s(6.f), s(4.f)})->borderThickness(1.f);
+
+    auto label = [this](const std::string& t) {
+        return HNew(STextBlock)->text(t)->fontSize(s(12.f))->color(kTextBody)
+                 ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center);
+    };
+    auto labelAttr = [this](std::function<std::string()> fn) {
+        return HNew(STextBlock)->text(AttrStr(std::move(fn)))->fontSize(s(12.f))
+                 ->color(kTextBody)->hAlign(EHAlign::Center)->vAlign(EVAlign::Center);
+    };
+    // 상태 표시는 전부 isActive/AttrStr 로 매 프레임 읽습니다. 그래서 클릭이 리빌드를
+    // 부를 일이 없고(자기 콜백 안에서 자기 컨테이너를 지우는 자기 파괴가 원천 차단),
+    // 단축키로 바꾼 상태도 UI 에 즉시 반영됩니다.
+    auto chip = [this](std::shared_ptr<HWidget> content,
+                       std::function<bool()> active, std::function<void()> click) {
+        viewportToolbarBox_->addSlot(
+            HNew(SToggleButton)->padding(HPadding{s(10.f), s(5.f)})
+                ->isActive(std::move(active))->onClick(std::move(click))
+                ->content(std::move(content)),
+            SHorizontalBox::ESizeRule::Auto);
+    };
+    auto divider = [this] {
+        viewportToolbarBox_->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f));
+        viewportToolbarBox_->addSlot(HNew(SBorder)->background(kBorder),
+                                     SHorizontalBox::ESizeRule::Fixed, 1.f);
+        viewportToolbarBox_->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f));
+    };
+
+    // ── 변환 도구 ─────────────────────────────────────────────────────────────
+    static const char* kToolLong [4] = { "Select", "Move", "Rotate", "Scale" };
+    static const char* kToolShort[4] = { "Sel",    "Mov",  "Rot",    "Scl"   };
+    for (int m = 0; m < 4; ++m)
+        chip(label(lv <= 0 ? kToolLong[m] : kToolShort[m]),
+             [this, m] { return gizmoMode_ == m; },
+             [this, m] { gizmoMode_ = m; });
+
+    divider();
+
+    // ── 좌표계 ────────────────────────────────────────────────────────────────
+    if (lv <= 1) {
+        chip(label("World"), [this] { return worldSpace_;  }, [this] { worldSpace_ = true;  });
+        chip(label("Local"), [this] { return !worldSpace_; }, [this] { worldSpace_ = false; });
+    } else {
+        chip(labelAttr([this] { return worldSpace_ ? std::string("World")
+                                                   : std::string("Local"); }),
+             [] { return false; }, [this] { worldSpace_ = !worldSpace_; });
+    }
+
+    // ── 스냅 ──────────────────────────────────────────────────────────────────
+    // 값 칩의 라벨은 지금 기즈모 모드를 따라갑니다. 스냅이 꺼져 있으면 괄호로 감싸
+    // "지금은 적용되지 않는 값"임을 알립니다(아이콘이 없으므로 ASCII 로만 구분).
+    if (lv <= 3) {
+        divider();
+        chip(label("Snap"), [this] { return snap_.enabled; },
+             [this] { snap_.enabled = !snap_.enabled; });
+        if (lv <= 2)
+            chip(labelAttr([this] {
+                     char v[24];
+                     switch (gizmoMode_) {
+                         case 1:  std::snprintf(v, sizeof v, "%.3f m", snap_.move);      break;
+                         case 2:  std::snprintf(v, sizeof v, "%g deg", snap_.rotateDeg); break;
+                         case 3:  std::snprintf(v, sizeof v, "x%.3f", snap_.scale);      break;
+                         default: std::snprintf(v, sizeof v, "--");                      break;
+                     }
+                     char out[32];
+                     std::snprintf(out, sizeof out, snap_.enabled ? "%s" : "(%s)", v);
+                     return std::string(out);
+                 }),
+                 [this] { return snap_.enabled; },
+                 [this] {
+                     const int dir = (ctx_.window &&
+                                      ctx_.window->isKeyDown(HInput::KEY_LEFT_SHIFT)) ? -1 : 1;
+                     switch (gizmoMode_) {
+                         case 1: snap_.move      = cycleFrom(kSnapMove,   snap_.move,      dir); break;
+                         case 2: snap_.rotateDeg = cycleFrom(kSnapRotate, snap_.rotateDeg, dir); break;
+                         case 3: snap_.scale     = cycleFrom(kSnapScale,  snap_.scale,     dir); break;
+                         default: break;
+                     }
+                 });
+    }
+
+    divider();
+
+    // ── 카메라 속도 ───────────────────────────────────────────────────────────
+    // 클릭하면 프리셋을 한 칸 올리고 Shift 를 누른 채면 내립니다. 기본값(5)에서 벗어나
+    // 있을 때만 활성으로 표시해, 종전과 다른 속도라는 것을 눈에 띄게 합니다.
+    chip(labelAttr([this, lv] {
+             char buf[32];
+             std::snprintf(buf, sizeof buf, lv <= 3 ? "Cam %g m/s" : "%g m/s", camSpeed_);
+             return std::string(buf);
+         }),
+         [this] { return camSpeed_ != 5.f; },
+         [this] {
+             const bool back = ctx_.window &&
+                               ctx_.window->isKeyDown(HInput::KEY_LEFT_SHIFT);
+             camSpeed_ = cycleSpeed(camSpeed_, back ? -1 : 1);
+         });
+
 }
 
 // ── Play state ─────────────────────────────────────────────────────────────────
@@ -2277,14 +2485,29 @@ void EditorApp::handleInput(float mouseX, float mouseY,
 
     // ── Gizmo drag ─────────────────────────────────────────────────────────────
     bool gizmoConsumed = false;
-    if (ctx_.selected && ctx_.selected != editorCamActor_ && ctx_.world && ctx_.window &&
-        ctx_.selected->activeInHierarchy()) {   // 안 보이는 것은 드래그도 되지 않습니다
+    // 진행 중인 드래그는 반드시 handleDrag 의 종료 분기까지 도달해야 합니다. 드래그 도중
+    // 액터를 눈으로 끄면(activeInHierarchy 거짓) 호출 자체가 끊겨 dragging_ 이 남고, 그다음
+    // 클릭이 이어붙습니다. 시작 조건만 활성으로 막고, 진행 중이면 계속 넘깁니다.
+    if (ctx_.world && ctx_.window && ctx_.selected && ctx_.selected != editorCamActor_ &&
+        (ctx_.selected->activeInHierarchy() || gizmo_.isDragging())) {
         // 좌표는 worldVP 하나로만 만듭니다. inView 게이팅도 fb 공간으로 통일합니다.
-        const bool inView = inViewport(mouseX, mouseY, winW, winH);
+        const bool inView = inViewport(mouseX, mouseY, winW, winH) &&
+                            ctx_.selected->activeInHierarchy();
         gizmoConsumed = gizmo_.handleDrag(ctx_.selected, *ctx_.world, cmdStack_,
                                           worldVP(mouseX, mouseY, winW, winH),
                                           leftDown, prevLeftDown_,
                                           gizmoMode_, worldSpace_, inView);
+    } else if (gizmo_.isDragging()) {
+        gizmo_.cancel();   // 선택이 사라진 경우. handleDrag 는 !selected 에서 즉시 반환합니다.
+    }
+    // 기즈모로 회전시킨 뒤 디테일 패널의 ROTATION 행은 cachedEuler_ 를 읽으므로, 드래그가
+    // 끝나는 프레임에 캐시를 맞춰 주지 않으면 패널 값이 낡은 채로 남습니다.
+    {
+        const bool dragNow = gizmo_.isDragging();
+        // 회전 드래그에만 맞춥니다. 이동·크기 뒤에도 갱신하면 회전은 그대로인데 표시만
+        // 다른 오일러 표현으로 튀어(같은 회전을 나타내는 값이 여러 개라) 값이 바뀐 것처럼 보입니다.
+        if (prevGizmoDragging_ && !dragNow && gizmoMode_ == 2) syncEulerCache();
+        prevGizmoDragging_ = dragNow;
     }
 
     // ── UI event + actor pick ─────────────────────────────────────────────────
@@ -2405,7 +2628,21 @@ bool EditorApp::inViewport(float mx, float my, float winW, float winH) const {
     // 히트테스트도 프레임버퍼 공간으로 통일합니다. 마우스(윈도 픽셀)를 fb 로 변환해
     // 뷰포트 위젯의 실측 fb rect 와 비교하므로, 도킹·리사이즈·HiDPI 와 무관하게 정확합니다.
     const glm::vec2 fb = mouseToFb(mx, my, winW, winH);
+    // 뷰포트 위에 떠 있는 툴바가 가린 영역은 3D 가 아닙니다. 이 한 줄로 픽·LMB 오빗·
+    // 기즈모 호버·기즈모 드래그 시작·RMB 카메라 모드가 한꺼번에 게이팅됩니다.
+    const HViewportRect tb = viewportToolbarFbRect();
+    if (tb.width >= 1.f && tb.contains(fb.x, fb.y)) return false;
     return viewportFbRect().contains(fb.x, fb.y);
+}
+
+// 뷰포트 툴바가 가린 영역(프레임버퍼 픽셀). 배제 rect 는 반드시 툴바 막대 위젯의
+// geometry 여야 합니다. 툴바를 담은 Fill 레이어의 geometry 를 쓰면 뷰포트 전체가
+// 배제되어 픽도 카메라도 죽습니다.
+HViewportRect EditorApp::viewportToolbarFbRect() const {
+    if (!viewportToolbarBar_) return {};
+    const HGeometry& g = viewportToolbarBar_->cachedGeometry();
+    if (g.size.x < 1.f || g.size.y < 1.f) return {};
+    return { g.position.x, g.position.y, g.size.x, g.size.y };
 }
 
 // ── deleteSelectedActor ────────────────────────────────────────────────────────
@@ -2589,7 +2826,7 @@ void EditorApp::tickEditorCamera(float dt, float scroll) {
 
     // WASD fly — only when camera mode active (RMB held in viewport)
     if (win.isCameraModeActive()) {
-        const float speed = 5.f * dt;
+        const float speed = camSpeed_ * dt;
         if (win.isKeyDown(HInput::KEY_W)) editorCamActor_->translateLocal(fwd * speed);
         if (win.isKeyDown(HInput::KEY_S)) editorCamActor_->translateLocal(-fwd * speed);
         if (win.isKeyDown(HInput::KEY_D)) editorCamActor_->translateLocal(rgt * speed);

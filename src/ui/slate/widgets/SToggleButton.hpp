@@ -48,7 +48,15 @@ public:
 
     HReply onMouseButton(const HPointerEvent& e) override {
         if (e.button == 0) {
-            if (!e.down && cachedGeo_.contains(e.position) && onClick_) onClick_();
+            // 프레스와 릴리즈가 모두 내 위에서 일어났을 때만 발화합니다. 이 위젯은 캡처를
+            // 요청하지 않으므로(캡처는 SNumberField 만 씁니다) 눌린 곳을 스스로 기억해야,
+            // 다른 곳에서 시작한 드래그를 내 위에서 놓았을 때 눌린 것으로 오인하지 않습니다.
+            if (e.down) {
+                armed_ = cachedGeo_.contains(e.position);
+            } else {
+                if (armed_ && cachedGeo_.contains(e.position) && onClick_) onClick_();
+                armed_ = false;
+            }
             return HReply::Handled();
         }
         return HReply::Unhandled();
@@ -67,6 +75,7 @@ private:
     glm::vec4  active_  { 0.07f, 0.33f, 0.58f, 1.f };
     HPadding   pad_     { 9.f, 4.f };
     bool       isHovered_ = false;
+    bool       armed_     = false;   // 이 위젯 위에서 눌렸는가(프레스-릴리즈 짝 판정)
 
     std::shared_ptr<SToggleButton> self() {
         return std::static_pointer_cast<SToggleButton>(shared_from_this());

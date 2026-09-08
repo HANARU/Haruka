@@ -62,7 +62,25 @@ static void selectedAabb(Actor* a, glm::vec3& lo, glm::vec3& hi) {
     }
 }
 
+// 스칼라 양자화. step 이 0 이면 항등이라, 스냅 끄기를 조건 분기가 아니라 값으로
+// 표현합니다(코드 경로가 한 벌이라 켠 쪽만 검증되고 끈 쪽이 썩는 일이 없습니다).
+static inline float snapTo(float v, float step) {
+    return step > 1e-6f ? std::roundf(v / step) * step : v;
+}
+
+// 드래그 전후 트랜스폼이 사실상 같은지. 회전은 q 와 -q 가 같은 회전이라 |dot| 로 봅니다.
+static bool nearlyEqualT(const Transform& a, const Transform& b) {
+    const glm::vec3 dp = a.position() - b.position();
+    const glm::vec3 ds = a.scale()    - b.scale();
+    if (glm::dot(dp, dp) > 1e-12f || glm::dot(ds, ds) > 1e-12f) return false;
+    return std::abs(glm::dot(a.rotation(), b.rotation())) > 1.f - 1e-6f;
+}
+
 static glm::vec3 axisWorldDir(Actor* a, int i, bool worldSpace) {
+    // kAxes 는 3원소입니다. 크기 모드의 균등 핸들은 axis_ == 3 이라, 드래그 중 모드가
+    // 바뀌면 이동·회전 분기가 여기로 3 을 넘겨 범위 밖을 읽습니다. 호출부에서도 막지만
+    // 생산자 쪽에서 한 번 더 잠급니다.
+    i = std::clamp(i, 0, 2);
     if (worldSpace) return kAxes[i];
     return glm::normalize(a->worldRotation() * kAxes[i]);
 }
@@ -235,8 +253,14 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
         prevMouse_  = mouse;
         startMouse_ = mouse;
 
+        // 드래그 내내 고정할 기준값입니다. 매 프레임 현재 상태에서 다시 뽑으면, 스냅으로
+        // 위치·크기가 계단처럼 튈 때 그 결과가 다시 감도를 바꾸는 되먹임이 생깁니다.
+        dragAxisW_     = axisWorldDir(selected, axis_, worldSpace);   // DEF-51
+        dragStartPosW_ = selected->worldPosition();
+        accumMove_     = 0.f;
+        dragReadout_   = 0.f;
+
         if (mode == 2) {
-            dragAxisW_ = axisWorldDir(selected, axis_, worldSpace);
             planeBasis(dragAxisW_, planeU_, planeV_);
             glm::vec3 pos = selected->worldPosition();
             glm::vec3 ro, rd;
@@ -259,17 +283,26 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
         glm::vec3 pos = selected->worldPosition();
 
         if (mode == 1) {                                       // ── 이동 ──
-            glm::vec3 axis = axisWorldDir(selected, axis_, worldSpace);   // DEF-51
-            glm::vec2 sa   = wvp.project(vp,pos + axis) - wvp.project(vp,pos);
-            float     sl2  = glm::dot(sa, sa);
+            // 축과 화면 투영을 시작 시점 값으로 고정합니다(위 주석 참고).
+            glm::vec2 sa  = wvp.project(vp, dragStartPosW_ + dragAxisW_)
+                          - wvp.project(vp, dragStartPosW_);
+            float     sl2 = glm::dot(sa, sa);
             if (sl2 > 0.1f) {
-                glm::vec2 dm       = mouse - prevMouse_;
-                glm::vec3 worldDel = axis * (glm::dot(dm, sa) / sl2);
+                accumMove_ += glm::dot(mouse - prevMouse_, sa) / sl2;
+                // 스냅 대상은 "축 위 이동 거리"입니다. 월드 좌표를 격자에 맞추는 방식은
+                // 로컬 축이 임의 방향이라 축을 벗어나거나 값이 얼어붙습니다.
+                // 프레임 델타에 바로 반올림을 걸면 한 프레임 이동량이 눈금보다 작아
+                // 언제나 0 이 되므로, 누적값을 양자화해야 합니다.
+                const float d = snapTo(accumMove_, snap_.enabled ? snap_.move : 0.f);
+                glm::vec3 worldDel = dragAxisW_ * d;
                 Actor* parent = selected->getParent();           // DEF-52
                 glm::vec3 localDel = worldDel;
                 if (parent)
                     localDel = glm::vec3(glm::inverse(parent->worldMatrix()) * glm::vec4(worldDel, 0.f));
-                selected->translateLocal(localDel);
+                // 증분 누적이 아니라 시작 트랜스폼 기준의 절대 위치입니다. 축과 부모 행렬이
+                // 드래그 중 상수이므로, 스냅이 꺼져 있으면 궤적은 기존 증분식과 같습니다.
+                selected->setLocalPosition(undoSnap_.position() + localDel);
+                dragReadout_ = d;
             }
         } else if (mode == 2) {                                // ── 회전 ──
             glm::vec3 ro, rd;
@@ -285,7 +318,14 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
                     accumAngle_ += d;
                     prevAngle_   = ang;
 
-                    glm::quat dq = glm::angleAxis(accumAngle_, dragAxisW_);   // DEF-51
+                    // accumAngle_ 원본은 건드리지 않습니다. prevAngle_ 과 함께 누적
+                    // 기준이라, 스냅값을 되쓰면 되감김과 히스테리시스가 생깁니다.
+                    // 쿼터니언을 오일러로 풀어 반올림하는 방식도 금물입니다(짐벌 구간에서
+                    // 표현이 유일하지 않아 축이 뒤집힙니다).
+                    const float snapAng = snapTo(accumAngle_,
+                        snap_.enabled ? glm::radians(snap_.rotateDeg) : 0.f);
+                    dragReadout_ = glm::degrees(snapAng);
+                    glm::quat dq = glm::angleAxis(snapAng, dragAxisW_);   // DEF-51
                     Actor*    parent = selected->getParent();
                     glm::quat pWorld = parent ? parent->worldRotation() : glm::quat(1,0,0,0);
                     glm::quat newLocal = glm::inverse(pWorld) * dq * pWorld * undoSnap_.rotation();
@@ -293,24 +333,38 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
                 }
             }
         } else if (mode == 3) {                                // ── 크기 (언제나 로컬) ──
-            glm::vec3 snap = undoSnap_.scale();
+            const glm::vec3 s0 = undoSnap_.scale();
+            const float     st = snap_.enabled ? snap_.scale : 0.f;
             if (axis_ == 3) {
-                float amount = (startMouse_.y - mouse.y) / 120.f;
-                float factor = std::max(0.05f, 1.f + amount);
-                selected->setLocalScale(snap * factor);
+                const float amount = (startMouse_.y - mouse.y) / 120.f;
+                // 균등 핸들의 계약은 비율 보존이라 배율 쪽을 양자화합니다. 세 성분을 각각
+                // 스냅하면 시작 스케일이 비균등일 때 그 균등성이 깨집니다.
+                const float factor = std::max(0.05f, snapTo(1.f + amount, st));
+                selected->setLocalScale(s0 * factor);
+                dragReadout_ = factor;
             } else {
                 glm::vec3 dirW = glm::normalize(selected->worldRotation() * kAxes[axis_]);
+                // 기준 길이는 **매 프레임** 카메라 거리로 잽니다. 길이가 거리에 비례하면
+                // 화면 투영 길이에서 거리가 상쇄되어 감도가 거리에 무관해집니다. 시작
+                // 시점에 고정하면 오히려 반대로, 드래그 중 휠 돌리가 배율을 끌고 갑니다.
                 float refLen = std::max(0.02f,
                     glm::length(cam->owner->worldPosition() - pos) * sizeFactor_);
-                glm::vec2 sa  = wvp.project(vp,pos + dirW * refLen)
-                              - wvp.project(vp,pos);
+                glm::vec2 sa  = wvp.project(vp, pos + dirW * refLen)
+                              - wvp.project(vp, pos);
                 float     sl2 = glm::dot(sa, sa);
                 if (sl2 > 0.1f) {
-                    float amount = glm::dot(mouse - startMouse_, sa) / sl2;
-                    float factor = std::max(0.05f, 1.f + amount);
-                    glm::vec3 ns = snap;
-                    ns[axis_] = snap[axis_] * factor;
+                    const float amount = glm::dot(mouse - startMouse_, sa) / sl2;
+                    // 균등 핸들과 같이 **배율**을 양자화합니다. 최종 절대 스케일을
+                    // 양자화하면 (a) 시작 스케일이 눈금 위에 없을 때 잡기만 해도 값이 튀어
+                    // 빈 undo 가 쌓이고, (b) 음수(미러) 스케일이 하한에 걸려 부호를 잃습니다.
+                    const float factor = std::max(0.05f, snapTo(1.f + amount, st));
+                    glm::vec3 ns = s0;
+                    ns[axis_] = s0[axis_] * factor;
                     selected->setLocalScale(ns);
+                    // 균등 핸들과 같은 양(배율)을 보고합니다. 절대 스케일을 보고하면
+                    // 시작 스케일이 1 이 아닐 때 스텝이 눈금과 달라 보여, 스냅이 걸리는지
+                    // 확인시킨다는 리드아웃의 목적이 무너집니다.
+                    dragReadout_ = factor;
                 }
             }
         }
@@ -323,9 +377,16 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
 
     // ── 드래그 종료 ──────────────────────────────────────────────────────────
     if (dragging_ && !leftDown) {
-        cmdStack.push(std::make_unique<SetTransformCmd>(selected, undoSnap_, selected->transform()));
+        const Transform after = selected->transform();
+        // 잡았다가 그대로 놓은 드래그로 64칸 커맨드 스택이 빈 이력에 차지 않게 합니다.
+        if (!nearlyEqualT(undoSnap_, after))
+            cmdStack.push(std::make_unique<SetTransformCmd>(selected, undoSnap_, after));
         dragging_ = false;
         axis_     = -1;
+        accumMove_ = accumAngle_ = dragReadout_ = 0.f;
+        // 종료 프레임의 마우스-업을 여기서 소비합니다. 그러지 않으면 릴리즈가 슬레이트로
+        // 흘러가, 커서 아래에 있던 위젯(뷰포트 툴바 버튼 등)이 함께 발화합니다.
+        consumed  = true;
     }
 
     return consumed;

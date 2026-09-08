@@ -174,6 +174,20 @@ private:
     int  gizmoMode_  = 1;   // 0=select, 1=move, 2=rotate, 3=scale
     bool worldSpace_ = true;
 
+    // ── 뷰포트 툴바 (Phase 2) ────────────────────────────────────────────────
+    // 뷰포트 오버레이 상단에 떠 있는 툴바입니다. 변환 도구·좌표계는 메인 툴바에서
+    // 여기로 이관했고, 카메라 속도가 새로 붙습니다. 툴바가 차지한 rect 는 inViewport
+    // 에서 배제해, 그 위 클릭이 픽·오빗·기즈모·RMB 카메라 모드로 새지 않게 합니다.
+    static constexpr float kVpToolbarInset = 6.f;   // 뷰포트 가장자리 인셋(미스케일)
+    float camSpeed_          = 5.f;    // 현행 하드코딩과 같은 기본값(m/s)
+    int   vpToolbarLevel_    = -1;     // 폭 사다리 레벨(-1 = 미초기화)
+    bool  vpToolbarDirty_    = true;   // 지연 리빌드 요청
+    bool  prevGizmoDragging_ = false;  // 드래그 종료(하강 에지) 검출
+    std::shared_ptr<SBorder>        viewportToolbarBar_;   // 배제 rect 의 진리원
+    std::shared_ptr<SHorizontalBox> viewportToolbarBox_;
+    // 기즈모 스냅. 소유자는 여기이고, 기즈모에는 매 프레임 사본을 밀어 넣습니다.
+    HGizmoSnap snap_{};
+
     // Bottom panel tabs
     int bottomTab_ = 1;     // 0=content, 1=log, 2=gpu stats
 
@@ -327,6 +341,11 @@ private:
     void rebuildDockArea();                             // dockRoot_ → dockHost_ 로 조합
     std::shared_ptr<HWidget> buildDockWidget(DockNode* node);   // 노드 재귀 조합
     void rebuildToolbar();
+    // ── 뷰포트 툴바 (Phase 2) ────────────────────────────────────────────────
+    void          rebuildViewportToolbar();
+    int           computeVpToolbarLevel() const;   // 뷰포트 폭 → 축약 단계(0=최대)
+    HViewportRect viewportToolbarFbRect() const;   // 툴바가 가린 영역(프레임버퍼 픽셀)
+    std::string   gizmoReadoutText() const;        // 드래그 중 값(뷰포트 하단 표시)
     void rebuildOutliner();
     // ── 아웃라이너 계층 헬퍼 (Phase 3) ───────────────────────────────────────
     // 루트부터 전위 순회하며 표시할 행을 평탄화합니다. 필터가 있으면 매치되지 않고

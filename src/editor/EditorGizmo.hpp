@@ -21,6 +21,16 @@ struct HViewportRect {
     }
 };
 
+// ── HGizmoSnap ────────────────────────────────────────────────────────────────
+// 기즈모 스냅 설정입니다. 값은 1 unit = 1 meter 규약 기준이며, 스냅이 꺼져 있으면
+// 양자화 함수에 0 을 넘겨 항등으로 처리합니다(조건 분기로 코드를 두 벌 만들지 않습니다).
+struct HGizmoSnap {
+    bool  enabled   = false;
+    float move      = 0.25f;   // m
+    float rotateDeg = 15.f;    // deg
+    float scale     = 0.25f;   // 배율 또는 절대 스케일의 눈금
+};
+
 // ── WorldViewport ─────────────────────────────────────────────────────────────
 // 마우스↔월드 변환에 필요한 좌표와 **투영 수학**을 하나로 묶습니다. **이 구조체를
 // 통해서만** 월드 변환을 하게 하여, 좌표 혼용과 오프셋 누락을 원천 차단합니다. 유일한
@@ -84,6 +94,20 @@ public:
     void  setSizeFactor(float f) { sizeFactor_ = f; }
     float sizeFactor() const     { return sizeFactor_; }
 
+    // 스냅 설정. 소유자는 EditorApp 이고 여기에는 매 프레임 사본이 들어옵니다
+    // (tick/handleDrag 시그니처가 이미 길어 setSizeFactor 선례를 따릅니다).
+    void              setSnap(const HGizmoSnap& s) { snap_ = s; }
+    const HGizmoSnap& snap() const                 { return snap_; }
+
+    // 드래그 중이면 축과 현재 값(이동=m, 회전=deg, 크기=배율 또는 절대 스케일)을 돌려줍니다.
+    // 툴바가 이 값을 읽어, 스냅이 실제로 걸리고 있는지 눈으로 확인할 수 있게 합니다.
+    bool dragReadout(int& outAxis, float& outValue) const {
+        if (!dragging_) return false;
+        outAxis  = axis_;
+        outValue = dragReadout_;
+        return true;
+    }
+
     // 드래그 시작/이동 처리. 이벤트를 소비했으면 true.
     // (선택 가능 여부 — 에디터 카메라 제외 등 — 은 호출자가 가드)
     bool handleDrag(Actor* selected, World& world, HCommandStack& cmdStack,
@@ -93,7 +117,11 @@ public:
     bool isDragging() const { return dragging_; }
 
     // 선택 삭제 등으로 드래그/호버 상태를 강제 해제
-    void cancel() { dragging_ = false; hovered_ = -1; axis_ = -1; }
+    void cancel() {
+        dragging_ = false; hovered_ = -1; axis_ = -1;
+        accumMove_ = accumAngle_ = dragReadout_ = 0.f;
+        dragStartPosW_ = glm::vec3(0.f);
+    }
 
 private:
     // hovered_/axis_: 0=X, 1=Y, 2=Z, 3=중앙(크기 균등). -1=없음.
@@ -111,4 +139,12 @@ private:
     float     prevAngle_  = 0.f;   // 직전 프레임의 각도 (증분 누적용)
     float     accumAngle_ = 0.f;   // 시작 이후 누적 회전각 (2pi 감김을 흡수)
     float     sizeFactor_ = 0.12f; // 카메라 거리에 곱하는 기즈모 크기 배율
+
+    // ── 스냅 (Phase 2) ────────────────────────────────────────────────────────
+    HGizmoSnap snap_{};
+    // 이동은 축 위 "누적 이동 거리"를 양자화합니다. 프레임 델타에 바로 반올림을 걸면
+    // 한 프레임 이동량이 스텝보다 작아 언제나 0 이 되어 기즈모가 멈춥니다.
+    float      accumMove_    = 0.f;
+    glm::vec3  dragStartPosW_{0.f};  // 축의 화면 투영을 시작 위치에 고정(감도 흔들림 방지)
+    float      dragReadout_  = 0.f;  // 툴바에 보여 줄 현재 값
 };
