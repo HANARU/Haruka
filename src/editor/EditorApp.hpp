@@ -151,7 +151,8 @@ private:
     std::shared_ptr<SDockOverlay> dockOverlay_;   // 드롭 존 하이라이트(최상위)
 
     // ── 상단 메뉴 바 (Phase 1) ────────────────────────────────────────────────
-    static constexpr float kMenuBarH = 26.f;
+    static constexpr float kMenuBarH   = 26.f;
+    static constexpr float kStatusBarH = 24.f;
     struct MenuItem { std::string label; std::function<void()> action; };
     struct MenuDef  { std::string name;  std::vector<MenuItem> items; float x = 0.f; };
     std::vector<MenuDef>            menus_;
@@ -173,6 +174,19 @@ private:
     bool toolbarDirty_   = false;
     bool detailsDirty_   = false;
     void flushChromeRebuilds();
+
+    // ── 하단 상태바 (Phase 1) ────────────────────────────────────────────────
+    // 슬롯은 buildWidgetTree 에서 **한 번만** 채우고 이후 절대 다시 만들지 않습니다.
+    // 표시는 Attr 로 읽고, 폭에 따른 축약도 슬롯 재구성이 아니라 문자열 길이로만
+    // 처리합니다(빈 문자열이면 Auto 슬롯이 스스로 폭 0 이 됩니다). 그래서 이 패널에는
+    // "콜백 중 자기 컨테이너 파괴" 가 구조적으로 불가능합니다.
+    std::shared_ptr<SHorizontalBox> statusBarBox_;
+    std::string                     statusMsg_ = "Ready";
+    glm::vec4                       statusMsgColor_ { 0.42f, 0.42f, 0.45f, 1.f };
+    int                             statusNarrow_  = 0;   // 0=전체, 1=축약, 2=숨김
+    glm::ivec2                      statusSizeSig_ {0, 0};
+    void        updateStatusMessage();      // 로그 한 줄을 잘라 캐시(프레임마다 호출 금지)
+    std::string statusFocusText() const;    // 짧은 리터럴만 반환
 
     // 트리 변형: 드롭 시 소스에서 빼고 타깃에 붙임(탭화 또는 분할). 빈 리프 정리.
     void performRedock(DockNode* src, int srcIdx, const std::string& panelId,
@@ -308,6 +322,10 @@ private:
     // 씬을 그릴 3D 뷰포트 rect(프레임버퍼 픽셀, 오프셋 포함). 렌더러 setViewportRect 와
     // worldVP 가 공유하는 단일 진리원입니다.
     HViewportRect viewportFbRect() const;
+    // 뷰포트 위젯이 아직 배치되지 않은 프레임에 돌려줄 직전 유효 rect. 고정 치수 산술로
+    // 되돌아가면 크롬 높이가 바뀔 때마다 어긋나고, 그 rect 로 렌더 타깃이 한 번 더
+    // 재생성됩니다. viewportFbRect 가 const 라 mutable 입니다.
+    mutable HViewportRect lastValidVpRect_ {};
     glm::vec2     mouseToFb(float mx, float my, float winW, float winH) const;
 
     // 마우스↔월드 변환의 **유일한** 좌표 생산자입니다. pickActor 와 기즈모는 오직 이

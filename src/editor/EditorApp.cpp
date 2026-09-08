@@ -337,8 +337,24 @@ void EditorApp::tick(float dt) {
     }
 
     // exchange로 플래그를 먼저 내려야 리빌드 중 도착한 로그가 다음 프레임에 잡힌다
-    if (ctx_.logDirty.exchange(false, std::memory_order_acquire))
+    bool statusDirty = false;
+    if (ctx_.logDirty.exchange(false, std::memory_order_acquire)) {
         rebuildBottomPanel();
+        statusDirty = true;
+    }
+    // 상태바 폭이 바뀌면 잘라 둔 문자열과 축약 단계를 다시 잡습니다(4px 양자화).
+    if (statusBarBox_) {
+        const HGeometry& g = statusBarBox_->cachedGeometry();
+        const glm::ivec2 sig{ (int)(g.size.x / 4.f), (int)(g.size.y / 4.f) };
+        if (sig != statusSizeSig_) {
+            statusSizeSig_ = sig;
+            const float w  = g.size.x / std::max(0.01f, uiScale_);
+            const int   lv = (w >= 260.f) ? 0 : (w >= 150.f) ? 1 : 2;
+            if (lv != statusNarrow_) statusNarrow_ = lv;
+            statusDirty = true;
+        }
+    }
+    if (statusDirty) updateStatusMessage();
 
     // 단축키·메뉴 액션처럼 위젯 이벤트를 거치지 않고 상태만 바뀌는 경로도 여기서 소진합니다.
     flushChromeRebuilds();
@@ -526,10 +542,35 @@ void EditorApp::buildWidgetTree() {
     dockHost_      = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
     dockOverlay_   = HNew(SDockOverlay);
     menuPopupHost_ = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
+    // ── 하단 상태바 ───────────────────────────────────────────────────────────
+    // 클릭 대상이 없고 슬롯을 다시 만들지 않습니다. 폭에 따른 축약은 문자열 길이로만
+    // 처리하므로(빈 문자열 → Auto 슬롯 폭 0) 리빌드 함수 자체가 필요 없습니다.
+    statusBarBox_ = HNew(HR);
+    statusBarBox_
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(8.f))
+        ->addSlot(HNew(STextBlock)
+                      ->text(AttrStr([this]() -> std::string { return statusMsg_; }))
+                      ->fontSize(s(11.f))->color(statusMsgColor_)
+                      ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                  HR::ESizeRule::Fill, 1.f)
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(10.f))
+        ->addSlot(HNew(STextBlock)
+                      ->text(AttrStr([this]() -> std::string { return statusFocusText(); }))
+                      ->fontSize(s(11.f))->color(kTextDim)
+                      ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
+                  HR::ESizeRule::Auto)
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(8.f));
+    auto statusBar = HNew(BR)->background(kBgHeader)
+        ->borderColor(kBorder)->borderThickness(1.f)
+        ->content(statusBarBox_);
+
+    // 상태바는 반드시 Fixed 입니다. Auto 면 내용에 따라 높이가 흔들려, 그때마다
+    // 뷰포트 rect 가 바뀌고 렌더 타깃이 재생성됩니다.
     auto rootStack = HNew(VR)
         ->addSlot(menuBar,   VR::ESizeRule::Fixed, s(kMenuBarH))
         ->addSlot(toolbar,   VR::ESizeRule::Fixed, s(kToolbarH))
-        ->addSlot(dockHost_, VR::ESizeRule::Fill,  1.f);
+        ->addSlot(dockHost_, VR::ESizeRule::Fill,  1.f)
+        ->addSlot(statusBar, VR::ESizeRule::Fixed, s(kStatusBarH));
     auto root = HNew(SOverlay);
     root->addSlot(rootStack);
     root->addSlot(menuPopupHost_);
@@ -1296,9 +1337,9 @@ void EditorApp::beginPlay() {
     if (playState_ == EPlayState::Playing) return;
     if (playState_ == EPlayState::Editor) {
         worldSnapshot_ = serializeWorld();
-        std::cout << "[Editor] ▶ Play\n";
+        std::cout << "[Editor] Play\n";
     } else {
-        std::cout << "[Editor] ▶ Resume\n";
+        std::cout << "[Editor] Resume\n";
     }
     playState_ = EPlayState::Playing;
     toolbarDirty_ = true;
@@ -1307,10 +1348,10 @@ void EditorApp::beginPlay() {
 void EditorApp::pausePlay() {
     if (playState_ == EPlayState::Playing) {
         playState_ = EPlayState::Paused;
-        std::cout << "[Editor] ⏸ Paused\n";
+        std::cout << "[Editor] Paused\n";
     } else if (playState_ == EPlayState::Paused) {
         playState_ = EPlayState::Playing;
-        std::cout << "[Editor] ▶ Resumed\n";
+        std::cout << "[Editor] Resumed\n";
     }
     toolbarDirty_ = true;
 }
@@ -1321,7 +1362,7 @@ void EditorApp::stopPlay() {
     deserializeWorld(worldSnapshot_);
     worldSnapshot_.clear();
     cmdStack_.clear();
-    std::cout << "[Editor] ⏹ Stopped — world restored\n";
+    std::cout << "[Editor] Stopped - world restored\n";
     toolbarDirty_ = true;
 }
 
@@ -1651,6 +1692,48 @@ bool EditorApp::focusWidgetContains(float x, float y) const {
             return outlinerList_ && outlinerList_->cachedGeometry().contains(p);
         default:
             return false;
+    }
+}
+
+// 상태바 왼쪽 칸. 마지막 로그 한 줄을 상태바 폭에 맞춰 잘라 캐시합니다. 자르는 비용이
+// 폰트 실측 반복이라 싸지 않으므로, Attr 안에서 부르지 않고 로그가 바뀌거나 폭이 달라진
+// 프레임에만 호출합니다.
+void EditorApp::updateStatusMessage() {
+    std::string line = ctx_.lastLogLine();
+    if (line.empty()) {
+        statusMsg_      = "Ready";
+        statusMsgColor_ = kTextDim;
+        return;
+    }
+    // Output Log 와 같은 분류 규칙.
+    if (line.find("ERROR") != std::string::npos || line.find("FATAL") != std::string::npos)
+        statusMsgColor_ = { 0.90f, 0.35f, 0.35f, 1.f };
+    else if (line.find("WARN") != std::string::npos)
+        statusMsgColor_ = { 0.90f, 0.75f, 0.30f, 1.f };
+    else
+        statusMsgColor_ = kTextDim;
+
+    // 폰트가 ASCII 전용이라 그릴 수 없는 바이트는 물음표로 바꿉니다(개행도 여기서 제거).
+    for (char& c : line)
+        if ((unsigned char)c < 32 || (unsigned char)c > 126) c = '?';
+
+    float avail = 0.f;
+    if (statusBarBox_) {
+        const HGeometry& g = statusBarBox_->cachedGeometry();
+        avail = g.size.x - s(26.f) - (statusNarrow_ >= 2 ? 0.f : s(80.f));
+    }
+    statusMsg_ = (avail > s(24.f)) ? ellipsizeText(line, avail, s(11.f)) : std::string();
+}
+
+// 상태바 오른쪽 칸. 지금 키보드 입력이 어디로 가는지 알려 줍니다. Attr 로 매 프레임
+// 평가되므로 짧은 리터럴만 돌려줍니다(문자열 조립·할당 금지).
+std::string EditorApp::statusFocusText() const {
+    if (statusNarrow_ >= 2) return {};
+    switch (currentFocus()) {
+        case EFocusTarget::Rename:      return statusNarrow_ ? "RENAME" : "KBD: Rename";
+        case EFocusTarget::Search:      return statusNarrow_ ? "SEARCH" : "KBD: Search";
+        case EFocusTarget::NumberField: return statusNarrow_ ? "VALUE"  : "KBD: Value";
+        default:                        return {};
     }
 }
 
@@ -2707,20 +2790,21 @@ HViewportRect EditorApp::fullFbRect() const {
 HViewportRect EditorApp::viewportFbRect() const {
     if (viewportWidget_) {
         const HGeometry& g = viewportWidget_->cachedGeometry();
-        if (g.size.x >= 1.f && g.size.y >= 1.f)
-            return { std::floor(g.position.x), std::floor(g.position.y),
-                     std::floor(g.size.x),     std::floor(g.size.y) };
+        if (g.size.x >= 1.f && g.size.y >= 1.f) {
+            lastValidVpRect_ = { std::floor(g.position.x), std::floor(g.position.y),
+                                 std::floor(g.size.x),     std::floor(g.size.y) };
+            return lastValidVpRect_;
+        }
     }
-    // Fallback (첫 배치 전 프레임): 고정 치수 + 윈도→프레임버퍼 배율. 위젯 geometry 가
-    // 아직 없을 때만 쓰이고, 다음 프레임부터는 위 실측 경로가 인계합니다.
-    int wW = 1, wH = 1, fw = 1, fh = 1;
-    if (ctx_.window) { ctx_.window->getWindowSize(wW, wH); ctx_.window->getFramebufferSize(fw, fh); }
-    const float sx = (float)fw / std::max(1.f, (float)wW);
-    const float sy = (float)fh / std::max(1.f, (float)wH);
-    const float l = s(outlinerW_), t = s(kToolbarH);
-    const float w = (float)wW - s(outlinerW_) - s(detailsW_);
-    const float h = (float)wH - s(kToolbarH)  - s(bottomH_);
-    return { std::floor(l * sx), std::floor(t * sy), std::floor(w * sx), std::floor(h * sy) };
+    // 위젯이 아직 배치되지 않은 프레임(첫 프레임, uiScale 변경 직후의 재조립)입니다.
+    // 고정 치수로 되돌아가면 크롬 줄 수가 바뀔 때마다 어긋나므로, 직전 유효 rect 를
+    // 그대로 돌려줍니다. 그러면 setViewportRect 가 값 비교에서 early-return 해
+    // 렌더 타깃 재생성도 일어나지 않습니다.
+    if (lastValidVpRect_.width >= 1.f && lastValidVpRect_.height >= 1.f)
+        return lastValidVpRect_;
+    // 진짜 첫 프레임. 렌더러도 이때는 renderExtent == 스왑체인 extent 로 시작하므로
+    // 프레임버퍼 전체가 실제 렌더 결과와 일치합니다.
+    return fullFbRect();
 }
 
 glm::vec2 EditorApp::mouseToFb(float mx, float my, float winW, float winH) const {

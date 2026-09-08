@@ -10,6 +10,11 @@ void EditorContext::addLog(const std::string& line) {
     logDirty.store(true, std::memory_order_release);
 }
 
+std::string EditorContext::lastLogLine() const {
+    std::lock_guard<std::mutex> lock(logMutex_);
+    return logLines_.empty() ? std::string() : logLines_.back();
+}
+
 std::vector<std::string> EditorContext::snapshotLog() const {
     std::lock_guard<std::mutex> lock(logMutex_);
     return { logLines_.begin(), logLines_.end() };

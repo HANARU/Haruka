@@ -28,6 +28,9 @@ struct EditorContext {
 
     void addLog(const std::string& line);          // thread-safe
     std::vector<std::string> snapshotLog() const;  // thread-safe 복사본 (UI 표시용)
+    // 마지막 한 줄만 돌려줍니다. snapshotLog 는 최대 200개 문자열 전량 복사라
+    // 매 프레임 경로에서 쓸 수 없습니다.
+    std::string              lastLogLine() const;
 
 private:
     mutable std::mutex      logMutex_;
