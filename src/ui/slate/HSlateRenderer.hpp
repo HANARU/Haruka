@@ -25,7 +25,12 @@ public:
     void rebuildFramebuffers(VkExtent2D extent,
                              const std::vector<VkImageView>& imageViews);
 
-    void setRootWidget(std::shared_ptr<HWidget> root) { root_ = std::move(root); }
+    // 루트를 갈아 끼우면 이전 트리의 위젯은 곧 파괴됩니다. capturedWidget_ 는 raw
+    // 포인터라 그대로 두면 해제된 위젯을 가리킵니다(uiScale 변경 → buildWidgetTree 경로).
+    void setRootWidget(std::shared_ptr<HWidget> root) {
+        root_           = std::move(root);
+        capturedWidget_ = nullptr;
+    }
 
     // Per-frame: records UI render pass into cmd. Uses framebuffers_[imgIdx].
     void record(VkCommandBuffer cmd, uint32_t imgIdx,

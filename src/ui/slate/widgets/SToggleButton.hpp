@@ -63,6 +63,7 @@ public:
     }
     HReply onMouseMove(const HPointerEvent& e) override {
         isHovered_ = cachedGeo_.contains(e.position);
+        if (!e.down) armed_ = false;   // 눌린 채 리빌드되어 남은 상태를 정리
         return HReply::Unhandled();
     }
 

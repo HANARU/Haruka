@@ -50,11 +50,12 @@ public:
     }
 
     void paint(HPaintContext& ctx, const HGeometry& geo) override {
-        if (!isVisible() || !child_) return;
+        if (!isVisible() || !child_ || !child_->isVisible()) return;
         child_->paint(ctx, child_->cachedGeometry());
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
+        if (!cachedGeo_.contains(e.position)) return HReply::Unhandled();
         return child_ ? child_->onMouseButton(e) : HReply::Unhandled();
     }
     HReply onMouseMove(const HPointerEvent& e) override {

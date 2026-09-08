@@ -2542,7 +2542,10 @@ void EditorApp::handleInput(float mouseX, float mouseY,
         e.button = 0; e.down = false;
         slateRenderer_.handlePointerEvent(e);
     }
+    // 이동 이벤트에도 좌버튼의 현재 상태를 실어 보냅니다. 버튼류가 "눌린 채 리빌드되어
+    // 남은 프레스 상태"를 스스로 정리할 때 이 값을 봅니다.
     e.button = -1;
+    e.down   = leftDown;
     slateRenderer_.handlePointerEvent(e);
 
     prevLeftDown_ = leftDown;

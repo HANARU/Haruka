@@ -52,14 +52,27 @@ public:
     HReply onMouseButton(const HPointerEvent& e) override {
         if (!enabled.get()) return HReply::Unhandled();
         if (e.button == 0) {
-            isPressed_ = e.down;
-            if (!e.down && onClick_) onClick_();
+            // 프레스와 릴리즈가 모두 내 위에서 일어났을 때만 발화합니다. 이 위젯은 포인터
+            // 캡처를 요청하지 않으므로(캡처는 SNumberField 만 씁니다) 눌린 곳을 스스로
+            // 기억해야, 다른 데서 시작한 드래그를 내 위에서 놓았을 때 눌린 것으로 오인하지
+            // 않습니다. 뷰포트 오빗을 아웃라이너 x 위에서 놓아 액터가 지워지던 경로입니다.
+            if (e.down) {
+                armed_     = cachedGeo_.contains(e.position);
+                isPressed_ = armed_;
+            } else {
+                if (armed_ && cachedGeo_.contains(e.position) && onClick_) onClick_();
+                armed_     = false;
+                isPressed_ = false;
+            }
             return HReply::Handled();
         }
         return HReply::Unhandled();
     }
     HReply onMouseMove(const HPointerEvent& e) override {
         isHovered_ = cachedGeo_.contains(e.position);
+        // 좌버튼이 이미 떨어진 뒤라면 눌림 상태를 정리합니다. 버튼 위에서 눌러 밖에서
+        // 떼면 이 위젯은 마우스-업을 영영 받지 못해, 없으면 눌린 색으로 굳습니다.
+        if (!e.down) { armed_ = false; isPressed_ = false; }
         return HReply::Unhandled();
     }
 
@@ -74,6 +87,7 @@ private:
     EVAlign   vAlign_  = EVAlign::Center;
     bool      isHovered_ = false;
     bool      isPressed_ = false;
+    bool      armed_     = false;   // 이 위젯 위에서 눌렸는가(프레스-릴리즈 짝 판정)
 
     std::shared_ptr<SButton> self() {
         return std::static_pointer_cast<SButton>(shared_from_this());

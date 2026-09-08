@@ -53,9 +53,11 @@ public:
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
-        for (int i = (int)slots_.size() - 1; i >= 0; --i)
+        for (int i = (int)slots_.size() - 1; i >= 0; --i) {
+            if (!slots_[i].widget->isVisible()) continue;   // paint 와 같은 기준
             if (slots_[i].widget->cachedGeometry().contains(e.position))
                 if (auto r = slots_[i].widget->onMouseButton(e); r.handled) return r;
+        }
         return HReply::Unhandled();
     }
     // 이동은 포함 여부와 무관하게 모든 슬롯에 내려보냅니다(세로·가로 상자와 같은 규칙).

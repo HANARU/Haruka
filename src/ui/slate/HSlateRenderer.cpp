@@ -436,8 +436,6 @@ void HSlateRenderer::record(VkCommandBuffer cmd, uint32_t imgIdx,
     HPaintContext ctx(&fonts_);
     root_->paint(ctx, fullGeo);
 
-    if (fonts_.isDirty()) fonts_.upload();
-
     std::stable_sort(ctx.elements.begin(), ctx.elements.end(),
         [](const HDrawElement& a, const HDrawElement& b) {
             return a.layer < b.layer;
@@ -461,6 +459,13 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
         float penX  = e.rect.x;
         float baseY = e.rect.y + e.fontSize; // approximate baseline
         for (char c : e.text) {
+            // 개행. 없으면 여러 줄 문자열이 한 줄로 이어붙어 그려집니다
+            // (뷰포트 통계 오버레이 4줄이 실제로 그랬습니다).
+            if (c == '\n') {
+                penX   = e.rect.x;
+                baseY += e.fontSize * 1.2f;
+                continue;
+            }
             auto g = fonts_.getGlyph(c, e.fontSize);
             if (g.pixelSize.x < 1.f || g.pixelSize.y < 1.f) {
                 penX += g.advance;
@@ -482,6 +487,10 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
     }
 
     if (flat.empty()) return;
+
+    // 글리프 확장이 끝난 **뒤에** 업로드해야 합니다. 위에서 getGlyph 가 새 글리프를
+    // 래스터라이즈하므로, 확장 전에 업로드하면 그 프레임에 처음 나온 글자가 빈 텍셀로 그려집니다.
+    if (fonts_.isDirty()) fonts_.upload();
 
     VkRenderPassBeginInfo rpbi{};
     rpbi.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -548,7 +557,17 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
             pushDescriptor(cmd, curTex);
         }
 
-        emitQuad(e.rect, uvRect, e.color);
+        if (!emitQuad(e.rect, uvRect, e.color)) {
+            // 예산을 넘으면 나머지가 조용히 사라집니다. 화면만 보고는 원인을 알 수 없으므로
+            // 한 번은 알립니다(매 프레임 찍으면 로그 패널이 잠깁니다).
+            static bool warned = false;
+            if (!warned) {
+                warned = true;
+                std::cerr << "[HSlate] UI vertex budget exceeded (" << kMaxVerts
+                          << ") - remaining draw elements dropped this frame\n";
+            }
+            break;
+        }
     }
     flushBatch();
 

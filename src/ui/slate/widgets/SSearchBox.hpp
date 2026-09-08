@@ -75,7 +75,16 @@ public:
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
-        if (e.button == 0 && !e.down && cachedGeo_.contains(e.position)) {
+        if (e.button != 0) return HReply::Unhandled();
+        // 버튼류와 같은 규약. 뷰포트에서 시작한 드래그를 검색창 위에서 놓으면 포커스를
+        // 빼앗겨, 이후 타이핑이 전부 필터로 들어가고 사용자에게는 키가 죽은 것처럼 보입니다.
+        if (e.down) {
+            armed_ = cachedGeo_.contains(e.position);
+            return armed_ ? HReply::Handled() : HReply::Unhandled();
+        }
+        const bool hit = armed_ && cachedGeo_.contains(e.position);
+        armed_ = false;
+        if (hit) {
             if (onClick_) onClick_();
             return HReply::Handled();
         }
@@ -83,10 +92,12 @@ public:
     }
     HReply onMouseMove(const HPointerEvent& e) override {
         hoverPos_ = e.position;
+        if (!e.down) armed_ = false;
         return HReply::Unhandled();
     }
 
 private:
+    bool                      armed_ = false;   // 이 위젯 위에서 눌렸는가
     AttrStr                   text_;
     std::string               placeholder_ = "Search...";
     float                     fontSize_    = 10.f;

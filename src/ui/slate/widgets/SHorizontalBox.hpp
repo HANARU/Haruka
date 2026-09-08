@@ -100,9 +100,11 @@ public:
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
-        for (auto& s : slots_)
+        for (auto& s : slots_) {
+            if (!s.widget->isVisible()) continue;   // paint 와 같은 기준
             if (s.widget->cachedGeometry().contains(e.position))
                 if (auto r = s.widget->onMouseButton(e); r.handled) return r;
+        }
         return HReply::Unhandled();
     }
     HReply onMouseMove(const HPointerEvent& e) override {

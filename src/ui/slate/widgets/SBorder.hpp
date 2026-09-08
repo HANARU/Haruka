@@ -59,6 +59,9 @@ public:
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
+        // 자기 rect 밖이면 자식에게 넘기지 않습니다. 넘기면 테두리·패딩 띠를 누른 것이
+        // 안쪽 버튼을 누른 것으로 처리됩니다(SBorder 로 감싼 버튼에서 실제로 발생).
+        if (!cachedGeo_.contains(e.position)) return HReply::Unhandled();
         return child_ ? child_->onMouseButton(e) : HReply::Unhandled();
     }
     HReply onMouseMove(const HPointerEvent& e) override {
