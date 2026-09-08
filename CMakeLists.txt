@@ -287,7 +287,18 @@ if(NOT ANDROID)
         set_target_properties(HarukaActorTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 커맨드 스택 purge 테스트 --------------------------------------------
+    # 헤더 전용이라 링크할 소스가 없습니다. 죽은 대상을 참조하는 커맨드가 undo/redo
+    # 양쪽에서 걷히는지 검산합니다(컴포넌트만 제거되는 경로 포함).
+    add_executable(HarukaCommandTest tests/CommandStackTest.cpp)
+    target_include_directories(HarukaCommandTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaCommandTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaCommandTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     enable_testing()
     add_test(NAME geometry_conventions COMMAND HarukaGeometryTest)
     add_test(NAME actor_lifecycle      COMMAND HarukaActorTest)
+    add_test(NAME command_stack_purge  COMMAND HarukaCommandTest)
 endif()

@@ -35,20 +35,26 @@ static glm::vec3 quatToEulerDeg(const glm::quat& q) {
 }
 
 struct PropsSnapshotCmd : ICommand {
-    // 이 스냅샷이 속한 액터입니다. props 의 setF/getF 람다가 컴포넌트 원시 포인터를
-    // 캡처하므로, 액터가 파괴되면 purge 로 이 커맨드를 반드시 걷어내야 undo/redo 에서
-    // 해제된 컴포넌트를 역참조하지 않습니다. refersTo 가 그 연결 고리입니다.
+    // props 의 setF/getF 람다가 **컴포넌트 원시 포인터**를 캡처하므로, 그 컴포넌트가
+    // 사라지면 이 커맨드를 반드시 걷어내야 undo/redo 가 해제된 메모리를 만지지 않습니다.
+    // 사라지는 경로가 둘이라 연결 고리도 둘입니다.
+    //   1) 액터 파괴 → onActorDestroyed → purge(Actor*)      → refersTo
+    //   2) 컴포넌트만 제거(디테일 패널 x) → purgeComponent   → refersToComponent
+    // 2번은 액터가 살아남아 이벤트가 발화하지 않으므로 1번이 잡지 못합니다.
     const Actor*          actor;
+    const Component*      comp;
     std::vector<PropDesc> props;
     std::vector<float>    before, after;
 
-    PropsSnapshotCmd(const Actor* owner, std::vector<PropDesc> p,
+    PropsSnapshotCmd(const Actor* owner, const Component* c, std::vector<PropDesc> p,
                      std::vector<float> b, std::vector<float> a)
-        : actor(owner), props(std::move(p)), before(std::move(b)), after(std::move(a)) {}
+        : actor(owner), comp(c), props(std::move(p)),
+          before(std::move(b)), after(std::move(a)) {}
 
     void undo() override { size_t j=0; for (auto& pd : props) if (pd.setF) pd.setF(before[j++]); }
     void redo() override { size_t j=0; for (auto& pd : props) if (pd.setF) pd.setF(after[j++]);  }
     bool refersTo(const Actor* a) const override { return actor == a; }
+    bool refersToComponent(const Component* c) const override { return comp == c; }
 };
 
 namespace fs = std::filesystem;
@@ -1935,18 +1941,27 @@ void EditorApp::rebuildDetails() {
 
         detailsList_->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(8.f));
 
-        // Remove callback — type dispatch
+        // Remove callback — type dispatch.
+        // 제거 **전에** 그 컴포넌트를 참조하는 커맨드를 걷어냅니다. 프로퍼티 스냅샷의
+        // 값 접근자가 컴포넌트 포인터를 붙잡고 있어서, 걷어내지 않으면 다음 Ctrl+Z 가
+        // 해제된 메모리에 씁니다. 대상은 removeComponent 와 같은 기준(첫 매치)으로 얻습니다.
+        auto dropCmds = [this](const Component* c) { if (c) cmdStack_.purgeComponent(c); };
         std::function<void()> removeFn;
         if (dynamic_cast<StaticMeshComponent*>(comp))
-            removeFn = [this, sel]{ sel->removeComponent<StaticMeshComponent>(); rebuildDetails(); };
+            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<StaticMeshComponent>());
+                sel->removeComponent<StaticMeshComponent>(); rebuildDetails(); };
         else if (dynamic_cast<LightComponent*>(comp))
-            removeFn = [this, sel]{ sel->removeComponent<LightComponent>(); rebuildDetails(); };
+            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<LightComponent>());
+                sel->removeComponent<LightComponent>(); rebuildDetails(); };
         else if (dynamic_cast<CameraComponent*>(comp))
-            removeFn = [this, sel]{ sel->removeComponent<CameraComponent>(); rebuildDetails(); };
+            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<CameraComponent>());
+                sel->removeComponent<CameraComponent>(); rebuildDetails(); };
         else if (dynamic_cast<AudioComponent*>(comp))
-            removeFn = [this, sel]{ sel->removeComponent<AudioComponent>(); rebuildDetails(); };
+            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<AudioComponent>());
+                sel->removeComponent<AudioComponent>(); rebuildDetails(); };
         else if (dynamic_cast<RigidBodyComponent*>(comp))
-            removeFn = [this, sel]{ sel->removeComponent<RigidBodyComponent>(); rebuildDetails(); };
+            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<RigidBodyComponent>());
+                sel->removeComponent<RigidBodyComponent>(); rebuildDetails(); };
 
         // Component header row
         bool en = comp->isEnabled();
@@ -1982,14 +1997,15 @@ void EditorApp::rebuildDetails() {
             for (auto& pd : *props)
                 if (pd.getF) snapBefore->push_back(pd.getF());
         };
-        auto compEnd = [this, sel, props, snapBefore] {
+        auto compEnd = [this, sel, comp, props, snapBefore] {
             std::vector<float> after;
             after.reserve(props->size());
             for (auto& pd : *props)
                 if (pd.getF) after.push_back(pd.getF());
-            // sel(소유 액터)을 함께 넘겨, 그 액터가 파괴될 때 purge 가 이 커맨드를
-            // 걷어낼 수 있게 합니다. compEnd 는 패널이 살아있는 동안만 호출되므로 sel 은 유효합니다.
-            cmdStack_.push(std::make_unique<PropsSnapshotCmd>(sel, *props, *snapBefore, std::move(after)));
+            // 소유 액터와 대상 컴포넌트를 함께 넘겨, 둘 중 어느 쪽이 사라지든 커맨드가
+            // 걷히게 합니다. compEnd 는 패널이 살아있는 동안만 호출되므로 둘 다 유효합니다.
+            cmdStack_.push(std::make_unique<PropsSnapshotCmd>(sel, comp, *props,
+                                                             *snapBefore, std::move(after)));
         };
 
         for (auto& pd : *props) {
