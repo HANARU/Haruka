@@ -22,7 +22,8 @@ namespace HInput {
     constexpr int KEY_DELETE    = 261;  // GLFW_KEY_DELETE
     constexpr int KEY_F2        = 291;  // GLFW_KEY_F2
     constexpr int KEY_BACKSPACE = 259;  // GLFW_KEY_BACKSPACE
-    constexpr int KEY_ENTER     = 257;  // GLFW_KEY_ENTER
+    constexpr int KEY_ENTER     = 257;
+    constexpr int KEY_ESCAPE    = 256;  // GLFW_KEY_ESCAPE  // GLFW_KEY_ENTER
     constexpr int MOUSE_BUTTON_LEFT  = 0;
     constexpr int MOUSE_BUTTON_RIGHT = 1;
 }

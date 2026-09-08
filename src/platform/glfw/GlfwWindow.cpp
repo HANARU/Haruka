@@ -252,11 +252,9 @@ void GlfwWindow::setClipboardText(const std::string& text) {
 void GlfwWindow::keyCallback(GLFWwindow* w, int key, int /*scancode*/, int action, int /*mods*/) {
     if (action == GLFW_REPEAT) return;
 
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-        glfwSetWindowShouldClose(w, GLFW_TRUE);
-        std::cout << "[Input] PRESS ESCAPE -> window close\n";
-        return;
-    }
+    // Esc 는 다른 키와 똑같이 흘려보냅니다. 예전에는 여기서 곧바로 창을 닫았는데,
+    // 저장 여부를 묻는 경로가 없어 편집 중이던 씬이 그대로 사라졌습니다. 에디터에서
+    // Esc 의 자연스러운 의미는 "지금 편집을 취소" 이고, 창 닫기는 OS 닫기 버튼이 맡습니다.
 
     const char* act  = (action == GLFW_PRESS) ? "PRESS" : "RELEASE";
     const char* name = glfwGetKeyName(key, 0);

@@ -234,8 +234,8 @@ void EditorApp::tick(float dt) {
     // Gizmo hotkeys Q/W/E/R (edge trigger, only when not in camera mode / not typing)
     // 드래그 중에는 모드를 바꾸지 않습니다. 바뀌면 UI 와 실제 조작이 어긋나고,
     // 크기 균등 핸들(axis_ == 3) 상태로 이동·회전 분기에 들어가 축 배열을 넘겨 읽습니다.
-    if (ctx_.window && !renaming_ && !outlinerSearchFocused_ && !gizmo_.isDragging() &&
-        !SNumberField::focusedField() && !ctx_.window->isCameraModeActive()) {
+    if (ctx_.window && currentFocus() == EFocusTarget::None && !gizmo_.isDragging() &&
+        !ctx_.window->isCameraModeActive()) {
         IWindow& win = *ctx_.window;
         bool qNow = win.isKeyDown(HInput::KEY_Q);
         bool wNow = win.isKeyDown(HInput::KEY_W);
@@ -293,7 +293,7 @@ void EditorApp::tick(float dt) {
 
     // 리네임 해제를 리빌드 **앞**으로 옮깁니다. 뒤에 두면 선택이 바뀌는 프레임에 새 행이
     // 직전 액터의 renameBuffer_ 를 한 프레임 그대로 보여 줍니다.
-    if (selChanged && renaming_) { renaming_ = false; renameSelAll_ = false; }
+    if (selChanged && renaming_) setTextFocus(EFocusTarget::None);
     // 접힌 부모 아래 자식을 뷰포트에서 픽하면 조상을 펼치고 그 행으로 스크롤합니다.
     if (selChanged && ctx_.selected) { revealActor(ctx_.selected); outlinerRevealSel_ = true; }
 
@@ -386,14 +386,15 @@ void EditorApp::buildWidgetTree() {
 
     // ── Panel: Outliner (search + list) ───────────────────────────────────────
     outlinerList_ = HNew(VR);
-    auto outlinerSearch = HNew(SSearchBox)
+    outlinerSearchBox_ = HNew(SSearchBox);
+    auto outlinerSearch = outlinerSearchBox_
         ->placeholder("Search...")
         ->text(AttrStr([this]() -> std::string { return outlinerSearch_; }))
         ->focused([this]() -> bool { return outlinerSearchFocused_; })
         ->selectedAll([this]() -> bool { return searchSelAll_; })
         ->onClick([this]{
-            outlinerSearchFocused_ = !outlinerSearchFocused_;
-            searchSelAll_          = false;
+            setTextFocus(currentFocus() == EFocusTarget::Search ? EFocusTarget::None
+                                                                : EFocusTarget::Search);
         })
         ->fontSize(s(12.f));
     auto outlinerPanel = HNew(BR)
@@ -1575,6 +1576,84 @@ void EditorApp::flushOutlinerRebuild() {
     outlinerDirty_ = false;
 }
 
+// ── 텍스트 입력 포커스 중재 ───────────────────────────────────────────────────
+// 실제 포커스는 세 플래그에서 유도합니다. 숫자 필드는 위젯이 소유한 정적 상태라
+// 여기서 진입시킬 수 없으므로, 그것이 잡혀 있으면 언제나 최우선으로 봅니다.
+EditorApp::EFocusTarget EditorApp::currentFocus() const {
+    if (SNumberField::focusedField()) return EFocusTarget::NumberField;
+    if (renaming_)                    return EFocusTarget::Rename;
+    if (outlinerSearchFocused_)       return EFocusTarget::Search;
+    return EFocusTarget::None;
+}
+
+void EditorApp::setTextFocus(EFocusTarget t) {
+    const EFocusTarget prev = currentFocus();
+    if (prev == t) return;
+
+    // 이전 포커스를 정리합니다. 숫자 필드는 편집 중이던 값을 확정해야, 나중에 다른 곳에서
+    // 누른 Enter 가 낡은 값으로 되살아나지 않습니다.
+    if (prev == EFocusTarget::NumberField) {
+        if (auto* nf = SNumberField::focusedField()) nf->commitEdit();
+    } else if (prev == EFocusTarget::Rename) {
+        renaming_ = false; renameSelAll_ = false; outlinerDirty_ = true;
+    } else if (prev == EFocusTarget::Search) {
+        outlinerSearchFocused_ = false; searchSelAll_ = false; outlinerDirty_ = true;
+    }
+
+    if (t == EFocusTarget::Rename) {
+        if (ctx_.selected && ctx_.selected != editorCamActor_) {
+            renaming_     = true;
+            renameBuffer_ = ctx_.selected->name;
+            renameSelAll_ = true;   // 윈도우 표준: 이름 변경 시작 시 전체 선택
+        }
+        outlinerDirty_ = true;
+    } else if (t == EFocusTarget::Search) {
+        outlinerSearchFocused_ = true;
+        searchSelAll_          = !outlinerSearch_.empty();
+        outlinerDirty_         = true;
+    }
+
+    if (ctx_.window) {
+        IWindow& w = *ctx_.window;
+        // 포커스가 없던 동안 쌓인 문자를 버립니다. 그러지 않으면 그동안 누른 글자가
+        // 입력창을 여는 순간 한꺼번에 쏟아집니다.
+        std::vector<unsigned int> junk;
+        w.drainCharQueue(junk);
+        // 키 엣지를 현재 물리 상태로 다시 심습니다. 누른 채로 진입하면 그 키가 곧바로
+        // 엣지로 잡혀(예: Enter 를 누른 채 리네임 진입) 편집이 즉시 끝나 버립니다.
+        prevEnterDown_     = w.isKeyDown(HInput::KEY_ENTER);
+        prevBackspaceDown_ = w.isKeyDown(HInput::KEY_BACKSPACE);
+        prevF2Down_        = w.isKeyDown(HInput::KEY_F2);
+        prevDeleteDown_    = w.isKeyDown(HInput::KEY_DELETE);
+        prevVDown_         = w.isKeyDown(HInput::KEY_V);
+        prevCDown_         = w.isKeyDown(HInput::KEY_C);
+        prevADown_         = w.isKeyDown(HInput::KEY_A);
+    }
+
+    // 텍스트 입력을 시작하면 열려 있던 메뉴는 닫습니다.
+    if (t != EFocusTarget::None && openMenu_ >= 0) {
+        openMenu_     = -1;
+        menuBarDirty_ = menuPopupDirty_ = true;
+    }
+}
+
+bool EditorApp::focusWidgetContains(float x, float y) const {
+    const glm::vec2 p{ x, y };
+    switch (currentFocus()) {
+        case EFocusTarget::NumberField:
+            if (auto* nf = SNumberField::focusedField())
+                return nf->cachedGeometry().contains(p);
+            return false;
+        case EFocusTarget::Search:
+            return outlinerSearchBox_ && outlinerSearchBox_->cachedGeometry().contains(p);
+        case EFocusTarget::Rename:
+            // 리네임 행 위젯은 리빌드마다 새로 만들어지므로 목록 전체를 기준으로 봅니다.
+            return outlinerList_ && outlinerList_->cachedGeometry().contains(p);
+        default:
+            return false;
+    }
+}
+
 // 크롬의 지연 리빌드를 소진합니다. 위젯 콜백이 자기 컨테이너를 직접 비우면 순회 중인
 // 슬롯과 실행 중인 std::function 이 함께 파괴되므로, 콜백은 플래그만 세우고 여기서
 // 한 번에 처리합니다. 아웃라이너보다 뒤에 두어, 메뉴 항목이 도크 변형을 요청한 경우
@@ -2331,17 +2410,12 @@ void EditorApp::tickShortcuts() {
 
     // Ctrl+F → 아웃라이너 검색창 포커스 (기존 검색어는 전체 선택 → 바로 교체 가능)
     if (fEdge) {
-        if (auto* nf = SNumberField::focusedField()) nf->commitEdit();
-        renaming_              = false;
-        renameSelAll_          = false;
-        outlinerSearchFocused_ = true;
-        searchSelAll_          = !outlinerSearch_.empty();
-        rebuildOutliner();
+        setTextFocus(EFocusTarget::Search);
         return;
     }
 
     // 텍스트 입력 중에는 씬 undo/redo가 직관에 어긋나므로 차단
-    if (renaming_ || outlinerSearchFocused_ || SNumberField::focusedField()) return;
+    if (currentFocus() != EFocusTarget::None) return;   // 텍스트 입력 중에는 단축키를 막습니다
 
     bool shift = win.isKeyDown(HInput::KEY_LEFT_SHIFT);
     if (zEdge && !shift)                 undo();
@@ -2363,6 +2437,14 @@ void EditorApp::handleInput(float mouseX, float mouseY,
             self->flushChromeRebuilds();
         }
     } deferredRebuildGuard{ this };
+
+    // 편집 중에 다른 곳을 누르면 편집을 끝냅니다. 이 처리가 스플리터·탭·기즈모의 조기
+    // return 보다 **앞**에 있어야 합니다. 뒤에 있으면 그 경로들이 커밋을 건너뛰어 편집
+    // 모드가 갇히고, 나중에 누른 Enter 가 낡은 값으로 기즈모 결과를 덮어씁니다.
+    if (leftDown && !prevLeftDown_ && currentFocus() != EFocusTarget::None &&
+        !focusWidgetContains(mouseX, mouseY)) {
+        setTextFocus(EFocusTarget::None);
+    }
 
     // ── 메뉴 hover 전환 ──────────────────────────────────────────────────────────
     // 메뉴가 열려 있을 때 다른 메뉴 버튼 위로 마우스를 옮기면 그 메뉴로 전환합니다(표준 메뉴 바
@@ -2545,8 +2627,6 @@ void EditorApp::handleInput(float mouseX, float mouseY,
 
     // ── UI event + actor pick ─────────────────────────────────────────────────
     if (!gizmoConsumed && leftDown && !prevLeftDown_) {
-        // 다른 곳 클릭 → 편집 중인 숫자 필드 확정
-        if (auto* nf = SNumberField::focusedField()) nf->commitEdit();
         e.button = 0; e.down = true;
         HReply r = slateRenderer_.handlePointerEvent(e);
         if (!r.handled && inViewport(mouseX, mouseY, winW, winH)) {
@@ -2696,80 +2776,89 @@ void EditorApp::tickRenameInput() {
     if (!ctx_.window) return;
     IWindow& win = *ctx_.window;
 
-    // ── Ctrl+C/V/A 클립보드·전체선택 엣지 (모든 텍스트 입력 공용) ──────────────
-    bool ctrlHeld = win.isKeyDown(HInput::KEY_LEFT_CTRL);
-    bool vNow = win.isKeyDown(HInput::KEY_V);
-    bool cNow = win.isKeyDown(HInput::KEY_C);
-    bool aNow = win.isKeyDown(HInput::KEY_A);
-    bool pasteEdge  = ctrlHeld && vNow && !prevVDown_;
-    bool copyEdge   = ctrlHeld && cNow && !prevCDown_;
-    bool selAllEdge = ctrlHeld && aNow && !prevADown_;
-    prevVDown_ = vNow;
-    prevCDown_ = cNow;
-    prevADown_ = aNow;
+    // 키 엣지를 여기서 **한 번에** 계산하고 prev 상태를 조건 없이 갱신합니다. 예전에는
+    // 숫자 필드 분기가 중간에서 return 해 F2·Delete 엣지가 갱신되지 않았고, 그 탓에 값을
+    // 확정한 직후 눌린 채였던 Delete 가 선택 액터를 지웠습니다(undo 없음).
+    const bool ctrlHeld = win.isKeyDown(HInput::KEY_LEFT_CTRL);
+    const bool vNow   = win.isKeyDown(HInput::KEY_V);
+    const bool cNow   = win.isKeyDown(HInput::KEY_C);
+    const bool aNow   = win.isKeyDown(HInput::KEY_A);
+    const bool f2Now  = win.isKeyDown(HInput::KEY_F2);
+    const bool delNow = win.isKeyDown(HInput::KEY_DELETE);
+    const bool enNow  = win.isKeyDown(HInput::KEY_ENTER);
+    const bool bsNow  = win.isKeyDown(HInput::KEY_BACKSPACE);
+    const bool escNow = win.isKeyDown(HInput::KEY_ESCAPE);
 
-    // ── 숫자 필드 인라인 편집 — 입력 모드 중에는 모든 키가 필드로만 간다 ──────
-    if (auto* nf = SNumberField::focusedField()) {
+    const bool pasteEdge  = ctrlHeld && vNow && !prevVDown_;
+    const bool copyEdge   = ctrlHeld && cNow && !prevCDown_;
+    const bool selAllEdge = ctrlHeld && aNow && !prevADown_;
+    const bool f2Edge     = f2Now  && !prevF2Down_;
+    const bool delEdge    = delNow && !prevDeleteDown_;
+    const bool enterEdge  = enNow  && !prevEnterDown_;
+    const bool bsEdge     = bsNow  && !prevBackspaceDown_;
+    const bool escEdge    = escNow && !prevEscapeDown_;
+
+    prevVDown_         = vNow;
+    prevCDown_         = cNow;
+    prevADown_         = aNow;
+    prevF2Down_        = f2Now;
+    prevDeleteDown_    = delNow;
+    prevEnterDown_     = enNow;
+    prevBackspaceDown_ = bsNow;
+    prevEscapeDown_    = escNow;
+
+    const EFocusTarget focus = currentFocus();
+
+    // Esc — 무엇을 편집하고 있든 취소하고 빠져나옵니다(숫자 필드는 값을 확정).
+    if (escEdge && focus != EFocusTarget::None) {
+        setTextFocus(EFocusTarget::None);
+        return;
+    }
+
+    // F2 — 리네임 진입·종료. 다른 텍스트 편집 중에는 반응하지 않습니다.
+    if (f2Edge && (focus == EFocusTarget::None || focus == EFocusTarget::Rename)) {
+        setTextFocus(focus == EFocusTarget::Rename ? EFocusTarget::None
+                                                   : EFocusTarget::Rename);
+        return;
+    }
+
+    // ── 숫자 필드 인라인 편집 — 입력 모드 중에는 모든 문자가 필드로만 갑니다 ──
+    if (focus == EFocusTarget::NumberField) {
+        auto* nf = SNumberField::focusedField();
         std::vector<unsigned int> chars;
         win.drainCharQueue(chars);
         for (unsigned int cp : chars) nf->onChar(cp);
 
-        if (selAllEdge)
-            nf->selectAll();
+        if (selAllEdge) nf->selectAll();
         if (pasteEdge)
             for (char c : win.getClipboardText()) nf->onChar((unsigned char)c);
-        if (copyEdge)
-            win.setClipboardText(nf->editBuffer());
-
-        bool bsNow = win.isKeyDown(HInput::KEY_BACKSPACE);
-        if (bsNow && !prevBackspaceDown_) nf->onBackspace();
-        prevBackspaceDown_ = bsNow;
-
-        bool enNow = win.isKeyDown(HInput::KEY_ENTER);
-        if (enNow && !prevEnterDown_) nf->commitEdit();
-        prevEnterDown_ = enNow;
+        if (copyEdge)  win.setClipboardText(nf->editBuffer());
+        if (bsEdge)    nf->onBackspace();
+        if (enterEdge) nf->commitEdit();
         return;
     }
 
-    bool f2Now  = win.isKeyDown(HInput::KEY_F2);
-    bool delNow = win.isKeyDown(HInput::KEY_DELETE);
-    bool f2Edge = f2Now  && !prevF2Down_;
-    bool delEdge= delNow && !prevDeleteDown_;
-    prevF2Down_     = f2Now;
-    prevDeleteDown_ = delNow;
-
-    if (f2Edge) {
-        if (!renaming_ && ctx_.selected && ctx_.selected != editorCamActor_) {
-            renaming_           = true;
-            renameBuffer_       = ctx_.selected->name;
-            renameSelAll_       = true;   // 윈도우 표준: 이름 변경 시작 시 전체 선택
-            prevBackspaceDown_  = win.isKeyDown(HInput::KEY_BACKSPACE);
-            prevEnterDown_      = win.isKeyDown(HInput::KEY_ENTER);
-            rebuildOutliner();
-        } else if (renaming_) {
-            renaming_     = false;
-            renameSelAll_ = false;
-            rebuildOutliner();
-        }
-        return;
-    }
-
-    if (renaming_) {
+    // ── 인라인 리네임 / 아웃라이너 검색 — 같은 편집 규칙을 공유합니다 ─────────
+    if (focus == EFocusTarget::Rename || focus == EFocusTarget::Search) {
+        const bool isRename = (focus == EFocusTarget::Rename);
+        std::string& buf    = isRename ? renameBuffer_ : outlinerSearch_;
+        bool&        selAll = isRename ? renameSelAll_ : searchSelAll_;
         bool dirty = false;
 
-        // 전체 선택 상태에서 입력/붙여넣기/지우기 → 기존 내용 교체
-        auto clearIfSelAll = [&]{
-            if (renameSelAll_) { renameBuffer_.clear(); renameSelAll_ = false; dirty = true; }
+        // 전체 선택 상태에서 입력·붙여넣기·지우기 → 기존 내용 교체
+        auto clearIfSelAll = [&] {
+            if (selAll) { buf.clear(); selAll = false; dirty = true; }
         };
 
-        if (selAllEdge && !renameBuffer_.empty()) { renameSelAll_ = true; dirty = true; }
+        if (selAllEdge && !buf.empty()) { selAll = true; dirty = true; }
 
         std::vector<unsigned int> chars;
         win.drainCharQueue(chars);
         for (unsigned int cp : chars) {
+            // 폰트 아틀라스가 ASCII 전용이라, 그릴 수 없는 글자는 애초에 받지 않습니다.
             if (cp >= 32 && cp < 127) {
                 clearIfSelAll();
-                renameBuffer_ += (char)cp;
+                buf += (char)cp;
                 dirty = true;
             }
         }
@@ -2777,75 +2866,37 @@ void EditorApp::tickRenameInput() {
         if (pasteEdge) {
             clearIfSelAll();
             for (char c : win.getClipboardText())
-                if (c >= 32 && c < 127) { renameBuffer_ += c; dirty = true; }
+                if (c >= 32 && c < 127) { buf += c; dirty = true; }
         }
-        if (copyEdge) win.setClipboardText(renameBuffer_);
+        if (copyEdge) win.setClipboardText(buf);
 
-        bool bsNow = win.isKeyDown(HInput::KEY_BACKSPACE);
-        if (bsNow && !prevBackspaceDown_ && !renameBuffer_.empty()) {
-            if (renameSelAll_) clearIfSelAll();
-            else               renameBuffer_.pop_back();
+        if (bsEdge && !buf.empty()) {
+            if (selAll) clearIfSelAll();
+            else        buf.pop_back();
             dirty = true;
         }
-        prevBackspaceDown_ = bsNow;
 
-        bool enNow = win.isKeyDown(HInput::KEY_ENTER);
-        if (enNow && !prevEnterDown_ && !renameBuffer_.empty()) {
-            ctx_.selected->name = renameBuffer_;
-            renaming_           = false;
-            renameSelAll_       = false;
-            dirty               = true;
-        }
-        prevEnterDown_ = enNow;
-
-        if (dirty) rebuildOutliner();
-    } else if (outlinerSearchFocused_) {
-        bool dirty = false;
-
-        auto clearIfSelAll = [&]{
-            if (searchSelAll_) { outlinerSearch_.clear(); searchSelAll_ = false; dirty = true; }
-        };
-
-        if (selAllEdge && !outlinerSearch_.empty()) { searchSelAll_ = true; dirty = true; }
-
-        std::vector<unsigned int> chars;
-        win.drainCharQueue(chars);
-        for (unsigned int cp : chars) {
-            if (cp >= 32 && cp < 127) {
-                clearIfSelAll();
-                outlinerSearch_ += (char)cp;
-                dirty = true;
-            }
+        if (enterEdge) {
+            // 빈 이름은 적용하지 않되 편집은 끝냅니다. 예전에는 버퍼가 비면 Enter 가
+            // 아무 일도 하지 않아 확정도 탈출도 못 하는 상태에 갇혔습니다.
+            if (isRename && !buf.empty() && ctx_.selected)
+                ctx_.selected->name = buf;
+            setTextFocus(EFocusTarget::None);
+            return;
         }
 
-        if (pasteEdge) {
-            clearIfSelAll();
-            for (char c : win.getClipboardText())
-                if (c >= 32 && c < 127) { outlinerSearch_ += c; dirty = true; }
-        }
-        if (copyEdge) win.setClipboardText(outlinerSearch_);
-
-        bool bsNow = win.isKeyDown(HInput::KEY_BACKSPACE);
-        if (bsNow && !prevBackspaceDown_ && !outlinerSearch_.empty()) {
-            if (searchSelAll_) clearIfSelAll();
-            else               outlinerSearch_.pop_back();
-            dirty = true;
-        }
-        prevBackspaceDown_ = bsNow;
-
-        bool enNow = win.isKeyDown(HInput::KEY_ENTER);
-        if (enNow && !prevEnterDown_) {
-            outlinerSearchFocused_ = false;
-            searchSelAll_          = false;
-            dirty = true;
-        }
-        prevEnterDown_ = enNow;
-
-        if (dirty) rebuildOutliner();
-    } else {
-        if (delEdge && ctx_.selected && ctx_.selected != editorCamActor_)
-            deleteSelectedActor();
+        if (dirty) outlinerDirty_ = true;
+        return;
     }
+
+    // ── 포커스 없음 ───────────────────────────────────────────────────────────
+    if (delEdge && ctx_.selected && ctx_.selected != editorCamActor_)
+        deleteSelectedActor();
+
+    // 아무도 받지 않는 문자는 버립니다. 쌓아 두면 다음에 입력창을 여는 순간
+    // 그동안 누른 글자가 한꺼번에 쏟아집니다.
+    std::vector<unsigned int> junk;
+    win.drainCharQueue(junk);
 }
 
 // ── tickEditorCamera ───────────────────────────────────────────────────────────

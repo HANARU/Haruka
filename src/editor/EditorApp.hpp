@@ -203,6 +203,19 @@ private:
     // Outliner search
     std::string outlinerSearch_;
     bool        outlinerSearchFocused_ = false;
+    // 검색 상자 위젯. 포커스 밖 클릭 판정에 geometry 가 필요해 참조를 남깁니다.
+    std::shared_ptr<SSearchBox> outlinerSearchBox_;
+
+    // ── 텍스트 입력 포커스 중재 ───────────────────────────────────────────────
+    // 텍스트를 받는 곳이 셋(인라인 리네임·아웃라이너 검색·숫자 필드)인데 각자 플래그로
+    // 관리되어 서로를 몰랐습니다. 그래서 둘이 동시에 활성이 되거나, 다른 곳을 클릭해도
+    // 편집 모드가 풀리지 않아 나중의 Enter 가 엉뚱한 값을 확정하는 일이 있었습니다.
+    // 진입·이탈을 setTextFocus 한 곳으로 모으고, 실제 상태는 currentFocus 가 유도합니다.
+    enum class EFocusTarget { None, Rename, Search, NumberField };
+    EFocusTarget currentFocus() const;
+    void         setTextFocus(EFocusTarget t);
+    // 지금 포커스를 가진 위젯이 이 좌표를 품는가(포커스 밖 클릭 판정).
+    bool         focusWidgetContains(float x, float y) const;
 
     // ── 아웃라이너 계층 트리 (Phase 3) ────────────────────────────────────────
     // 행 치수(미스케일 기준값). s() 로 스케일해 씁니다.
@@ -316,6 +329,7 @@ private:
     bool prevF2Down_        = false;
     bool prevBackspaceDown_ = false;
     bool prevEnterDown_     = false;
+    bool prevEscapeDown_    = false;
     bool prevZDown_         = false;
     bool prevYDown_         = false;
     bool prevSDown_         = false;
