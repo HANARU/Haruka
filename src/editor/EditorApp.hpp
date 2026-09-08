@@ -164,6 +164,15 @@ private:
     void buildMenus();
     void rebuildMenuBar();
     void rebuildMenuPopup();
+    // 크롬(메뉴 바·팝업·툴바·디테일)의 지연 리빌드 요청입니다. 위젯 콜백은 자기를 담은
+    // 컨테이너를 직접 비울 수 없습니다 — 슬롯을 순회하는 도중 clearSlots 가 돌면 지금
+    // 실행 중인 버튼과 그 std::function 자체가 파괴됩니다. 아웃라이너의 outlinerDirty_
+    // 와 같은 방식으로, 콜백은 플래그만 세우고 프레임 끝에서 한 번 리빌드합니다.
+    bool menuBarDirty_   = false;
+    bool menuPopupDirty_ = false;
+    bool toolbarDirty_   = false;
+    bool detailsDirty_   = false;
+    void flushChromeRebuilds();
 
     // 트리 변형: 드롭 시 소스에서 빼고 타깃에 붙임(탭화 또는 분할). 빈 리프 정리.
     void performRedock(DockNode* src, int srcIdx, const std::string& panelId,

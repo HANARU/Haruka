@@ -339,6 +339,9 @@ void EditorApp::tick(float dt) {
     // exchange로 플래그를 먼저 내려야 리빌드 중 도착한 로그가 다음 프레임에 잡힌다
     if (ctx_.logDirty.exchange(false, std::memory_order_acquire))
         rebuildBottomPanel();
+
+    // 단축키·메뉴 액션처럼 위젯 이벤트를 거치지 않고 상태만 바뀌는 경로도 여기서 소진합니다.
+    flushChromeRebuilds();
 }
 
 // ── scanModelFiles ─────────────────────────────────────────────────────────────
@@ -963,7 +966,7 @@ void EditorApp::rebuildMenuBar() {
                 ->padding(HPadding{s(10.f), s(4.f)})
                 ->onClick([this, mi]{
                     openMenu_ = (openMenu_ == mi) ? -1 : mi;
-                    rebuildMenuBar(); rebuildMenuPopup();
+                    menuBarDirty_ = menuPopupDirty_ = true;
                 })
                 ->content(HNew(STextBlock)->text(menus_[mi].name)->fontSize(s(13.f))
                     ->color(kTextBody)->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
@@ -999,7 +1002,7 @@ void EditorApp::rebuildMenuPopup() {
                     if (k < 0 || k >= (int)menus_[openMenu_].items.size()) return;
                     auto act = menus_[openMenu_].items[k].action;
                     openMenu_ = -1;
-                    rebuildMenuBar(); rebuildMenuPopup();
+                    menuBarDirty_ = menuPopupDirty_ = true;
                     if (act) act();
                 })
                 ->content(HNew(STextBlock)->text(md.items[k].label)->fontSize(s(13.f))
@@ -1026,7 +1029,7 @@ void EditorApp::rebuildMenuPopup() {
         ->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(kMenuBarH))
         ->addSlot(
             HNew(SButton)->normalColor({0,0,0,0})->hoveredColor({0,0,0,0})->pressedColor({0,0,0,0})
-                ->onClick([this]{ openMenu_ = -1; rebuildMenuBar(); rebuildMenuPopup(); })
+                ->onClick([this]{ openMenu_ = -1; menuBarDirty_ = menuPopupDirty_ = true; })
                 ->content(spacer()),
             SVerticalBox::ESizeRule::Fill);
     // 슬롯 순서 = z(뒤→앞): 캐처 / 섀도 / 드롭다운. 섀도는 드롭다운보다 (3,3)px 어긋나 깔립니다.
@@ -1297,7 +1300,7 @@ void EditorApp::beginPlay() {
         std::cout << "[Editor] ▶ Resume\n";
     }
     playState_ = EPlayState::Playing;
-    rebuildToolbar();
+    toolbarDirty_ = true;
 }
 
 void EditorApp::pausePlay() {
@@ -1308,7 +1311,7 @@ void EditorApp::pausePlay() {
         playState_ = EPlayState::Playing;
         std::cout << "[Editor] ▶ Resumed\n";
     }
-    rebuildToolbar();
+    toolbarDirty_ = true;
 }
 
 void EditorApp::stopPlay() {
@@ -1318,7 +1321,7 @@ void EditorApp::stopPlay() {
     worldSnapshot_.clear();
     cmdStack_.clear();
     std::cout << "[Editor] ⏹ Stopped — world restored\n";
-    rebuildToolbar();
+    toolbarDirty_ = true;
 }
 
 // ── Serialization ──────────────────────────────────────────────────────────────
@@ -1570,6 +1573,17 @@ void EditorApp::flushOutlinerRebuild() {
     if (!outlinerDirty_) return;
     rebuildOutliner();
     outlinerDirty_ = false;
+}
+
+// 크롬의 지연 리빌드를 소진합니다. 위젯 콜백이 자기 컨테이너를 직접 비우면 순회 중인
+// 슬롯과 실행 중인 std::function 이 함께 파괴되므로, 콜백은 플래그만 세우고 여기서
+// 한 번에 처리합니다. 아웃라이너보다 뒤에 두어, 메뉴 항목이 도크 변형을 요청한 경우
+// 도크 쪽이 먼저 정리되게 합니다.
+void EditorApp::flushChromeRebuilds() {
+    if (menuBarDirty_)   { menuBarDirty_   = false; rebuildMenuBar();   }
+    if (menuPopupDirty_) { menuPopupDirty_ = false; rebuildMenuPopup(); }
+    if (toolbarDirty_)   { toolbarDirty_   = false; rebuildToolbar();   }
+    if (detailsDirty_)   { detailsDirty_   = false; rebuildDetails();   }
 }
 
 // 행 하나를 조립합니다. 슬롯은 SHorizontalBox 가 penX 를 단조 누적하므로 서로 겹치지
@@ -1907,7 +1921,7 @@ void EditorApp::rebuildDetails() {
                                {0.22f, 0.22f, 0.28f, 1.f}, {0.35f, 0.35f, 0.40f, 1.f},
                                [this, opts, getI, setI]{
                                    setI((getI() + 1) % (int)opts.size());
-                                   rebuildDetails();
+                                   detailsDirty_ = true;
                                }),
                     SHorizontalBox::ESizeRule::Fixed, s(88.f))
                 ->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(8.f)),
@@ -1930,7 +1944,7 @@ void EditorApp::rebuildDetails() {
                                v ? glm::vec4{0.18f,0.50f,0.22f,1.f}
                                  : glm::vec4{0.38f,0.18f,0.18f,1.f},
                                {0.35f, 0.35f, 0.40f, 1.f},
-                               [this, getB, setB]{ setB(!getB()); rebuildDetails(); }),
+                               [this, getB, setB]{ setB(!getB()); detailsDirty_ = true; }),
                     SHorizontalBox::ESizeRule::Fixed, s(44.f))
                 ->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(8.f)),
             SVerticalBox::ESizeRule::Fixed, s(26.f));
@@ -1949,19 +1963,19 @@ void EditorApp::rebuildDetails() {
         std::function<void()> removeFn;
         if (dynamic_cast<StaticMeshComponent*>(comp))
             removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<StaticMeshComponent>());
-                sel->removeComponent<StaticMeshComponent>(); rebuildDetails(); };
+                sel->removeComponent<StaticMeshComponent>(); detailsDirty_ = true; };
         else if (dynamic_cast<LightComponent*>(comp))
             removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<LightComponent>());
-                sel->removeComponent<LightComponent>(); rebuildDetails(); };
+                sel->removeComponent<LightComponent>(); detailsDirty_ = true; };
         else if (dynamic_cast<CameraComponent*>(comp))
             removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<CameraComponent>());
-                sel->removeComponent<CameraComponent>(); rebuildDetails(); };
+                sel->removeComponent<CameraComponent>(); detailsDirty_ = true; };
         else if (dynamic_cast<AudioComponent*>(comp))
             removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<AudioComponent>());
-                sel->removeComponent<AudioComponent>(); rebuildDetails(); };
+                sel->removeComponent<AudioComponent>(); detailsDirty_ = true; };
         else if (dynamic_cast<RigidBodyComponent*>(comp))
             removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<RigidBodyComponent>());
-                sel->removeComponent<RigidBodyComponent>(); rebuildDetails(); };
+                sel->removeComponent<RigidBodyComponent>(); detailsDirty_ = true; };
 
         // Component header row
         bool en = comp->isEnabled();
@@ -1978,7 +1992,7 @@ void EditorApp::rebuildDetails() {
                                        en ? glm::vec4{0.18f,0.50f,0.22f,1.f}
                                           : glm::vec4{0.38f,0.18f,0.18f,1.f},
                                        {0.35f, 0.35f, 0.40f, 1.f},
-                                       [this, comp]{ comp->setEnabled(!comp->isEnabled()); rebuildDetails(); }),
+                                       [this, comp]{ comp->setEnabled(!comp->isEnabled()); detailsDirty_ = true; }),
                             SHorizontalBox::ESizeRule::Fixed, s(42.f))
                         ->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f))
                         ->addSlot(
@@ -2046,27 +2060,27 @@ void EditorApp::rebuildDetails() {
     if (!sel->getComponent<LightComponent>())
         addCompBtn("+ Light", [this, sel]{
             sel->addComponent<LightComponent>();
-            rebuildDetails();
+            detailsDirty_ = true;
         });
     if (!sel->getComponent<CameraComponent>())
         addCompBtn("+ Camera", [this, sel]{
             sel->addComponent<CameraComponent>();
-            rebuildDetails();
+            detailsDirty_ = true;
         });
     if (!sel->getComponent<StaticMeshComponent>())
         addCompBtn("+ Mesh", [this, sel]{
             sel->addComponent<StaticMeshComponent>();
-            rebuildDetails();
+            detailsDirty_ = true;
         });
     if (!sel->getComponent<AudioComponent>())
         addCompBtn("+ Audio", [this, sel]{
             sel->addComponent<AudioComponent>();
-            rebuildDetails();
+            detailsDirty_ = true;
         });
     if (!sel->getComponent<RigidBodyComponent>())
         addCompBtn("+ RigidBody", [this, sel]{
             sel->addComponent<RigidBodyComponent>();
-            rebuildDetails();
+            detailsDirty_ = true;
         });
 
     detailsList_->addSlot(addRow, SVerticalBox::ESizeRule::Fixed, s(34.f));
@@ -2175,7 +2189,7 @@ void EditorApp::rebuildBottomPanel() {
                             }
                             ac->filePath    = fullPath;
                             ac->loadFailed_ = false;
-                            rebuildDetails();
+                            detailsDirty_ = true;
                         })
                         ->content(HNew(SHorizontalBox)
                             ->addSlot(HNew(STextBlock)->text("[A]")->fontSize(s(12.f))
@@ -2342,10 +2356,13 @@ void EditorApp::handleInput(float mouseX, float mouseY,
     // 도중 clearSlots 가 돌면 지금 실행 중인 버튼과 그 std::function 자체가 파괴되기
     // 때문입니다. 이 함수에는 조기 return 이 여러 개라 소진은 스코프 가드로 합니다.
     // 소멸자는 이벤트 디스패치가 전부 끝난 뒤, 이 프레임의 drawFrame 전에 돕니다.
-    struct OutlinerFlushGuard {
+    struct DeferredRebuildGuard {
         EditorApp* self;
-        ~OutlinerFlushGuard() { self->flushOutlinerRebuild(); }
-    } outlinerFlushGuard{ this };
+        ~DeferredRebuildGuard() {
+            self->flushOutlinerRebuild();
+            self->flushChromeRebuilds();
+        }
+    } deferredRebuildGuard{ this };
 
     // ── 메뉴 hover 전환 ──────────────────────────────────────────────────────────
     // 메뉴가 열려 있을 때 다른 메뉴 버튼 위로 마우스를 옮기면 그 메뉴로 전환합니다(표준 메뉴 바
@@ -2356,7 +2373,7 @@ void EditorApp::handleInput(float mouseX, float mouseY,
             if (mi == openMenu_ || !menuButtons_[mi]) continue;
             if (menuButtons_[mi]->cachedGeometry().contains(mm)) {
                 openMenu_ = mi;
-                rebuildMenuBar(); rebuildMenuPopup();
+                menuBarDirty_ = menuPopupDirty_ = true;
                 break;
             }
         }
