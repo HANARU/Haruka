@@ -97,7 +97,18 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
     // cmdStack_.clear() 를 기억해야 했던 규율을 이벤트 메커니즘으로 대체합니다.
     actorDestroyedSub_ = world.onActorDestroyed.add([this](Actor* a) {
         cmdStack_.purge(a);
-        if (ctx_.selected == a) ctx_.selected = nullptr;
+        // 파괴는 erase 앞에서 방송되므로 여기서 a->id 를 읽는 것은 안전합니다.
+        // 서브트리 재귀 파괴 시 자손마다 따로 방송되어 접힘 상태가 남지 않습니다.
+        outlinerCollapsed_.erase(a->id);
+        if (prevSelected2_ == a) prevSelected2_ = nullptr;
+        if (ctx_.selected == a) {
+            ctx_.selected = nullptr;
+            // 리네임 중인 액터가 (조상 삭제로) 함께 사라질 수 있습니다. 여기서 끄지 않으면
+            // 다음 Enter 가 tickRenameInput 에서 널 selected 를 역참조합니다.
+            renaming_     = false;
+            renameSelAll_ = false;
+        }
+        outlinerDirty_ = true;
     });
 
     editorCamActor_ = world.spawnActor("Camera");
@@ -181,7 +192,27 @@ void EditorApp::tick(float dt) {
         vpTimings_.transparentDraws= s.transparentDraws;
     }
 
-    tickEditorCamera(dt);
+    // 휠은 프로세스 전체에서 이 한 줄로만 읽습니다(getScrollDelta 는 consume-on-read라
+    // 두 곳에서 읽으면 한쪽이 항상 0 을 받습니다). 커서가 아웃라이너 목록 위이고 카메라
+    // 모드가 아닐 때만 목록 스크롤로 가로채고, 나머지는 카메라 돌리로 넘깁니다.
+    float scroll = ctx_.window ? ctx_.window->getScrollDelta() : 0.f;
+    // 좌버튼을 누르고 있는 동안에는 목록을 스크롤하지 않습니다. 스크롤하면 리빌드가 행
+    // 위젯을 통째로 갈아 끼우는데, HSlate 에는 포인터 캡처도 프레스 추적도 없어서 마우스-업이
+    // "그 자리에 새로 온" 다른 액터의 버튼으로 배달됩니다(누른 적 없는 액터가 삭제됨).
+    // 아웃라이너가 비활성 탭이면 위젯이 배치되지 않아 geometry 가 stale 하므로 제외합니다.
+    if (scroll != 0.f && outlinerList_ && outlinerVisible_ && ctx_.window &&
+        !ctx_.window->isCameraModeActive() &&
+        !ctx_.window->isMouseButtonDown(HInput::MOUSE_BUTTON_LEFT)) {
+        float mx, my;
+        ctx_.window->getMousePosition(mx, my);
+        // 히트테스트 좌표계는 handleInput 의 e.position 과 같은 윈도 좌표로 통일합니다.
+        if (outlinerList_->cachedGeometry().contains(glm::vec2{mx, my})) {
+            outlinerScrollTop_ = std::max(0, outlinerScrollTop_ + (scroll > 0.f ? -3 : 3));
+            outlinerDirty_     = true;
+            scroll             = 0.f;
+        }
+    }
+    tickEditorCamera(dt, scroll);
     tickRenameInput();
     tickShortcuts();
 
@@ -228,7 +259,11 @@ void EditorApp::tick(float dt) {
         const bool inView = inViewport(mx, my, (float)wW, (float)wH);
         // 기즈모와 아이콘을 한 리스트에 모아 한 번에 설정합니다.
         std::vector<LineVertex> lines, tris;
-        gizmo_.tick(ctx_.selected, *ctx_.world, wvp, s(18.f),
+        // 눈으로 끈 액터는 뷰포트에서 그려지지도 잡히지도 않으므로 기즈모도 띄우지
+        // 않습니다. 그러지 않으면 화면에 없는 것을 축 화살표만 보고 움직이게 됩니다.
+        Actor* const gizmoTarget =
+            (ctx_.selected && ctx_.selected->activeInHierarchy()) ? ctx_.selected : nullptr;
+        gizmo_.tick(gizmoTarget, *ctx_.world, wvp, s(18.f),
                     gizmoMode_, worldSpace_, inView, lines, tris);
         buildEditorIcons(*ctx_.world, wvp, lines, tris);
         ctx_.renderer->setEditorLines(std::move(lines));
@@ -237,19 +272,35 @@ void EditorApp::tick(float dt) {
 
     int  actorCount    = (int)ctx_.world->getActors().size();
     bool selChanged    = (ctx_.selected != prevSelected_);
+
+    // 리네임 해제를 리빌드 **앞**으로 옮깁니다. 뒤에 두면 선택이 바뀌는 프레임에 새 행이
+    // 직전 액터의 renameBuffer_ 를 한 프레임 그대로 보여 줍니다.
+    if (selChanged && renaming_) { renaming_ = false; renameSelAll_ = false; }
+    // 접힌 부모 아래 자식을 뷰포트에서 픽하면 조상을 펼치고 그 행으로 스크롤합니다.
+    if (selChanged && ctx_.selected) { revealActor(ctx_.selected); outlinerRevealSel_ = true; }
+
     bool renamChanged  = (renaming_ != prevRenaming_);
 
-    if (actorCount != prevActorCount_ || selChanged || renamChanged) {
+    // 스플리터·도킹으로 패널 크기가 바뀌면 표시 가능한 행 수와 말줄임 폭이 달라집니다.
+    // 4px 로 양자화해 드래그 중 매 프레임 리빌드가 되지 않게 합니다.
+    if (outlinerList_) {
+        const HGeometry& lg = outlinerList_->cachedGeometry();
+        const glm::ivec2 sig{ (int)(lg.size.x / 4.f), (int)(lg.size.y / 4.f) };
+        if (sig != outlinerLayoutSig_) outlinerDirty_ = true;
+    }
+
+    if (actorCount != prevActorCount_ || selChanged || renamChanged || outlinerDirty_) {
         rebuildOutliner();
         prevActorCount_ = actorCount;
+        outlinerDirty_  = false;
     }
     prevRenaming_ = renaming_;
 
     if (selChanged) {
         syncEulerCache();
         rebuildDetails();
-        prevSelected_ = ctx_.selected;
-        if (renaming_) { renaming_ = false; }
+        prevSelected2_ = prevSelected_;
+        prevSelected_  = ctx_.selected;
     }
     // exchange로 플래그를 먼저 내려야 리빌드 중 도착한 로그가 다음 프레임에 잡힌다
     if (ctx_.logDirty.exchange(false, std::memory_order_acquire))
@@ -313,7 +364,16 @@ void EditorApp::buildWidgetTree() {
         ->content(HNew(VR)
             ->addSlot(HNew(BR)->background({0,0,0,0})->padding(HPadding{s(4.f), s(3.f)})
                 ->content(outlinerSearch), VR::ESizeRule::Fixed, s(34.f))
-            ->addSlot(outlinerList_, VR::ESizeRule::Fill));
+            ->addSlot(outlinerList_, VR::ESizeRule::Fill)
+            // 액터 개수 줄. outlinerList_ 바깥이라 rebuildOutliner 의 clearSlots 와 무관하게
+            // 남습니다. 문자열은 rebuildOutliner 가 캐시해 두고 여기서는 읽기만 합니다
+            // (Attr 은 computeDesiredSize/paint 에서 매 프레임 여러 번 평가됩니다).
+            ->addSlot(HNew(BR)->background(kBgHeader)->padding(HPadding{s(8.f), s(2.f)})
+                ->content(HNew(STextBlock)
+                    ->text(AttrStr([this]() -> std::string { return outlinerFooter_; }))
+                    ->fontSize(s(11.f))->color(kTextDim)
+                    ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
+                VR::ESizeRule::Fixed, s(kOutFooterH)));
 
     // ── Panel: Details ─────────────────────────────────────────────────────────
     detailsList_ = HNew(VR);
@@ -442,6 +502,8 @@ void EditorApp::rebuildDockArea() {
     // 뷰포트가 활성 탭일 때만 그 위젯이 배치되어 viewportFbRect 가 유효합니다. 비활성이면
     // inViewport 게이팅을 꺼서(아래) stale rect 위 클릭이 픽·오빗·기즈모로 새지 않게 합니다.
     viewportVisible_ = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Viewport");
+    // 아웃라이너도 같은 이유로 필요합니다(휠 라우팅이 이 패널의 geometry 를 봅니다).
+    outlinerVisible_ = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Outliner");
     if (dockHost_ && dockRoot_)
         dockHost_->content(buildDockWidget(dockRoot_.get()));
 }
@@ -789,6 +851,33 @@ void EditorApp::buildMenus() {
             if (ctx_.world)
                 ctx_.selected = ctx_.world->spawnActor("Actor_" + std::to_string(actorCounter_++));
         } },
+        // 계층을 만들 수단이 지금은 씬 역직렬화뿐이라, 아웃라이너 트리를 실기로 확인할
+        // 방법이 없습니다. 재부모화 드래그&드롭은 아직 계획에 없으므로 메뉴로 노출합니다.
+        // 부모는 "직전에 선택했던 액터", 자식은 "지금 선택한 액터"입니다.
+        { "Attach To Prev Selected", [this]{
+            Actor* child  = ctx_.selected;
+            Actor* parent = prevSelected2_;
+            if (!child || !parent || child == parent) return;
+            if (child == editorCamActor_ || parent == editorCamActor_) return;
+            // attachTo 는 사이클을 std::cerr 로만 알리고 조용히 무시합니다(반환값 없음).
+            // 호출 전에 조상 체인을 직접 확인해야 UI 가 성공한 줄 착각하지 않습니다.
+            for (Actor* p = parent; p; p = p->getParent())
+                if (p == child) return;
+            child->attachTo(parent);
+            // 선택 액터는 그대로라 tick 의 selChanged 자동 노출이 걸리지 않습니다. 새 부모와
+            // 그 조상을 모두 펼치고 결과 행으로 스크롤해, 조작 결과가 반드시 보이게 합니다.
+            outlinerCollapsed_.erase(parent->id);
+            revealActor(child);
+            outlinerRevealSel_ = true;
+            outlinerDirty_     = true;
+        } },
+        { "Detach Selected", [this]{
+            if (!ctx_.selected || ctx_.selected == editorCamActor_) return;
+            ctx_.selected->detach();
+            // 루트로 올라가면 id 순 정렬에서 자리가 크게 바뀌므로 그 행으로 스크롤합니다.
+            outlinerRevealSel_ = true;
+            outlinerDirty_     = true;
+        } },
     }, 0.f });
     menus_.push_back({ "View", {
         { "Reset Layout", [this]{ buildDefaultDockLayout(); rebuildDockArea(); saveDockLayout(); } },
@@ -1106,6 +1195,14 @@ void EditorApp::deserializeWorld(const std::string& data) {
             spawned[i]->attachTo(spawned[p]);
     }
 
+    // 씬 로드는 기존 액터를 전부 파괴하고 새 id 로 다시 스폰하므로, 아웃라이너의
+    // 세션 상태(접힘·스크롤)를 그대로 두면 엉뚱한 액터가 접힌 채로 나타납니다.
+    outlinerCollapsed_.clear();
+    outlinerRows_.clear();
+    outlinerScrollTop_ = 0;
+    prevSelected2_     = nullptr;
+    outlinerDirty_     = true;
+
     // Sync actorCounter_ so "Add Empty" names don't collide with loaded actors
     actorCounter_ = 0;
     for (auto& ap : ctx_.world->getActors()) {
@@ -1133,7 +1230,278 @@ void EditorApp::loadScene() {
     std::cout << "[Editor] Scene loaded from scene.hscene\n";
 }
 
+// ── 아웃라이너 계층 헬퍼 (Phase 3) ─────────────────────────────────────────────
+// Type 라벨은 컴포넌트에서 유도하되, 추가 순서에 흔들리지 않도록 고정 우선순위로
+// 하나를 고릅니다. 색은 각 컴포넌트가 이미 선언한 editorIcon 색을 재사용해서,
+// 아이콘 아틀라스 없이도 타입이 눈에 구분되게 합니다(타입 아이콘은 설계상 보류).
+std::string EditorApp::outlinerTypeLabel(const Actor* a, glm::vec4& outColor) const {
+    outColor = kTextDim;
+    if (!a) return "Actor";
+
+    int         bestRank     = 99;
+    int         contributors = 0;
+    std::string label;
+    glm::vec4   color = kTextDim;
+
+    for (const auto& comp : a->getComponents()) {
+        const std::string tn = comp->typeName();
+        int         rank = 6;
+        std::string lbl;
+        if (tn == "StaticMeshComponent")     { rank = 1; lbl = "Mesh"; }
+        else if (tn == "LightComponent")     {
+            rank = 2;
+            const auto* lc = static_cast<const LightComponent*>(comp.get());
+            lbl = (lc->lightType == LightType::Point) ? "PointLight"
+                : (lc->lightType == LightType::Spot)  ? "SpotLight"
+                                                      : "DirLight";
+        }
+        else if (tn == "CameraComponent")    { rank = 3; lbl = "Camera"; }
+        else if (tn == "AudioComponent")     { rank = 4; lbl = "Audio";  }
+        else if (tn == "RigidBodyComponent") { rank = 5; lbl = "Body";   }
+        else {
+            lbl = tn;
+            const std::string suffix = "Component";
+            if (lbl.size() > suffix.size() &&
+                lbl.compare(lbl.size() - suffix.size(), suffix.size(), suffix) == 0)
+                lbl.erase(lbl.size() - suffix.size());
+        }
+        ++contributors;
+        if (rank < bestRank) {
+            bestRank = rank;
+            label    = lbl;
+            glm::vec4 ic;
+            color    = comp->editorIcon(ic) ? ic : kTextDim;
+        }
+    }
+    if (label.empty()) return "Actor";
+    outColor = color;
+    return contributors > 1 ? label + "+" : label;   // 다른 컴포넌트도 있다는 표시
+}
+
+// 폭을 넘는 텍스트를 ".." 로 줄입니다. 폰트 실측을 쓰므로 const 가 아닙니다
+// (HSlateRenderer::fontAtlas 가 비const 참조를 돌려줍니다).
+std::string EditorApp::ellipsizeText(const std::string& text, float maxPx, float fontPx) {
+    if (text.empty() || maxPx <= 1.f) return text;
+    HFontAtlas& fonts = slateRenderer_.fontAtlas();
+    if (fonts.measureText(text, fontPx) <= maxPx) return text;
+    for (size_t n = text.size(); n > 1; --n) {
+        std::string cand = text.substr(0, n - 1) + "..";
+        if (fonts.measureText(cand, fontPx) <= maxPx) return cand;
+    }
+    return text.substr(0, 1);
+}
+
+// 루트부터 전위 순회하며 화면에 그릴 행을 평탄화합니다. 필터가 걸리면 매치도 아니고
+// 매치 자손도 없는 서브트리는 out 을 되감아 통째로 버립니다(단일 패스, 순서 보존).
+void EditorApp::flattenOutliner(const std::string& filt,
+                                std::vector<OutlinerRow>& out) const {
+    out.clear();
+    if (!ctx_.world) return;
+    const bool filtering = !filt.empty();
+
+    auto matches = [&](const Actor* a) {
+        std::string n = a->name;
+        std::transform(n.begin(), n.end(), n.begin(), ::tolower);
+        return n.find(filt) != std::string::npos;
+    };
+
+    std::function<bool(Actor*, int)> visit = [&](Actor* a, int depth) -> bool {
+        if (depth > 64) return false;              // 병리적 깊이·사이클 안전 브레이크
+        const size_t mine = out.size();
+        out.push_back({ a->id, a, depth, false, true, false, !a->activeInHierarchy() });
+
+        std::vector<Actor*> kids = a->getChildren();
+        std::sort(kids.begin(), kids.end(),
+                  [](const Actor* x, const Actor* y) { return x->id < y->id; });
+
+        // 필터 중에는 접힘을 무시합니다. 그러지 않으면 매치된 자손이 접힌 조상 아래
+        // 숨어 검색이 사실상 회귀합니다.
+        const bool open = filtering ||
+                          outlinerCollapsed_.find(a->id) == outlinerCollapsed_.end();
+        bool keptChild = false;
+        if (open)
+            for (Actor* k : kids) keptChild = visit(k, depth + 1) || keptChild;
+
+        const bool selfMatch = !filtering || matches(a);
+        if (!selfMatch && !keptChild) { out.resize(mine); return false; }
+
+        out[mine].hasKids  = filtering ? keptChild : !kids.empty();
+        out[mine].expanded = open;
+        out[mine].dimPath  = filtering && !selfMatch;   // 경로로만 남은 조상
+        return true;
+    };
+
+    // 루트 판정에서 에디터 카메라는 완전히 제외합니다(아래 rebuildOutliner 주석 참고).
+    std::vector<Actor*> roots;
+    for (const auto& ap : ctx_.world->getActors()) {
+        Actor* a = ap.get();
+        if (a == editorCamActor_) continue;
+        Actor* p = a->getParent();
+        if (!p || p == editorCamActor_) roots.push_back(a);
+    }
+    // getActors 는 스폰 순서고 getChildren 은 attachTo 순서라 둘 다 표시 순서의
+    // 진리원이 못 됩니다(씬 로드는 부모가 자식보다 뒤에 올 수 있음). id 로 정렬합니다.
+    std::sort(roots.begin(), roots.end(),
+              [](const Actor* x, const Actor* y) { return x->id < y->id; });
+    for (Actor* r : roots) visit(r, 0);
+}
+
+void EditorApp::revealActor(Actor* a) {
+    if (!a) return;
+    for (Actor* p = a->getParent(); p; p = p->getParent())
+        outlinerCollapsed_.erase(p->id);
+}
+
+void EditorApp::flushOutlinerRebuild() {
+    if (!outlinerDirty_) return;
+    rebuildOutliner();
+    outlinerDirty_ = false;
+}
+
+// 행 하나를 조립합니다. 슬롯은 SHorizontalBox 가 penX 를 단조 누적하므로 서로 겹치지
+// 않고, 그래서 화살표·눈·삭제는 이름 버튼의 자식이 아니라 반드시 형제여야 합니다
+// (SButton 은 좌클릭을 자식에게 넘기지 않고 항상 Handled 로 끊습니다).
+void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
+    Actor* const   a         = r.actor;
+    const uint64_t id        = r.id;
+    const bool     sel       = (a == ctx_.selected);
+    const bool     ren       = sel && renaming_;
+    const bool     renAll    = ren && renameSelAll_;
+    const bool     filtering = !outlinerSearch_.empty();
+
+    // 폭 사다리. 고정폭 합이 패널 폭을 넘으면 이름 Fill 슬롯이 0 이 되어 그리기는
+    // 넘쳐 보여도 히트테스트가 죽습니다(행 선택 자체가 불가능해짐). 들여쓰기 클램프 →
+    // Type 컬럼 강등 → 들여쓰기 제거 순으로 폭을 반납합니다.
+    float indent = std::min((float)r.depth * s(kOutIndent), std::max(0.f, listW * 0.35f));
+    float typeW  = s(kOutTypeW);
+    float fixed  = s(4.f) + indent + s(kOutArrowW) + typeW + s(kOutEyeW) + s(kOutDelW);
+    if (listW - fixed < s(kOutMinLabelW)) { fixed -= typeW;  typeW  = 0.f; }
+    if (listW - fixed < s(kOutMinLabelW)) { fixed -= indent; indent = 0.f; }
+    const float nameW = std::max(s(kOutMinLabelW), listW - fixed) - s(18.f);   // 버튼 padding 보정
+
+    // 같은 행을 다시 누르면 선택이 풀리는 것은 개편 전부터의 동작이라 그대로 둡니다.
+    auto selectRow = [this, id] {
+        renaming_ = false;
+        if (Actor* t = ctx_.world->findById(id))
+            ctx_.selected = (ctx_.selected == t) ? nullptr : t;
+    };
+
+    glm::vec4   typeCol;
+    std::string typeStr = outlinerTypeLabel(a, typeCol);
+    std::string shown   = ren ? (renAll ? renameBuffer_ : renameBuffer_ + "|")
+                              : ellipsizeText(a->name, nameW, s(14.f));
+
+    std::shared_ptr<HWidget> nameWidget =
+        HNew(STextBlock)->text(shown)->fontSize(s(14.f))
+            ->color(sel ? glm::vec4{1.f, 1.f, 1.f, 1.f}
+                        : (r.dimPath || r.dimOff) ? kTextDim : kTextBody)
+            ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center);
+    if (renAll)   // Ctrl+A 전체 선택 하이라이트
+        nameWidget = HNew(SBorder)->background({0.20f, 0.45f, 0.85f, 1.f})
+                         ->content(nameWidget);
+
+    // 폰트 아틀라스는 ASCII 전용이라 유니코드 삼각형·눈은 .notdef 로 찍힙니다.
+    // 글리프는 'v' '>' 'O' 'o' '-' 만 씁니다.
+    const char* arrowGlyph = (!r.hasKids || filtering) ? "" : (r.expanded ? "v" : ">");
+    // 작은 타깃은 SToggleButton 을 씁니다. 마우스-업에서 위치를 재검사하므로, 눌렀다가
+    // 다른 칸에서 떼면 발화하지 않습니다(SButton 은 재검사 없이 발화).
+    auto smallBtn = [&] {
+        return HNew(SToggleButton)->padding(HPadding{0.f, 0.f})
+                 ->isActive([] { return false; })          // 강제 파란 액센트 바 회피
+                 ->normalColor({0.f, 0.f, 0.f, 0.f})
+                 ->hoveredColor({0.25f, 0.25f, 0.30f, 1.f});
+    };
+
+    // 자식이 없거나 필터 중이면 화살표 자리는 '죽은 칸'이 아니라 행 선택으로 동작합니다.
+    auto arrowBtn = smallBtn()
+        ->content(HNew(STextBlock)->text(arrowGlyph)->fontSize(s(12.f))->color(kTextDim)
+                    ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center))
+        ->onClick((r.hasKids && !filtering)
+            ? std::function<void()>([this, id] {
+                  if (outlinerCollapsed_.count(id)) outlinerCollapsed_.erase(id);
+                  else                              outlinerCollapsed_.insert(id);
+                  outlinerDirty_ = true;   // 콜백 안에서 리빌드하면 자기 파괴가 됩니다
+              })
+            : std::function<void()>(selectRow));
+
+    // 눈 글리프는 Attr 로 매 프레임 재평가되므로 클릭 즉시 상태가 뒤집혀 보입니다.
+    // 'O' = 보임, '-' = 자신을 껐음, 'o' = 자신은 켜져 있으나 조상이 꺼짐.
+    auto eyeBtn = smallBtn()
+        ->content(HNew(STextBlock)
+            ->text(AttrStr([this, id]() -> std::string {
+                Actor* t = ctx_.world ? ctx_.world->findById(id) : nullptr;
+                if (!t) return "-";
+                if (!t->activeSelf())          return "-";
+                return t->activeInHierarchy() ? "O" : "o";
+            }))
+            ->fontSize(s(12.f))->color(r.dimOff ? kTextDim : kTextBody)
+            ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center))
+        ->onClick([this, id] {
+            Actor* t = ctx_.world ? ctx_.world->findById(id) : nullptr;
+            // 에디터 카메라를 끄면 getActiveCamera 가 비어 뷰포트·기즈모·픽이 전부
+            // 죽습니다. 아웃라이너에 노출하지 않지만 여기서도 이중으로 막습니다.
+            if (!t || t == editorCamActor_) return;
+            t->setActive(!t->activeSelf());
+            outlinerDirty_ = true;
+        });
+
+    auto row = HNew(SHorizontalBox)
+        ->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f) + indent)
+        ->addSlot(arrowBtn, SHorizontalBox::ESizeRule::Fixed, s(kOutArrowW))
+        ->addSlot(
+            HNew(SButton)
+                ->normalColor ({0.f, 0.f, 0.f, 0.f})
+                ->hoveredColor(sel ? kSelected : glm::vec4{0.25f, 0.25f, 0.30f, 1.f})
+                ->pressedColor({0.15f, 0.30f, 0.55f, 1.f})
+                ->padding({s(8.f), s(6.f)})
+                // SButton 기본 정렬은 Center 입니다. 그대로 두면 들여쓰기가 절반만 반영되고
+                // 이름 길이에 따라 시작 x 가 흔들립니다. Fill 로 두어야 자식이 슬롯 폭을
+                // 그대로 받아 STextBlock 의 Left 정렬이 실제 왼쪽 정렬이 됩니다.
+                ->hAlign(EHAlign::Fill)
+                ->onClick(selectRow)
+                ->content(nameWidget),
+            SHorizontalBox::ESizeRule::Fill);
+
+    if (typeW > 0.f)
+        row->addSlot(
+            smallBtn()
+                ->content(HNew(STextBlock)
+                    ->text(ellipsizeText(typeStr, typeW - s(6.f), s(11.f)))
+                    ->fontSize(s(11.f))->color(r.dimOff ? kTextDim : typeCol)
+                    ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center))
+                ->onClick(selectRow),
+            SHorizontalBox::ESizeRule::Fixed, typeW);
+
+    row->addSlot(eyeBtn, SHorizontalBox::ESizeRule::Fixed, s(kOutEyeW))
+       ->addSlot(
+           textButton("x", 12.f, {0.9f, 0.4f, 0.4f, 1.f}, {5.f, 3.f},
+                      {0.f, 0.f, 0.f, 0.f}, {0.40f, 0.12f, 0.12f, 1.f},
+                      [this, id] {
+                          Actor* t = ctx_.world ? ctx_.world->findById(id) : nullptr;
+                          if (!t || t == editorCamActor_) return;
+                          if (ctx_.selected == t) {
+                              ctx_.selected = nullptr;
+                              renaming_     = false;
+                          }
+                          // 이 액터를 참조하는 커맨드는 onActorDestroyed 구독이
+                          // 정밀 제거합니다(무관한 이력은 보존).
+                          ctx_.world->destroyActor(t);
+                          outlinerDirty_ = true;
+                      }),
+           SHorizontalBox::ESizeRule::Fixed, s(kOutDelW));
+
+    // 선택 하이라이트는 행 전체에 깔되, SBorder 는 자식에게 이벤트를 그대로 넘기므로
+    // 히트테스트에 개입하지 않습니다.
+    outlinerList_->addSlot(
+        HNew(SBorder)->background(sel ? kSelected : glm::vec4{0.f, 0.f, 0.f, 0.f})
+            ->content(row),
+        SVerticalBox::ESizeRule::Fixed, s(kOutRowH));
+}
+
 // ── rebuildOutliner ────────────────────────────────────────────────────────────
+// HSlate 에는 스크롤 컨테이너도 클리핑도 없습니다. 그래서 목록이 패널보다 길어지면
+// 이웃 패널 위로 그대로 새어 나갑니다. 여기서는 "보이는 창"에 드는 행만 슬롯으로
+// 만들어(가상 스크롤) 그 문제를 원천에서 없앱니다. 창 밖 행은 존재하지 않습니다.
 void EditorApp::rebuildOutliner() {
     if (!outlinerList_ || !ctx_.world) return;
     outlinerList_->clearSlots();
@@ -1148,65 +1516,64 @@ void EditorApp::rebuildOutliner() {
                                std::string nm = "Actor_" + std::to_string(actorCounter_++);
                                ctx_.selected = ctx_.world->spawnActor(nm);
                            })),
-        SVerticalBox::ESizeRule::Fixed, s(34.f));
+        SVerticalBox::ESizeRule::Fixed, s(kOutHeaderH));
 
     // Case-insensitive search filter
     std::string filter = outlinerSearch_;
     std::transform(filter.begin(), filter.end(), filter.begin(), ::tolower);
+    flattenOutliner(filter, outlinerRows_);
 
-    for (auto& actorPtr : ctx_.world->getActors()) {
-        Actor* actor = actorPtr.get();
+    // 지난 프레임 실측 지오메트리. 첫 프레임(또는 위젯 트리 재구성 직후)에는 0 이라
+    // 시드값으로 폴백하고, 레이아웃 시그니처 비교가 다음 프레임에 자가 교정합니다.
+    // 실측이 아예 없을 때(위젯 트리를 막 만든 프레임)만 시드로 폴백합니다. 실측이 작다고
+    // 큰 시드를 쓰면 짧은 패널에 행을 과하게 만들어 그대로 패널 밖으로 넘칩니다.
+    const HGeometry& lg = outlinerList_->cachedGeometry();
+    const float listW = (lg.size.x >= 1.f) ? lg.size.x : s(outlinerW_);
+    const float listH = (lg.size.y >= 1.f) ? lg.size.y : s(320.f);
+    outlinerLayoutSig_ = { (int)(lg.size.x / 4.f), (int)(lg.size.y / 4.f) };
 
-        if (!filter.empty()) {
-            std::string nameLow = actor->name;
-            std::transform(nameLow.begin(), nameLow.end(), nameLow.begin(), ::tolower);
-            if (nameLow.find(filter) == std::string::npos) continue;
+    outlinerRowCap_ = std::max(0, (int)((listH - s(kOutHeaderH)) / s(kOutRowH)));
+    const int total = (int)outlinerRows_.size();
+
+    // 검색어가 바뀌면 결과 집합 자체가 달라지므로 스크롤을 맨 위로 되돌립니다. 유지하면
+    // 매치된 앞부분이 창 밖에 남아 "검색했는데 아무것도 안 나온" 것처럼 보입니다.
+    if (filter != outlinerFilterPrev_) { outlinerScrollTop_ = 0; outlinerFilterPrev_ = filter; }
+
+    int top = std::clamp(outlinerScrollTop_, 0, std::max(0, total - outlinerRowCap_));
+
+    if (outlinerRevealSel_ && ctx_.selected) {     // 선택 행을 창 안으로 끌어옵니다
+        for (int i = 0; i < total; ++i) {
+            if (outlinerRows_[i].actor != ctx_.selected) continue;
+            if (i < top)                          top = i;
+            else if (i >= top + outlinerRowCap_)  top = i - outlinerRowCap_ + 1;
+            break;
         }
-        bool   sel   = (actor == ctx_.selected);
-        bool   ren   = sel && renaming_;
-
-        bool renSelAll = ren && renameSelAll_;
-        std::string displayName = ren ? (renSelAll ? renameBuffer_ : renameBuffer_ + "|")
-                                      : actor->name;
-
-        std::shared_ptr<HWidget> nameWidget =
-            HNew(STextBlock)->text(displayName)->fontSize(s(14.f))
-                ->color(sel ? glm::vec4{1.f,1.f,1.f,1.f} : kTextBody)
-                ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center);
-        if (renSelAll)   // Ctrl+A 전체 선택 하이라이트
-            nameWidget = HNew(SBorder)->background({0.20f, 0.45f, 0.85f, 1.f})
-                             ->content(nameWidget);
-
-        outlinerList_->addSlot(
-            HNew(SHorizontalBox)
-                ->addSlot(
-                    HNew(SButton)
-                        ->normalColor ({sel ? kSelected : glm::vec4{0.f,0.f,0.f,0.f}})
-                        ->hoveredColor({sel ? kSelected : glm::vec4{0.25f,0.25f,0.30f,1.f}})
-                        ->pressedColor({0.15f, 0.30f, 0.55f, 1.f})
-                        ->padding({s(14.f), s(6.f)})
-                        ->onClick([this, actor]{
-                            renaming_ = false;
-                            ctx_.selected = (ctx_.selected == actor) ? nullptr : actor;
-                        })
-                        ->content(nameWidget),
-                    SHorizontalBox::ESizeRule::Fill)
-                ->addSlot(
-                    textButton("x", 12.f, {0.9f, 0.4f, 0.4f, 1.f}, {5.f, 3.f},
-                               {0.f, 0.f, 0.f, 0.f}, {0.40f, 0.12f, 0.12f, 1.f},
-                               [this, actor]{
-                                   if (actor == editorCamActor_) return;
-                                   if (ctx_.selected == actor) {
-                                       ctx_.selected = nullptr;
-                                       renaming_     = false;
-                                   }
-                                   // 이 액터를 참조하는 커맨드는 onActorDestroyed
-                                   // 구독이 정밀 제거합니다(무관한 이력은 보존).
-                                   ctx_.world->destroyActor(actor);
-                               }),
-                    SHorizontalBox::ESizeRule::Fixed, s(26.f)),
-            SVerticalBox::ESizeRule::Fixed, s(30.f));
     }
+    outlinerRevealSel_ = false;
+    outlinerScrollTop_ = top;
+
+    const int end = std::min(top + outlinerRowCap_, total);
+    for (int i = top; i < end; ++i) addOutlinerRow(outlinerRows_[i], listW);
+
+    // 개수는 직렬화 집합과 같은 기준(에디터 카메라 제외)으로 셉니다.
+    int actorTotal = 0;
+    for (const auto& ap : ctx_.world->getActors())
+        if (ap.get() != editorCamActor_) ++actorTotal;
+
+    // 스크롤바가 없으므로, 창이 넘칠 때는 어디를 보고 있는지 푸터가 유일한 단서입니다.
+    // 검색 중에도 같은 이유로 범위를 붙입니다.
+    char buf[96];
+    const bool windowed = total > outlinerRowCap_;
+    if (!filter.empty() && windowed)
+        std::snprintf(buf, sizeof buf, "%d of %d actors  (%d-%d)",
+                      total, actorTotal, top + 1, end);
+    else if (!filter.empty())
+        std::snprintf(buf, sizeof buf, "%d of %d actors", total, actorTotal);
+    else if (windowed)
+        std::snprintf(buf, sizeof buf, "%d actors  (%d-%d)", actorTotal, top + 1, end);
+    else
+        std::snprintf(buf, sizeof buf, "%d actor%s", actorTotal, actorTotal == 1 ? "" : "s");
+    outlinerFooter_ = buf;
 }
 
 // ── rebuildDetails ─────────────────────────────────────────────────────────────
@@ -1747,6 +2114,15 @@ void EditorApp::tickShortcuts() {
 void EditorApp::handleInput(float mouseX, float mouseY,
                              bool leftDown, bool leftJustUp,
                              float scrollDelta, float winW, float winH) {
+    // 위젯 콜백(펼침·눈·삭제)은 리빌드를 직접 하지 않고 플래그만 세웁니다. 슬롯 순회
+    // 도중 clearSlots 가 돌면 지금 실행 중인 버튼과 그 std::function 자체가 파괴되기
+    // 때문입니다. 이 함수에는 조기 return 이 여러 개라 소진은 스코프 가드로 합니다.
+    // 소멸자는 이벤트 디스패치가 전부 끝난 뒤, 이 프레임의 drawFrame 전에 돕니다.
+    struct OutlinerFlushGuard {
+        EditorApp* self;
+        ~OutlinerFlushGuard() { self->flushOutlinerRebuild(); }
+    } outlinerFlushGuard{ this };
+
     // ── 메뉴 hover 전환 ──────────────────────────────────────────────────────────
     // 메뉴가 열려 있을 때 다른 메뉴 버튼 위로 마우스를 옮기면 그 메뉴로 전환합니다(표준 메뉴 바
     // 동작). 버튼 위젯은 프레임 간 유지되므로 직전 프레임의 실측 geometry 로 히트테스트합니다.
@@ -1901,7 +2277,8 @@ void EditorApp::handleInput(float mouseX, float mouseY,
 
     // ── Gizmo drag ─────────────────────────────────────────────────────────────
     bool gizmoConsumed = false;
-    if (ctx_.selected && ctx_.selected != editorCamActor_ && ctx_.world && ctx_.window) {
+    if (ctx_.selected && ctx_.selected != editorCamActor_ && ctx_.world && ctx_.window &&
+        ctx_.selected->activeInHierarchy()) {   // 안 보이는 것은 드래그도 되지 않습니다
         // 좌표는 worldVP 하나로만 만듭니다. inView 게이팅도 fb 공간으로 통일합니다.
         const bool inView = inViewport(mouseX, mouseY, winW, winH);
         gizmoConsumed = gizmo_.handleDrag(ctx_.selected, *ctx_.world, cmdStack_,
@@ -1946,6 +2323,9 @@ void EditorApp::buildEditorIcons(World& world, const WorldViewport& /*wvp*/,
     for (auto& ap : world.getActors()) {
         Actor* a = ap.get();
         if (a == editorCamActor_) continue;
+        // 아웃라이너의 눈으로 끈 액터는 아이콘도 사라져야 합니다. 메시 렌더는 이미
+        // getVisibleMeshes 에서 게이트되므로, 에디터 오버레이만 맞춰 줍니다.
+        if (!a->activeInHierarchy()) continue;
         glm::vec4 color{0.f}; bool has = false;
         for (const auto& comp : a->getComponents())
             if (comp->editorIcon(color)) { has = true; break; }
@@ -2196,7 +2576,7 @@ void EditorApp::tickRenameInput() {
 }
 
 // ── tickEditorCamera ───────────────────────────────────────────────────────────
-void EditorApp::tickEditorCamera(float dt) {
+void EditorApp::tickEditorCamera(float dt, float scroll) {
     if (!editorCam_ || !editorCamActor_ || !ctx_.window) return;
     IWindow& win = *ctx_.window;
 
@@ -2237,8 +2617,8 @@ void EditorApp::tickEditorCamera(float dt) {
         }
     }
 
-    // Scroll dolly
-    float scroll = win.getScrollDelta();
+    // Scroll dolly — 휠은 tick 이 이미 읽어 라우팅했습니다(consume-on-read 라
+    // 여기서 다시 읽으면 한쪽이 항상 0 을 받습니다).
     if (scroll != 0.f)
         editorCamActor_->translateLocal(fwd * (scroll * 0.3f));
 }
@@ -2272,6 +2652,7 @@ void EditorApp::pickActor(float mx, float my, float winW, float winH) {
         for (auto& ap : ctx_.world->getActors()) {
             Actor* a = ap.get();
             if (a == editorCamActor_) continue;
+            if (!a->activeInHierarchy()) continue;   // 안 보이는 것은 잡히지도 않습니다
             glm::vec4 c; bool has = false;
             for (const auto& comp : a->getComponents())
                 if (comp->editorIcon(c)) { has = true; break; }
@@ -2290,6 +2671,7 @@ void EditorApp::pickActor(float mx, float my, float winW, float winH) {
 
     for (auto& ap : ctx_.world->getActors()) {
         Actor* a = ap.get();
+        if (!a->activeInHierarchy()) continue;   // 눈으로 끈 액터는 픽에서도 제외
 
         glm::vec3 lo, hi;
         bool hasBounds = false;

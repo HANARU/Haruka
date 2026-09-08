@@ -3,6 +3,8 @@
 
 # ── Logs (build logs, run output) ──
 /Logs/
+# 실행 로그. main.cpp 가 루트에 만듭니다(경로를 Logs/ 로 옮기는 것은 별건).
+/HarukaEngine.log
 
 # ── Visual Studio / MSVC local ──
 .vs/

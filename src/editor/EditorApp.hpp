@@ -15,6 +15,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <unordered_set>
 
 class Renderer;
 class World;
@@ -69,7 +70,9 @@ private:
     CameraComponent* editorCam_      = nullptr;
     bool             lmbOrbit_       = false;
 
-    void tickEditorCamera(float dt);
+    // 휠은 tick 이 한 번만 읽어(getScrollDelta 는 consume-on-read) 아웃라이너와 카메라
+    // 중 한쪽으로 라우팅합니다. 여기서는 인자로 받은 값만 씁니다.
+    void tickEditorCamera(float dt, float scroll);
 
     // Log capture
     LogStreamBuf*   coutBuf_  = nullptr;
@@ -178,6 +181,51 @@ private:
     std::string outlinerSearch_;
     bool        outlinerSearchFocused_ = false;
 
+    // ── 아웃라이너 계층 트리 (Phase 3) ────────────────────────────────────────
+    // 행 치수(미스케일 기준값). s() 로 스케일해 씁니다.
+    static constexpr float kOutRowH        = 30.f;
+    static constexpr float kOutIndent      = 12.f;
+    static constexpr float kOutArrowW      = 16.f;
+    static constexpr float kOutTypeW       = 74.f;
+    static constexpr float kOutEyeW        = 20.f;
+    static constexpr float kOutDelW        = 26.f;
+    static constexpr float kOutMinLabelW   = 56.f;
+    static constexpr float kOutHeaderH     = 34.f;   // "+ Add Empty" 줄
+    static constexpr float kOutFooterH     = 20.f;   // 액터 개수 줄
+
+    // 평탄화된 한 행. 위젯 조립 직전에만 쓰는 스냅샷이라, actor 포인터는 콜백이
+    // 캡처하지 않습니다(캡처 키는 언제나 id).
+    struct OutlinerRow {
+        uint64_t id       = 0;
+        Actor*   actor    = nullptr;
+        int      depth    = 0;
+        bool     hasKids  = false;   // 필터 적용 후 실제로 표시될 자식이 있는가
+        bool     expanded = false;   // 필터 중에는 항상 참
+        bool     dimPath  = false;   // 매치가 아니라 '경로'로만 남은 조상
+        bool     dimOff   = false;   // activeInHierarchy() 가 거짓
+    };
+
+    // 접힌 액터의 id 집합입니다. "펼침"이 아니라 "접힘"을 저장하므로, 상태가 비어도
+    // 아무것도 숨지 않습니다(신규 스폰·재부모화가 즉시 보임). Actor::id 는 단조 증가라
+    // 재사용되지 않아 해제된 포인터를 키로 쓰는 위험이 없습니다.
+    std::unordered_set<uint64_t> outlinerCollapsed_;
+    std::vector<OutlinerRow>     outlinerRows_;
+    // 위젯 콜백 안에서 rebuildOutliner() 를 직접 부르면 슬롯 순회 중 자기 파괴가 되므로,
+    // 콜백은 이 플래그만 세우고 tick/handleInput 종료 시점에 한 번 리빌드합니다.
+    bool        outlinerDirty_     = false;
+    bool        outlinerRevealSel_ = false;   // 이번 리빌드에서 선택 행을 창 안으로
+    int         outlinerScrollTop_ = 0;       // 창 시작 행 인덱스
+    int         outlinerRowCap_    = 0;       // 마지막 리빌드에서 표시 가능했던 행 수
+    glm::ivec2  outlinerLayoutSig_ {0, 0};    // 리스트 실측 크기(4px 양자화) — 리사이즈 감지
+    std::string outlinerFooter_;              // 개수 문자열 캐시(Attr 은 매 프레임 평가됨)
+    std::string outlinerFilterPrev_;          // 직전 리빌드의 필터(바뀌면 스크롤을 맨 위로)
+    // 아웃라이너가 자신의 리프에서 활성 탭인지. 뷰포트의 viewportVisible_ 과 같은 이유로
+    // 필요합니다. 비활성이면 위젯이 배치되지 않아 cachedGeometry 가 stale 하고, 그 낡은
+    // rect 로 휠을 가로채면 그 자리를 차지한 다른 패널 위에서 카메라 돌리가 죽습니다.
+    bool        outlinerVisible_ = true;
+    // 직전 선택(= 지금 선택의 하나 앞). Actor 메뉴의 부착 액션이 부모로 씁니다.
+    Actor*      prevSelected2_ = nullptr;
+
     // Viewport overlay stats
     struct VpTimings {
         int fps=0, drawCalls=0, culled=0, transparentDraws=0;
@@ -280,6 +328,18 @@ private:
     std::shared_ptr<HWidget> buildDockWidget(DockNode* node);   // 노드 재귀 조합
     void rebuildToolbar();
     void rebuildOutliner();
+    // ── 아웃라이너 계층 헬퍼 (Phase 3) ───────────────────────────────────────
+    // 루트부터 전위 순회하며 표시할 행을 평탄화합니다. 필터가 있으면 매치되지 않고
+    // 매치 자손도 없는 서브트리를 통째로 버립니다.
+    void        flattenOutliner(const std::string& filterLower,
+                                std::vector<OutlinerRow>& out) const;
+    // 컴포넌트에서 Type 라벨과 색을 유도합니다(고정 우선순위, 추가 순서 비의존).
+    std::string outlinerTypeLabel(const Actor* a, glm::vec4& outColor) const;
+    // 폭을 넘는 텍스트를 ".." 로 줄입니다. 폰트 실측을 쓰므로 const 가 아닙니다.
+    std::string ellipsizeText(const std::string& text, float maxPx, float fontPx);
+    void        addOutlinerRow(const OutlinerRow& r, float listW);
+    void        revealActor(Actor* a);          // 조상 체인을 모두 펼침
+    void        flushOutlinerRebuild();         // 지연 리빌드 요청 소진
     void rebuildDetails();
     void rebuildLog();
     void rebuildContent();
