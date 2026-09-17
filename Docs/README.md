@@ -24,6 +24,7 @@
 |---|---|
 | [Lighting_UE_Design.md](Lighting_UE_Design.md) | 라이팅 UE 용어·설계(색온도·Cast Shadows 포함) |
 | [Editor_Layout_Design.md](Editor_Layout_Design.md) | 에디터 레이아웃 구조(UE5 기반): 5분할 + 메뉴바/상태바/뷰포트툴바/아웃라이너 계층 |
+| [Log_Category_Design.md](Log_Category_Design.md) | 로그 카테고리: 기록 수준과 표시 필터 분리, Output Log 필터 |
 | [Transform_Design.md](Transform_Design.md) | 트랜스폼·기즈모, 월드 행렬 캐시 제거 |
 | [Spatial_Representation_Design.md](Spatial_Representation_Design.md) | 엔티티 무관 공간 표현, Transform 캡슐화 |
 | [Transparency_Temporal_Design.md](Transparency_Temporal_Design.md) | 반투명(볼록 2패스)·TAA 처리 |

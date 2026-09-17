@@ -447,3 +447,7 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
 `STextBlock` 폭 근사의 실측화(뷰포트 툴바 폭 사다리 임계값이 그 근사 위에 튜닝되어 있어 동반 재조정 필요),
 `setViewportRect` 의 오프셋-전용 재생성 제거, Window 메뉴. **Window 메뉴보다 탭 닫기 버튼을 먼저 추가하지
 마십시오** — 되살릴 수단이 없는 패널이 생깁니다.
+
+미룬 항목 전체(14건)는 2026-09-17 에 결함 정본으로 옮겼습니다:
+[Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 의 DEF-56 ~ DEF-69. 종합 오류 검출 작업에서
+일괄 처리합니다.

@@ -1095,3 +1095,64 @@ Vulkan·창·World 를 링크하지 않는 헤더 전용 테스트입니다.
 캡처하는 구조가 그대로이므로, 컴포넌트를 해제하거나 **이동시키는** 경로가 새로 생기면 같은 유형이
 다시 나옵니다. 근본 해결은 접근자를 주소 캡처에서 `{타입, 필드}` 기술자로 바꾸는 것이고,
 그 판단은 [ECS_Decision.md](ECS_Decision.md) 에 트리거와 함께 적어 두었습니다.
+
+---
+
+## UI · 뷰포트 잔여 결함 (DEF-56 ~ DEF-69, 2026-09-17 등재)
+
+**처리 시점: 종합 오류 검출 작업에서 일괄 처리합니다(사용자 결정 2026-09-17).** 개별로 먼저
+착수하지 않습니다.
+
+출처는 상태바 착수 전에 수행한 HSlate 위젯 결함 조사(33건)입니다. 그중 21건은 2026-09-09 커밋
+네 개로 고쳤고([Editor_Layout_Design.md](Editor_Layout_Design.md) §7.11), 아래는 미룬 12건에
+**계획에는 있었으나 실제 수정에서 빠진 1건(DEF-62)** 과 조사 목록의 마지막 항목(DEF-69)을 더한
+것입니다. 2026-09-17 에 현재 코드와 다시 대조해 전부 남아 있음을 확인했습니다. 줄 번호는 커밋마다
+어긋나므로 파일과 함수 이름으로 적습니다.
+
+| ID | 심각도 | 내용 | 위치 |
+|---|---|---|---|
+| DEF-56 | MEDIUM | 클리핑 API 가 호출자 0인 죽은 코드입니다. 긴 목록과 문자열이 이웃 패널을 침범합니다 | `HPaintContext` 의 `pushClip`/`popClip`/`currentClip`, `HDrawElement` 에 클립 필드 없음 |
+| DEF-57 | MEDIUM | 휠이 위젯에 도달하지 않습니다(어떤 컨테이너도 `onScroll` 을 전달하지 않음). 포인터 캡처 중의 휠은 `onMouseMove` 로 잘못 라우팅됩니다 | `HSlateRenderer` 입력 분기, 컨테이너 위젯 전부 |
+| DEF-58 | MEDIUM | 키 리피트가 없어 백스페이스를 누르고 있어도 한 글자만 지워집니다(모든 텍스트 필드) | `GlfwWindow::keyCallback` 이 `GLFW_REPEAT` 를 즉시 버림, 키는 폴링 |
+| DEF-59 | MEDIUM | `setViewportRect` 가 오프셋만 바뀌어도 씬 렌더 타깃을 전량 재생성합니다. 스플리터 드래그 중 매 프레임 `vkDeviceWaitIdle` 과 TAA 히스토리 소실이 일어납니다 | `Renderer_swap.cpp` 의 비교식이 오프셋을 포함. 오프셋 소비처는 `PostPass` 하나 |
+| DEF-60 | MEDIUM | `STextBlock` 의 폭 계산(`0.6 × fontSize` 근사)이 실제 글리프 advance 와 다릅니다 | `STextBlock::computeDesiredSize` vs `HFontAtlas::measureText` |
+| DEF-61 | MEDIUM | Output Log 의 표시 줄 수가 도킹 이후 갱신되지 않는 시드 상수 `bottomH_` 로 계산됩니다 | `EditorApp::rebuildBottomPanel` 의 `kMaxDisplay` |
+| DEF-62 | LOW | Fill 슬롯의 패딩을 1패스는 합산하지 않고 2패스는 더해, 마지막 슬롯이 컨테이너 밖으로 밀려납니다. Fill 슬롯에 패딩을 준 곳에서만 드러납니다 | `SVerticalBox`·`SHorizontalBox` 의 `onArrangeChildren` |
+| DEF-63 | LOW | `SCollapseSection`·`STabBar` 가 프레스 추적 없이 마우스-업으로 발화합니다. `SCollapseSection` 헤더의 마우스-다운은 body 로 새어 들어갑니다 | 두 위젯의 `onMouseButton` |
+| DEF-64 | LOW | 메뉴 팝업 캐처가 메뉴 바 행을 제외한 전체를 덮어, 메뉴가 열린 동안 하단 크롬의 첫 클릭이 닫기에만 쓰입니다. 의도된 동작으로 볼지 먼저 판단해야 합니다 | `EditorApp::rebuildMenuPopup` 의 캐처 |
+| DEF-65 | LOW | `onMouseMove` 경로에서 자식이 돌려준 `HReply`(캡처·해제 요청)가 버려집니다 | `SOverlay`·`SBorder`(반환값 무시), `SHorizontalBox`·`SVerticalBox`(마지막 Handled 만 보존) |
+| DEF-66 | LOW | 오른쪽 Ctrl 로는 복사·붙여넣기·전체 선택·실행 취소·저장·찾기가 동작하지 않습니다 | `EditorApp` 이 `KEY_LEFT_CTRL` 만 확인, `IWindow.hpp` 에 오른쪽 상수 없음 |
+| DEF-67 | LOW · 잠재 | 게임 입력계가 텍스트 포커스를 무시해, 타이핑이 바인딩된 게임 액션을 함께 발화시킵니다. 현재 바인딩이 0건이라 증상은 없습니다 | `HInputSystem::update`(포커스 게이트 없음), `Engine::run` 이 매 프레임 호출 |
+| DEF-68 | LOW | `recreateRenderTargets` 가 계측되지 않아, 뷰포트 통계의 `Recreate/s` 가 뷰포트 크기 변경에 의한 재생성을 세지 않습니다 | `Renderer_swap.cpp`(`recreateSwapChain` 만 카운트) |
+| DEF-69 | LOW | Window 메뉴가 없고, `PanelDef::closable`·`PanelRegistry::order()` 를 읽는 곳이 0입니다 | `dock/DockTree.hpp`, `EditorApp::buildMenus` |
+
+### 처리할 때 지켜야 할 순서 제약
+
+- **DEF-60 은 뷰포트 툴바 폭 사다리와 함께 고칩니다.** 사다리 임계값(640/575/520/435/345)과 승격
+  임계값이 이 근사 위에서 튜닝되어 있어, 폭 계산만 실측으로 바꾸면 툴바가 엉뚱한 단계에서 접힙니다
+  (§7.9).
+- **DEF-69 는 탭 닫기 버튼보다 먼저 합니다.** 순서가 바뀌면 닫은 패널을 되살릴 수단이 없습니다.
+- **DEF-56(클리핑)과 DEF-57(휠 라우팅)은 스크롤 목록 전반의 선행 조건입니다.** 지금 아웃라이너는
+  `EditorApp::tick` 의 단일 휠 판독 지점에서 직접 히트테스트하는 우회로 스크롤합니다. 두 결함을 고치면
+  이 우회를 위젯 경로로 되돌릴지 함께 결정합니다.
+- **DEF-61 은 로그 설계의 L3(행 풀)에서 해소될 예정입니다**([Log_Category_Design.md](Log_Category_Design.md)).
+  종합 검출 전에 L3 가 끝나면 이 항목은 그때 닫습니다.
+- **DEF-64 는 로그 설계의 Categories 팝업에도 그대로 영향을 줍니다.** 같은 캐처 구조를 재사용하기 때문입니다.
+
+---
+
+## 로그 경로 결함 (DEF-70 ~ DEF-72, 2026-09-17 등재)
+
+로그 카테고리 설계를 위한 조사에서 확인했습니다. 셋 다 설계의 L1 단계에서 구조적으로 해소되므로 따로
+고치지 않습니다. 설계와 근거는 [Log_Category_Design.md](Log_Category_Design.md) §2 입니다.
+
+| ID | 심각도 | 내용 | 해소 단계 |
+|---|---|---|---|
+| DEF-70 | LOW | 로그가 한 줄 들어올 때마다 하단 패널 전체를 리빌드합니다. **Content Browser·GPU Stats 탭이 활성이어도** 리빌드되어, 그 사이에 누른 Content Browser 버튼의 프레스 상태가 사라지고 클릭이 삼켜집니다. 매번 200줄 전체 복사도 따라옵니다 | L1(활성 탭 검사) → L3(행 풀로 리빌드 제거) |
+| DEF-71 | LOW | 표준 출력 가로채기를 `EditorApp::init` 에서 설치해, 그 전에 나온 부팅 로그(GPU 이름·MSAA·힙 존·BRDF LUT·IBL·오디오·물리 초기화)가 Output Log 에 들어오지 않습니다 | L1(가로채기를 `main` 으로 이동) |
+| DEF-72 | LOW | 심각도를 로그 문자열의 부분 일치(`ERROR`/`WARN`/`FATAL`)로 판정합니다. 71개 호출부 중 이 단어를 포함하는 것은 2곳뿐이라 **오류 로그가 사실상 전부 회색으로 표시됩니다**. Vulkan 검증 콜백은 심각도 플래그를 인자로 받으면서도 버리고 있습니다 | L1(레코드의 심각도 필드로 판정) |
+
+**키 입력 로그**는 결함이 아니라 소음원이므로 번호를 부여하지 않았습니다. 누를 때와 뗄 때 한 줄씩
+쌓여 200줄 링을 밀어냈고, 줄마다 DEF-70 의 리빌드를 일으켰습니다. 2026-09-17 에
+`GlfwWindow::keyCallback` 의 스위치(`kLogKeyEvents = false`)로 껐고, L2 에서 `Input` 카테고리의
+Verbose 로 옮깁니다.
