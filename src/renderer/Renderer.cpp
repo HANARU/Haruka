@@ -5,7 +5,6 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
 #include <glm/gtc/random.hpp>
-#include <iostream>
 #include <stdexcept>
 #include <cstring>
 #include <cmath>
@@ -18,6 +17,10 @@
 #include "../platform/glfw/GlfwWindow.hpp"
 #endif
 #include "GlfwSwapchain.hpp"
+#include "RendererLog.hpp"
+
+// 검증 레이어 메시지. 렌더러 로그와 따로 끌 수 있게 분리합니다.
+static constinit HLogCategory LogVulkan{ "Vulkan", ELogVerbosity::Log };
 
 // readFile defined as inline in Renderer.hpp
 
@@ -32,10 +35,15 @@ static VkResult CreateDebugMessenger(VkInstance inst,
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL Renderer::debugCallback(
-    VkDebugUtilsMessageSeverityFlagBitsEXT,
+    VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     VkDebugUtilsMessageTypeFlagsEXT,
     const VkDebugUtilsMessengerCallbackDataEXT* d, void*) {
-    std::cerr << "[Vulkan] " << d->pMessage << "\n";
+    // 메신저는 WARNING|ERROR 만 요청합니다. 그 외 심각도가 오면 Verbose 로 내립니다.
+    const ELogVerbosity v =
+        (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)   ? ELogVerbosity::Error   :
+        (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) ? ELogVerbosity::Warning :
+                                                                       ELogVerbosity::Verbose;
+    if (LogVulkan.isEnabled(v)) HLog::submit(LogVulkan, v, d->pMessage);
     return VK_FALSE;
 }
 
@@ -256,7 +264,7 @@ void Renderer::generateBRDFLUT() {
     vkDestroyFramebuffer(device, tmpFb, nullptr);
     vkDestroyRenderPass(device, tmpRp, nullptr);
 
-    std::cout << "[Renderer] BRDF LUT generated (512x512 R16G16)\n";
+    HLOG(LogRenderer, Log) << "BRDF LUT generated (512x512 R16G16)";
 }
 
 // ── IBL cubemap generation (CPU sky gradient) ─────────────────────────────────
@@ -510,7 +518,7 @@ void Renderer::generateIBLCubemaps() {
     vkDestroyBuffer(device, irrStaging, nullptr);  allocator.freeB(irrStagingAlloc);
     vkDestroyBuffer(device, prefStaging, nullptr); allocator.freeB(prefStagingAlloc);
 
-    std::cout << "[Renderer] IBL cubemaps generated (sky gradient, " << kPrefMips << " mip levels)\n";
+    HLOG(LogRenderer, Log) << "IBL cubemaps generated (sky gradient, " << kPrefMips << " mip levels)";
 }
 
 // ── Vulkan instance / device setup ────────────────────────────────────────────
@@ -578,13 +586,13 @@ void Renderer::pickPhysicalDevice() {
         throw std::runtime_error("No suitable GPU found!");
     VkPhysicalDeviceProperties p;
     vkGetPhysicalDeviceProperties(physDevice, &p);
-    std::cout << "[Haruka] GPU: " << p.deviceName << "\n";
+    HLOG(LogRenderer, Log) << "GPU: " << p.deviceName;
     VkSampleCountFlags counts = p.limits.framebufferColorSampleCounts &
                                 p.limits.framebufferDepthSampleCounts;
     if      (counts & VK_SAMPLE_COUNT_4_BIT) msaaSamples_ = VK_SAMPLE_COUNT_4_BIT;
     else if (counts & VK_SAMPLE_COUNT_2_BIT) msaaSamples_ = VK_SAMPLE_COUNT_2_BIT;
     else                                      msaaSamples_ = VK_SAMPLE_COUNT_1_BIT;
-    std::cout << "[Haruka] MSAA: " << (uint32_t)msaaSamples_ << "x\n";
+    HLOG(LogRenderer, Log) << "MSAA: " << (uint32_t)msaaSamples_ << "x";
     timestampPeriod_ = p.limits.timestampPeriod;
 }
 
@@ -734,7 +742,7 @@ void Renderer::createTimestampPool() {
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(physDevice, &props);
     if (!props.limits.timestampComputeAndGraphics) {
-        std::cout << "[Haruka] GPU timestamp queries not supported\n";
+        HLOG(LogRenderer, Warning) << "GPU timestamp queries not supported";
         return;
     }
     VkQueryPoolCreateInfo ci{};
@@ -759,5 +767,5 @@ void Renderer::setUIRenderer(HSlateRenderer* r) {
 void Renderer::reloadPipelines() {
     vkDeviceWaitIdle(device);
     createAllPipelines();
-    std::cout << "[Haruka] Pipelines hot-reloaded.\n";
+    HLOG(LogRenderer, Log) << "Pipelines hot-reloaded.";
 }

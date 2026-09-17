@@ -2,6 +2,10 @@
 #include <vulkan/vulkan.h>
 #include <string>
 #include <vector>
+#include "../core/HLog.hpp"
+
+// 키 입력 등 플랫폼 입력 로그. 키 이벤트는 Verbose 라 기본 기록 수준(Log)에서는 남지 않습니다.
+inline constinit HLogCategory LogInput{ "Input", ELogVerbosity::Log };
 
 // Platform-agnostic input constants (values match GLFW/ASCII so no translation needed)
 namespace HInput {

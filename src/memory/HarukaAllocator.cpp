@@ -1,7 +1,9 @@
 #include "HarukaAllocator.hpp"
 #include <stdexcept>
 #include <algorithm>
-#include <iostream>
+#include "../core/HLog.hpp"
+
+static constinit HLogCategory LogMemory{ "Memory", ELogVerbosity::Log };
 
 // ── selectMemType ─────────────────────────────────────────────────────────────
 // props에서 required 플래그를 모두 만족하고, 해당 heap 크기가 minHeapSize 이상인
@@ -60,9 +62,9 @@ void HarukaAllocator::init(VkDevice dev, VkPhysicalDevice physDev) {
     heapSize = std::min(kHeapTarget, avail * 3 / 4);
 
     if (heapSize < kHeapTarget) {
-        std::cout << "[Haruka] Core Heap: target 1GB, available "
-                  << avail / (1024 * 1024) << "MB — capping to "
-                  << heapSize / (1024 * 1024) << "MB\n";
+        HLOG(LogMemory, Warning) << "Core Heap: target 1GB, available "
+                                 << avail / (1024 * 1024) << "MB - capping to "
+                                 << heapSize / (1024 * 1024) << "MB";
     }
 
     // 1GB 선점 시도 → 실패 시 절반씩 줄여 재시도 (최소 256MB)
@@ -82,31 +84,30 @@ void HarukaAllocator::init(VkDevice dev, VkPhysicalDevice physDev) {
     if (vkMapMemory(device, hHeap, 0, VK_WHOLE_SIZE, 0, &heapMapped) != VK_SUCCESS)
         throw std::runtime_error("[Haruka] vkMapMemory failed for Core Heap!");
 
-    std::cout << "[Haruka] Core Heap ready: "
-              << heapSize / (1024 * 1024) << "MB"
-              << " | memType[" << memType << "]"
-              << (isUMA ? " | DEVICE_LOCAL+HOST_VISIBLE (UMA)"
-                        : " | HOST_VISIBLE only (discrete GPU)")
-              << "\n";
+    HLOG(LogMemory, Log) << "Core Heap ready: "
+                         << heapSize / (1024 * 1024) << "MB"
+                         << " | memType[" << memType << "]"
+                         << (isUMA ? " | DEVICE_LOCAL+HOST_VISIBLE (UMA)"
+                                   : " | HOST_VISIBLE only (discrete GPU)");
 
     // Zone B free list init
     VkPhysicalDeviceProperties devProps;
     vkGetPhysicalDeviceProperties(physDev, &devProps);
     bigGranularity = devProps.limits.bufferImageGranularity;
     freeListB.push_back({ kZoneBOffset, kZoneBSize });
-    std::cout << "[Haruka] Zone B ready: "
-              << kZoneBSize / (1024 * 1024) << "MB FreeList"
-              << " | BIG=" << bigGranularity << "\n";
+    HLOG(LogMemory, Log) << "Zone B ready: "
+                         << kZoneBSize / (1024 * 1024) << "MB FreeList"
+                         << " | BIG=" << bigGranularity;
 
-    std::cout << "[Haruka] Zone C ready: "
-              << kZoneCSize / (1024 * 1024) << "MB Ring\n";
+    HLOG(LogMemory, Log) << "Zone C ready: "
+                         << kZoneCSize / (1024 * 1024) << "MB Ring";
 
     // Zone A smoke test
     auto probe = allocA(256, 4);
     if (!probe.isValid())
         throw std::runtime_error("[Haruka] Zone A smoke test failed!");
-    std::cout << "[Haruka] Zone A ready: offset=" << probe.offset
-              << " ptr=" << probe.mappedPtr << "\n";
+    HLOG(LogMemory, Log) << "Zone A ready: offset=" << probe.offset
+                         << " ptr=" << probe.mappedPtr;
     resetZoneA();
 }
 
@@ -118,8 +119,8 @@ HarukaAllocation HarukaAllocator::allocA(VkDeviceSize size, VkDeviceSize alignme
     const VkDeviceSize end     = kZoneAOffset + kZoneASize;
 
     if (aligned + size > end) {
-        std::cerr << "[Haruka] Zone A OOM: requested " << size
-                  << " bytes, cursor=" << cursorA << "\n";
+        HLOG(LogMemory, Error) << "Zone A OOM: requested " << size
+                               << " bytes, cursor=" << cursorA;
         return {};
     }
 
@@ -169,7 +170,7 @@ HarukaAllocation HarukaAllocator::allocB(const VkMemoryRequirements& reqs, Resou
         return a;
     }
 
-    std::cerr << "[Haruka] Zone B OOM: requested " << size << " bytes\n";
+    HLOG(LogMemory, Error) << "Zone B OOM: requested " << size << " bytes";
     return {};
 }
 
@@ -184,7 +185,7 @@ HarukaAllocation HarukaAllocator::allocC(VkDeviceSize size, VkDeviceSize alignme
         aligned   = (kZoneCOffset + alignment - 1) & ~(alignment - 1); // wrap
     }
     if (aligned + size > zoneEnd) {
-        std::cerr << "[Haruka] Zone C OOM: requested " << size << " bytes\n";
+        HLOG(LogMemory, Error) << "Zone C OOM: requested " << size << " bytes";
         return {};
     }
 

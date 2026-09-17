@@ -1,6 +1,5 @@
 #include "HotReloader.hpp"
 #include "../renderer/Renderer.hpp"
-#include <iostream>
 #include <thread>
 #include <chrono>
 
@@ -8,6 +7,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
+#include "../core/HLog.hpp"
+
+// 워처 스레드에서도 로그를 남깁니다. HLOG 는 어느 스레드에서나 안전합니다(Threading.md 규칙 4).
+static constinit HLogCategory LogHotReload{ "HotReload", ELogVerbosity::Log };
 
 void HotReloader::start(const std::string& watchDir, Renderer& renderer) {
     renderer_ = &renderer;
@@ -33,7 +36,7 @@ void HotReloader::watchLoop() {
         nullptr);
 
     if (hDir == INVALID_HANDLE_VALUE) {
-        std::cerr << "[HotReloader] Cannot watch directory: " << watchDir_ << "\n";
+        HLOG(LogHotReload, Warning) << "Cannot watch directory: " << watchDir_;
         return;
     }
 
@@ -77,7 +80,7 @@ void HotReloader::watchLoop() {
         } while (true);
 
         if (changed) {
-            std::cout << "[HotReloader] Shader change detected — reload queued\n";
+            HLOG(LogHotReload, Log) << "Shader change detected - reload queued";
             pending_.store(true, std::memory_order_release);
         }
     }

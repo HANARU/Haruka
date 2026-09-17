@@ -10,8 +10,10 @@
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 
-#include <iostream>
 #include <cstring>
+#include "../core/HLog.hpp"
+
+static constinit HLogCategory LogAudio{ "Audio", ELogVerbosity::Log };
 
 void AudioSystem::startup() {
     auto* eng = new ma_engine();
@@ -20,12 +22,12 @@ void AudioSystem::startup() {
     cfg.sampleRate  = 48000;
 
     if (ma_engine_init(&cfg, eng) != MA_SUCCESS) {
-        std::cerr << "[Audio] ma_engine_init failed\n";
+        HLOG(LogAudio, Error) << "ma_engine_init failed";
         delete eng;
         return;
     }
     engine_ = eng;
-    std::cout << "[Audio] miniaudio initialized (48 kHz stereo)\n";
+    HLOG(LogAudio, Log) << "miniaudio initialized (48 kHz stereo)";
 }
 
 void AudioSystem::shutdown() {
@@ -66,7 +68,7 @@ void AudioSystem::tick(float /*dt*/) {
                 if (ac->autoPlay)
                     ma_sound_start(static_cast<ma_sound*>(snd));
             } else {
-                std::cerr << "[Audio] Failed to load: " << ac->filePath << "\n";
+                HLOG(LogAudio, Error) << "Failed to load: " << ac->filePath;
                 ac->loadFailed_ = true;
             }
         }

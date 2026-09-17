@@ -22,8 +22,10 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
-#include <iostream>
 #include <thread>
+#include "../core/HLog.hpp"
+
+static constinit HLogCategory LogPhysics{ "Physics", ELogVerbosity::Log };
 
 // ── Layer definitions ─────────────────────────────────────────────────────────
 namespace Layers {
@@ -103,7 +105,7 @@ void PhysicsSystem::startup() {
         impl_->bpLayerInterface, impl_->objVsBpFilter, impl_->objLayerPairFilter);
     impl_->physics->SetGravity(JPH::Vec3(0.f, -9.81f, 0.f));
 
-    std::cout << "[Physics] Jolt initialized\n";
+    HLOG(LogPhysics, Log) << "Jolt initialized";
 }
 
 void PhysicsSystem::shutdown() {
@@ -126,7 +128,7 @@ void PhysicsSystem::shutdown() {
     JPH::UnregisterTypes();
     delete JPH::Factory::sInstance;
     JPH::Factory::sInstance = nullptr;
-    std::cout << "[Physics] Jolt shutdown\n";
+    HLOG(LogPhysics, Log) << "Jolt shutdown";
 }
 
 void PhysicsSystem::onBeginPlay() {
@@ -179,10 +181,10 @@ void PhysicsSystem::tick(float dt) {
         auto uniformScale = [&](const char* shapeName) -> float {
             const float minSc = std::min({ sc.x, sc.y, sc.z });
             if (maxSc - minSc > 1e-4f * std::max(1.f, maxSc))
-                std::cerr << "[Physics] '" << a->name << "': " << shapeName
-                          << " 콜라이더는 균등 스케일만 표현할 수 있습니다. scale("
-                          << sc.x << ", " << sc.y << ", " << sc.z
-                          << ") 를 최대 성분 " << maxSc << " 로 보수 근사합니다.\n";
+                HLOG(LogPhysics, Warning) << "'" << a->name << "': " << shapeName
+                                          << " 콜라이더는 균등 스케일만 표현할 수 있습니다. scale("
+                                          << sc.x << ", " << sc.y << ", " << sc.z
+                                          << ") 를 최대 성분 " << maxSc << " 로 보수 근사합니다.";
             return maxSc;
         };
 

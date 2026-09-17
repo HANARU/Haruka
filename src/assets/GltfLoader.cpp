@@ -4,8 +4,8 @@
 #include "tiny_gltf.h"
 
 #include "GltfLoader.hpp"
+#include "AssetLog.hpp"
 #include <stdexcept>
-#include <iostream>
 #include <numeric>
 #include <cstring>
 #include <cmath>
@@ -232,7 +232,7 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
         ? loader.LoadBinaryFromFile(&model, &err, &warn, path)
         : loader.LoadASCIIFromFile(&model, &err, &warn, path);
 
-    if (!warn.empty()) std::cout << "[Asset] glTF warning: " << warn;
+    if (!warn.empty()) HLOG(LogAsset, Warning) << "glTF warning: " << warn;
     if (!ok)           throw std::runtime_error("glTF load failed: " + err);
     if (model.meshes.empty())
         throw std::runtime_error("glTF has no meshes: " + path);
@@ -377,17 +377,17 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
                 // 팩터를 적용하기 전에 파일이 실제로 무엇을 지정했는지 남긴다.
                 // 텍스처 유무와 팩터 값을 함께 봐야 화면이 왜 그렇게 보이는지 판단할 수 있다.
                 // (applyColorFactor 가 hasData 를 true 로 바꾸므로 반드시 그 전에 읽는다.)
-                std::cout << "[Asset]   mat \"" << mat.name << "\""
-                          << "  baseColor(" << pbr.baseColorFactor[0] << ", "
-                          << pbr.baseColorFactor[1] << ", " << pbr.baseColorFactor[2]
-                          << ", " << pbr.baseColorFactor[3] << ")"
-                          << "  metallic=" << pbr.metallicFactor
-                          << "  roughness=" << pbr.roughnessFactor
-                          << "  tex[albedo=" << (d.albedo.hasData ? "Y" : "-")
-                          << " normal="      << (d.normalMap.hasData ? "Y" : "-")
-                          << " mr="          << (d.metalRough.hasData ? "Y" : "-")
-                          << " ao="          << (d.ao.hasData ? "Y" : "-")
-                          << " emis="        << (d.emissive.hasData ? "Y" : "-") << "]\n";
+                HLOG(LogAsset, Verbose) << "mat \"" << mat.name << "\""
+                                        << "  baseColor(" << pbr.baseColorFactor[0] << ", "
+                                        << pbr.baseColorFactor[1] << ", " << pbr.baseColorFactor[2]
+                                        << ", " << pbr.baseColorFactor[3] << ")"
+                                        << "  metallic=" << pbr.metallicFactor
+                                        << "  roughness=" << pbr.roughnessFactor
+                                        << "  tex[albedo=" << (d.albedo.hasData ? "Y" : "-")
+                                        << " normal="      << (d.normalMap.hasData ? "Y" : "-")
+                                        << " mr="          << (d.metalRough.hasData ? "Y" : "-")
+                                        << " ao="          << (d.ao.hasData ? "Y" : "-")
+                                        << " emis="        << (d.emissive.hasData ? "Y" : "-") << "]";
 
                 // 머티리얼이 사실상 비어 있는지 판정한다. 텍스처가 하나도 없고 모든 팩터가
                 // glTF 기본값이면, 제작 도구에서 머티리얼을 만들기만 하고 아무 값도 지정하지
@@ -412,15 +412,15 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
                      (mat.emissiveFactor[0] == 0.0 && mat.emissiveFactor[1] == 0.0 &&
                       mat.emissiveFactor[2] == 0.0));
                 if (noTextures && defaultFactors) {
-                    std::cout
-                        << "[Asset]   WARNING: material \"" << mat.name
+                    HLOG(LogAsset, Warning)
+                        << "material \"" << mat.name
                         << "\" has no textures and every factor is at the glTF default.\n"
-                        << "[Asset]            Spec defaults are metallic=1, roughness=1, so this\n"
-                        << "[Asset]            renders as a fully metallic, fully rough surface:\n"
-                        << "[Asset]            diffuse becomes zero and the result looks flat with\n"
-                        << "[Asset]            no directional shading. The engine renders what the\n"
-                        << "[Asset]            file says and does not substitute its own defaults.\n"
-                        << "[Asset]            Set the material in the DCC tool before exporting.\n";
+                        << "  Spec defaults are metallic=1, roughness=1, so this\n"
+                        << "  renders as a fully metallic, fully rough surface:\n"
+                        << "  diffuse becomes zero and the result looks flat with\n"
+                        << "  no directional shading. The engine renders what the\n"
+                        << "  file says and does not substitute its own defaults.\n"
+                        << "  Set the material in the DCC tool before exporting.";
                 }
 
                 applyColorFactor(d.albedo, pbr.baseColorFactor, /*srgbEncoded=*/true);
@@ -439,9 +439,9 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
 
     size_t totalV = 0, totalT = 0;
     for (const auto& r : result) { totalV += r.vertices.size(); totalT += r.indices.size() / 3; }
-    std::cout << "[Asset] Loaded: " << path
-              << "  meshes=" << result.size()
-              << "  verts=" << totalV << "  tris=" << totalT << "\n";
+    HLOG(LogAsset, Log) << "Loaded: " << path
+                        << "  meshes=" << result.size()
+                        << "  verts=" << totalV << "  tris=" << totalT;
     return result;
 }
 
@@ -450,7 +450,7 @@ MeshSourceData GltfLoader::load(const std::string& path) {
         auto all = loadAll(path);
         if (!all.empty()) return std::move(all[0]);
     } catch (const std::exception& e) {
-        std::cerr << "[Asset] Load failed (" << path << "): " << e.what() << " -> defaultCube\n";
+        HLOG(LogAsset, Error) << "Load failed (" << path << "): " << e.what() << " -> defaultCube";
     }
     return defaultCube();
 }
@@ -498,6 +498,6 @@ MeshSourceData GltfLoader::defaultCube() {
             p[0] = c; p[1] = c; p[2] = c; p[3] = 255;
         }
 
-    std::cout << "[Asset] Using built-in default cube\n";
+    HLOG(LogAsset, Log) << "Using built-in default cube";
     return d;
 }

@@ -1,6 +1,6 @@
 #include "GlfwWindow.hpp"
 #include <stdexcept>
-#include <iostream>
+#include <string>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -249,6 +249,12 @@ void GlfwWindow::setClipboardText(const std::string& text) {
     glfwSetClipboardString(window, text.c_str());
 }
 
+static std::string keyLabel(int key) {
+    const char* name = glfwGetKeyName(key, 0);
+    if (!name) name = specialKeyName(key);
+    return name ? std::string(name) : "key=" + std::to_string(key);
+}
+
 void GlfwWindow::keyCallback(GLFWwindow* w, int key, int /*scancode*/, int action, int /*mods*/) {
     if (action == GLFW_REPEAT) return;
 
@@ -256,19 +262,8 @@ void GlfwWindow::keyCallback(GLFWwindow* w, int key, int /*scancode*/, int actio
     // 저장 여부를 묻는 경로가 없어 편집 중이던 씬이 그대로 사라졌습니다. 에디터에서
     // Esc 의 자연스러운 의미는 "지금 편집을 취소" 이고, 창 닫기는 OS 닫기 버튼이 맡습니다.
 
-    // 키 로그는 기본으로 끕니다. 누를 때와 뗄 때 한 줄씩 쌓여, 이름 하나만 타이핑해도
-    // Output Log 의 200줄 링이 다른 로그를 전부 밀어냅니다. 로그 한 줄마다 하단 패널이
-    // 통째로 리빌드되는 비용도 함께 따라옵니다. 로그 카테고리가 들어오면 이 스위치를
-    // 없애고 Input 카테고리의 Verbose 로 옮깁니다(Docs/Log_Category_Design.md).
-    static constexpr bool kLogKeyEvents = false;
-    if (kLogKeyEvents) {
-        const char* act  = (action == GLFW_PRESS) ? "PRESS" : "RELEASE";
-        const char* name = glfwGetKeyName(key, 0);
-        if (!name) name  = specialKeyName(key);
-
-        if (name)
-            std::cout << "[Input] " << act << " " << name << "\n";
-        else
-            std::cout << "[Input] " << act << " key=" << key << "\n";
-    }
+    // 키 로그는 Input 카테고리의 Verbose 입니다. 누를 때와 뗄 때 한 줄씩 쌓여 이름 하나만
+    // 타이핑해도 다른 로그를 전부 밀어내므로, 기본 기록 수준(Log)에서는 남지 않고 키 이름
+    // 조회도 일어나지 않습니다. 조사할 때 Input 의 기록 수준을 Verbose 로 올리십시오.
+    HLOG(LogInput, Verbose) << (action == GLFW_PRESS ? "PRESS " : "RELEASE ") << keyLabel(key);
 }

@@ -1,6 +1,6 @@
 #include "GlfwSwapchain.hpp"
+#include "RendererLog.hpp"
 #include "../core/FrameTimings.hpp"
-#include <iostream>
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -110,9 +110,9 @@ void GlfwSwapchain::create() {
             pm == VK_PRESENT_MODE_MAILBOX_KHR      ? "MAILBOX"      :
             pm == VK_PRESENT_MODE_FIFO_KHR         ? "FIFO(vsync)"  :
             pm == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "FIFO_RELAXED" : "UNKNOWN";
-        std::cout << "[Swapchain] presentMode=" << pmName
-                  << " images=" << images_.size()
-                  << " extent=" << ext.width << "x" << ext.height << std::endl;
+        HLOG(LogRenderer, Log) << "Swapchain presentMode=" << pmName
+                               << " images=" << images_.size()
+                               << " extent=" << ext.width << "x" << ext.height;
     }
 
     buildImageViews();

@@ -1,9 +1,9 @@
 #include "GassetCache.hpp"
+#include "AssetLog.hpp"
 #include <fstream>
 #include <filesystem>
 #include <sstream>
 #include <iomanip>
-#include <iostream>
 #include <stdexcept>
 
 namespace fs = std::filesystem;
@@ -66,7 +66,7 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
 
     {
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        if (!f) { std::cerr << "[GassetCache] Cannot write: " << tmp << "\n"; return; }
+        if (!f) { HLOG(LogAsset, Warning) << "gasset cache cannot write: " << tmp; return; }
 
         wU32(f, kMagic);
         wU32(f, kVersion);
@@ -90,7 +90,7 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
         }
 
         if (!f) {
-            std::cerr << "[GassetCache] Write error: " << tmp << "\n";
+            HLOG(LogAsset, Warning) << "gasset cache write error: " << tmp;
             std::error_code ec; fs::remove(tmp, ec);
             return;
         }
@@ -99,7 +99,7 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
     std::error_code ec;
     fs::rename(tmp, cp, ec);
     if (ec) {
-        std::cerr << "[GassetCache] Rename failed: " << ec.message() << "\n";
+        HLOG(LogAsset, Warning) << "gasset cache rename failed: " << ec.message();
         fs::remove(tmp, ec);
     }
 }
@@ -159,6 +159,6 @@ std::vector<MeshSourceData> GassetCache::load(const std::string& srcPath) {
         result.push_back(std::move(m));
     }
 
-    std::cout << "[GassetCache] Hit: " << srcPath << "  meshes=" << meshCount << "\n";
+    HLOG(LogAsset, Verbose) << "gasset cache hit: " << srcPath << "  meshes=" << meshCount;
     return result;
 }

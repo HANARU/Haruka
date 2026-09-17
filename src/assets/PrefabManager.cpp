@@ -1,10 +1,10 @@
 #include "PrefabManager.hpp"
+#include "AssetLog.hpp"
 #include "SceneSerializer.hpp"
 #include "../core/Actor.hpp"
 
 #include <fstream>
 #include <filesystem>
-#include <iostream>
 #include <algorithm>
 
 namespace fs = std::filesystem;
@@ -12,17 +12,17 @@ namespace fs = std::filesystem;
 void PrefabManager::save(const Actor* actor, const std::string& path) {
     fs::create_directories(kDir);
     std::ofstream f(path);
-    if (!f) { std::cerr << "[Prefab] Cannot write: " << path << "\n"; return; }
+    if (!f) { HLOG(LogAsset, Error) << "Prefab cannot write: " << path; return; }
 
     f << "# Haruka Prefab v1\n";
     f << "NAME:" << actor->name << "\n";
     SceneSerializer::writeActor(f, actor);
-    std::cout << "[Prefab] Saved: " << path << "\n";
+    HLOG(LogAsset, Log) << "Prefab saved: " << path;
 }
 
 Actor* PrefabManager::spawn(const std::string& path, World& world, AssetManager& assets) {
     std::ifstream f(path);
-    if (!f) { std::cerr << "[Prefab] Not found: " << path << "\n"; return nullptr; }
+    if (!f) { HLOG(LogAsset, Error) << "Prefab not found: " << path; return nullptr; }
 
     SceneSerializer::ActorData data;
     std::string line;
@@ -38,9 +38,9 @@ Actor* PrefabManager::spawn(const std::string& path, World& world, AssetManager&
     }
 
     Actor* a = SceneSerializer::spawn(data, world, assets);
-    if (!a) { std::cerr << "[Prefab] Missing NAME in: " << path << "\n"; return nullptr; }
+    if (!a) { HLOG(LogAsset, Error) << "Prefab missing NAME in: " << path; return nullptr; }
 
-    std::cout << "[Prefab] Spawned: " << data.name << " from " << path << "\n";
+    HLOG(LogAsset, Log) << "Prefab spawned: " << data.name << " from " << path;
     return a;
 }
 

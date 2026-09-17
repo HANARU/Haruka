@@ -23,7 +23,6 @@
 #include <filesystem>
 #include <algorithm>
 #include <cstdio>
-#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
@@ -58,6 +57,8 @@ struct PropsSnapshotCmd : ICommand {
 };
 
 namespace fs = std::filesystem;
+
+static constinit HLogCategory LogEditor{ "Editor", ELogVerbosity::Log };
 
 // ── Widget helpers ─────────────────────────────────────────────────────────────
 std::shared_ptr<HWidget> EditorApp::spacer() const {
@@ -135,7 +136,7 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
 
     renderer.setUIRenderer(&slateRenderer_);
     hotReloader_.start("shaders", renderer);
-    std::cout << "[Editor] Ready. Press Play to run game simulation.\n";
+    HLOG(LogEditor, Log) << "Ready. Press Play to run game simulation.";
 }
 
 void EditorApp::cleanup() {
@@ -901,7 +902,7 @@ void EditorApp::saveDockLayout() const {
     std::error_code ec;
     fs::create_directories("Config", ec);           // 없으면 생성(실패해도 아래 open 이 처리)
     std::ofstream f("Config/editor_layout.txt");
-    if (!f) { std::cerr << "[Editor] Layout save failed\n"; return; }
+    if (!f) { HLOG(LogEditor, Error) << "Layout save failed"; return; }
     std::ostringstream oss;
     oss << "# Haruka Dock Layout v1\n";
     dockSerialize(dockRoot_.get(), oss);
@@ -958,7 +959,7 @@ void EditorApp::buildMenus() {
             Actor* parent = prevSelected2_;
             if (!child || !parent || child == parent) return;
             if (child == editorCamActor_ || parent == editorCamActor_) return;
-            // attachTo 는 사이클을 std::cerr 로만 알리고 조용히 무시합니다(반환값 없음).
+            // attachTo 는 사이클을 Scene 카테고리 경고로만 알리고 조용히 무시합니다(반환값 없음).
             // 호출 전에 조상 체인을 직접 확인해야 UI 가 성공한 줄 착각하지 않습니다.
             for (Actor* p = parent; p; p = p->getParent())
                 if (p == child) return;
@@ -1330,9 +1331,9 @@ void EditorApp::beginPlay() {
     if (playState_ == EPlayState::Playing) return;
     if (playState_ == EPlayState::Editor) {
         worldSnapshot_ = serializeWorld();
-        std::cout << "[Editor] Play\n";
+        HLOG(LogEditor, Log) << "Play";
     } else {
-        std::cout << "[Editor] Resume\n";
+        HLOG(LogEditor, Log) << "Resume";
     }
     playState_ = EPlayState::Playing;
     toolbarDirty_ = true;
@@ -1341,10 +1342,10 @@ void EditorApp::beginPlay() {
 void EditorApp::pausePlay() {
     if (playState_ == EPlayState::Playing) {
         playState_ = EPlayState::Paused;
-        std::cout << "[Editor] Paused\n";
+        HLOG(LogEditor, Log) << "Paused";
     } else if (playState_ == EPlayState::Paused) {
         playState_ = EPlayState::Playing;
-        std::cout << "[Editor] Resumed\n";
+        HLOG(LogEditor, Log) << "Resumed";
     }
     toolbarDirty_ = true;
 }
@@ -1355,7 +1356,7 @@ void EditorApp::stopPlay() {
     deserializeWorld(worldSnapshot_);
     worldSnapshot_.clear();
     cmdStack_.clear();
-    std::cout << "[Editor] Stopped - world restored\n";
+    HLOG(LogEditor, Log) << "Stopped - world restored";
     toolbarDirty_ = true;
 }
 
@@ -1468,18 +1469,18 @@ void EditorApp::deserializeWorld(const std::string& data) {
 
 void EditorApp::saveScene() {
     std::ofstream f("scene.hscene");
-    if (!f) { std::cerr << "[Editor] Save failed\n"; return; }
+    if (!f) { HLOG(LogEditor, Error) << "Save failed"; return; }
     f << serializeWorld();
-    std::cout << "[Editor] Scene saved to scene.hscene\n";
+    HLOG(LogEditor, Log) << "Scene saved to scene.hscene";
 }
 
 void EditorApp::loadScene() {
     std::ifstream f("scene.hscene");
-    if (!f) { std::cerr << "[Editor] Load failed: scene.hscene not found\n"; return; }
+    if (!f) { HLOG(LogEditor, Error) << "Load failed: scene.hscene not found"; return; }
     std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     deserializeWorld(data);
     cmdStack_.clear();
-    std::cout << "[Editor] Scene loaded from scene.hscene\n";
+    HLOG(LogEditor, Log) << "Scene loaded from scene.hscene";
 }
 
 // ── 아웃라이너 계층 헬퍼 (Phase 3) ─────────────────────────────────────────────
@@ -2328,7 +2329,7 @@ void EditorApp::rebuildBottomPanel() {
                                 }
                                 ctx_.selected = first;
                             } catch (const std::exception& ex) {
-                                std::cerr << "[Editor] Spawn failed: " << ex.what() << "\n";
+                                HLOG(LogEditor, Error) << "Spawn failed: " << ex.what();
                             }
                         })
                         ->content(HNew(SHorizontalBox)

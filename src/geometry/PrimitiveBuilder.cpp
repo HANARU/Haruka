@@ -1,10 +1,10 @@
 #include "PrimitiveBuilder.hpp"
+#include "PrimitiveLog.hpp"
 
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
-#include <iostream>
 #include <unordered_map>
 #include <vector>
 
@@ -620,8 +620,8 @@ MeshSourceData PrimitiveBuilder::build(const PrimitiveDesc& descIn) {
         default:
             // 아직 구현하지 않은 셰이프입니다. 다른 도형으로 조용히 대체하지
             // 않습니다. 빈 메시가 돌아가면 호출자가 즉시 알아차립니다.
-            std::cerr << "[Primitive] '" << primitiveShapeName(desc.shape)
-                      << "' 는 아직 구현되지 않았습니다. 빈 메시를 반환합니다.\n";
+            HLOG(LogPrimitive, Warning) << "'" << primitiveShapeName(desc.shape)
+                                        << "' 는 아직 구현되지 않았습니다. 빈 메시를 반환합니다.";
             return d;
     }
 

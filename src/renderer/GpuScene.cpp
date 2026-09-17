@@ -1,9 +1,9 @@
 #include "GpuScene.hpp"
+#include "RendererLog.hpp"
 #include "../assets/GltfLoader.hpp"
 
 #include <algorithm>
 #include <cstring>
-#include <iostream>
 #include <stdexcept>
 
 #define GLM_FORCE_RADIANS
@@ -74,9 +74,9 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
     // 돌아오지 않으므로, 넘치기 전에 미리 알려 주는 것이 사후 throw 보다 낫습니다.
     const auto bud = budget();
     if (bud.vertPct >= 80.f || bud.idxPct >= 80.f)
-        std::cerr << "[GpuScene] 메가버퍼 사용률 경고: 정점 " << bud.vertPct
-                  << " %, 인덱스 " << bud.idxPct
-                  << " %. 이 버퍼는 회수되지 않습니다.\n";
+        HLOG(LogRenderer, Warning) << "메가버퍼 사용률 경고: 정점 " << bud.vertPct
+                                   << " %, 인덱스 " << bud.idxPct
+                                   << " %. 이 버퍼는 회수되지 않습니다.";
 
     auto traverse = [&](glm::vec3& lo, glm::vec3& hi) {
         lo = glm::vec3( FLT_MAX);
@@ -101,8 +101,8 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
         const float eps = 1e-3f;
         if (glm::any(glm::lessThan(lo, h->aabbMin - eps)) ||
             glm::any(glm::greaterThan(hi, h->aabbMax + eps)))
-            std::cerr << "[GpuScene] 해석 바운드가 실제 정점을 담지 못합니다. "
-                         "컬링 경계에서 도형이 깜빡입니다.\n";
+            HLOG(LogRenderer, Warning) << "해석 바운드가 실제 정점을 담지 못합니다. "
+                                          "컬링 경계에서 도형이 깜빡입니다.";
 #endif
     } else {
         glm::vec3 lo, hi;
@@ -113,8 +113,8 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
         h->boundRadius = glm::length(hi - h->boundCenter);
     }
 
-    std::cout << "[Renderer] Mesh uploaded: " << vCount << " verts, "
-              << "firstVtx=" << h->firstVertex << "\n";
+    HLOG(LogRenderer, Verbose) << "Mesh uploaded: " << vCount << " verts, "
+                               << "firstVtx=" << h->firstVertex;
     return h;
 }
 

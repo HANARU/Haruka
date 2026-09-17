@@ -1,7 +1,6 @@
 #include "core/Engine.hpp"
 #include "core/HLog.hpp"
 
-#include <iostream>
 #include <stdexcept>
 #include <cstdlib>
 #include <cstdio>
@@ -57,10 +56,10 @@ int main() {
         Engine engine;   // 부팅(생성자) → 실행 → 소멸자에서 역순 teardown.
         engine.run();
     } catch (const std::exception& e) {
-        std::cerr << "[Haruka] FATAL: " << e.what() << "\n";
+        HLOG(LogEngine, Error) << "FATAL: " << e.what();
         return EXIT_FAILURE;
     }
 
-    std::cout << "[Haruka] Clean exit.\n";
+    HLOG(LogEngine, Log) << "Clean exit.";
     return EXIT_SUCCESS;
 }

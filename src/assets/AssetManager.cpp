@@ -1,4 +1,6 @@
 #include "AssetManager.hpp"
+#include "AssetLog.hpp"
+#include "../geometry/PrimitiveLog.hpp"
 #include "GltfLoader.hpp"
 #include "GassetCache.hpp"
 #include "../renderer/Renderer.hpp"
@@ -8,7 +10,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <iostream>
 
 std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
     auto it = cache.find(path);
@@ -20,8 +21,8 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
             try {
                 meshes = GassetCache::load(path);
             } catch (const std::exception& cacheEx) {
-                std::cerr << "[AssetManager] Cache corrupted (" << path << "): "
-                          << cacheEx.what() << " -> reloading from source\n";
+                HLOG(LogAsset, Warning) << "Cache corrupted (" << path << "): "
+                                        << cacheEx.what() << " -> reloading from source";
                 meshes = GltfLoader::loadAll(path);
                 GassetCache::save(path, meshes);
             }
@@ -30,8 +31,8 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
             GassetCache::save(path, meshes);
         }
     } catch (const std::exception& e) {
-        std::cerr << "[AssetManager] Load failed (" << path << "): "
-                  << e.what() << " -> using defaultCube\n";
+        HLOG(LogAsset, Error) << "Load failed (" << path << "): "
+                              << e.what() << " -> using defaultCube";
         meshes = { GltfLoader::defaultCube() };
     }
 
@@ -89,14 +90,14 @@ AssetPair AssetManager::acquirePrimitive(const PrimitiveDesc& descIn) {
     // 목적이며, 그래서 생성과 업로드를 분리해 둔 것입니다.
     const uint32_t evc = PrimitiveBuilder::estimateVertexCount(desc);
     if (evc == 0) {
-        std::cerr << "[AssetManager] 절차 도형 '" << key
-                  << "' 는 아직 구현되지 않았습니다. 액터에 메시가 붙지 않습니다.\n";
+        HLOG(LogAsset, Error) << "절차 도형 '" << key
+                              << "' 는 아직 구현되지 않았습니다. 액터에 메시가 붙지 않습니다.";
         return AssetPair{};
     }
 
     MeshSourceData src = PrimitiveBuilder::build(desc);
     if (src.vertices.empty() || src.indices.empty()) {
-        std::cerr << "[AssetManager] 절차 도형 '" << key << "' 생성이 빈 메시를 냈습니다.\n";
+        HLOG(LogAsset, Error) << "절차 도형 '" << key << "' 생성이 빈 메시를 냈습니다.";
         return AssetPair{};
     }
 
@@ -106,7 +107,7 @@ AssetPair AssetManager::acquirePrimitive(const PrimitiveDesc& descIn) {
     // 이유가 이런 검사가 없었기 때문입니다 (DEF-39).
     std::string report;
     if (!PrimitiveBuilder::validate(desc, src, &report))
-        std::cerr << "[Primitive] '" << key << "' 규약 위반:\n" << report;
+        HLOG(LogPrimitive, Error) << "'" << key << "' 규약 위반:\n" << report;
 #endif
 
     std::vector<Vertex> verts;

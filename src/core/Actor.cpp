@@ -1,6 +1,6 @@
 #include "Actor.hpp"
+#include "SceneLog.hpp"
 #include <algorithm>
-#include <iostream>
 
 // ── 월드 트랜스폼 — 온디맨드 유도 ─────────────────────────────────────────────
 //
@@ -61,8 +61,8 @@ void Actor::attachTo(Actor* parent) {
     // 이 한 곳을 막으면 사이클이 구조적으로 생길 수 없습니다.
     for (Actor* a = parent; a; a = a->parent_) {
         if (a == this) {
-            std::cerr << "[Actor] attachTo 거부: '" << name
-                      << "' 를 자기 자신 또는 자손 아래에 붙일 수 없습니다(사이클).\n";
+            HLOG(LogScene, Warning) << "attachTo 거부: '" << name
+                                    << "' 를 자기 자신 또는 자손 아래에 붙일 수 없습니다(사이클).";
             return;
         }
     }

@@ -2,8 +2,8 @@
 #include "stb_truetype.h"
 
 #include "HFontAtlas.hpp"
+#include "SlateLog.hpp"
 #include <fstream>
-#include <iostream>
 #include <stdexcept>
 #include <cstring>
 
@@ -52,7 +52,7 @@ void HFontAtlas::init(VkDevice device, VkPhysicalDevice physDevice,
 
     createAtlasImage();
     uploadFullAtlas();
-    std::cout << "[HFontAtlas] Ready: " << kAtlasW << "x" << kAtlasH << "\n";
+    HLOG(LogUI, Log) << "Font atlas ready: " << kAtlasW << "x" << kAtlasH;
 }
 
 void HFontAtlas::cleanup() {
@@ -109,7 +109,7 @@ void HFontAtlas::rasterizeGlyph(char c, float size, HGlyphInfo& out) {
         rowH_     = 0;
     }
     if (cursorY_ + gh + 1 > kAtlasH) {
-        std::cerr << "[HFontAtlas] Atlas full!\n";
+        HLOG(LogUI, Error) << "Font atlas full";
         out = {};
         return;
     }

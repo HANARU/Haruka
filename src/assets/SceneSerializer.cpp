@@ -1,4 +1,5 @@
 #include "SceneSerializer.hpp"
+#include "../core/SceneLog.hpp"
 #include "AssetManager.hpp"
 #include "../core/Actor.hpp"
 #include "../core/World.hpp"
@@ -13,7 +14,6 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <sstream>
-#include <iostream>
 #include <algorithm>
 
 static glm::vec3 quatToEulerDeg(const glm::quat& q) {
@@ -154,7 +154,7 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
                 mc->setEnabled(d.meshEnabled != 0);
             }
         } catch (const std::exception& ex) {
-            std::cerr << "[Scene] Mesh load failed: " << ex.what() << "\n";
+            HLOG(LogScene, Error) << "Mesh load failed: " << ex.what();
         }
     }
     if (d.hasLight) {

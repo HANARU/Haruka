@@ -1,11 +1,11 @@
 #include "HSlateRenderer.hpp"
+#include "SlateLog.hpp"
 #include "HPaintContext.hpp"
 #include "HGeometry.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
 #include <cstring>
-#include <iostream>
 
 // ── 헬퍼 ──────────────────────────────────────────────────────────────────────
 uint32_t HSlateRenderer::findMemType(VkMemoryRequirements reqs,
@@ -563,8 +563,8 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
             static bool warned = false;
             if (!warned) {
                 warned = true;
-                std::cerr << "[HSlate] UI vertex budget exceeded (" << kMaxVerts
-                          << ") - remaining draw elements dropped this frame\n";
+                HLOG(LogUI, Warning) << "UI vertex budget exceeded (" << kMaxVerts
+                                     << ") - remaining draw elements dropped this frame";
             }
             break;
         }

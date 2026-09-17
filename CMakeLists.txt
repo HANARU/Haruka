@@ -264,6 +264,7 @@ if(NOT ANDROID)
         tests/GeometryTest.cpp
         src/geometry/PrimitiveDesc.cpp
         src/geometry/PrimitiveBuilder.cpp
+        src/core/HLog.cpp
     )
     target_link_libraries(HarukaGeometryTest PRIVATE glm::glm)
     target_include_directories(HarukaGeometryTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -279,6 +280,7 @@ if(NOT ANDROID)
         tests/ActorLifecycleTest.cpp
         src/core/Actor.cpp
         src/core/Component.cpp
+        src/core/HLog.cpp
     )
     target_link_libraries(HarukaActorTest PRIVATE glm::glm)
     target_include_directories(HarukaActorTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

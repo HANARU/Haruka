@@ -5,7 +5,9 @@
 #include "../components/StaticMeshComponent.hpp"
 #include "../assets/AssetManager.hpp"
 #include "../geometry/PrimitiveDesc.hpp"
-#include <iostream>
+#include "../core/HLog.hpp"
+
+static constinit HLogCategory LogGame{ "Game", ELogVerbosity::Log };
 
 // ── 라이팅 확인 씬 ────────────────────────────────────────────────────────────
 // Primitive_And_Lighting_Design.md 9절의 Lighting_Probe 배치입니다.
@@ -25,7 +27,7 @@ Actor* spawnPrimitive(EngineContext& ctx, const char* name,
                       MaterialHandle* material) {
     AssetPair pair = ctx.assets.acquirePrimitive(desc);
     if (!pair.mesh) {
-        std::cerr << "[Scene] '" << name << "' 생성 실패. 액터를 만들지 않습니다.\n";
+        HLOG(LogGame, Error) << "'" << name << "' 생성 실패. 액터를 만들지 않습니다.";
         return nullptr;
     }
 
@@ -113,6 +115,6 @@ void DefaultGameModule::onStart(EngineContext& ctx) {
         mc->vertCount  = pair.vertCount;
         mc->triCount   = pair.triCount;
     } catch (const std::exception& ex) {
-        std::cerr << "[DefaultGameModule] Mesh load failed: " << ex.what() << "\n";
+        HLOG(LogGame, Error) << "Mesh load failed: " << ex.what();
     }
 }
