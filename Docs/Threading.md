@@ -15,14 +15,14 @@
 | 스레드 | 생성 주체 | 역할 | 엔진 데이터 접근 |
 |---|---|---|---|
 | 메인 | OS | 입력→틱→에디터→렌더 전체 | 전부 (소유자) |
-| 셰이더 워처 | HotReloader | .spv 변경 감시 | `pending_` atomic + std::cout만 |
+| 셰이더 워처 | HotReloader | .spv 변경 감시 | `pending_` atomic + 로그만 |
 | Jolt 워커 ×N | PhysicsSystem (JobSystemThreadPool) | 물리 스텝 내부 병렬화 | 없음 (Update() 내부에서 join) |
 | 오디오 | miniaudio (ma_engine) | 디바이스 콜백 믹싱 | 없음 (ma_* API 내부 동기화) |
 
 ## 규칙
 
 1. **엔진 데이터는 메인 스레드 전용.**
-   World / Actor / Component / HSlate 위젯 / EditorContext(로그 제외) /
+   World / Actor / Component / HSlate 위젯 / EditorContext /
    Renderer의 모든 Vulkan 객체는 메인 스레드에서만 읽고 쓴다.
 
 2. **서브시스템 스레드는 자기 내부 데이터만 만진다.**
@@ -30,13 +30,16 @@
    콜백으로 받지 않는다. 콜백이 필요하면 큐에 적재하고 메인 틱에서 소비한다.
 
 3. **스레드 교차 통신은 두 가지 방법만 허용.**
-   - `std::atomic` 플래그/카운터 (예: `HotReloader::pending_`, `EditorContext::logDirty`)
-   - 뮤텍스로 보호된 큐/버퍼 (예: `EditorContext` 로그 deque)
+   - `std::atomic` 플래그/카운터 (예: `HotReloader::pending_`, `HLog::latestSeq`)
+   - 뮤텍스로 보호된 큐/버퍼 (예: `HLog` 링 버퍼)
    필드 옆 주석에 어느 뮤텍스로 보호되는지 명시한다.
 
-4. **std::cout / std::cerr는 어느 스레드에서나 안전.**
-   LogStreamBuf가 내부 락으로 직렬화한다 (2026-06-11 수정). 단, 이것이
-   "백그라운드 스레드에서 UI를 만져도 된다"는 뜻이 아니다 — 로그만 예외다.
+4. **로그(`HLOG`, std::cout / std::cerr)는 어느 스레드에서나 안전.**
+   `core/HLog` 의 제출 경로가 뮤텍스 하나로 직렬화하고, std::cout / std::cerr 는
+   `main()` 이 설치한 어댑터가 같은 경로로 넘긴다 (2026-09-17 코어로 이관). 기록 수준은
+   atomic 이라 어디서나 읽되, 바꾸는 쓰기는 메인 스레드(에디터 UI)만 한다.
+   출력처(싱크) 안이나 레지스트리 락을 쥔 채로 로그를 남기지 않는다(같은 뮤텍스 재진입).
+   단, 이것이 "백그라운드 스레드에서 UI를 만져도 된다"는 뜻이 아니다. 로그만 예외다.
 
 5. **블로킹 금지 구역.** 메인 루프(틱/렌더 경로)에서 파일 I/O·네트워크·join을
    새로 추가하지 않는다. 기존 위반(glTF 동기 로드)은 비동기 에셋 로딩 도입 시 해소.

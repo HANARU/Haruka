@@ -3,6 +3,7 @@
 #include <chrono>
 #include "../core/Transform.hpp"
 #include "EditorContext.hpp"
+#include "../core/HLog.hpp"
 #include "EditorGizmo.hpp"
 #include "HCommandStack.hpp"
 #include "HotReloader.hpp"
@@ -74,11 +75,8 @@ private:
     // 중 한쪽으로 라우팅합니다. 여기서는 인자로 받은 값만 씁니다.
     void tickEditorCamera(float dt, float scroll);
 
-    // Log capture
-    LogStreamBuf*   coutBuf_  = nullptr;
-    LogStreamBuf*   cerrBuf_  = nullptr;
-    std::streambuf* origCout_ = nullptr;
-    std::streambuf* origCerr_ = nullptr;
+    // 로그: 코어 링 버퍼에서 마지막으로 본 seq. 달라진 프레임에만 Output Log·상태바를 갱신합니다.
+    uint64_t        logSeenSeq_ = 0;
 
     // Dynamic panel refs
     std::shared_ptr<SHorizontalBox> toolbarBox_;
@@ -186,6 +184,8 @@ private:
     int                             statusNarrow_  = 0;   // 0=전체, 1=축약, 2=숨김
     glm::ivec2                      statusSizeSig_ {0, 0};
     void        updateStatusMessage();      // 로그 한 줄을 잘라 캐시(프레임마다 호출 금지)
+    static glm::vec4   logColor(ELogVerbosity v);
+    static std::string formatLogLine(const HLogRecord& rec);   // 접두어 + ASCII 치환
     std::string statusFocusText() const;    // 짧은 리터럴만 반환
 
     // 트리 변형: 드롭 시 소스에서 빼고 타깃에 붙임(탭화 또는 분할). 빈 리프 정리.

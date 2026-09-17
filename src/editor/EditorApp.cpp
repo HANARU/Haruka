@@ -121,13 +121,6 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
     editorCamActor_->setLocalPosition({ 0.f, 0.3f, 2.5f });
     editorCam_ = editorCamActor_->addComponent<CameraComponent>();
 
-    origCout_ = std::cout.rdbuf();
-    origCerr_ = std::cerr.rdbuf();
-    coutBuf_  = new LogStreamBuf(&ctx_, origCout_);
-    cerrBuf_  = new LogStreamBuf(&ctx_, origCerr_);
-    std::cout.rdbuf(coutBuf_);
-    std::cerr.rdbuf(cerrBuf_);
-
     auto beginCmd = [&renderer]() { return renderer.beginOneTimeCmd(); };
     auto endCmd   = [&renderer](VkCommandBuffer cmd) { renderer.endOneTimeCmd(cmd); };
 
@@ -151,10 +144,6 @@ void EditorApp::cleanup() {
     if (ctx_.world) ctx_.world->onActorDestroyed.remove(actorDestroyedSub_);
     hotReloader_.stop();
     slateRenderer_.cleanup();
-    std::cout.rdbuf(origCout_); origCout_ = nullptr;
-    std::cerr.rdbuf(origCerr_); origCerr_ = nullptr;
-    delete coutBuf_; coutBuf_ = nullptr;
-    delete cerrBuf_; cerrBuf_ = nullptr;
 }
 
 // ── tick ───────────────────────────────────────────────────────────────────────
@@ -336,10 +325,14 @@ void EditorApp::tick(float dt) {
         if (vpToolbarDirty_) { vpToolbarDirty_ = false; rebuildViewportToolbar(); }
     }
 
-    // exchange로 플래그를 먼저 내려야 리빌드 중 도착한 로그가 다음 프레임에 잡힌다
+    // 새 로그는 seq 비교로 감지합니다. 읽은 seq 를 먼저 기록하므로, 리빌드 도중 다른
+    // 스레드가 남긴 로그는 다음 프레임에 잡힙니다. 하단 패널은 Output Log 탭일 때만
+    // 다시 만듭니다. 예전에는 Content Browser 탭에서도 로그마다 리빌드되어, 그 사이에
+    // 누른 버튼의 프레스 상태가 사라졌습니다(DEF-70).
     bool statusDirty = false;
-    if (ctx_.logDirty.exchange(false, std::memory_order_acquire)) {
-        rebuildBottomPanel();
+    if (const uint64_t logSeq = HLog::latestSeq(); logSeq != logSeenSeq_) {
+        logSeenSeq_ = logSeq;
+        if (bottomTab_ == 1) rebuildBottomPanel();
         statusDirty = true;
     }
     // 상태바 폭이 바뀌면 잘라 둔 문자열과 축약 단계를 다시 잡습니다(4px 양자화).
@@ -1695,27 +1688,48 @@ bool EditorApp::focusWidgetContains(float x, float y) const {
     }
 }
 
+// 로그 한 줄의 표시 색. 심각도 필드로 정합니다. 예전에는 문자열에 ERROR/WARN 이 들어
+// 있는지로 판정해, 그 단어를 쓰는 로그가 거의 없어 오류가 전부 회색이었습니다(DEF-72).
+glm::vec4 EditorApp::logColor(ELogVerbosity v) {
+    switch (v) {
+        case ELogVerbosity::Error:   return { 0.90f, 0.35f, 0.35f, 1.f };
+        case ELogVerbosity::Warning: return { 0.90f, 0.75f, 0.30f, 1.f };
+        case ELogVerbosity::Verbose: return { 0.32f, 0.32f, 0.35f, 1.f };
+        default:                     return kTextDim;
+    }
+}
+
+// 콘솔과 같은 "[Category] Warning: 본문" 형식. 폰트가 ASCII 전용이라 그릴 수 없는 바이트는
+// 물음표로 바꿉니다. 레코드의 원문(UTF-8)은 그대로 남으므로 콘솔에는 영향이 없습니다.
+std::string EditorApp::formatLogLine(const HLogRecord& rec) {
+    const HLogCategoryState* cat = HLog::categoryAt(rec.category);
+    std::string line;
+    line.reserve(rec.text.size() + 24);
+    line += '[';
+    line += cat ? cat->name : std::string("?");
+    line += "] ";
+    if (rec.verbosity == ELogVerbosity::Error)   line += "Error: ";
+    if (rec.verbosity == ELogVerbosity::Warning) line += "Warning: ";
+    line += rec.text;
+    for (char& c : line)
+        if ((unsigned char)c < 32 || (unsigned char)c > 126) c = '?';
+    return line;
+}
+
 // 상태바 왼쪽 칸. 마지막 로그 한 줄을 상태바 폭에 맞춰 잘라 캐시합니다. 자르는 비용이
 // 폰트 실측 반복이라 싸지 않으므로, Attr 안에서 부르지 않고 로그가 바뀌거나 폭이 달라진
 // 프레임에만 호출합니다.
 void EditorApp::updateStatusMessage() {
-    std::string line = ctx_.lastLogLine();
-    if (line.empty()) {
+    // Verbose 는 건너뜁니다. 키 입력 같은 소음을 켜 두어도 상태바가 덮이지 않게 합니다.
+    // Output Log 의 표시 필터는 따르지 않습니다(숨긴 카테고리의 오류도 여기에는 떠야 합니다).
+    HLogRecord rec;
+    if (!HLog::latestAtMost(ELogVerbosity::Log, rec)) {
         statusMsg_      = "Ready";
         statusMsgColor_ = kTextDim;
         return;
     }
-    // Output Log 와 같은 분류 규칙.
-    if (line.find("ERROR") != std::string::npos || line.find("FATAL") != std::string::npos)
-        statusMsgColor_ = { 0.90f, 0.35f, 0.35f, 1.f };
-    else if (line.find("WARN") != std::string::npos)
-        statusMsgColor_ = { 0.90f, 0.75f, 0.30f, 1.f };
-    else
-        statusMsgColor_ = kTextDim;
-
-    // 폰트가 ASCII 전용이라 그릴 수 없는 바이트는 물음표로 바꿉니다(개행도 여기서 제거).
-    for (char& c : line)
-        if ((unsigned char)c < 32 || (unsigned char)c > 126) c = '?';
+    statusMsgColor_ = logColor(rec.verbosity);
+    const std::string line = formatLogLine(rec);
 
     float avail = 0.f;
     if (statusBarBox_) {
@@ -2399,20 +2413,17 @@ void EditorApp::rebuildBottomPanel() {
                 SVerticalBox::ESizeRule::Fixed, s(30.f));
         }
     } else if (bottomTab_ == 1) {
-        // Output Log — 워처 스레드가 동시에 push할 수 있으므로 스냅샷으로 순회
-        std::vector<std::string> logSnap = ctx_.snapshotLog();
+        // Output Log. 코어 링 버퍼에서 마지막 N개만 복사합니다(다른 스레드가 동시에 제출해도
+        // copySince 가 락 안에서 복사합니다). 표시 줄 수의 bottomH_ 의존은 DEF-61 로 남아 있습니다.
         const int kMaxDisplay = std::max(6, (int)((bottomH_ - 30.f) / 16.f) - 1);
-        int start = std::max(0, (int)logSnap.size() - kMaxDisplay);
-        for (int i = start; i < (int)logSnap.size(); ++i) {
-            const std::string& line = logSnap[i];
-            glm::vec4 col = kTextDim;
-            if (line.find("ERROR") != std::string::npos || line.find("FATAL") != std::string::npos)
-                col = {0.9f, 0.3f, 0.3f, 1.f};
-            else if (line.find("WARN") != std::string::npos)
-                col = {0.9f, 0.8f, 0.2f, 1.f};
+        const uint64_t latest = HLog::latestSeq();
+        std::vector<HLogRecord> recs;
+        HLog::copySince(latest > (uint64_t)kMaxDisplay ? latest - (uint64_t)kMaxDisplay : 0, recs);
+        for (const HLogRecord& rec : recs) {
             bottomContent_->addSlot(
                 HNew(SBorder)->background({0,0,0,0})->padding({s(4.f), 0.f})
-                    ->content(HNew(STextBlock)->text(line)->fontSize(s(12.f))->color(col)
+                    ->content(HNew(STextBlock)->text(formatLogLine(rec))->fontSize(s(12.f))
+                        ->color(logColor(rec.verbosity))
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
                 SVerticalBox::ESizeRule::Fixed, s(16.f));
         }

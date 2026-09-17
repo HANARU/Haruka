@@ -1,6 +1,6 @@
 # 로그 카테고리 설계 (Log Category Design)
 
-> **상태: 설계 확정 (2026-09-17).** §11 의 결정 5건을 권장안대로 확정했습니다. L0 완료, L1 부터 구현합니다.
+> **상태: 구현 중 (2026-09-17).** §11 의 결정 5건을 권장안대로 확정했습니다. L0·L1 완료.
 >
 > 관련 문서: [Editor_Layout_Design.md](Editor_Layout_Design.md) §7.11(상태바),
 > [Threading.md](Threading.md) 규칙 4(로그 스레드 안전성),
@@ -399,7 +399,7 @@ struct HLogRecord {
 | 단계 | 내용 | 검증 |
 |---|---|---|
 | **L0** (완료 2026-09-17) | 키 입력 로그를 `GlfwWindow::keyCallback` 의 스위치로 비활성화 | 빌드 경고 0 |
-| **L1 코어** | `HLog.hpp/.cpp`(카테고리·레지스트리·링·싱크), 어댑터를 `main` 으로 이동, `EditorContext` 로그 제거 후 `HLog` 소비로 교체, Output Log·상태바의 색을 심각도로 판정, 비활성 탭에서는 리빌드하지 않음. 테스트 `HarukaLogTest` 신설 | 부팅 로그가 Output Log 에 보이는지, 기존 로그가 어댑터를 거쳐 빠짐없이 들어오는지 |
+| **L1 코어** (완료 2026-09-17) | `HLog.hpp/.cpp`(카테고리·레지스트리·링·싱크), 어댑터를 `main` 으로 이동, `EditorContext` 로그 제거 후 `HLog` 소비로 교체, Output Log·상태바의 색을 심각도로 판정, 비활성 탭에서는 리빌드하지 않음. 테스트 `HarukaLogTest` 신설 | 부팅 로그가 Output Log 에 보이는지, 기존 로그가 어댑터를 거쳐 빠짐없이 들어오는지 |
 | **L2 이관** | 71개 호출부를 `HLOG` 로 이관(§6 통합표), 키 입력 스위치를 `LogInput` Verbose 로 교체, Vulkan 콜백 심각도 대응 | `std::cout`/`std::cerr` 검색 결과가 어댑터 외 0건 |
 | **L3 Output Log** | 필터 행, Categories 팝업(표시·기록), 행 풀, 검색, Clear, `STextBlock` 색 `Attr`, `LogSearch` 포커스 | 로그 폭주 중 Content Browser 클릭, 패널 높이 변경 시 줄 수 |
 | **L4 보존·스크롤** | 설정 파일 2종, 꼬리 추종 스크롤, 파일 싱크 | 재시작 후 설정 복원 |

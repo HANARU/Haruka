@@ -148,6 +148,7 @@ set(CORE_SOURCES
     src/core/World.cpp
     src/core/Actor.cpp
     src/core/Component.cpp
+    src/core/HLog.cpp
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp
     src/components/StaticMeshComponent.cpp
@@ -180,7 +181,6 @@ set(CORE_SOURCES
     src/ui/slate/HFontAtlas.cpp
     src/ui/slate/HSlateRenderer.cpp
     src/editor/EditorApp.cpp
-    src/editor/EditorContext.cpp
     src/editor/EditorGizmo.cpp
     src/editor/HotReloader.cpp
     src/game/DefaultGameModule.cpp
@@ -297,8 +297,19 @@ if(NOT ANDROID)
         set_target_properties(HarukaCommandTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 로그 카테고리 테스트 ------------------------------------------------
+    # HLog.cpp 하나만 링크합니다. 꺼진 로그의 인자 미평가, 같은 이름의 상태 공유, 링 버퍼
+    # seq 연속성, 표준 출력 어댑터의 태그 해석, 다중 스레드 제출을 검산합니다.
+    add_executable(HarukaLogTest tests/LogTest.cpp src/core/HLog.cpp)
+    target_include_directories(HarukaLogTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaLogTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaLogTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     enable_testing()
     add_test(NAME geometry_conventions COMMAND HarukaGeometryTest)
     add_test(NAME actor_lifecycle      COMMAND HarukaActorTest)
     add_test(NAME command_stack_purge  COMMAND HarukaCommandTest)
+    add_test(NAME log_category         COMMAND HarukaLogTest)
 endif()

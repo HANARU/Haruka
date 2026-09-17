@@ -1,4 +1,5 @@
 #include "core/Engine.hpp"
+#include "core/HLog.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -45,6 +46,12 @@ int main() {
     redirectStdioIfHeadless();   // setvbuf 보다 먼저. 새 스트림에 적용되어야 한다.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
+
+    // 표준 출력 가로채기는 엔진 부팅보다 먼저 설치합니다. 예전에는 EditorApp::init 이
+    // 설치해서, 그 전에 나온 부팅 로그(GPU·힙·오디오·물리 초기화)가 Output Log 에 없었습니다
+    // (DEF-71). 해제는 Engine 이 소멸해 다른 스레드가 모두 멈춘 뒤, 어느 경로로 나가든 일어납니다.
+    HLog::installStdStreamCapture();
+    struct CaptureGuard { ~CaptureGuard() { HLog::uninstallStdStreamCapture(); } } captureGuard;
 
     try {
         Engine engine;   // 부팅(생성자) → 실행 → 소멸자에서 역순 teardown.
