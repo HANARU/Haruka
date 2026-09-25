@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <deque>
 #include <memory>
+#include <set>
 #include <vector>
 #include <string>
 #include <unordered_set>
@@ -121,6 +122,25 @@ private:
     void refreshLogView();          // 필터를 적용해 logViewRows_ 문자열을 갱신(위젯 생성 없음)
     void rebuildLogPopup();
     bool logRecordVisible(const HLogRecord& r, const std::string& needleLower) const;
+
+    // ── Output Log 설정 보존·스크롤 (로그 카테고리 L4) ────────────────────────
+    // 설정은 바뀌는 순간 저장합니다. 표시 필터는 Config/editor_log.txt, 기록 수준은
+    // HLog::kLevelOverridesPath 입니다. 숨긴 카테고리는 인덱스가 아니라 이름으로 기억합니다.
+    // 인덱스는 등록 순서라 실행마다 달라지고, 이번 실행에서 아직 등록되지 않은 카테고리의
+    // 설정도 파일에서 지우면 안 되기 때문입니다(설계 문서 §9).
+    std::set<std::string> logHiddenNames_;
+    void loadLogFilter();
+    void saveLogFilter() const;
+    void saveLogLevels() const;
+    void setLogCategoryHidden(uint16_t index, bool hidden);   // 인덱스 배열과 이름 집합을 함께 갱신
+    // 스크롤 위치는 "화면 맨 아래 행의 seq" 로 기억합니다(0 = 꼬리 추종). 줄 수로 기억하면
+    // 고정 중에 새 로그가 들어오거나 필터가 바뀔 때마다 보던 자리가 밀립니다.
+    uint64_t    logAnchorSeq_ = 0;
+    uint64_t    logPinSeq_    = 0;   // 고정을 시작한 순간의 최신 seq. 이후 들어온 줄이 "new lines"
+    int         logScrollReq_ = 0;   // 다음 갱신에 적용할 휠 이동(보이는 행 수, 양수 = 위)
+    std::string logJumpText_;        // 꼬리로 돌아가는 버튼의 라벨 캐시(고정 중에만 표시)
+    // 하단 패널이 자기 리프에서 활성 탭인지. outlinerVisible_ 과 같은 이유로 휠 라우팅에 필요합니다.
+    bool        bottomVisible_ = true;
 
     // Dynamic panel refs
     std::shared_ptr<SHorizontalBox> toolbarBox_;

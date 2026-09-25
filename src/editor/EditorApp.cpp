@@ -130,6 +130,7 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
                         renderer.getSwapFormat(), beginCmd, endCmd);
 
     scanModelFiles();
+    loadLogFilter();   // 첫 syncLogCategories 보다 먼저. 숨긴 카테고리는 등록되는 순간 적용됩니다
     buildWidgetTree();
     rebuildOutliner();
     rebuildDetails();
@@ -210,6 +211,19 @@ void EditorApp::tick(float dt) {
             outlinerScrollTop_ = std::max(0, outlinerScrollTop_ + (scroll > 0.f ? -3 : 3));
             outlinerDirty_     = true;
             scroll             = 0.f;
+        }
+    }
+    // Output Log 도 같은 우회로 스크롤합니다(DEF-57). 로그 행은 위젯을 다시 만들지 않고
+    // 문자열만 바꾸므로, 아웃라이너와 달리 좌버튼을 누른 채 굴려도 클릭이 엇갈리지 않습니다.
+    // 이동량은 여기서 쌓기만 하고, 필터를 적용한 실제 이동은 refreshLogView 가 합니다.
+    if (scroll != 0.f && logRowsBox_ && bottomVisible_ && bottomTab_ == 1 && ctx_.window &&
+        !ctx_.window->isCameraModeActive()) {
+        float mx, my;
+        ctx_.window->getMousePosition(mx, my);
+        if (logRowsBox_->cachedGeometry().contains(glm::vec2{mx, my})) {
+            logScrollReq_ += (scroll > 0.f) ? 3 : -3;
+            logViewDirty_  = true;
+            scroll         = 0.f;
         }
     }
     // RMB 비행 중 휠은 돌리가 아니라 이동 속도 조절입니다. 카메라 모드를 놓으면
@@ -623,6 +637,7 @@ void EditorApp::rebuildDockArea() {
     viewportVisible_ = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Viewport");
     // 아웃라이너도 같은 이유로 필요합니다(휠 라우팅이 이 패널의 geometry 를 봅니다).
     outlinerVisible_ = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Outliner");
+    bottomVisible_   = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Bottom");   // Output Log 휠
     if (dockHost_ && dockRoot_)
         dockHost_->content(buildDockWidget(dockRoot_.get()));
 }
@@ -2365,14 +2380,70 @@ void EditorApp::pullLogRecords() {
 }
 
 // 카테고리 인덱스는 등록 순서라 한 번 정해지면 바뀌지 않습니다. 늘어난 만큼만 붙입니다.
+// 숨김 여부는 저장된 이름 집합에서 가져오므로, 지난 실행에서 숨긴 카테고리는 이번 실행에서
+// 처음 등록되는 순간부터 숨겨집니다.
 void EditorApp::syncLogCategories() {
     const std::vector<HLogCategoryState*> cats = HLog::categories();
     if (cats.size() == logCatNames_.size()) return;
-    for (size_t i = logCatNames_.size(); i < cats.size(); ++i)
+    for (size_t i = logCatNames_.size(); i < cats.size(); ++i) {
         logCatNames_.push_back(toDisplayAscii(cats[i]->name));
+        logCatHidden_.push_back(logHiddenNames_.count(cats[i]->name) ? 1 : 0);
+    }
     logCatCounts_.resize(cats.size(), 0);
-    logCatHidden_.resize(cats.size(), 0);
     if (logPopupOpen_) logPopupDirty_ = true;
+}
+
+void EditorApp::setLogCategoryHidden(uint16_t index, bool hidden) {
+    if (index >= logCatHidden_.size()) return;
+    logCatHidden_[index] = hidden ? 1 : 0;
+    if (const HLogCategoryState* st = HLog::categoryAt(index)) {
+        if (hidden) logHiddenNames_.insert(st->name);
+        else        logHiddenNames_.erase(st->name);
+    }
+    logViewDirty_ = true;
+}
+
+// ── Output Log 설정 보존 (로그 카테고리 L4) ────────────────────────────────────
+// 표시 필터 파일. 한 줄에 하나씩 "severity <수준> on|off" 와 "hide <카테고리>" 입니다.
+// 모르는 줄은 건너뛰므로, 항목이 늘어도 예전 파일을 그대로 읽을 수 있습니다.
+static constexpr const char* kLogFilterPath = "Config/editor_log.txt";
+static constexpr ELogVerbosity kLogSeverities[] = { ELogVerbosity::Error, ELogVerbosity::Warning,
+                                                    ELogVerbosity::Log,   ELogVerbosity::Verbose };
+
+void EditorApp::loadLogFilter() {
+    std::ifstream f(kLogFilterPath);
+    if (!f) return;   // 첫 실행: 기본값(전부 표시)을 그대로 씁니다
+    std::string line;
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream ls(line);
+        std::string key, a, b;
+        ls >> key >> a >> b;
+        ELogVerbosity v = ELogVerbosity::Off;
+        if (key == "severity" && parseLogVerbosity(a, v) && v != ELogVerbosity::Off &&
+            (b == "on" || b == "off"))
+            logShowVerb_[(int)v] = (b == "on");
+        else if (key == "hide" && !a.empty())
+            logHiddenNames_.insert(a);
+    }
+}
+
+void EditorApp::saveLogFilter() const {
+    std::error_code ec;
+    fs::create_directories("Config", ec);   // 없으면 생성(실패해도 아래 open 이 처리)
+    std::ofstream f(kLogFilterPath, std::ios::trunc);
+    if (!f) { HLOG(LogEditor, Warning) << "Output Log filter save failed (" << kLogFilterPath << ")"; return; }
+    f << "# Haruka Output Log display filter v1. Search text is not saved.\n";
+    for (ELogVerbosity v : kLogSeverities)
+        f << "severity " << logVerbosityName(v) << (logShowVerb_[(int)v] ? " on\n" : " off\n");
+    // 이번 실행에서 아직 등록되지 않은 이름도 그대로 씁니다(지우면 설정이 사라집니다).
+    for (const std::string& name : logHiddenNames_) f << "hide " << name << '\n';
+}
+
+void EditorApp::saveLogLevels() const {
+    if (!HLog::saveLevelOverrides(HLog::kLevelOverridesPath))
+        HLOG(LogEditor, Warning) << "log level save failed (" << HLog::kLevelOverridesPath << ")";
 }
 
 bool EditorApp::logRecordVisible(const HLogRecord& r, const std::string& needleLower) const {
@@ -2435,20 +2506,64 @@ void EditorApp::rebuildLogRows() {
     logViewDirty_ = true;
 }
 
-// 필터를 적용해 화면에 보일 마지막 N개를 고르고 행 문자열을 만듭니다. 위젯은 만들지 않습니다.
+// 필터를 적용해 화면에 보일 N개를 고르고 행 문자열을 만듭니다. 위젯은 만들지 않습니다.
+//
+// 스크롤 위치는 화면 맨 아래 행의 seq(logAnchorSeq_) 하나입니다. 0 이면 꼬리를 따라갑니다.
+// 줄 수가 아니라 seq 로 기억하므로, 고정 중에 새 로그가 들어오거나 필터가 바뀌어도 보던
+// 자리가 밀리지 않습니다. 사본은 seq 오름차순이라 앵커 위치를 이분 탐색으로 찾습니다.
 void EditorApp::refreshLogView() {
     pullLogRecords();
 
     std::string needle = logSearch_;
     for (char& c : needle) c = (char)std::tolower((unsigned char)c);
+    auto shown      = [&](size_t i) { return logRecordVisible(logMirror_[i], needle); };
+    auto firstAfter = [&](uint64_t seq) {   // seq 보다 뒤인 첫 레코드의 위치
+        return (size_t)(std::upper_bound(logMirror_.begin(), logMirror_.end(), seq,
+                                         [](uint64_t v, const HLogRecord& r) { return v < r.seq; })
+                        - logMirror_.begin());
+    };
 
-    std::vector<const HLogRecord*> picked;
-    picked.reserve((size_t)std::max(0, logRowCap_));
-    for (auto it = logMirror_.rbegin(); it != logMirror_.rend() && (int)picked.size() < logRowCap_; ++it) {
-        if (it->seq <= logClearedSeq_) break;
-        if (logRecordVisible(*it, needle)) picked.push_back(&*it);
-    }
+    const size_t n   = logMirror_.size();
+    const size_t lo  = firstAfter(logClearedSeq_);   // Clear 이전 레코드는 보이지 않습니다
+    const int    cap = std::max(1, logRowCap_);
+
+    // 화면 맨 아래 행 바로 다음 위치. 꼬리 추종이면 사본의 끝입니다. 앵커가 사본에서 밀려났으면
+    // 가장 오래된 자리로 붙습니다.
+    size_t end = logAnchorSeq_ ? std::max(lo, firstAfter(logAnchorSeq_)) : n;
+
+    // 휠 이동은 보이는 행 단위로 셉니다. 필터에 걸러진 레코드는 건너뜁니다.
+    for (int k = logScrollReq_; k > 0 && end > lo; ) { --end; if (shown(end)) --k; }     // 위(과거)로
+    for (int k = -logScrollReq_; k > 0 && end < n; ++end) if (shown(end)) --k;         // 아래(최신)로
+    logScrollReq_ = 0;
+
+    // end 에서 위로 cap 개를 모읍니다. 맨 위에 닿아 모자라면 아래쪽에서 채워, 맨 위를 넘겨
+    // 올라가 빈 줄이 생기지 않게 합니다.
+    std::vector<size_t> picked;
+    picked.reserve((size_t)cap);
+    for (size_t i = end; i > lo && (int)picked.size() < cap; ) { --i; if (shown(i)) picked.push_back(i); }
     std::reverse(picked.begin(), picked.end());   // 위가 오래된 것, 아래가 최신
+    for (; end < n && (int)picked.size() < cap; ++end) if (shown(end)) picked.push_back(end);
+
+    // 화면 아래에 보이는 레코드가 남았으면 위치를 고정하고, 없으면 꼬리에 닿은 것이므로 추종으로
+    // 돌아갑니다. "new lines" 는 고정을 시작한 뒤에 들어온 줄만 셉니다(원래 아래에 있던 줄 제외).
+    if (!logAnchorSeq_) logPinSeq_ = logMirrorSeq_;
+    size_t below = 0, fresh = 0;
+    for (size_t i = n; i > end; ) {
+        --i;
+        if (!shown(i)) continue;
+        ++below;
+        if (logMirror_[i].seq > logPinSeq_) ++fresh;
+    }
+    if (below == 0 || picked.empty()) {
+        logAnchorSeq_ = 0;
+        logPinSeq_    = 0;
+        logJumpText_.clear();
+    } else {
+        logAnchorSeq_ = logMirror_[picked.back()].seq;
+        logJumpText_  = fresh == 0 ? std::string("v Latest")
+                      : fresh == 1 ? std::string("v 1 new line")
+                                   : "v " + std::to_string(fresh) + " new lines";
+    }
 
     // 폰트가 ASCII 전용이고 클리핑이 없어, 폭을 넘는 문자열은 이웃 패널로 넘칩니다.
     // 카테고리와 본문 모두 칸 폭에 맞춰 자릅니다.
@@ -2457,7 +2572,7 @@ void EditorApp::refreshLogView() {
 
     logViewRows_.resize(picked.size());
     for (size_t i = 0; i < picked.size(); ++i) {
-        const HLogRecord& r   = *picked[i];
+        const HLogRecord& r   = logMirror_[picked[i]];
         LogViewRow&       row = logViewRows_[i];
 
         char tb[32];
@@ -2514,19 +2629,23 @@ void EditorApp::rebuildLogPopup() {
     auto list = HNew(VR);
     list->addSlot(HNew(HR)
         ->addSlot(spacer(), HR::ESizeRule::Fixed, s(6.f))
+        // All 은 아직 등록되지 않아 목록에 없는 카테고리의 숨김까지 풉니다. 남겨 두면 "전부 보기"
+        // 를 누른 뒤에 처음 쓰이는 카테고리가 숨은 채로 나타납니다.
         ->addSlot(textButton("All", 11.f, kTextBody, HPadding{8.f, 2.f}, btnN, btnH, [this] {
                       std::fill(logCatHidden_.begin(), logCatHidden_.end(), (char)0);
+                      logHiddenNames_.clear();
                       logViewDirty_ = true;
+                      saveLogFilter();
                   }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, s(4.f) })
         ->addSlot(spacer(), HR::ESizeRule::Fixed, s(4.f))
         ->addSlot(textButton("None", 11.f, kTextBody, HPadding{8.f, 2.f}, btnN, btnH, [this] {
-                      std::fill(logCatHidden_.begin(), logCatHidden_.end(), (char)1);
-                      logViewDirty_ = true;
+                      for (uint16_t i = 0; i < (uint16_t)logCatHidden_.size(); ++i) setLogCategoryHidden(i, true);
+                      saveLogFilter();
                   }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, s(4.f) })
         ->addSlot(spacer(), HR::ESizeRule::Fill)
-        ->addSlot(textButton("Reset levels", 11.f, kTextBody, HPadding{8.f, 2.f}, btnN, btnH, [] {
-                      for (HLogCategoryState* st : HLog::categories())
-                          st->level.store((uint8_t)st->defaultLevel, std::memory_order_relaxed);
+        ->addSlot(textButton("Reset levels", 11.f, kTextBody, HPadding{8.f, 2.f}, btnN, btnH, [this] {
+                      HLog::resetLevels();   // 적용 대기 중인 항목도 버립니다
+                      saveLogLevels();
                   }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, s(4.f) })
         ->addSlot(spacer(), HR::ESizeRule::Fixed, s(6.f)),
         VR::ESizeRule::Fixed, s(28.f));
@@ -2548,8 +2667,8 @@ void EditorApp::rebuildLogPopup() {
                           ->isActive([this, idx] { return !(idx < logCatHidden_.size() && logCatHidden_[idx]); })
                           ->onClick([this, idx] {
                               if (idx >= logCatHidden_.size()) return;
-                              logCatHidden_[idx] = !logCatHidden_[idx];
-                              logViewDirty_ = true;
+                              setLogCategoryHidden(idx, !logCatHidden_[idx]);
+                              saveLogFilter();
                           })
                           ->normalColor(btnN)->hoveredColor(btnH)->activeColor({ 0.20f, 0.22f, 0.27f, 1.f })
                           ->padding(HPadding{ s(6.f), s(1.f) })
@@ -2577,9 +2696,10 @@ void EditorApp::rebuildLogPopup() {
             ->addSlot(HNew(SButton)
                           ->normalColor(btnN)->hoveredColor(btnH)->pressedColor({ 0.12f, 0.12f, 0.15f, 1.f })
                           ->padding(HPadding{ s(6.f), s(1.f) })->hAlign(EHAlign::Left)
-                          ->onClick([st] {
+                          ->onClick([this, st] {
                               const uint8_t next = (uint8_t)((st->level.load(std::memory_order_relaxed) + 1) % 5);
                               st->level.store(next, std::memory_order_relaxed);
+                              saveLogLevels();
                           })
                           ->content(HNew(STextBlock)
                               ->text(AttrStr([st]() -> std::string { return logVerbosityName(st->currentLevel()); }))
@@ -2788,7 +2908,11 @@ void EditorApp::rebuildBottomPanel() {
             if (v == ELogVerbosity::Verbose) textCol = { 0.55f, 0.55f, 0.60f, 1.f };
             return HNew(SToggleButton)
                 ->isActive([this, vi] { return logShowVerb_[vi]; })
-                ->onClick([this, vi] { logShowVerb_[vi] = !logShowVerb_[vi]; logViewDirty_ = true; })
+                ->onClick([this, vi] {
+                    logShowVerb_[vi] = !logShowVerb_[vi];
+                    logViewDirty_    = true;
+                    saveLogFilter();
+                })
                 ->normalColor(btnN)->hoveredColor(btnH)->activeColor({ 0.20f, 0.22f, 0.27f, 1.f })
                 ->padding(HPadding{ s(7.f), s(2.f) })
                 ->content(HNew(STextBlock)->text(label)->fontSize(s(11.f))->color(textCol)
@@ -2804,6 +2928,7 @@ void EditorApp::rebuildBottomPanel() {
                     for (bool& on : logShowVerb_) on = false;
                     logShowVerb_[(int)v] = true;
                     logViewDirty_ = true;
+                    saveLogFilter();
                 })
                 ->content(HNew(STextBlock)
                     ->text(AttrStr([this, errors]() -> std::string { return errors ? logErrText_ : logWarnText_; }))
@@ -2832,17 +2957,42 @@ void EditorApp::rebuildBottomPanel() {
                                      // 코어 링은 비우지 않습니다. 파일·상태바에는 영향이 없습니다.
                                      pullLogRecords();
                                      logClearedSeq_ = logMirrorSeq_;
+                                     logAnchorSeq_  = 0;   // 비운 뒤에는 새 로그를 따라갑니다
+                                     logScrollReq_  = 0;
                                      logViewDirty_  = true;
                                  }),
                       HR::ESizeRule::Auto, 0.f, vpad)
             ->addSlot(spacer(),      HR::ESizeRule::Fixed, s(4.f));
 
         logRowsBox_ = HNew(SVerticalBox);
+        // 스크롤을 고정한 동안만 보이는 "v N new lines" 버튼. 누르면 꼬리 추종으로 돌아갑니다.
+        // 위젯은 항상 두고 가시성만 Attr 로 바꿉니다. 고정 상태는 휠과 새 로그에 따라 수시로
+        // 바뀌는데, 그때마다 위젯을 다시 만들면 행 풀이 없앤 리빌드(DEF-70)가 되살아납니다.
+        auto jumpButton = HNew(SButton)
+            ->normalColor({ 0.10f, 0.30f, 0.50f, 1.f })->hoveredColor(kAccent)
+            ->pressedColor({ 0.06f, 0.22f, 0.38f, 1.f })
+            ->padding(HPadding{ s(8.f), s(2.f) })
+            ->onClick([this] {
+                logAnchorSeq_ = 0;
+                logScrollReq_ = 0;
+                logViewDirty_ = true;
+            })
+            ->content(HNew(STextBlock)
+                ->text(AttrStr([this]() -> std::string { return logJumpText_; }))
+                ->fontSize(s(11.f))->color(kTextHdr)
+                ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
+        jumpButton->visibility.bind([this] {
+            return logAnchorSeq_ != 0 ? EVisibility::Visible : EVisibility::Collapsed;
+        });
+        auto rowsArea = HNew(SOverlay);
+        rowsArea->addSlot(logRowsBox_);
+        rowsArea->addSlot(jumpButton, EHAlign::Right, EVAlign::Bottom, HPadding{ 0.f, 0.f, s(10.f), s(4.f) });
+
         bottomContent_->addSlot(HNew(SBorder)->background(kBgHeader)->content(filterRow),
                                 SVerticalBox::ESizeRule::Fixed, s(28.f));
         // 패딩은 슬롯이 아니라 감싼 SBorder 에 줍니다. Fill 슬롯의 패딩은 이중 계산됩니다(DEF-62).
         bottomContent_->addSlot(HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f })
-                                    ->padding(HPadding{ s(4.f), s(2.f) })->content(logRowsBox_),
+                                    ->padding(HPadding{ s(4.f), s(2.f) })->content(rowsArea),
                                 SVerticalBox::ESizeRule::Fill);
         rebuildLogRows();
     } else {

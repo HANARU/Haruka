@@ -31,6 +31,8 @@
 enum class ELogVerbosity : uint8_t { Off = 0, Error = 1, Warning = 2, Log = 3, Verbose = 4 };
 
 const char* logVerbosityName(ELogVerbosity v);
+// logVerbosityName 의 역. 대소문자를 구분하지 않습니다.
+bool        parseLogVerbosity(std::string_view name, ELogVerbosity& out);
 
 // 이름 하나당 하나씩 레지스트리가 소유합니다. 해제하지 않습니다(정적 소멸 중의 로그 대비).
 struct HLogCategoryState {
@@ -117,6 +119,26 @@ void installStdStreamCapture();
 void uninstallStdStreamCapture();
 // 어댑터가 한 줄을 처리하는 경로입니다. 테스트가 직접 호출합니다.
 void feedLegacyLine(std::string_view line, bool fromStderr);
+
+// UTF-8 파일 출력처. 실행마다 새로 쓰고, 줄마다 flush 합니다(크래시 직전 로그 보존).
+// 형식은 콘솔과 같되 앞에 경과 시간이 붙습니다. 상위 폴더가 없으면 만듭니다.
+bool openFileSink(const std::string& path);
+void closeFileSink();
+
+// ── 기록 수준 보존 ────────────────────────────────────────────────────────────
+// 부팅(main)이 읽고 에디터가 씁니다. 두 곳이 서로 다른 경로를 보면 설정이 조용히 사라지므로
+// 경로는 여기 한 곳에만 둡니다.
+inline constexpr const char* kLevelOverridesPath = "Config/log_levels.txt";
+// 파일 형식: 한 줄에 "카테고리 수준" (예: "Input Verbose"). '#' 줄은 주석입니다.
+// 아직 등록되지 않은 이름은 보관해 두었다가, 그 카테고리가 등록되는 순간에 적용합니다
+// (카테고리는 첫 사용 시점에 등록되므로 부팅 시점에는 대부분 아직 없습니다).
+bool loadLevelOverrides(const std::string& path);
+// 선언 기본값과 다른 수준만 씁니다. 이번 실행에서 한 번도 등록되지 않아 적용 대기 중인
+// 항목도 지우지 않고 그대로 보존합니다.
+bool saveLevelOverrides(const std::string& path);
+// 모든 카테고리를 선언 기본값으로 되돌리고, 적용 대기 중인 항목도 버립니다. 대기 항목을
+// 남기면 사용자가 되돌린 뒤에 그 카테고리가 처음 쓰이는 순간 예전 수준이 되살아납니다.
+void resetLevels();
 
 // HLOG 매크로의 임시 객체. 문장이 끝날 때 소멸자가 제출합니다.
 class Line {

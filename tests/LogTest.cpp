@@ -11,6 +11,9 @@
 #include "../src/core/HLog.hpp"
 
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -30,6 +33,8 @@ constinit HLogCategory LogTestB      { "TestShared", ELogVerbosity::Log };
 constinit HLogCategory LogTestLevels { "TestLevels", ELogVerbosity::Log };
 constinit HLogCategory LogTestRing   { "TestRing",   ELogVerbosity::Log };
 constinit HLogCategory LogTestThread { "TestThread", ELogVerbosity::Log };
+constinit HLogCategory LogTestLate   { "TestLate",   ELogVerbosity::Log };   // 설정 로드 뒤에 첫 사용
+constinit HLogCategory LogTestFile   { "TestFile",   ELogVerbosity::Log };
 
 HLogRecord lastRecord() {
     std::vector<HLogRecord> out;
@@ -209,6 +214,101 @@ void testThreads() {
     check(ordered, "스레드별 제출 순서가 보존됨");
 }
 
+std::string readAll(const std::filesystem::path& path) {
+    std::ifstream in(path);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+void testLevelPersistence() {
+    std::printf("\n[9] 기록 수준 보존 (설정 파일)\n");
+    ELogVerbosity v = ELogVerbosity::Off;
+    check(parseLogVerbosity("verbose", v) && v == ELogVerbosity::Verbose, "수준 이름은 대소문자 무시");
+    check(!parseLogVerbosity("Loud", v), "모르는 이름은 거부");
+
+    const auto dir = std::filesystem::temp_directory_path() / "HarukaLogTest";
+    std::filesystem::create_directories(dir);
+    const std::string inPath = (dir / "levels_in.txt").string();
+    {
+        std::ofstream f(inPath);
+        f << "# comment\n"
+          << "TestLevels Error\n"      // 이미 등록된 카테고리
+          << "TestLate Verbose\n"      // 아직 등록되지 않은 카테고리
+          << "NeverSeen Off\n"         // 이번 실행에서 끝내 등록되지 않을 카테고리
+          << "Broken Loud\n";          // 잘못된 수준은 무시
+    }
+    check(HLog::loadLevelOverrides(inPath), "설정 파일 읽기");
+    check(LogTestLevels.state()->currentLevel() == ELogVerbosity::Error, "등록된 카테고리에는 즉시 적용");
+    check(LogTestLate.isEnabled(ELogVerbosity::Verbose), "나중에 등록되는 카테고리에는 등록 순간 적용");
+
+    const std::string outPath = (dir / "levels_out.txt").string();
+    check(HLog::saveLevelOverrides(outPath), "설정 파일 쓰기");
+    const std::string saved = readAll(outPath);
+    check(saved.find("TestLevels Error") != std::string::npos, "기본값과 다른 수준을 기록");
+    check(saved.find("TestLate Verbose") != std::string::npos, "대기 중이던 뒤 등록된 항목도 기록");
+    check(saved.find("NeverSeen Off") != std::string::npos, "끝내 등록되지 않은 대기 항목을 보존");
+    check(saved.find("TestShared") == std::string::npos, "기본값인 카테고리는 쓰지 않음");
+    check(saved.find("Broken") == std::string::npos, "잘못된 수준 줄은 버림");
+
+    LogTestLevels.state()->level.store((uint8_t)ELogVerbosity::Log);
+}
+
+void testFileSink() {
+    std::printf("\n[10] 파일 출력처\n");
+    const auto dir  = std::filesystem::temp_directory_path() / "HarukaLogTest" / "sub";
+    std::filesystem::remove_all(dir);
+    const std::string path = (dir / "file_sink.log").string();
+    check(HLog::openFileSink(path), "상위 폴더를 만들고 파일을 엶");
+    HLOG(LogTestFile, Warning) << "file line one\nfile line two";
+    HLOG(LogTestFile, Verbose) << "suppressed";   // 기본 수준 Log 라 남지 않음
+    // 엔진이 도는 동안에도 편집기나 tail 로 로그를 읽을 수 있어야 합니다(독점으로 열면 실패).
+    {
+        std::ifstream probe(path);
+        std::string   first;
+        check(probe.is_open() && std::getline(probe, first) && first.find("file line one") != std::string::npos,
+              "열려 있는 동안에도 다른 곳에서 읽을 수 있고, 줄마다 flush 되어 내용이 보임");
+    }
+    HLog::closeFileSink();
+    HLOG(LogTestFile, Log) << "after close";       // 닫은 뒤에는 파일에 가지 않음
+
+    const std::string body = readAll(path);
+    check(body.find("[TestFile] Warning: file line one") != std::string::npos, "형식: [카테고리] 심각도: 본문");
+    check(body.find("[TestFile] Warning: file line two") != std::string::npos, "여러 줄은 줄마다 접두어");
+    check(body.find("suppressed") == std::string::npos, "기록 수준에서 꺼진 로그는 파일에도 없음");
+    check(body.find("after close") == std::string::npos, "닫은 뒤의 로그는 기록되지 않음");
+}
+
+void testResetLevels() {
+    std::printf("\n[11] 기록 수준 되돌리기 (Reset levels)\n");
+    const auto dir = std::filesystem::temp_directory_path() / "HarukaLogTest";
+    std::filesystem::create_directories(dir);
+    const std::string inPath = (dir / "levels_reset_in.txt").string();
+    {
+        std::ofstream f(inPath);
+        f << "TestLevels Verbose\n"
+          << "StillPending Error\n";   // 이번 실행에서 아직 등록되지 않은 카테고리
+    }
+    check(HLog::loadLevelOverrides(inPath), "설정 파일 읽기");
+    check(LogTestLevels.state()->currentLevel() == ELogVerbosity::Verbose, "되돌리기 전에는 설정값이 적용됨");
+
+    HLog::resetLevels();
+    check(LogTestLevels.state()->currentLevel() == ELogVerbosity::Log, "등록된 카테고리는 선언 기본값으로");
+    check(LogTestLate.state()->currentLevel() == ELogVerbosity::Log, "대기 항목으로 수준을 받았던 카테고리도 기본값으로");
+
+    const std::string outPath = (dir / "levels_reset_out.txt").string();
+    check(HLog::saveLevelOverrides(outPath), "설정 파일 쓰기");
+    const std::string saved = readAll(outPath);
+    check(saved.find("StillPending") == std::string::npos && saved.find("NeverSeen") == std::string::npos,
+          "적용 대기 중이던 항목도 버림");
+    check(saved.find("TestLevels") == std::string::npos && saved.find("LegacyTag") == std::string::npos,
+          "기본값과 다른 항목이 하나도 남지 않음");
+
+    // 대기 항목을 남겼다면, 되돌린 뒤에 처음 쓰이는 카테고리가 예전 수준으로 등록됩니다.
+    check(HLog::category("StillPending").state()->currentLevel() == ELogVerbosity::Log,
+          "되돌린 뒤 처음 등록되는 카테고리는 기본 수준");
+}
+
 } // namespace
 
 int main() {
@@ -223,6 +323,9 @@ int main() {
     testLatestAtMost();
     testLegacyAdapter();
     testThreads();
+    testLevelPersistence();
+    testFileSink();
+    testResetLevels();
 
     std::printf("\n%s (%d failed)\n", g_failed == 0 ? "ALL PASSED" : "FAILED", g_failed);
     return g_failed == 0 ? 0 : 1;

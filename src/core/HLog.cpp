@@ -1,13 +1,21 @@
 #include "HLog.hpp"
 
+#include <cctype>
 #include <chrono>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <streambuf>
 #include <unordered_map>
 
 #ifdef __ANDROID__
 #include <android/log.h>
+#endif
+#ifdef _MSC_VER
+#include <share.h>   // _SH_DENYWR
 #endif
 
 // 로그 체계 자신의 경고(같은 이름 카테고리의 기본 수준 충돌 등)와, 접두어 없는 표준 출력.
@@ -25,6 +33,20 @@ const char* logVerbosityName(ELogVerbosity v) {
     return "?";
 }
 
+bool parseLogVerbosity(std::string_view name, ELogVerbosity& out) {
+    static const ELogVerbosity kAll[] = { ELogVerbosity::Off, ELogVerbosity::Error, ELogVerbosity::Warning,
+                                          ELogVerbosity::Log, ELogVerbosity::Verbose };
+    for (ELogVerbosity v : kAll) {
+        const std::string_view ref = logVerbosityName(v);
+        if (ref.size() != name.size()) continue;
+        bool same = true;
+        for (size_t i = 0; i < ref.size(); ++i)
+            if (std::tolower((unsigned char)ref[i]) != std::tolower((unsigned char)name[i])) { same = false; break; }
+        if (same) { out = v; return true; }
+    }
+    return false;
+}
+
 namespace {
 
 // ── 레지스트리 ────────────────────────────────────────────────────────────────
@@ -35,6 +57,8 @@ struct Registry {
     std::vector<HLogCategoryState*>                     states;    // 등록 순서, 해제 안 함
     std::unordered_map<std::string, HLogCategoryState*> byName;
     std::unordered_map<std::string, HLogCategory*>      runtime;   // category(name) 가 만든 것
+    // 설정 파일에서 읽었지만 아직 등록되지 않은 카테고리의 기록 수준. 등록되는 순간 적용하고 지웁니다.
+    std::map<std::string, ELogVerbosity>                pending;
 };
 
 // 의도적 누수. 정적 소멸 중에 남는 로그가 이미 해제된 레지스트리를 건드리지 않게 합니다.
@@ -56,6 +80,10 @@ HLogCategoryState* findOrCreate(std::string_view name, ELogVerbosity def, bool* 
     s->defaultLevel = def;
     s->level.store((uint8_t)def, std::memory_order_relaxed);
     s->index        = (uint16_t)r.states.size();
+    if (auto p = r.pending.find(key); p != r.pending.end()) {
+        s->level.store((uint8_t)p->second, std::memory_order_relaxed);
+        r.pending.erase(p);
+    }
     r.states.push_back(s);
     r.byName.emplace(key, s);
     return s;
@@ -75,6 +103,7 @@ struct Sink {
     std::streambuf*         out = nullptr;
     std::streambuf*         err = nullptr;
     bool                    console = true;
+    std::FILE*              file    = nullptr;   // 파일 출력처(mtx 보호)
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
 };
 
@@ -111,6 +140,15 @@ void writeConsoleLocked(Sink& k, const HLogCategoryState& st, ELogVerbosity v, s
 #endif
 }
 
+void writeFileLocked(Sink& k, const HLogCategoryState& st, ELogVerbosity v, std::string_view line, float t) {
+    if (!k.file) return;
+    const char* prefix = v == ELogVerbosity::Error   ? "Error: "
+                       : v == ELogVerbosity::Warning ? "Warning: " : "";
+    std::fprintf(k.file, "[%9.3f] [%s] %s%.*s\n", (double)t, st.name.c_str(), prefix,
+                 (int)line.size(), line.data());
+    std::fflush(k.file);
+}
+
 void pushLocked(Sink& k, const HLogCategoryState& st, ELogVerbosity v, std::string_view line, float t) {
     HLogRecord& r = k.ring[k.head];
     r.seq       = ++k.seq;
@@ -122,6 +160,7 @@ void pushLocked(Sink& k, const HLogCategoryState& st, ELogVerbosity v, std::stri
     if (k.count < HLog::kCapacity) ++k.count;
     k.latest.store(k.seq, std::memory_order_relaxed);
     writeConsoleLocked(k, st, v, line);
+    writeFileLocked(k, st, v, line, t);
 }
 
 // ── 표준 출력 어댑터 ──────────────────────────────────────────────────────────
@@ -353,4 +392,97 @@ void HLog::feedLegacyLine(std::string_view line, bool fromStderr) {
     }
     if (!cat->isEnabled(v)) return;
     submit(*cat, v, body);
+}
+
+// ── 파일 출력처 ───────────────────────────────────────────────────────────────
+bool HLog::openFileSink(const std::string& path) {
+    std::error_code ec;
+    const std::filesystem::path fp(path);
+    if (fp.has_parent_path()) std::filesystem::create_directories(fp.parent_path(), ec);
+
+    std::FILE* f = nullptr;
+#ifdef _MSC_VER
+    // fopen_s 는 파일을 공유 없이 독점해서 엽니다. 그러면 엔진이 도는 동안 편집기나 tail 로
+    // 로그를 열어 볼 수 없으므로, 쓰기만 막고 읽기는 허용합니다.
+    f = _fsopen(path.c_str(), "w", _SH_DENYWR);
+#else
+    f = std::fopen(path.c_str(), "w");
+#endif
+    if (!f) return false;
+
+    Sink& k = sink();
+    std::FILE* old = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(k.mtx);
+        old    = k.file;
+        k.file = f;
+    }
+    if (old) std::fclose(old);
+    return true;
+}
+
+void HLog::closeFileSink() {
+    Sink& k = sink();
+    std::FILE* f = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(k.mtx);
+        f      = k.file;
+        k.file = nullptr;
+    }
+    if (f) std::fclose(f);
+}
+
+// ── 기록 수준 보존 ────────────────────────────────────────────────────────────
+bool HLog::loadLevelOverrides(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) return false;
+
+    std::vector<std::pair<std::string, ELogVerbosity>> entries;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream ls(line);
+        std::string name, level;
+        ELogVerbosity v;
+        if ((ls >> name >> level) && parseLogVerbosity(level, v)) entries.emplace_back(name, v);
+    }
+
+    Registry& r = registry();
+    std::lock_guard<std::mutex> lock(r.mtx);
+    for (const auto& [name, v] : entries) {
+        if (auto it = r.byName.find(name); it != r.byName.end())
+            it->second->level.store((uint8_t)v, std::memory_order_relaxed);
+        else
+            r.pending[name] = v;
+    }
+    return true;
+}
+
+bool HLog::saveLevelOverrides(const std::string& path) {
+    std::map<std::string, ELogVerbosity> out;   // 이름순으로 기록합니다
+    {
+        Registry& r = registry();
+        std::lock_guard<std::mutex> lock(r.mtx);
+        out = r.pending;
+        for (const HLogCategoryState* s : r.states)
+            if (s->currentLevel() != s->defaultLevel) out[s->name] = s->currentLevel();
+    }
+
+    std::error_code ec;
+    const std::filesystem::path fp(path);
+    if (fp.has_parent_path()) std::filesystem::create_directories(fp.parent_path(), ec);
+    std::ofstream f(path, std::ios::trunc);
+    if (!f) return false;
+    f << "# Haruka log capture levels (category level). Only non-default levels are listed.\n";
+    for (const auto& [name, v] : out) f << name << ' ' << logVerbosityName(v) << '\n';
+    return (bool)f;
+}
+
+void HLog::resetLevels() {
+    Registry& r = registry();
+    std::lock_guard<std::mutex> lock(r.mtx);
+    for (HLogCategoryState* s : r.states)
+        s->level.store((uint8_t)s->defaultLevel, std::memory_order_relaxed);
+    r.pending.clear();
 }

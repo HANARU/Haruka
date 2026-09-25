@@ -3,7 +3,8 @@
 
 # ── Logs (build logs, run output) ──
 /Logs/
-# 실행 로그. main.cpp 가 루트에 만듭니다(경로를 Logs/ 로 옮기는 것은 별건).
+# 실행 로그는 Logs/HarukaEngine.log(HLog 파일 출력처)와 Logs/stdout.txt(헤드리스 stdio)입니다.
+# 루트의 HarukaEngine.log 는 2026-09-17 이전 빌드가 남긴 파일입니다.
 /HarukaEngine.log
 
 # ── Visual Studio / MSVC local ──
@@ -17,6 +18,8 @@
 
 # ── Editor per-user state ──
 /Config/editor_layout.txt
+/Config/editor_log.txt
+/Config/log_levels.txt
 
 # ── Scene saves (user data; run un-ignore if you want scenes versioned) ──
 *.hscene

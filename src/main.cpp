@@ -23,18 +23,27 @@
 // 그때 stdout 은 유효한 파이프 핸들이므로 이 우회가 끼어들면 안 된다. 끼어들면
 // tee 가 받을 것이 없어져 로그 파일이 빈 채로 남는다. 그래서 핸들이 실제로 없을
 // 때에만 파일로 돌린다.
-static void redirectStdioIfHeadless() {
+//
+// 엔진 로그의 정본은 이제 HLog 의 파일 출력처(Logs/HarukaEngine.log)다. 이 우회는 HLog 를
+// 거치지 않는 C stdio 출력(서드파티의 printf·fprintf)만 받으므로 파일 이름을 따로 둔다.
+// 우회가 일어나면 true 를 돌려주고, 호출부는 콘솔 출력처를 꺼서 같은 줄이 두 파일에
+// 중복되지 않게 한다.
+static bool redirectStdioIfHeadless() {
 #ifdef _WIN32
     HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
     if (out != nullptr && out != INVALID_HANDLE_VALUE)
-        return;   // 콘솔이든 파이프든 받아줄 곳이 이미 있다
+        return false;   // 콘솔이든 파이프든 받아줄 곳이 이미 있다
 
+    CreateDirectoryA("Logs", nullptr);   // 이미 있으면 실패하지만 상관없다
     FILE* f = nullptr;
-    if (freopen_s(&f, "HarukaEngine.log", "w", stdout) != 0 || f == nullptr)
-        return;
+    if (freopen_s(&f, "Logs/stdout.txt", "w", stdout) != 0 || f == nullptr)
+        return false;
     // stderr 를 같은 파일에 따로 열면 두 스트림이 서로의 내용을 덮어쓴다.
     // 기술자를 복제해서 한 스트림을 공유하게 한다.
     _dup2(_fileno(stdout), _fileno(stderr));
+    return true;
+#else
+    return false;
 #endif
 }
 
@@ -42,15 +51,25 @@ static void redirectStdioIfHeadless() {
 // Engine 이 소유합니다(core/Engine.hpp). 예전에는 이 함수가 200줄로 그 전부를
 // 떠안고 있었습니다.
 int main() {
-    redirectStdioIfHeadless();   // setvbuf 보다 먼저. 새 스트림에 적용되어야 한다.
+    const bool headless = redirectStdioIfHeadless();   // setvbuf 보다 먼저. 새 스트림에 적용되어야 한다.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 
-    // 표준 출력 가로채기는 엔진 부팅보다 먼저 설치합니다. 예전에는 EditorApp::init 이
-    // 설치해서, 그 전에 나온 부팅 로그(GPU·힙·오디오·물리 초기화)가 Output Log 에 없었습니다
-    // (DEF-71). 해제는 Engine 이 소멸해 다른 스레드가 모두 멈춘 뒤, 어느 경로로 나가든 일어납니다.
+    // 로그 체계는 엔진 부팅보다 먼저 준비합니다. 예전에는 EditorApp::init 이 표준 출력을
+    // 가로채서, 그 전에 나온 부팅 로그(GPU·힙·오디오·물리 초기화)가 Output Log 에 없었습니다
+    // (DEF-71). 파일 출력처는 실행 방법(run.bat·바로가기·디버거)과 무관하게 같은 UTF-8 파일을
+    // 남깁니다. run.bat 의 Logs/latest.txt 는 PowerShell 이 UTF-16 으로 저장합니다.
+    // 해제는 Engine 이 소멸해 다른 스레드가 모두 멈춘 뒤, 어느 경로로 나가든 일어납니다.
+    if (headless) HLog::setConsoleSinkEnabled(false);
+    HLog::openFileSink("Logs/HarukaEngine.log");
+    HLog::loadLevelOverrides(HLog::kLevelOverridesPath);
     HLog::installStdStreamCapture();
-    struct CaptureGuard { ~CaptureGuard() { HLog::uninstallStdStreamCapture(); } } captureGuard;
+    struct LogGuard {
+        ~LogGuard() {
+            HLog::uninstallStdStreamCapture();   // 남은 조각을 제출하므로 파일보다 먼저
+            HLog::closeFileSink();
+        }
+    } logGuard;
 
     try {
         Engine engine;   // 부팅(생성자) → 실행 → 소멸자에서 역순 teardown.
