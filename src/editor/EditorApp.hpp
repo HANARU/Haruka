@@ -13,6 +13,7 @@
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <algorithm>
+#include <deque>
 #include <memory>
 #include <vector>
 #include <string>
@@ -77,6 +78,49 @@ private:
 
     // 로그: 코어 링 버퍼에서 마지막으로 본 seq. 달라진 프레임에만 Output Log·상태바를 갱신합니다.
     uint64_t        logSeenSeq_ = 0;
+
+    // ── Output Log (로그 카테고리 L3) ─────────────────────────────────────────
+    // 설계: Docs/Log_Category_Design.md §7. 여기 있는 것은 **표시 필터**뿐입니다. 기록 수준은
+    // 코어(HLogCategoryState::level)에 있고, Categories 팝업의 Capture 열이 그것을 직접 바꿉니다.
+    //
+    // 로그 행 위젯은 패널 실측 높이에 맞춘 개수만 만들고, 텍스트와 색을 Attr 로 logViewRows_
+    // 에서 읽습니다. 새 로그가 와도 위젯을 다시 만들지 않습니다(DEF-70·DEF-61). 리빌드는
+    // 행 수가 바뀔 때(패널 높이 변화)와 탭을 다시 열 때만 일어납니다.
+    static constexpr float kLogRowH  = 16.f;
+    static constexpr float kLogTimeW = 52.f;
+    static constexpr float kLogCatW  = 84.f;
+    struct LogViewRow { std::string time, category, text; glm::vec4 color{ 1.f }; };
+    std::deque<HLogRecord>        logMirror_;           // 코어 링의 사본(최대 HLog::kCapacity)
+    uint64_t                      logMirrorSeq_  = 0;   // 사본에 들어온 마지막 seq
+    std::vector<std::string>      logCatNames_;         // 카테고리 인덱스 → 이름
+    std::vector<int>              logCatCounts_;        // 사본 안의 카테고리별 레코드 수
+    std::vector<char>             logCatHidden_;        // 표시 필터: 1 = 숨김(인덱스 기준)
+    bool                          logShowVerb_[5] = { false, true, true, true, true };  // ELogVerbosity 순
+    std::string                   logSearch_;
+    bool                          logSearchFocused_ = false;
+    bool                          logSearchSelAll_  = false;
+    uint64_t                      logClearedSeq_    = 0;   // Clear 는 코어 링을 비우지 않고 이 값만 올립니다
+    std::string                   logErrText_ = "E 0", logWarnText_ = "W 0";   // 누계 표시 캐시
+    bool                          logHasErr_  = false, logHasWarn_ = false;
+    std::vector<LogViewRow>       logViewRows_;
+    bool                          logViewDirty_ = true;
+    int                           logRowCap_    = 0;
+    glm::ivec2                    logRowsSig_ {0, 0};   // 행 영역 실측 크기(4px 양자화)
+    std::shared_ptr<SVerticalBox> logRowsBox_;
+    std::shared_ptr<SSearchBox>   logSearchBox_;
+    std::shared_ptr<SButton>      logCatButton_;
+    // Categories 팝업. 메뉴 팝업과 달리 전면 캐처를 쓰지 않습니다. 바깥 클릭은 handleInput 이
+    // 팝업을 닫기만 하고 삼키지 않으므로, 팝업이 열린 채로 다른 곳을 한 번에 누를 수 있습니다.
+    std::shared_ptr<SBorder>      logPopupHost_;        // 최상위 오버레이 슬롯
+    std::shared_ptr<HWidget>      logPopupPanel_;       // 바깥 클릭 판정용
+    bool                          logPopupOpen_  = false;
+    bool                          logPopupDirty_ = false;
+    void pullLogRecords();          // 코어 링의 새 레코드를 사본으로 옮김
+    void syncLogCategories();       // 새로 등록된 카테고리를 이름·개수·필터 배열에 반영
+    void rebuildLogRows();          // 행 위젯 N개를 다시 만듦(높이 변화·탭 진입 시에만)
+    void refreshLogView();          // 필터를 적용해 logViewRows_ 문자열을 갱신(위젯 생성 없음)
+    void rebuildLogPopup();
+    bool logRecordVisible(const HLogRecord& r, const std::string& needleLower) const;
 
     // Dynamic panel refs
     std::shared_ptr<SHorizontalBox> toolbarBox_;
@@ -186,6 +230,7 @@ private:
     void        updateStatusMessage();      // 로그 한 줄을 잘라 캐시(프레임마다 호출 금지)
     static glm::vec4   logColor(ELogVerbosity v);
     static std::string formatLogLine(const HLogRecord& rec);   // 접두어 + ASCII 치환
+    static std::string toDisplayAscii(std::string s);          // 폰트가 그릴 수 없는 바이트를 '?' 로
     std::string statusFocusText() const;    // 짧은 리터럴만 반환
 
     // 트리 변형: 드롭 시 소스에서 빼고 타깃에 붙임(탭화 또는 분할). 빈 리프 정리.
@@ -225,7 +270,8 @@ private:
     // 관리되어 서로를 몰랐습니다. 그래서 둘이 동시에 활성이 되거나, 다른 곳을 클릭해도
     // 편집 모드가 풀리지 않아 나중의 Enter 가 엉뚱한 값을 확정하는 일이 있었습니다.
     // 진입·이탈을 setTextFocus 한 곳으로 모으고, 실제 상태는 currentFocus 가 유도합니다.
-    enum class EFocusTarget { None, Rename, Search, NumberField };
+    // 나중에 추가한 Output Log 검색(LogSearch)도 같은 중재를 따릅니다.
+    enum class EFocusTarget { None, Rename, Search, NumberField, LogSearch };
     EFocusTarget currentFocus() const;
     void         setTextFocus(EFocusTarget t);
     // 지금 포커스를 가진 위젯이 이 좌표를 품는가(포커스 밖 클릭 판정).

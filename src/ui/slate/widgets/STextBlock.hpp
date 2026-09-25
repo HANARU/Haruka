@@ -17,7 +17,12 @@ public:
         fontSize_ = s; return self();
     }
     std::shared_ptr<STextBlock> color(glm::vec4 c) {
-        color_ = c; return self();
+        color_.set(c); return self();
+    }
+    // 색을 매 프레임 평가합니다. 값으로 넘기면 생성 시점의 색에 고정되어, 상태에 따라
+    // 색이 바뀌어야 하는 곳(상태바의 로그 심각도, 로그 행)이 갱신되지 않습니다.
+    std::shared_ptr<STextBlock> color(Attr<glm::vec4> c) {
+        color_ = std::move(c); return self();
     }
     std::shared_ptr<STextBlock> hAlign(EHAlign a) {
         hAlign_ = a; return self();
@@ -67,14 +72,14 @@ public:
         textGeo.position = { tx, ty };
         textGeo.size     = { tw, th };
         textGeo.scale    = geo.scale;
-        ctx.drawText(textGeo, t, fontSize_, color_);
+        ctx.drawText(textGeo, t, fontSize_, color_.get());
     }
 
 private:
     std::string        text_;
     Attr<std::string>  textAttr_ { std::string{} };
     float              fontSize_ = 14.f;
-    glm::vec4          color_    { 1.f, 1.f, 1.f, 1.f };
+    Attr<glm::vec4>    color_    { glm::vec4{ 1.f, 1.f, 1.f, 1.f } };
     EHAlign            hAlign_   = EHAlign::Left;
     EVAlign            vAlign_   = EVAlign::Center;
 

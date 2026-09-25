@@ -22,6 +22,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <filesystem>
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -332,10 +333,21 @@ void EditorApp::tick(float dt) {
     // 누른 버튼의 프레스 상태가 사라졌습니다(DEF-70).
     bool statusDirty = false;
     if (const uint64_t logSeq = HLog::latestSeq(); logSeq != logSeenSeq_) {
-        logSeenSeq_ = logSeq;
-        if (bottomTab_ == 1) rebuildBottomPanel();
-        statusDirty = true;
+        logSeenSeq_   = logSeq;
+        logViewDirty_ = true;   // 위젯은 다시 만들지 않고 행 문자열만 갱신합니다
+        statusDirty   = true;
     }
+    // Output Log 행 영역의 높이가 바뀌면(스플리터·도킹·창 크기) 행 수를 다시 잡습니다.
+    // 폭만 바뀌어도 말줄임 폭이 달라지므로 문자열을 다시 계산합니다.
+    if (bottomTab_ == 1 && logRowsBox_) {
+        const HGeometry& lg = logRowsBox_->cachedGeometry();
+        const glm::ivec2 sig{ (int)(lg.size.x / 4.f), (int)(lg.size.y / 4.f) };
+        if (sig.y != logRowsSig_.y)      rebuildLogRows();
+        else if (sig != logRowsSig_)   { logRowsSig_ = sig; logViewDirty_ = true; }
+    }
+    // 카테고리는 로그를 남기지 않아도(꺼진 로그의 isEnabled 호출만으로) 등록됩니다.
+    // 팝업이 열려 있는 동안에는 새 카테고리가 목록에 바로 나타나게 합니다.
+    if (logPopupOpen_) syncLogCategories();
     // 상태바 폭이 바뀌면 잘라 둔 문자열과 축약 단계를 다시 잡습니다(4px 양자화).
     if (statusBarBox_) {
         const HGeometry& g = statusBarBox_->cachedGeometry();
@@ -536,6 +548,10 @@ void EditorApp::buildWidgetTree() {
     dockHost_      = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
     dockOverlay_   = HNew(SDockOverlay);
     menuPopupHost_ = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
+    logPopupHost_  = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
+    // 위젯 트리를 새로 만들면 팝업이 붙어 있던 버튼도 사라지므로 팝업을 닫습니다.
+    logPopupOpen_  = false;
+    logPopupPanel_.reset();
     // ── 하단 상태바 ───────────────────────────────────────────────────────────
     // 클릭 대상이 없고 슬롯을 다시 만들지 않습니다. 폭에 따른 축약은 문자열 길이로만
     // 처리하므로(빈 문자열 → Auto 슬롯 폭 0) 리빌드 함수 자체가 필요 없습니다.
@@ -544,7 +560,9 @@ void EditorApp::buildWidgetTree() {
         ->addSlot(spacer(), HR::ESizeRule::Fixed, s(8.f))
         ->addSlot(HNew(STextBlock)
                       ->text(AttrStr([this]() -> std::string { return statusMsg_; }))
-                      ->fontSize(s(11.f))->color(statusMsgColor_)
+                      // 색은 반드시 Attr 로 읽습니다. 값으로 넘기면 생성 시점 색에 고정되어
+                      // 오류·경고여도 회색으로 남습니다.
+                      ->fontSize(s(11.f))->color(Attr<glm::vec4>([this] { return statusMsgColor_; }))
                       ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
                   HR::ESizeRule::Fill, 1.f)
         ->addSlot(spacer(), HR::ESizeRule::Fixed, s(10.f))
@@ -567,6 +585,7 @@ void EditorApp::buildWidgetTree() {
         ->addSlot(statusBar, VR::ESizeRule::Fixed, s(kStatusBarH));
     auto root = HNew(SOverlay);
     root->addSlot(rootStack);
+    root->addSlot(logPopupHost_);
     root->addSlot(menuPopupHost_);
     root->addSlot(dockOverlay_);
     slateRenderer_.setRootWidget(root);
@@ -1537,11 +1556,15 @@ std::string EditorApp::ellipsizeText(const std::string& text, float maxPx, float
     if (text.empty() || maxPx <= 1.f) return text;
     HFontAtlas& fonts = slateRenderer_.fontAtlas();
     if (fonts.measureText(text, fontPx) <= maxPx) return text;
-    for (size_t n = text.size(); n > 1; --n) {
-        std::string cand = text.substr(0, n - 1) + "..";
-        if (fonts.measureText(cand, fontPx) <= maxPx) return cand;
+    // 접두어 폭은 길이에 따라 늘어나므로 이분 탐색으로 가장 긴 후보를 찾습니다. 예전의 선형
+    // 탐색은 수백 자짜리 로그(검증 레이어 메시지 등)에서 행마다 수백 번 폰트 실측을 반복했습니다.
+    size_t lo = 1, hi = text.size() - 1, best = 0;
+    while (lo <= hi) {
+        const size_t mid = lo + (hi - lo) / 2;
+        if (fonts.measureText(text.substr(0, mid) + "..", fontPx) <= maxPx) { best = mid; lo = mid + 1; }
+        else                                                                  { hi = mid - 1; }
     }
-    return text.substr(0, 1);
+    return best ? text.substr(0, best) + ".." : text.substr(0, 1);
 }
 
 // 루트부터 전위 순회하며 화면에 그릴 행을 평탄화합니다. 필터가 걸리면 매치도 아니고
@@ -1618,6 +1641,7 @@ EditorApp::EFocusTarget EditorApp::currentFocus() const {
     if (SNumberField::focusedField()) return EFocusTarget::NumberField;
     if (renaming_)                    return EFocusTarget::Rename;
     if (outlinerSearchFocused_)       return EFocusTarget::Search;
+    if (logSearchFocused_)            return EFocusTarget::LogSearch;
     return EFocusTarget::None;
 }
 
@@ -1633,6 +1657,8 @@ void EditorApp::setTextFocus(EFocusTarget t) {
         renaming_ = false; renameSelAll_ = false; outlinerDirty_ = true;
     } else if (prev == EFocusTarget::Search) {
         outlinerSearchFocused_ = false; searchSelAll_ = false; outlinerDirty_ = true;
+    } else if (prev == EFocusTarget::LogSearch) {
+        logSearchFocused_ = false; logSearchSelAll_ = false; logViewDirty_ = true;
     }
 
     if (t == EFocusTarget::Rename) {
@@ -1646,6 +1672,10 @@ void EditorApp::setTextFocus(EFocusTarget t) {
         outlinerSearchFocused_ = true;
         searchSelAll_          = !outlinerSearch_.empty();
         outlinerDirty_         = true;
+    } else if (t == EFocusTarget::LogSearch) {
+        logSearchFocused_ = true;
+        logSearchSelAll_  = !logSearch_.empty();
+        logViewDirty_     = true;
     }
 
     if (ctx_.window) {
@@ -1681,6 +1711,8 @@ bool EditorApp::focusWidgetContains(float x, float y) const {
             return false;
         case EFocusTarget::Search:
             return outlinerSearchBox_ && outlinerSearchBox_->cachedGeometry().contains(p);
+        case EFocusTarget::LogSearch:
+            return logSearchBox_ && logSearchBox_->cachedGeometry().contains(p);
         case EFocusTarget::Rename:
             // 리네임 행 위젯은 리빌드마다 새로 만들어지므로 목록 전체를 기준으로 봅니다.
             return outlinerList_ && outlinerList_->cachedGeometry().contains(p);
@@ -1712,9 +1744,13 @@ std::string EditorApp::formatLogLine(const HLogRecord& rec) {
     if (rec.verbosity == ELogVerbosity::Error)   line += "Error: ";
     if (rec.verbosity == ELogVerbosity::Warning) line += "Warning: ";
     line += rec.text;
-    for (char& c : line)
+    return toDisplayAscii(std::move(line));
+}
+
+std::string EditorApp::toDisplayAscii(std::string s) {
+    for (char& c : s)
         if ((unsigned char)c < 32 || (unsigned char)c > 126) c = '?';
-    return line;
+    return s;
 }
 
 // 상태바 왼쪽 칸. 마지막 로그 한 줄을 상태바 폭에 맞춰 잘라 캐시합니다. 자르는 비용이
@@ -1748,6 +1784,7 @@ std::string EditorApp::statusFocusText() const {
         case EFocusTarget::Rename:      return statusNarrow_ ? "RENAME" : "KBD: Rename";
         case EFocusTarget::Search:      return statusNarrow_ ? "SEARCH" : "KBD: Search";
         case EFocusTarget::NumberField: return statusNarrow_ ? "VALUE"  : "KBD: Value";
+        case EFocusTarget::LogSearch:   return statusNarrow_ ? "LOG"    : "KBD: Log Search";
         default:                        return {};
     }
 }
@@ -1761,6 +1798,10 @@ void EditorApp::flushChromeRebuilds() {
     if (menuPopupDirty_) { menuPopupDirty_ = false; rebuildMenuPopup(); }
     if (toolbarDirty_)   { toolbarDirty_   = false; rebuildToolbar();   }
     if (detailsDirty_)   { detailsDirty_   = false; rebuildDetails();   }
+    if (logPopupDirty_)  { logPopupDirty_  = false; rebuildLogPopup();  }
+    // 로그 행은 위젯을 만들지 않고 문자열만 바꾸므로 콜백 안에서 불려도 안전하지만, 필터
+    // 토글을 여러 번 누른 프레임에 한 번만 계산하려고 같은 소진 지점에 둡니다.
+    if (logViewDirty_ && bottomTab_ == 1 && logRowsBox_) { logViewDirty_ = false; refreshLogView(); }
 }
 
 // 행 하나를 조립합니다. 슬롯은 SHorizontalBox 가 penX 를 단조 누적하므로 서로 겹치지
@@ -2290,10 +2331,315 @@ void EditorApp::rebuildContent() {
     rebuildBottomPanel();
 }
 
+// ── Output Log (로그 카테고리 L3) ──────────────────────────────────────────────
+// 코어 링의 새 레코드를 사본으로 옮깁니다. 사본이 있어야 필터를 바꿨을 때 지난 로그에
+// 소급 적용할 수 있고, 매번 링 전체(최대 2048개 문자열)를 복사하지 않아도 됩니다.
+void EditorApp::pullLogRecords() {
+    std::vector<HLogRecord> fresh;
+    HLog::copySince(logMirrorSeq_, fresh);
+    if (fresh.empty()) return;
+
+    for (HLogRecord& r : fresh) {
+        if (r.category >= logCatNames_.size()) syncLogCategories();
+        if (r.category < logCatCounts_.size()) ++logCatCounts_[r.category];
+        logMirror_.push_back(std::move(r));
+    }
+    while (logMirror_.size() > HLog::kCapacity) {
+        const uint16_t c = logMirror_.front().category;
+        if (c < logCatCounts_.size()) --logCatCounts_[c];
+        logMirror_.pop_front();
+    }
+    logMirrorSeq_ = logMirror_.back().seq;
+
+    // 누계는 새 로그가 들어올 때만 바뀌므로 여기서 한 번 문자열로 만들어 둡니다
+    // (Attr 은 매 프레임 여러 번 평가됩니다).
+    uint32_t errs = 0, warns = 0;
+    for (const HLogCategoryState* st : HLog::categories()) {
+        errs  += st->errors.load(std::memory_order_relaxed);
+        warns += st->warnings.load(std::memory_order_relaxed);
+    }
+    logErrText_  = "E " + std::to_string(errs);
+    logWarnText_ = "W " + std::to_string(warns);
+    logHasErr_   = errs  > 0;
+    logHasWarn_  = warns > 0;
+}
+
+// 카테고리 인덱스는 등록 순서라 한 번 정해지면 바뀌지 않습니다. 늘어난 만큼만 붙입니다.
+void EditorApp::syncLogCategories() {
+    const std::vector<HLogCategoryState*> cats = HLog::categories();
+    if (cats.size() == logCatNames_.size()) return;
+    for (size_t i = logCatNames_.size(); i < cats.size(); ++i)
+        logCatNames_.push_back(toDisplayAscii(cats[i]->name));
+    logCatCounts_.resize(cats.size(), 0);
+    logCatHidden_.resize(cats.size(), 0);
+    if (logPopupOpen_) logPopupDirty_ = true;
+}
+
+bool EditorApp::logRecordVisible(const HLogRecord& r, const std::string& needleLower) const {
+    const int v = (int)r.verbosity;
+    if (v <= 0 || v >= 5 || !logShowVerb_[v]) return false;
+    if (r.category < logCatHidden_.size() && logCatHidden_[r.category]) return false;
+    if (needleLower.empty()) return true;
+
+    // 대소문자를 무시한 부분 일치. 본문과 카테고리 이름을 모두 봅니다.
+    auto icontains = [&](const std::string& hay) {
+        return std::search(hay.begin(), hay.end(), needleLower.begin(), needleLower.end(),
+                           [](char a, char b) {
+                               return std::tolower((unsigned char)a) == (unsigned char)b;
+                           }) != hay.end();
+    };
+    if (icontains(r.text)) return true;
+    return r.category < logCatNames_.size() && icontains(logCatNames_[r.category]);
+}
+
+// 행 위젯 N개를 만듭니다. 각 행은 logViewRows_[i] 를 Attr 로 읽기만 하므로, 로그가 들어와도
+// 이 함수는 다시 불리지 않습니다. 행 영역 높이가 바뀌었을 때와 탭을 다시 열 때만 불립니다.
+void EditorApp::rebuildLogRows() {
+    if (!logRowsBox_) return;
+    logRowsBox_->clearSlots();
+
+    // 실측이 없을 때(위젯을 막 만든 프레임)만 시드로 추정하고, 다음 프레임의 크기 비교가
+    // 실측으로 바로잡습니다.
+    const HGeometry& g = logRowsBox_->cachedGeometry();
+    const float rowH = s(kLogRowH);
+    const float h    = (g.size.y >= 1.f) ? g.size.y : std::max(rowH * 6.f, s(bottomH_) - s(90.f));
+    logRowsSig_ = { (int)(g.size.x / 4.f), (int)(g.size.y / 4.f) };
+    logRowCap_  = std::max(1, (int)(h / rowH));
+
+    using HR = SHorizontalBox;
+    for (int i = 0; i < logRowCap_; ++i) {
+        auto field = [this, i](std::string LogViewRow::* member) {
+            return AttrStr([this, i, member]() -> std::string {
+                return i < (int)logViewRows_.size() ? logViewRows_[i].*member : std::string();
+            });
+        };
+        logRowsBox_->addSlot(
+            HNew(HR)
+                ->addSlot(HNew(STextBlock)->text(field(&LogViewRow::time))->fontSize(s(11.f))
+                              ->color({ 0.36f, 0.36f, 0.40f, 1.f })
+                              ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
+                          HR::ESizeRule::Fixed, s(kLogTimeW))
+                ->addSlot(spacer(), HR::ESizeRule::Fixed, s(8.f))
+                ->addSlot(HNew(STextBlock)->text(field(&LogViewRow::category))->fontSize(s(11.f))
+                              ->color({ 0.50f, 0.58f, 0.70f, 1.f })
+                              ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                          HR::ESizeRule::Fixed, s(kLogCatW))
+                ->addSlot(HNew(STextBlock)->text(field(&LogViewRow::text))->fontSize(s(12.f))
+                              ->color(Attr<glm::vec4>([this, i] {
+                                  return i < (int)logViewRows_.size() ? logViewRows_[i].color : kTextDim;
+                              }))
+                              ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                          HR::ESizeRule::Fill),
+            SVerticalBox::ESizeRule::Fixed, rowH);
+    }
+    logViewDirty_ = true;
+}
+
+// 필터를 적용해 화면에 보일 마지막 N개를 고르고 행 문자열을 만듭니다. 위젯은 만들지 않습니다.
+void EditorApp::refreshLogView() {
+    pullLogRecords();
+
+    std::string needle = logSearch_;
+    for (char& c : needle) c = (char)std::tolower((unsigned char)c);
+
+    std::vector<const HLogRecord*> picked;
+    picked.reserve((size_t)std::max(0, logRowCap_));
+    for (auto it = logMirror_.rbegin(); it != logMirror_.rend() && (int)picked.size() < logRowCap_; ++it) {
+        if (it->seq <= logClearedSeq_) break;
+        if (logRecordVisible(*it, needle)) picked.push_back(&*it);
+    }
+    std::reverse(picked.begin(), picked.end());   // 위가 오래된 것, 아래가 최신
+
+    // 폰트가 ASCII 전용이고 클리핑이 없어, 폭을 넘는 문자열은 이웃 패널로 넘칩니다.
+    // 카테고리와 본문 모두 칸 폭에 맞춰 자릅니다.
+    const HGeometry& g   = logRowsBox_ ? logRowsBox_->cachedGeometry() : HGeometry{};
+    const float      msgW = g.size.x - s(kLogTimeW) - s(8.f) - s(kLogCatW) - s(4.f);
+
+    logViewRows_.resize(picked.size());
+    for (size_t i = 0; i < picked.size(); ++i) {
+        const HLogRecord& r   = *picked[i];
+        LogViewRow&       row = logViewRows_[i];
+
+        char tb[32];
+        std::snprintf(tb, sizeof tb, "%.2f", (double)r.time);
+        row.time = tb;
+
+        const std::string& cat = r.category < logCatNames_.size() ? logCatNames_[r.category]
+                                                                  : std::string("?");
+        row.category = ellipsizeText(cat, s(kLogCatW) - s(4.f), s(11.f));
+
+        std::string text;
+        text.reserve(r.text.size() + 10);
+        if (r.verbosity == ELogVerbosity::Error)   text += "Error: ";
+        if (r.verbosity == ELogVerbosity::Warning) text += "Warning: ";
+        text += r.text;
+        text     = toDisplayAscii(std::move(text));
+        row.text = (msgW > s(24.f)) ? ellipsizeText(text, msgW, s(12.f)) : std::string();
+        row.color = logColor(r.verbosity);
+    }
+}
+
+// Categories 팝업. 한 행에 두 장치를 나란히 둡니다: Show(표시 필터, 에디터)와
+// Capture(기록 수준, 코어). 개수·수준 표시는 Attr 이라 로그가 들어와도 다시 만들지 않습니다.
+void EditorApp::rebuildLogPopup() {
+    if (!logPopupHost_) return;
+    logPopupPanel_.reset();
+    if (!logPopupOpen_ || !logCatButton_ || bottomTab_ != 1) {
+        logPopupOpen_ = false;
+        logPopupHost_->content(nullptr);
+        return;
+    }
+    syncLogCategories();
+
+    std::vector<HLogCategoryState*> cats = HLog::categories();
+    std::sort(cats.begin(), cats.end(), [](const HLogCategoryState* a, const HLogCategoryState* b) {
+        return a->name < b->name;
+    });
+
+    using HR = SHorizontalBox;
+    using VR = SVerticalBox;
+    const glm::vec4 btnN{ 0.16f, 0.16f, 0.19f, 1.f };
+    const glm::vec4 btnH{ 0.26f, 0.26f, 0.31f, 1.f };
+    const float rowH    = s(22.f);
+    const float panelW  = s(330.f);
+    const float headerH = s(28.f) + s(20.f);
+    const float panelH  = headerH + rowH * (float)cats.size() + s(8.f);
+    const HPadding vpad{ 0.f, s(2.f) };
+
+    auto colText = [&](const char* label, EHAlign ha) {
+        return HNew(STextBlock)->text(label)->fontSize(s(10.f))->color(kTextDim)
+            ->hAlign(ha)->vAlign(EVAlign::Center);
+    };
+
+    auto list = HNew(VR);
+    list->addSlot(HNew(HR)
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(6.f))
+        ->addSlot(textButton("All", 11.f, kTextBody, HPadding{8.f, 2.f}, btnN, btnH, [this] {
+                      std::fill(logCatHidden_.begin(), logCatHidden_.end(), (char)0);
+                      logViewDirty_ = true;
+                  }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, s(4.f) })
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(4.f))
+        ->addSlot(textButton("None", 11.f, kTextBody, HPadding{8.f, 2.f}, btnN, btnH, [this] {
+                      std::fill(logCatHidden_.begin(), logCatHidden_.end(), (char)1);
+                      logViewDirty_ = true;
+                  }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, s(4.f) })
+        ->addSlot(spacer(), HR::ESizeRule::Fill)
+        ->addSlot(textButton("Reset levels", 11.f, kTextBody, HPadding{8.f, 2.f}, btnN, btnH, [] {
+                      for (HLogCategoryState* st : HLog::categories())
+                          st->level.store((uint8_t)st->defaultLevel, std::memory_order_relaxed);
+                  }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, s(4.f) })
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(6.f)),
+        VR::ESizeRule::Fixed, s(28.f));
+    list->addSlot(HNew(HR)
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(8.f))
+        ->addSlot(colText("Show", EHAlign::Left),     HR::ESizeRule::Fixed, s(44.f))
+        ->addSlot(colText("Category", EHAlign::Left), HR::ESizeRule::Fill)
+        ->addSlot(colText("Count", EHAlign::Right),   HR::ESizeRule::Fixed, s(50.f))
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(12.f))
+        ->addSlot(colText("Capture", EHAlign::Left),  HR::ESizeRule::Fixed, s(80.f))
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(8.f)),
+        VR::ESizeRule::Fixed, s(20.f));
+
+    for (HLogCategoryState* st : cats) {
+        const uint16_t idx = st->index;
+        list->addSlot(HNew(HR)
+            ->addSlot(spacer(), HR::ESizeRule::Fixed, s(8.f))
+            ->addSlot(HNew(SToggleButton)
+                          ->isActive([this, idx] { return !(idx < logCatHidden_.size() && logCatHidden_[idx]); })
+                          ->onClick([this, idx] {
+                              if (idx >= logCatHidden_.size()) return;
+                              logCatHidden_[idx] = !logCatHidden_[idx];
+                              logViewDirty_ = true;
+                          })
+                          ->normalColor(btnN)->hoveredColor(btnH)->activeColor({ 0.20f, 0.22f, 0.27f, 1.f })
+                          ->padding(HPadding{ s(6.f), s(1.f) })
+                          ->content(HNew(STextBlock)
+                              ->text(AttrStr([this, idx]() -> std::string {
+                                  return (idx < logCatHidden_.size() && logCatHidden_[idx]) ? "off" : "on";
+                              }))
+                              ->fontSize(s(10.f))->color(kTextBody)
+                              ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center)),
+                      HR::ESizeRule::Fixed, s(36.f), vpad)
+            ->addSlot(spacer(), HR::ESizeRule::Fixed, s(8.f))
+            ->addSlot(HNew(STextBlock)->text(toDisplayAscii(st->name))->fontSize(s(12.f))->color(kTextBody)
+                          ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                      HR::ESizeRule::Fill)
+            ->addSlot(HNew(STextBlock)
+                          ->text(AttrStr([this, idx]() -> std::string {
+                              return idx < logCatCounts_.size() ? std::to_string(logCatCounts_[idx]) : "0";
+                          }))
+                          ->fontSize(s(11.f))->color(kTextDim)
+                          ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
+                      HR::ESizeRule::Fixed, s(50.f))
+            ->addSlot(spacer(), HR::ESizeRule::Fixed, s(12.f))
+            // 기록 수준 순환: Off → Error → Warning → Log → Verbose → Off. 선언 기본값과 다르면
+            // 강조색으로 표시합니다(키 입력 로그를 켜 둔 채 잊는 일을 막기 위해).
+            ->addSlot(HNew(SButton)
+                          ->normalColor(btnN)->hoveredColor(btnH)->pressedColor({ 0.12f, 0.12f, 0.15f, 1.f })
+                          ->padding(HPadding{ s(6.f), s(1.f) })->hAlign(EHAlign::Left)
+                          ->onClick([st] {
+                              const uint8_t next = (uint8_t)((st->level.load(std::memory_order_relaxed) + 1) % 5);
+                              st->level.store(next, std::memory_order_relaxed);
+                          })
+                          ->content(HNew(STextBlock)
+                              ->text(AttrStr([st]() -> std::string { return logVerbosityName(st->currentLevel()); }))
+                              ->fontSize(s(11.f))
+                              ->color(Attr<glm::vec4>([st] {
+                                  return st->currentLevel() != st->defaultLevel
+                                      ? glm::vec4{ 0.45f, 0.72f, 1.00f, 1.f } : kTextBody;
+                              }))
+                              ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
+                      HR::ESizeRule::Fixed, s(80.f), vpad)
+            ->addSlot(spacer(), HR::ESizeRule::Fixed, s(8.f)),
+            VR::ESizeRule::Fixed, rowH);
+    }
+
+    auto panel = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
+        HNew(SBorder)
+            ->background({ 0.055f, 0.055f, 0.07f, 1.f })
+            ->borderColor({ 0.34f, 0.34f, 0.40f, 1.f })->borderThickness(1.f)
+            ->padding(HPadding{ 0.f, s(4.f) })
+            ->content(list));
+    // 패널의 빈 곳(여백·열 제목)을 누른 클릭이 아래 패널(뷰포트 픽 등)로 새지 않게, 같은 자리에
+    // 투명 버튼을 깔아 받아 둡니다. SButton 은 자식에게 클릭을 넘기지 않으므로 패널을 감싸지
+    // 않고 형제로 뒤에 둡니다(오버레이는 앞 슬롯부터 판정).
+    auto absorber = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
+        HNew(SButton)->normalColor({ 0.f, 0.f, 0.f, 0.f })->hoveredColor({ 0.f, 0.f, 0.f, 0.f })
+            ->pressedColor({ 0.f, 0.f, 0.f, 0.f })->content(spacer()));
+
+    // 버튼이 화면 아래쪽 절반에 있으면 위로, 위쪽이면 아래로 엽니다. Output Log 는 도킹으로
+    // 어디든 옮겨질 수 있습니다.
+    const HGeometry& host = logPopupHost_->cachedGeometry();
+    const HGeometry& btn  = logCatButton_->cachedGeometry();
+    const bool  up   = (btn.position.y + btn.size.y * 0.5f) > (host.position.y + host.size.y * 0.5f);
+    float       top  = up ? btn.position.y - panelH - s(2.f) : btn.position.y + btn.size.y + s(2.f);
+    const float minT = host.position.y + s(kMenuBarH);
+    top = std::clamp(top, minT, std::max(minT, host.position.y + host.size.y - panelH));
+    float left = std::clamp(btn.position.x, host.position.x,
+                            std::max(host.position.x, host.position.x + host.size.x - panelW));
+
+    const HPadding at{ left - host.position.x, top - host.position.y, 0.f, 0.f };
+    auto inner = HNew(SOverlay);
+    inner->addSlot(absorber, EHAlign::Left, EVAlign::Top, at);
+    inner->addSlot(panel,    EHAlign::Left, EVAlign::Top, at);
+    logPopupPanel_ = panel;
+    logPopupHost_->content(inner);
+}
+
 // ── rebuildBottomPanel ─────────────────────────────────────────────────────────
 void EditorApp::rebuildBottomPanel() {
     if (!bottomContent_) return;
     bottomContent_->clearSlots();
+
+    // Output Log 탭에만 있는 위젯의 참조를 놓습니다. 다른 탭으로 가면 팝업을 닫고 로그 검색
+    // 포커스도 풉니다. 풀지 않으면 보이지 않는 검색창으로 타이핑이 계속 들어갑니다.
+    logRowsBox_.reset();
+    logSearchBox_.reset();
+    logCatButton_.reset();
+    if (bottomTab_ != 1) {
+        if (logPopupOpen_) { logPopupOpen_ = false; logPopupDirty_ = true; }
+        if (currentFocus() == EFocusTarget::LogSearch) setTextFocus(EFocusTarget::None);
+    }
 
     if (bottomTab_ == 0) {
         // Content Browser — Models
@@ -2414,20 +2760,91 @@ void EditorApp::rebuildBottomPanel() {
                 SVerticalBox::ESizeRule::Fixed, s(30.f));
         }
     } else if (bottomTab_ == 1) {
-        // Output Log. 코어 링 버퍼에서 마지막 N개만 복사합니다(다른 스레드가 동시에 제출해도
-        // copySince 가 락 안에서 복사합니다). 표시 줄 수의 bottomH_ 의존은 DEF-61 로 남아 있습니다.
-        const int kMaxDisplay = std::max(6, (int)((bottomH_ - 30.f) / 16.f) - 1);
-        const uint64_t latest = HLog::latestSeq();
-        std::vector<HLogRecord> recs;
-        HLog::copySince(latest > (uint64_t)kMaxDisplay ? latest - (uint64_t)kMaxDisplay : 0, recs);
-        for (const HLogRecord& rec : recs) {
-            bottomContent_->addSlot(
-                HNew(SBorder)->background({0,0,0,0})->padding({s(4.f), 0.f})
-                    ->content(HNew(STextBlock)->text(formatLogLine(rec))->fontSize(s(12.f))
-                        ->color(logColor(rec.verbosity))
-                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
-                SVerticalBox::ESizeRule::Fixed, s(16.f));
-        }
+        // Output Log. 필터 행 + 로그 행 풀. 필터 위젯의 콜백은 상태와 logViewDirty_ 만 바꾸고
+        // 위젯을 비우지 않습니다(콜백 중 자기 컨테이너 파괴 금지).
+        using HR = SHorizontalBox;
+        const glm::vec4 btnN{ 0.16f, 0.16f, 0.19f, 1.f };
+        const glm::vec4 btnH{ 0.26f, 0.26f, 0.31f, 1.f };
+
+        logSearchBox_ = HNew(SSearchBox);
+        logSearchBox_
+            ->placeholder("Search log...")
+            ->text(AttrStr([this]() -> std::string { return logSearch_; }))
+            ->focused([this]() -> bool { return logSearchFocused_; })
+            ->selectedAll([this]() -> bool { return logSearchSelAll_; })
+            ->onClick([this] {
+                setTextFocus(currentFocus() == EFocusTarget::LogSearch ? EFocusTarget::None
+                                                                       : EFocusTarget::LogSearch);
+            })
+            ->fontSize(s(12.f));
+
+        logCatButton_ = textButton("Categories", 11.f, kTextBody, HPadding{8.f, 3.f}, btnN, btnH,
+                                   [this] { logPopupOpen_ = !logPopupOpen_; logPopupDirty_ = true; });
+
+        // 심각도 토글. 켜진 상태는 SToggleButton 의 하단 막대로 보입니다.
+        auto verbToggle = [&](const char* label, ELogVerbosity v) {
+            const int vi = (int)v;
+            glm::vec4 textCol = (v == ELogVerbosity::Log) ? kTextBody : logColor(v);
+            if (v == ELogVerbosity::Verbose) textCol = { 0.55f, 0.55f, 0.60f, 1.f };
+            return HNew(SToggleButton)
+                ->isActive([this, vi] { return logShowVerb_[vi]; })
+                ->onClick([this, vi] { logShowVerb_[vi] = !logShowVerb_[vi]; logViewDirty_ = true; })
+                ->normalColor(btnN)->hoveredColor(btnH)->activeColor({ 0.20f, 0.22f, 0.27f, 1.f })
+                ->padding(HPadding{ s(7.f), s(2.f) })
+                ->content(HNew(STextBlock)->text(label)->fontSize(s(11.f))->color(textCol)
+                    ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
+        };
+        // 부팅 이후 오류·경고 누계. 누르면 그 심각도만 보이게 합니다.
+        auto counter = [&](bool errors) {
+            const ELogVerbosity v = errors ? ELogVerbosity::Error : ELogVerbosity::Warning;
+            return HNew(SButton)
+                ->normalColor({ 0.f, 0.f, 0.f, 0.f })->hoveredColor(btnH)->pressedColor(btnN)
+                ->padding(HPadding{ s(5.f), s(2.f) })
+                ->onClick([this, v] {
+                    for (bool& on : logShowVerb_) on = false;
+                    logShowVerb_[(int)v] = true;
+                    logViewDirty_ = true;
+                })
+                ->content(HNew(STextBlock)
+                    ->text(AttrStr([this, errors]() -> std::string { return errors ? logErrText_ : logWarnText_; }))
+                    ->fontSize(s(11.f))
+                    ->color(Attr<glm::vec4>([this, errors, v] {
+                        return (errors ? logHasErr_ : logHasWarn_) ? logColor(v) : kTextDim;
+                    })));
+        };
+        const HPadding vpad{ 0.f, s(3.f) };
+        auto filterRow = HNew(HR)
+            ->addSlot(spacer(),      HR::ESizeRule::Fixed, s(4.f))
+            ->addSlot(logSearchBox_, HR::ESizeRule::Fixed, s(200.f), vpad)
+            ->addSlot(spacer(),      HR::ESizeRule::Fixed, s(6.f))
+            ->addSlot(logCatButton_, HR::ESizeRule::Auto, 0.f, vpad)
+            ->addSlot(spacer(),      HR::ESizeRule::Fixed, s(10.f))
+            ->addSlot(verbToggle("Err",  ELogVerbosity::Error),   HR::ESizeRule::Auto, 0.f, vpad)
+            ->addSlot(verbToggle("Warn", ELogVerbosity::Warning), HR::ESizeRule::Auto, 0.f, vpad)
+            ->addSlot(verbToggle("Log",  ELogVerbosity::Log),     HR::ESizeRule::Auto, 0.f, vpad)
+            ->addSlot(verbToggle("Verb", ELogVerbosity::Verbose), HR::ESizeRule::Auto, 0.f, vpad)
+            ->addSlot(spacer(),      HR::ESizeRule::Fill)
+            ->addSlot(counter(true),  HR::ESizeRule::Auto, 0.f, vpad)
+            ->addSlot(counter(false), HR::ESizeRule::Auto, 0.f, vpad)
+            ->addSlot(spacer(),      HR::ESizeRule::Fixed, s(6.f))
+            ->addSlot(textButton("Clear", 11.f, kTextBody, HPadding{8.f, 3.f}, btnN, btnH,
+                                 [this] {
+                                     // 코어 링은 비우지 않습니다. 파일·상태바에는 영향이 없습니다.
+                                     pullLogRecords();
+                                     logClearedSeq_ = logMirrorSeq_;
+                                     logViewDirty_  = true;
+                                 }),
+                      HR::ESizeRule::Auto, 0.f, vpad)
+            ->addSlot(spacer(),      HR::ESizeRule::Fixed, s(4.f));
+
+        logRowsBox_ = HNew(SVerticalBox);
+        bottomContent_->addSlot(HNew(SBorder)->background(kBgHeader)->content(filterRow),
+                                SVerticalBox::ESizeRule::Fixed, s(28.f));
+        // 패딩은 슬롯이 아니라 감싼 SBorder 에 줍니다. Fill 슬롯의 패딩은 이중 계산됩니다(DEF-62).
+        bottomContent_->addSlot(HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f })
+                                    ->padding(HPadding{ s(4.f), s(2.f) })->content(logRowsBox_),
+                                SVerticalBox::ESizeRule::Fill);
+        rebuildLogRows();
     } else {
         // GPU Stats
         auto addStat = [&](const char* label, AttrStr val) {
@@ -2539,6 +2956,16 @@ void EditorApp::handleInput(float mouseX, float mouseY,
     if (leftDown && !prevLeftDown_ && currentFocus() != EFocusTarget::None &&
         !focusWidgetContains(mouseX, mouseY)) {
         setTextFocus(EFocusTarget::None);
+    }
+
+    // Categories 팝업 바깥을 누르면 닫기만 하고 클릭은 그대로 흘려보냅니다. 전면 캐처로 받으면
+    // 그 클릭이 닫기에만 쓰여 삼켜집니다(메뉴 팝업의 DEF-64). 팝업 제거는 지연 플래그로
+    // 프레임 끝에 일어나므로, 이번 프레임의 디스패치는 팝업이 있는 상태에서 판정됩니다.
+    if (leftDown && !prevLeftDown_ && logPopupOpen_) {
+        const glm::vec2 mp{ mouseX, mouseY };
+        const bool inPanel  = logPopupPanel_ && logPopupPanel_->cachedGeometry().contains(mp);
+        const bool onButton = logCatButton_  && logCatButton_->cachedGeometry().contains(mp);
+        if (!inPanel && !onButton) { logPopupOpen_ = false; logPopupDirty_ = true; }
     }
 
     // ── 메뉴 hover 전환 ──────────────────────────────────────────────────────────
@@ -2844,6 +3271,13 @@ bool EditorApp::inViewport(float mx, float my, float winW, float winH) const {
     // 기즈모 호버·기즈모 드래그 시작·RMB 카메라 모드가 한꺼번에 게이팅됩니다.
     const HViewportRect tb = viewportToolbarFbRect();
     if (tb.width >= 1.f && tb.contains(fb.x, fb.y)) return false;
+    // Output Log 의 Categories 팝업은 뷰포트 위로 열립니다. 팝업 안의 클릭이 기즈모 드래그나
+    // RMB 카메라 모드로 새지 않게 툴바와 같은 방식으로 배제합니다(기즈모는 UI 디스패치보다 먼저 판정).
+    if (logPopupOpen_ && logPopupPanel_) {
+        const HGeometry& pg = logPopupPanel_->cachedGeometry();
+        const HViewportRect pr{ pg.position.x, pg.position.y, pg.size.x, pg.size.y };
+        if (pr.width >= 1.f && pr.contains(fb.x, fb.y)) return false;
+    }
     return viewportFbRect().contains(fb.x, fb.y);
 }
 
@@ -2934,11 +3368,13 @@ void EditorApp::tickRenameInput() {
         return;
     }
 
-    // ── 인라인 리네임 / 아웃라이너 검색 — 같은 편집 규칙을 공유합니다 ─────────
-    if (focus == EFocusTarget::Rename || focus == EFocusTarget::Search) {
+    // ── 인라인 리네임 / 아웃라이너 검색 / 로그 검색 — 같은 편집 규칙을 공유합니다 ─
+    if (focus == EFocusTarget::Rename || focus == EFocusTarget::Search ||
+        focus == EFocusTarget::LogSearch) {
         const bool isRename = (focus == EFocusTarget::Rename);
-        std::string& buf    = isRename ? renameBuffer_ : outlinerSearch_;
-        bool&        selAll = isRename ? renameSelAll_ : searchSelAll_;
+        const bool isLog    = (focus == EFocusTarget::LogSearch);
+        std::string& buf    = isRename ? renameBuffer_ : isLog ? logSearch_       : outlinerSearch_;
+        bool&        selAll = isRename ? renameSelAll_ : isLog ? logSearchSelAll_ : searchSelAll_;
         bool dirty = false;
 
         // 전체 선택 상태에서 입력·붙여넣기·지우기 → 기존 내용 교체
@@ -2981,7 +3417,7 @@ void EditorApp::tickRenameInput() {
             return;
         }
 
-        if (dirty) outlinerDirty_ = true;
+        if (dirty) (isLog ? logViewDirty_ : outlinerDirty_) = true;
         return;
     }
 
