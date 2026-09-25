@@ -33,6 +33,9 @@
 # ── Claude local (machine-specific) settings ──
 .claude/settings.local.json
 
+# ── Office 임시 잠금 파일(문서를 연 동안만 생기는 파일) ──
+~$*
+
 # ── OS cruft ──
 Thumbs.db
 Desktop.ini

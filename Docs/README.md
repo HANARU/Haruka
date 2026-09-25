@@ -67,3 +67,9 @@
 | [archive/Deep_Carbon_Network_Analysis.md](archive/Deep_Carbon_Network_Analysis.md) | 네트워크(HNet) 사전 조사 — 범위 밖 |
 | [archive/Full_Carbon_Ecosystem_Analysis.md](archive/Full_Carbon_Ecosystem_Analysis.md) | Carbon 생태계 전반 분석 |
 | [archive/Trinity_Rendering_Analysis.md](archive/Trinity_Rendering_Analysis.md) | Trinity 렌더링(Reverse-Z 전환 참고) |
+
+## 브랜드 자산
+
+| 위치 | 내용 |
+|---|---|
+| [Logo/](Logo/) | 로고 마스터 `Logo_Final.png`(1658px)가 그림의 정본입니다. `Logo.pptx` 는 도형 원본이지만 어두운 배경 대응용 흰 원판이 빠져 있으니 여기서 아이콘을 다시 만들지 마십시오. `build_icon.py` 가 마스터에서 실행 파일 아이콘 [`res/Haruka.ico`](../res/Haruka.ico)(16~256px 7종)를 만들고, 리소스 등록은 [`res/Haruka.rc`](../res/Haruka.rc) 에 있습니다. |

@@ -1,0 +1,21 @@
+// Haruka Engine - Win32 resource script
+//
+// ASCII only on purpose. rc.exe reads a .rc through the ANSI/console code page
+// unless it finds a BOM, so a non-ASCII comment can desynchronise the lines that
+// follow it. Same reasoning as the ASCII-only rule for build.bat / run.bat.
+//
+// One multi-size icon is registered under two names:
+//   IDI_HARUKA_ICON  numeric id - the icon Explorer, the Start menu and any
+//                    shortcut show for HarukaEngine.exe
+//   GLFW_ICON        the name GLFW looks up in win32_window.c when it registers
+//                    the window class, which covers the title bar, Alt+Tab and
+//                    the taskbar button. Nothing has to call glfwSetWindowIcon.
+//
+// Haruka.ico carries 16/24/32/48/64/128/256 px entries. Windows picks the entry
+// that matches the surface and the display scaling on its own, so the logo stays
+// sharp from a 100% title bar up to an Explorer extra-large view.
+
+#define IDI_HARUKA_ICON 101
+
+IDI_HARUKA_ICON ICON "Haruka.ico"
+GLFW_ICON       ICON "Haruka.ico"

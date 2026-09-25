@@ -209,6 +209,17 @@ else()
     list(APPEND CORE_SOURCES
         src/platform/glfw/GlfwWindow.cpp
     )
+
+    # ── Windows 실행 파일·창 아이콘 ────────────────────────────────────────────
+    # res/Haruka.rc 가 다중 크기 .ico 하나를 실행 파일 안에 넣습니다. GLFW 는 창
+    # 클래스를 등록할 때 GLFW_ICON 이라는 이름의 아이콘 리소스를 직접 찾아 가므로
+    # (win32_window.c) 런타임에서 glfwSetWindowIcon 을 호출할 필요가 없습니다.
+    # 어느 크기를 쓸지는 표시 위치와 배율을 보고 Windows 가 고릅니다.
+    if(WIN32)
+        enable_language(RC)
+        list(APPEND CORE_SOURCES res/Haruka.rc)
+    endif()
+
     add_executable(HarukaEngine ${CORE_SOURCES})
     target_link_libraries(HarukaEngine PRIVATE Vulkan::Vulkan glfw glm::glm tinygltf Jolt)
     target_include_directories(HarukaEngine PRIVATE ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
