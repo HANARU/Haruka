@@ -8,9 +8,11 @@
 // 실행: build/Release/HarukaGeometryTest.exe
 
 #include "../src/geometry/PrimitiveBuilder.hpp"
+#include "../src/core/TextFloat.hpp"
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -319,6 +321,47 @@ int main() {
         PrimitiveDesc out;
         check(!PrimitiveDesc::fromKey("nosuchshape|32x16|0|0.5000", out),
               "모르는 셰이프 이름은 조용히 통과하지 않고 실패합니다");
+    }
+
+    // ── 씬 파일 형식 (PRIM: / PRIM_MAT:) ─────────────────────────────────────
+    // 씬 직렬화 자체는 렌더러가 있어야 돌지만, 값의 텍스트 형식은 여기서 검산합니다.
+    std::printf("\n== 씬 파일 형식 ==\n");
+    {
+        // PRIM: 값은 캐시 키 형식 그대로입니다. 키 형식을 바꾸면 저장된 씬을 못 읽습니다.
+        PrimitiveDesc torus; torus.shape = EPrimitiveShape::Torus;
+        torus.segU = 32; torus.segV = 16; torus.ratio = 0.4f;
+        PrimitiveDesc back;
+        check(PrimitiveDesc::fromKey(torus.toKey(), back) && back == torus,
+              "PRIM 값(Torus, ratio 0.4)이 왕복합니다");
+
+        PrimitiveMaterialDesc m;
+        const PrimitiveMaterialDesc gray{ false, 0xB4B4B4FFu };
+        check(gray.toText() == "color B4B4B4FF 0 0.6", "회색 머티리얼의 텍스트가 'color B4B4B4FF 0 0.6' 입니다");
+        check(PrimitiveMaterialDesc::fromText(gray.toText(), m) && m == gray, "색 머티리얼이 왕복합니다");
+
+        const PrimitiveMaterialDesc checker{ true };
+        check(checker.toText() == "checker" && PrimitiveMaterialDesc::fromText("checker", m) && m.checker,
+              "체커 머티리얼이 왕복합니다");
+
+        const PrimitiveMaterialDesc odd{ false, 0x12AB34CDu, 0.123456789f, 0.987654321f };
+        check(PrimitiveMaterialDesc::fromText(odd.toText(), m) && m == odd,
+              "유효 숫자가 긴 금속도·거칠기도 값이 바뀌지 않고 왕복합니다");
+        check(PrimitiveMaterialDesc::fromText("  color b4b4b4ff 0 0.6  ", m) && m == gray,
+              "앞뒤 공백과 소문자 16진수를 받아들입니다");
+
+        // 깨진 값은 조용히 통과하지 않습니다. 씬 로더는 실패를 로그로 알리고 기본값을 씁니다.
+        check(!PrimitiveMaterialDesc::fromText("color B4B4B4 0 0.6", m),         "색이 8자리가 아니면 실패합니다");
+        check(!PrimitiveMaterialDesc::fromText("color B4B4B4FF 0 0.6 extra", m), "꼬리에 쓰레기가 붙으면 실패합니다");
+        check(!PrimitiveMaterialDesc::fromText("color B4B4B4FF 2 0.6", m),       "금속도가 [0,1] 밖이면 실패합니다");
+        check(!PrimitiveMaterialDesc::fromText("color B4B4B4FF 0", m),           "값이 모자라면 실패합니다");
+        check(!PrimitiveMaterialDesc::fromText("metal B4B4B4FF 0 0.6", m),       "모르는 종류는 실패합니다");
+
+        // 씬 파일의 실수는 짧게 쓰되 값은 지킵니다(위치·크기·색 전부 이 형식입니다).
+        check(floatToText(0.02f) == "0.02" && floatToText(20.f) == "20" && floatToText(-0.f) == "0",
+              "흔한 값은 짧게 씁니다 (0.02, 20, -0 은 0)");
+        const float v = 1.2345678f;
+        check(std::strtof(floatToText(v).c_str(), nullptr) == v,
+              "유효 숫자 6자리를 넘는 값도 되읽으면 같은 값입니다 (예전 기본 형식은 1.23457 로 잘림)");
     }
 
 

@@ -27,6 +27,9 @@ Actor* PrefabManager::spawn(const std::string& path, World& world, AssetManager&
     SceneSerializer::ActorData data;
     std::string line;
     while (std::getline(f, line)) {
+        // readScene 과 같은 규칙입니다. 텍스트 모드가 아닌 경로에서는 CRLF 의 \r 이 값 끝에
+        // 남아 PRIM 값과 파일 경로가 조용히 어긋납니다.
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.empty() || line[0] == '#') continue;
         auto colon = line.find(':');
         if (colon == std::string::npos) continue;

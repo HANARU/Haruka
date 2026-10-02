@@ -176,6 +176,8 @@ set(CORE_SOURCES
     src/assets/PrefabManager.cpp
     src/assets/SceneSerializer.cpp
     src/audio/AudioSystem.cpp
+    src/audio/AudioAttenuation.cpp
+    src/audio/MiniaudioImpl.cpp
     src/physics/PhysicsSystem.cpp
     src/ui/slate/HPaintContext.cpp
     src/ui/slate/HFontAtlas.cpp
@@ -320,9 +322,35 @@ if(NOT ANDROID)
         set_target_properties(HarukaLogTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 오디오 테스트 ------------------------------------------------------
+    # 출력 장치 없는 miniaudio 엔진(noDevice)에서 출력 샘플을 직접 당겨, 청취자 방향·거리
+    # 감쇠·일시정지·비활성 정지·OGG 디코딩을 귀가 아니라 숫자로 검산합니다. Vulkan 도 창도
+    # 필요 없습니다. OGG 확인에는 저장소의 시험용 음원을 쓰므로 소스 경로를 넘깁니다.
+    add_executable(HarukaAudioTest
+        tests/AudioTest.cpp
+        src/audio/AudioSystem.cpp
+        src/audio/AudioAttenuation.cpp
+        src/audio/MiniaudioImpl.cpp
+        src/components/AudioComponent.cpp
+        src/components/CameraComponent.cpp
+        src/core/World.cpp
+        src/core/Actor.cpp
+        src/core/Component.cpp
+        src/core/HLog.cpp
+    )
+    target_link_libraries(HarukaAudioTest PRIVATE glm::glm)
+    target_include_directories(HarukaAudioTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${miniaudio_SOURCE_DIR})
+    target_compile_definitions(HarukaAudioTest PRIVATE
+        HARUKA_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    if(MSVC)
+        target_compile_options(HarukaAudioTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaAudioTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     enable_testing()
     add_test(NAME geometry_conventions COMMAND HarukaGeometryTest)
     add_test(NAME actor_lifecycle      COMMAND HarukaActorTest)
     add_test(NAME command_stack_purge  COMMAND HarukaCommandTest)
     add_test(NAME log_category         COMMAND HarukaLogTest)
+    add_test(NAME audio_system         COMMAND HarukaAudioTest)
 endif()

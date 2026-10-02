@@ -17,6 +17,17 @@ std::vector<PropDesc> StaticMeshComponent::buildProps() {
 }
 
 std::string StaticMeshComponent::readOnlyInfo() const {
+    if (primitive) {
+        // 절차 도형은 경로가 없으므로 셰이프와 세그먼트를 보입니다(예: "sphere 32x16").
+        PrimitiveDesc d = *primitive;
+        d.canonicalize();
+        char seg[32] = "";
+        if (d.segU && d.segV) std::snprintf(seg, sizeof(seg), " %ux%u", (unsigned)d.segU, (unsigned)d.segV);
+        else if (d.segU)      std::snprintf(seg, sizeof(seg), " %u", (unsigned)d.segU);
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "%s%s  V:%d  T:%d", primitiveShapeName(d.shape), seg, vertCount, triCount);
+        return buf;
+    }
     if (modelPath.empty()) return {};
     // Show just the filename (after last slash) to keep the Details panel compact
     auto slash = modelPath.find_last_of("/\\");

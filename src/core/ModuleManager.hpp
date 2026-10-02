@@ -33,6 +33,14 @@ public:
         for (auto* m : order_) m->onBeginPlay();
     }
 
+    void endPlayAll() {
+        for (auto* m : order_) m->onEndPlay();
+    }
+
+    void pauseChangedAll(bool paused) {
+        for (auto* m : order_) m->onPauseChanged(paused);
+    }
+
     // Shuts down in reverse registration order, then clears all modules.
     void shutdownAll() {
         for (int i = (int)order_.size() - 1; i >= 0; --i)

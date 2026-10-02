@@ -31,6 +31,7 @@
 | [Viewport_Render_Design.md](Viewport_Render_Design.md) | 뷰포트 렌더(renderExtent 분리)·좌표 단일화 |
 | [RendererRefactor.md](RendererRefactor.md) | 렌더러 구조: RenderContext·GpuScene·FrameResources·passes |
 | [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) | 절차 도형·라이팅 규약(단위·머티리얼) |
+| [Audio_Design.md](Audio_Design.md) | 오디오: 재생 규칙(일시정지·비활성), 청취자·3D 감쇠 설정, 씬 형식, 시험 음원 |
 | [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) | 결함 심층 분석 + 마스터 체크리스트(정본) |
 | [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) | 결함 작업 지시서(정본, Stabilization 과 상태 일치) |
 
@@ -46,7 +47,8 @@
 
 ## VR · 이식 (보류)
 
-현재 사운드·VR 은 진행하지 않는 상태입니다. 착수 시점의 사전 조사·계획으로 보관합니다.
+현재 VR 은 진행하지 않는 상태입니다. 착수 시점의 사전 조사·계획으로 보관합니다. 사운드는 2026-10-02 에
+기초를 정리했고, 정본은 위의 [Audio_Design.md](Audio_Design.md) 입니다.
 
 | 문서 | 내용 |
 |---|---|

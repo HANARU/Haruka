@@ -750,6 +750,27 @@ MESH_STATE:1 1
 - `.hprefab`은 `PrefabManager`가 동일한 `SceneSerializer` 경로를 쓰므로 추가 작업 없이 따라옵니다 (실측 확인).
 - LOD는 직렬화하지 않고 스폰 시 재구성합니다.
 
+#### 구현된 형식 (2026-10-02, 위 초안에서 바꾼 점)
+
+```
+PRIM:sphere|32x16|0|0.0000
+PRIM_MAT:checker
+MESH_STATE:1 1
+```
+```
+PRIM:box|0x0|0|0.0000
+PRIM_MAT:color B4B4B4FF 0 0.6
+MESH_STATE:1 1
+```
+
+- **`PRIM:` 값은 캐시 키(`PrimitiveDesc::toKey`) 형식을 그대로 씁니다.** 초안의 `PRIM:box 32 16 0` 처럼 별도 형식을 만들면 같은 값을 읽는 파서가 둘이 되어, 한쪽만 고쳐졌을 때 조용히 어긋납니다. `fromKey` 는 이미 왕복 테스트가 있고 꼬리의 쓰레기를 거부합니다. 대신 **키 형식이 곧 저장 형식**이 되었으므로, 키를 바꿀 때는 옛 형식도 읽도록 `fromKey` 를 함께 고쳐야 합니다(헤더 주석에 명시).
+- **초안의 `PRIM_EXTENT:` 는 두지 않습니다.** 크기는 D1 결정대로 `SCALE:` 에 실립니다.
+- **색은 `PRIM_COLOR:0.8 0.8 0.8` 대신 `PRIM_MAT:` 하나로 씁니다.** 머티리얼의 정체성이 색만이 아니라 체커 여부와 금속도·거칠기까지이기 때문입니다(`PrimitiveMaterialDesc`). 확인용 씬이 체커를 쓰므로 체커를 표현하지 못하면 씬을 파일로 옮길 수 없습니다. 색은 sRGB 표시값을 16진수 8자리로 써서 저장·불러오기에서 값이 변하지 않습니다.
+- **깨진 값의 처리:** `PRIM:` 이 깨졌으면 메시 없는 액터가 되고 오류 로그를 남깁니다(D4, 다른 도형으로 대체하지 않음). `PRIM_MAT:` 이 깨졌으면 도형은 살리고 기본 머티리얼을 쓰며 오류 로그를 남깁니다. 머티리얼 오류는 도형을 버릴 이유가 아니기 때문입니다. `PRIM_MAT:` 줄이 없으면 기본 머티리얼입니다.
+- **메시 컴포넌트가 정체성을 들고 다닙니다.** `StaticMeshComponent::primitive`(옵셔널 `PrimitiveDesc`)와 `primitiveMaterial` 입니다. 핸들만으로는 무엇을 만들었는지 알 수 없어서, 예전에는 절차 도형이 Play→Stop 과 저장·불러오기에서 통째로 사라졌습니다(Draw 8 → 1 실측).
+- **씬 헤더는 `# Haruka Scene v3` 입니다.** 같은 변경에서 씬 파일의 실수를 "다시 읽으면 같은 값이 되는 가장 짧은 십진수"로 쓰도록 바꿨습니다(`core/TextFloat.hpp`). 예전에는 iostream 기본값(유효 숫자 6자리)이라 Play→Stop 을 할 때마다 1.2345678 같은 값이 1.23457 로 잘렸습니다. 옛 엔진이 v3 파일을 읽으면 모르는 키를 건너뛰므로 절차 도형의 메시만 빠집니다.
+- **씬 단위 읽기·쓰기를 `SceneSerializer::writeScene/readScene` 으로 옮겼습니다.** 예전에는 `EditorApp` 에만 있어서 게임 모듈이 시작 씬을 파일에서 읽을 수 없었습니다. 옮기면서 줄 끝의 `\r` 을 지우게 했습니다(텍스트 모드가 아닌 경로에서 경로와 `PRIM:` 값이 조용히 어긋나는 것을 막음).
+
 ### 7-2. 정체성과 캐시
 
 #### `PrimitiveDesc` (자료구조 수준)
@@ -1576,13 +1597,13 @@ DEF-36과 DEF-37을 고친 뒤에도 화면 대비가 부족하여, **세 값을
 
 **검증**: V7, V8, V9, V12입니다. 단위 테스트가 디바이스 없이 통과합니다.
 
-### 단계 8. 직렬화와 에디터 (I1, I2, 7-4절)
+### 단계 8. 직렬화와 에디터 (I1, I2, 7-4절)  ◐ 직렬화 완료 2026-10-02, 에디터 항목 남음
 
-1. `ActorData`에 `hasPrim`, `prim`, `primExtent`, `primColor`를 추가합니다.
-2. `writeActor`, `parseLine`, `spawn`에 `PRIM:` 분기를 추가합니다.
-3. `StaticMeshComponent`에 옵셔널 `PrimitiveDesc`와 조건부 `buildProps` 행을 추가합니다.
-4. 콘텐츠 브라우저에 `PRIMITIVES` 섹션을, 아웃라이너에 `+ Add Cube`를 추가합니다.
-5. **단계 2의 임시 씬을 `.hscene` 파일로 옮깁니다** (9-4절).
+1. ✅ `ActorData`에 `hasPrim`, `prim`, `primMat` 을 추가했습니다(`primExtent` 는 두지 않음, 7-1절 "구현된 형식").
+2. ✅ `writeActor`, `parseLine`, `spawn`에 `PRIM:`·`PRIM_MAT:` 분기를 추가했습니다.
+3. ◐ `StaticMeshComponent`에 옵셔널 `PrimitiveDesc`(와 머티리얼 정체성)를 추가하고, 디테일 패널에 `sphere 32x16  V:561  T:960` 처럼 읽기 전용으로 보입니다. **편집 가능한 `buildProps` 행은 단계 6(커밋 훅)이 먼저입니다.** 커밋 훅 없이 붙이면 드래그 중 단계마다 도형이 재생성됩니다.
+4. ☐ 콘텐츠 브라우저에 `PRIMITIVES` 섹션을, 아웃라이너에 `+ Add Cube`를 추가합니다.
+5. ✅ **임시 씬을 `assets/scenes/LightingProbe.hscene` 으로 옮겼습니다** (9-4절). `DefaultGameModule::onStart` 는 이제 이 파일을 읽기만 합니다. 파일은 기존 코드가 만든 씬을 새 직렬화로 저장해 만들었고, 그 파일을 불러와 다시 저장한 결과가 원본과 같음을 확인했습니다. `.gitignore` 가 `*.hscene` 을 무시하므로 `assets/scenes/` 만 예외로 두었습니다.
 
 **검증**: 도형을 스폰하고 저장한 뒤 다시 열었을 때 그대로입니다. Play 와 Stop 왕복에서 유지됩니다. 파라미터를 드래그해도 정점 카운터가 커밋 시점에만 증가합니다.
 
@@ -1820,6 +1841,8 @@ AxisGizmo 만 아직 없습니다. Arrow 를 회전만 달리해 세 번 스폰�
 `DefaultGameModule::onStart` 에 9-1의 `Lighting_Probe` 배치를 넣었습니다. `Ground`(두께 0.2 m 슬래브), `ProbeSphere`, `ProbeBox`, `ProbePlane`, `FarSphere`, 그리고 기존 `Key` 입니다. 체커 머티리얼을 붙여 UV 왜곡을 바로 볼 수 있게 했습니다.
 
 **이 배치는 임시입니다.** `PRIM:` 직렬화(단계 8)가 붙으면 `.hscene` 파일로 옮깁니다. 9-4절의 이유이며, `onStart` 에 두면 게임 모듈이 특정 디버그 씬에 결합됩니다.
+
+**2026-10-02 갱신**: `PRIM:` 직렬화가 붙어 `assets/scenes/LightingProbe.hscene` 으로 옮겼습니다. 배치를 바꾸려면 에디터에서 고친 뒤 Save 로 만든 `scene.hscene` 을 그 파일에 덮어쓰면 됩니다. Play→Stop 뒤에도 Draw 8 · Culled 4 가 유지됩니다(이전에는 Draw 1 로 떨어졌습니다).
 
 **2026-08-25 갱신**: `ProbeCapsule`, `ProbeCylinder`, `ProbeCone`, `ProbeTorus`,
 `ProbeIcosphere`, `ProbeArrow` 를 씬에 추가했습니다. 화면으로 확인한 결과 Capsule 의

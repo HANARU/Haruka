@@ -9,7 +9,6 @@
 #include "../components/CameraComponent.hpp"
 #include "../components/LightComponent.hpp"
 #include "../components/AudioComponent.hpp"
-#include "../audio/AudioSystem.hpp"
 #include "../components/RigidBodyComponent.hpp"
 #include "../assets/AssetManager.hpp"
 #include "../assets/PrefabManager.hpp"
@@ -1395,34 +1394,11 @@ void EditorApp::stopPlay() {
 }
 
 // ── Serialization ──────────────────────────────────────────────────────────────
+// 씬 형식과 블록·부모 규칙은 SceneSerializer 가 소유합니다. 게임 모듈이 시작 씬을 같은
+// 함수로 읽으므로, 여기에 별도 구현을 두면 두 경로가 어긋납니다. 에디터 카메라는 씬이
+// 아니라 에디터 소유라 저장하지도 지우지도 않습니다.
 std::string EditorApp::serializeWorld() {
-    std::ostringstream oss;
-    oss << "# Haruka Scene v2\n";
-
-    // 직렬화 세트(에디터 카메라 제외)에서 각 액터에 순번을 매겨, 부모를 인덱스로
-    // 참조합니다. 부모가 세트 밖(예: 에디터 카메라)이면 -1 로 기록해 링크를 남기지 않습니다.
-    std::unordered_map<const Actor*, int> indexOf;
-    int n = 0;
-    for (auto& ap : ctx_.world->getActors()) {
-        if (ap.get() == editorCamActor_) continue;
-        indexOf[ap.get()] = n++;
-    }
-
-    for (auto& ap : ctx_.world->getActors()) {
-        Actor* a = ap.get();
-        if (a == editorCamActor_) continue;
-
-        int parentIdx = -1;
-        if (Actor* p = a->getParent()) {
-            auto it = indexOf.find(p);
-            if (it != indexOf.end()) parentIdx = it->second;
-        }
-
-        oss << "ACTOR:" << a->name << "\n";
-        SceneSerializer::writeActor(oss, a, parentIdx);
-        oss << "END_ACTOR\n";
-    }
-    return oss.str();
+    return SceneSerializer::writeScene(*ctx_.world, editorCamActor_);
 }
 
 void EditorApp::deserializeWorld(const std::string& data) {
@@ -1433,54 +1409,7 @@ void EditorApp::deserializeWorld(const std::string& data) {
     ctx_.selected = nullptr;
     for (Actor* a : toDestroy) ctx_.world->destroyActor(a);
 
-    // 직렬화 순서대로 블록마다 정확히 한 슬롯을 만듭니다(스폰 실패 시 nullptr 자리표시자).
-    // serializeWorld 가 액터마다 위치 인덱스를 매기므로, 이름 빈 블록 등으로 스폰이
-    // 실패해도 슬롯을 예약해야 그 뒤 PARENT 인덱스가 밀리지 않습니다. 부모 배선은 전부
-    // 스폰된 뒤에 하며, 파일에서 부모가 자식보다 뒤에 올 수도 있어 전방 참조를 허용합니다.
-    std::vector<Actor*> spawned;   // 블록당 한 항목, 스폰 실패면 nullptr
-    std::vector<int>    parentOf;
-    bool                inBlock = false;
-    SceneSerializer::ActorData cur;
-
-    auto closeBlock = [&] {
-        if (!inBlock) return;
-        Actor* a = SceneSerializer::spawn(cur, *ctx_.world, *ctx_.assets);
-        spawned.push_back(a);
-        parentOf.push_back(a ? cur.parentIndex : -1);
-        cur     = SceneSerializer::ActorData{};
-        inBlock = false;
-    };
-
-    std::string line;
-    std::istringstream iss(data);
-    while (std::getline(iss, line)) {
-        if (line.empty() || line[0] == '#') continue;
-        // END_ACTOR 는 콜론이 없으므로 콜론 검사보다 먼저 처리해 블록을 닫습니다.
-        if (line == "END_ACTOR") { closeBlock(); continue; }
-        auto colon = line.find(':');
-        if (colon == std::string::npos) continue;
-        std::string key = line.substr(0, colon);
-        std::string val = line.substr(colon + 1);
-
-        if (key == "ACTOR") {
-            closeBlock();          // END_ACTOR 없이 다음 블록이 와도 이전 블록을 닫음
-            inBlock  = true;
-            cur.name = val;
-        } else {
-            SceneSerializer::parseLine(key, val, cur);
-        }
-    }
-    closeBlock();                  // END_ACTOR 없이 끝나는 마지막 블록
-
-    // 부모 배선: PARENT 인덱스는 직렬화(블록) 순서이며 spawned 인덱스와 1:1 대응입니다.
-    // attachTo 가 사이클을 거부하고 실효 활성을 다시 맞추므로, 비활성 부모 아래 자식은
-    // 여기서 꺼지고, 순환 참조가 있어도 크래시하지 않습니다. null 슬롯은 건너뜁니다.
-    for (size_t i = 0; i < spawned.size(); ++i) {
-        int p = parentOf[i];
-        if (p >= 0 && p < (int)spawned.size()
-            && spawned[i] && spawned[p] && spawned[p] != spawned[i])
-            spawned[i]->attachTo(spawned[p]);
-    }
+    SceneSerializer::readScene(data, *ctx_.world, *ctx_.assets);
 
     // 씬 로드는 기존 액터를 전부 파괴하고 새 id 로 다시 스폰하므로, 아웃라이너의
     // 세션 상태(접힘·스크롤)를 그대로 두면 엉뚱한 액터가 접힌 채로 나타납니다.
@@ -2822,16 +2751,16 @@ void EditorApp::rebuildBottomPanel() {
                         ->pressedColor({0.07f, 0.33f, 0.58f, 1.f})
                         ->padding({s(8.f), s(3.f)})
                         ->onClick([this, stem, fullPath]{
-                            if (!ctx_.selected) return;
-                            auto* ac = ctx_.selected->getComponent<AudioComponent>();
-                            if (!ac) return;
-                            if (ac->sound_ && ac->audioSys_) {
-                                ac->audioSys_->destroySound(ac->sound_);
-                                ac->sound_    = nullptr;
-                                ac->audioSys_ = nullptr;
+                            // 선택한 액터에 지정합니다. 오디오 컴포넌트가 없으면 붙입니다. 예전에는
+                            // 선택이 없거나 컴포넌트가 없으면 아무 반응 없이 무시됐습니다.
+                            Actor* sel = ctx_.selected;
+                            if (!sel || sel == editorCamActor_) {
+                                HLOG(LogEditor, Warning) << "select an actor first to assign '" << stem << "'";
+                                return;
                             }
-                            ac->filePath    = fullPath;
-                            ac->loadFailed_ = false;
+                            auto* ac = sel->getComponent<AudioComponent>();
+                            if (!ac) ac = sel->addComponent<AudioComponent>();
+                            ac->setFile(fullPath);
                             detailsDirty_ = true;
                         })
                         ->content(HNew(SHorizontalBox)
@@ -3586,11 +3515,7 @@ void EditorApp::tickEditorCamera(float dt, float scroll) {
     if (!editorCam_ || !editorCamActor_ || !ctx_.window) return;
     IWindow& win = *ctx_.window;
 
-    const glm::vec3 fwd {
-         cosf(editorCam_->pitch) * sinf(editorCam_->yaw),
-        -sinf(editorCam_->pitch),
-        -cosf(editorCam_->pitch) * cosf(editorCam_->yaw)
-    };
+    const glm::vec3 fwd = editorCam_->forward();
     const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3(0.f, 1.f, 0.f)));
 
     // WASD fly — only when camera mode active (RMB held in viewport)

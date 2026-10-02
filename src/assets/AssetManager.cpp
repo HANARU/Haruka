@@ -89,15 +89,15 @@ AssetPair AssetManager::acquirePrimitive(const PrimitiveDesc& descIn) {
     // 업로드 전에 예산을 검사합니다. uploadMesh 의 throw 를 밟지 않는 것이
     // 목적이며, 그래서 생성과 업로드를 분리해 둔 것입니다.
     const uint32_t evc = PrimitiveBuilder::estimateVertexCount(desc);
+    // 로그는 영문으로 남깁니다. Output Log 폰트가 ASCII 전용이라 한글은 물음표로 보입니다.
     if (evc == 0) {
-        HLOG(LogAsset, Error) << "절차 도형 '" << key
-                              << "' 는 아직 구현되지 않았습니다. 액터에 메시가 붙지 않습니다.";
+        HLOG(LogAsset, Error) << "primitive '" << key << "' is not implemented; the actor gets no mesh";
         return AssetPair{};
     }
 
     MeshSourceData src = PrimitiveBuilder::build(desc);
     if (src.vertices.empty() || src.indices.empty()) {
-        HLOG(LogAsset, Error) << "절차 도형 '" << key << "' 생성이 빈 메시를 냈습니다.";
+        HLOG(LogAsset, Error) << "primitive '" << key << "' generated an empty mesh";
         return AssetPair{};
     }
 
@@ -199,6 +199,11 @@ void AssetManager::clear() {
 
     for (auto& [key, m] : primMaterials) renderer->freeMaterial(m);
     primMaterials.clear();
+}
+
+MaterialHandle* AssetManager::acquirePrimitiveMaterial(const PrimitiveMaterialDesc& desc) {
+    return desc.checker ? primitiveCheckerMaterial()
+                        : primitiveMaterial(desc.rgba8, desc.metallic, desc.roughness);
 }
 
 MaterialHandle* AssetManager::primitiveCheckerMaterial() {

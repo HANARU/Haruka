@@ -1,7 +1,9 @@
 #include "PrimitiveDesc.hpp"
+#include "../core/TextFloat.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -183,6 +185,62 @@ bool PrimitiveDesc::operator==(const PrimitiveDesc& o) const {
     return a.shape == b.shape && a.flags == b.flags &&
            a.segU  == b.segU  && a.segV  == b.segV  &&
            a.ratio == b.ratio;
+}
+
+// ── 머티리얼 정체성 ───────────────────────────────────────────────────────────
+
+std::string PrimitiveMaterialDesc::toText() const {
+    if (checker) return "checker";
+    char hex[16];
+    std::snprintf(hex, sizeof(hex), "%08X", (unsigned)rgba8);
+    return std::string("color ") + hex + " " + floatToText(metallic) + " " + floatToText(roughness);
+}
+
+bool PrimitiveMaterialDesc::fromText(std::string_view text, PrimitiveMaterialDesc& out) {
+    // 손으로 고친 파일을 위해 앞뒤 공백만 허용합니다.
+    const std::string s(text);
+    const size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return false;
+    const size_t e = s.find_last_not_of(" \t\r\n");
+    const std::string t = s.substr(b, e - b + 1);
+
+    if (t == "checker") {
+        out = PrimitiveMaterialDesc{};
+        out.checker = true;
+        return true;
+    }
+    if (t.rfind("color ", 0) != 0) return false;
+
+    // 색은 정확히 16진수 8자리입니다. strtoul 은 앞의 공백과 부호를 받아들이므로 직접 셉니다.
+    const char* p = t.c_str() + 6;
+    while (*p == ' ') ++p;
+    for (int i = 0; i < 8; ++i)
+        if (!std::isxdigit((unsigned char)p[i])) return false;
+    if (p[8] != ' ') return false;
+    const std::string hex(p, 8);
+    const unsigned long rgba = std::strtoul(hex.c_str(), nullptr, 16);
+    p += 8;
+
+    char* endp = nullptr;
+    const float metallic = std::strtof(p, &endp);
+    if (endp == p) return false;
+    p = endp;
+    const float roughness = std::strtof(p, &endp);
+    if (endp == p || *endp != '\0') return false;
+    if (!(metallic  >= 0.f && metallic  <= 1.f)) return false;   // NaN 도 여기서 걸립니다
+    if (!(roughness >= 0.f && roughness <= 1.f)) return false;
+
+    out = PrimitiveMaterialDesc{};
+    out.rgba8     = (uint32_t)rgba;
+    out.metallic  = metallic;
+    out.roughness = roughness;
+    return true;
+}
+
+bool PrimitiveMaterialDesc::operator==(const PrimitiveMaterialDesc& o) const {
+    if (checker != o.checker) return false;
+    if (checker) return true;   // 체커는 색과 팩터를 쓰지 않습니다
+    return rgba8 == o.rgba8 && metallic == o.metallic && roughness == o.roughness;
 }
 
 // ── LOD (규칙 R4) ─────────────────────────────────────────────────────────────

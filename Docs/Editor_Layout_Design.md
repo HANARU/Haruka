@@ -450,4 +450,4 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
 
 미룬 항목 전체(14건)는 2026-09-17 에 결함 정본으로 옮겼습니다:
 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 의 DEF-56 ~ DEF-69. 종합 오류 검출 작업에서
-일괄 처리합니다.
+일괄 처리합니다. 2026-10-02 에 디테일 패널 클릭 결함 DEF-73 ~ DEF-75 를 같은 묶음에 더했습니다.

@@ -3,14 +3,17 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 
+glm::vec3 CameraComponent::forward() const {
+    return glm::vec3(cosf(pitch) * sinf(yaw),
+                     -sinf(pitch),
+                     -cosf(pitch) * cosf(yaw));
+}
+
 glm::mat4 CameraComponent::viewMatrix() const {
     glm::vec3 pos(0.0f);
     if (owner) pos = owner->transform().position();
 
-    glm::vec3 fwd(cosf(pitch) * sinf(yaw),
-                  -sinf(pitch),
-                  -cosf(pitch) * cosf(yaw));
-    return glm::lookAt(pos, pos + fwd, glm::vec3(0.0f, 1.0f, 0.0f));
+    return glm::lookAt(pos, pos + forward(), glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
 glm::mat4 CameraComponent::projMatrix(float aspect) const {

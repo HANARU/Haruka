@@ -1,5 +1,7 @@
 #pragma once
 #include "../core/Component.hpp"
+#include "../geometry/PrimitiveDesc.hpp"
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +20,12 @@ public:
     bool            transparent = false;
     std::string     modelPath;
     int             meshIndex   = 0;  // index into AssetManager::loadAll() result
+
+    // 절차 도형이면 그 정체성이고, 파일 메시면 비어 있습니다. modelPath 와 배타입니다.
+    // 메시·머티리얼 핸들만으로는 무엇을 만들었는지 알 수 없어서, 씬에 저장할 때 이 두 값을
+    // 씁니다. 비워 두면 Play→Stop 이나 저장·불러오기에서 도형이 사라집니다.
+    std::optional<PrimitiveDesc> primitive;
+    PrimitiveMaterialDesc        primitiveMaterial;   // primitive 가 있을 때만 의미가 있습니다
     int             vertCount   = 0;
     int             triCount    = 0;
 

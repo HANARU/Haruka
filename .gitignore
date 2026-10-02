@@ -23,6 +23,8 @@
 
 # ── Scene saves (user data; run un-ignore if you want scenes versioned) ──
 *.hscene
+# 엔진이 읽는 시작 씬은 저장소에 둡니다(DefaultGameModule::onStart).
+!/assets/scenes/*.hscene
 
 # ── Session handoff (transient working notes, paste-in convention) ──
 /SESSION_HANDOFF.md

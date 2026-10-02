@@ -27,6 +27,10 @@ public:
     const char*           typeName()   const override { return "CameraComponent"; }
     std::vector<PropDesc> buildProps()       override;
 
+    // 카메라가 보는 방향(단위 벡터)입니다. 회전은 액터 트랜스폼이 아니라 yaw/pitch 가
+    // 정합니다. 렌더(viewMatrix), 에디터 카메라 이동, 오디오 청취자가 이 값을 함께 써서
+    // 화면과 소리의 좌우가 어긋나지 않습니다. yaw=pitch=0 이면 -Z 를 보고 오른쪽이 +X 입니다.
+    glm::vec3 forward() const;
     glm::mat4 viewMatrix() const;
     glm::mat4 projMatrix(float aspect) const;
 };

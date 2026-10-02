@@ -52,6 +52,10 @@ public:
     // 검증용 체커입니다. UV 왜곡과 스트레치를 즉시 드러냅니다.
     MaterialHandle* primitiveCheckerMaterial();
 
+    // 머티리얼 정체성으로 머티리얼을 얻습니다. 위의 두 함수로 나뉘는 유일한 분기점이라,
+    // 씬 파일에서 읽은 값과 코드에서 만든 값이 같은 핸들을 받습니다.
+    MaterialHandle* acquirePrimitiveMaterial(const PrimitiveMaterialDesc& desc);
+
     void clear();
 
 private:

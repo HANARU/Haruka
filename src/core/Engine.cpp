@@ -88,6 +88,7 @@ void Engine::run() {
     bool prevLDown  = false;
     bool prevRDown  = false;
     bool prevInGame = false;
+    bool prevPaused = false;
 
     while (!win.shouldClose()) {
         const auto loopT0 = Clock::now();
@@ -123,13 +124,21 @@ void Engine::run() {
         prevRDown = rmb;
 
         // ── Play state transitions ─────────────────────────────────────────
-        bool inGame = editor.isPlaying() || editor.isPaused();
+        const bool inGame = editor.isPlaying() || editor.isPaused();
+        const bool paused = editor.isPaused();
         if (inGame && !prevInGame) {
             gameModule.onBeginPlay(ctx);
             modules.beginPlayAll();
         }
-        if (!inGame && prevInGame)  gameModule.onEndPlay();
+        if (!inGame && prevInGame) {
+            gameModule.onEndPlay();
+            modules.endPlayAll();
+        }
+        // 일시정지는 시작·끝 처리 뒤에 알립니다. Pause 상태에서 곧바로 Stop 하면 끝 처리가
+        // 먼저 사운드를 멈추므로, 뒤따르는 재개 통지가 남은 소리를 다시 들려주지 않습니다.
+        if (paused != prevPaused) modules.pauseChangedAll(paused);
         prevInGame = inGame;
+        prevPaused = paused;
 
         // ── Tick ──────────────────────────────────────────────────────────
         {
