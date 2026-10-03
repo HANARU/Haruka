@@ -138,9 +138,11 @@ void HSlateRenderer::cleanup() {
     vkFreeMemory      (device_, whiteMem_,   nullptr);
 
     // vertexMem_ is persistently mapped — unmap before free
-    vkUnmapMemory  (device_, vertexMem_);
-    vkDestroyBuffer(device_, vertexBuf_, nullptr);
-    vkFreeMemory   (device_, vertexMem_, nullptr);
+    for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+        vkUnmapMemory  (device_, vertexMem_[i]);
+        vkDestroyBuffer(device_, vertexBuf_[i], nullptr);
+        vkFreeMemory   (device_, vertexMem_[i], nullptr);
+    }
     vkDestroyBuffer(device_, indexBuf_,  nullptr);
     vkFreeMemory   (device_, indexMem_,  nullptr);
 }
@@ -376,26 +378,28 @@ void HSlateRenderer::createWhiteTexture(CmdBeginFn beginCmd, CmdEndFn endCmd) {
 
 // ── createBuffers ──────────────────────────────────────────────────────────────
 void HSlateRenderer::createBuffers(CmdBeginFn /*beginCmd*/, CmdEndFn /*endCmd*/) {
-    // Dynamic vertex buffer: HOST_VISIBLE | HOST_COHERENT, persistently mapped
+    // Dynamic vertex buffers: HOST_VISIBLE | HOST_COHERENT, persistently mapped, 프레임 슬롯마다 하나
     VkDeviceSize vbSize = kMaxVerts * sizeof(UIVertex);
     VkBufferCreateInfo bi{};
     bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bi.size        = vbSize;
     bi.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    vkCreateBuffer(device_, &bi, nullptr, &vertexBuf_);
 
     VkMemoryRequirements reqs;
-    vkGetBufferMemoryRequirements(device_, vertexBuf_, &reqs);
     VkMemoryAllocateInfo ai{};
-    ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    ai.allocationSize  = reqs.size;
-    ai.memoryTypeIndex = findMemType(reqs,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    vkAllocateMemory(device_, &ai, nullptr, &vertexMem_);
-    vkBindBufferMemory(device_, vertexBuf_, vertexMem_, 0);
-    vkMapMemory(device_, vertexMem_, 0, VK_WHOLE_SIZE, 0,
-                reinterpret_cast<void**>(&vertexPtr_));
+    ai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+        vkCreateBuffer(device_, &bi, nullptr, &vertexBuf_[i]);
+        vkGetBufferMemoryRequirements(device_, vertexBuf_[i], &reqs);
+        ai.allocationSize  = reqs.size;
+        ai.memoryTypeIndex = findMemType(reqs,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        vkAllocateMemory(device_, &ai, nullptr, &vertexMem_[i]);
+        vkBindBufferMemory(device_, vertexBuf_[i], vertexMem_[i], 0);
+        vkMapMemory(device_, vertexMem_[i], 0, VK_WHOLE_SIZE, 0,
+                    reinterpret_cast<void**>(&vertexPtr_[i]));
+    }
 
     // Fixed index buffer: pre-filled quad pattern (0,1,2,0,2,3 per quad)
     VkDeviceSize ibSize = kMaxQuads * 6 * sizeof(uint32_t);
@@ -421,7 +425,7 @@ void HSlateRenderer::createBuffers(CmdBeginFn /*beginCmd*/, CmdEndFn /*endCmd*/)
 
 // ── record ─────────────────────────────────────────────────────────────────────
 void HSlateRenderer::record(VkCommandBuffer cmd, uint32_t imgIdx,
-                             VkExtent2D extent, uint32_t /*frameIdx*/) {
+                             VkExtent2D extent, uint32_t frameIdx) {
     if (!root_ || root_->isCollapsed()) return;
     if (imgIdx >= framebuffers_.size() || framebuffers_[imgIdx] == VK_NULL_HANDLE) return;
 
@@ -430,8 +434,7 @@ void HSlateRenderer::record(VkCommandBuffer cmd, uint32_t imgIdx,
     fullGeo.size     = { (float)extent.width, (float)extent.height };
     fullGeo.scale    = 1.f;
 
-    root_->computeDesiredSize();
-    root_->onArrangeChildren(fullGeo);
+    arrange(fullGeo.size);
 
     HPaintContext ctx(&fonts_);
     root_->paint(ctx, fullGeo);
@@ -441,13 +444,13 @@ void HSlateRenderer::record(VkCommandBuffer cmd, uint32_t imgIdx,
             return a.layer < b.layer;
         });
 
-    flush(cmd, imgIdx, extent, ctx.elements);
+    flush(cmd, imgIdx, extent, ctx.elements, frameIdx % kFramesInFlight);
 }
 
 // ── flush ──────────────────────────────────────────────────────────────────────
 void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
                             VkExtent2D extent,
-                            std::vector<HDrawElement>& elements) {
+                            std::vector<HDrawElement>& elements, uint32_t slot) {
     // Expand Text elements into per-glyph Texture elements
     std::vector<HDrawElement> flat;
     flat.reserve(elements.size() * 4);
@@ -512,7 +515,7 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::vec2), &screenSize);
 
     VkDeviceSize vbOffset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuf_, &vbOffset);
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuf_[slot], &vbOffset);
     vkCmdBindIndexBuffer  (cmd, indexBuf_, 0, VK_INDEX_TYPE_UINT32);
 
     uint32_t vertCount  = 0; // total vertices written this frame
@@ -523,7 +526,7 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
         if (vertCount + 4 > kMaxVerts) return false; // overflow guard
         float x = rect.x, y = rect.y, w = rect.z, h = rect.w;
         float u0 = uv.x, v0 = uv.y, u1 = uv.z, v1 = uv.w;
-        UIVertex* v = vertexPtr_ + vertCount;
+        UIVertex* v = vertexPtr_[slot] + vertCount;
         v[0] = {{ x,     y     }, { u0, v0 }, color };
         v[1] = {{ x + w, y     }, { u1, v0 }, color };
         v[2] = {{ x + w, y + h }, { u1, v1 }, color };
@@ -592,27 +595,56 @@ void HSlateRenderer::pushDescriptor(VkCommandBuffer cmd, VkImageView view) {
                            pipelineLayout_, 0, 1, &write);
 }
 
+// ── arrange ────────────────────────────────────────────────────────────────────
+void HSlateRenderer::arrange(glm::vec2 size) {
+    if (!root_ || root_->isCollapsed()) return;
+    HGeometry fullGeo;
+    fullGeo.size = size;
+    root_->computeDesiredSize();
+    root_->onArrangeChildren(fullGeo);
+}
+
 // ── handlePointerEvent ─────────────────────────────────────────────────────────
 HReply HSlateRenderer::handlePointerEvent(HPointerEvent e) {
     if (!root_ || !root_->isVisible()) return HReply::Unhandled();
 
-    if (capturedWidget_) {
-        HReply r;
-        if (e.button >= 0) {
-            r = capturedWidget_->onMouseButton(e);
-            if (!e.down || r.mouseRelease) capturedWidget_ = nullptr;
-        } else {
-            r = capturedWidget_->onMouseMove(e);
+    // 버튼 상태를 싣는 것은 이동 이벤트뿐입니다(e.down = 좌버튼이 지금 눌려 있음). 휠
+    // 이벤트의 e.down 은 늘 거짓이라 "버튼이 떨어졌다"로 읽으면 안 됩니다.
+    const bool isWheel  = (e.wheelDelta != 0.f);
+    const bool isButton = !isWheel && e.button >= 0;
+    const bool isMove   = !isWheel && e.button < 0;
+
+    if (captureActive_) {
+        if (auto cap = captured_.lock()) {
+            HReply r;
+            if (isWheel)       r = cap->onScroll(e);   // 예전에는 onMouseMove 로 갔습니다(DEF-57 일부)
+            else if (isButton) r = cap->onMouseButton(e);
+            else               r = cap->onMouseMove(e);
+            // 캡처는 버튼보다 오래 살지 않습니다. 뗌이 다른 처리에 소비되어 오지 않았더라도,
+            // 버튼이 떨어졌다고 실린 이동 이벤트를 위젯에 전한 뒤 풉니다.
+            if (r.mouseRelease || (!isWheel && !e.down)) releaseCapture();
+            return r;
         }
-        return r;
+        // 캡처한 위젯이 그사이 파괴됐습니다. 이 누름의 뗌은 주인이 없으므로 아무 데도 보내지
+        // 않습니다. 보내면 누른 적 없는 위젯이 뗌만 받습니다(DEF-77 이 그 경로였습니다).
+        if (isButton) {
+            if (!e.down) releaseCapture();
+            return HReply::Handled();
+        }
+        // 뗌을 받지 못한 채 버튼이 떨어졌으면 여기서 정리합니다. 이동과 휠은 아래 보통
+        // 경로로 보내 호버가 갱신되게 합니다.
+        if (isMove && !e.down) releaseCapture();
     }
 
     HReply r;
-    if (e.wheelDelta != 0.f) r = root_->onScroll(e);
-    else if (e.button >= 0)  r = root_->onMouseButton(e);
-    else                     r = root_->onMouseMove(e);
+    if (isWheel)       r = root_->onScroll(e);
+    else if (isButton) r = root_->onMouseButton(e);
+    else               r = root_->onMouseMove(e);
 
-    if (r.mouseCapture) capturedWidget_ = r.mouseCapture;
-    if (r.mouseRelease) capturedWidget_ = nullptr;
+    if (r.mouseCapture) {
+        captured_      = r.mouseCapture->weak_from_this();
+        captureActive_ = true;
+    }
+    if (r.mouseRelease) releaseCapture();
     return r;
 }

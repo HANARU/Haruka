@@ -39,6 +39,9 @@ public:
     EPlayState getPlayState() const { return playState_; }
     bool isPlaying()  const { return playState_ == EPlayState::Playing; }
     bool isPaused()   const { return playState_ == EPlayState::Paused;  }
+    // 텍스트 입력(리네임·검색·숫자 칸)이 키보드를 쥐고 있는지. 게임 입력계가 이 동안 키를
+    // 무시하는 데 씁니다(DEF-67).
+    bool isTextInputActive() const { return currentFocus() != EFocusTarget::None; }
     bool isInEditor() const { return playState_ == EPlayState::Editor;  }
 
     void beginPlay();
@@ -236,6 +239,13 @@ private:
     bool toolbarDirty_   = false;
     bool detailsDirty_   = false;
     void flushChromeRebuilds();
+    // 디테일 패널이 지금 보여 주는 액터입니다. 패널의 값 접근자는 이 액터와 그 컴포넌트를
+    // raw 포인터로 붙잡으므로, 이 액터가 파괴되면 onActorDestroyed 구독이 리빌드를 요청하고
+    // handleInput 이 이벤트를 보내기 전에 소진합니다(DEF-92). 선택 포인터와 따로 두는
+    // 이유는, 여러 삭제 경로가 파괴 전에 ctx_.selected 부터 비우기 때문입니다.
+    Actor* detailsActor_ = nullptr;
+    // 디테일 TRANSFORM 섹션의 펼침 상태. 선택이 바뀌어도 유지합니다(DEF-90).
+    bool   detailsTxExpanded_ = true;
 
     // ── 하단 상태바 (Phase 1) ────────────────────────────────────────────────
     // 슬롯은 buildWidgetTree 에서 **한 번만** 채우고 이후 절대 다시 만들지 않습니다.
@@ -339,6 +349,9 @@ private:
     // 필요합니다. 비활성이면 위젯이 배치되지 않아 cachedGeometry 가 stale 하고, 그 낡은
     // rect 로 휠을 가로채면 그 자리를 차지한 다른 패널 위에서 카메라 돌리가 죽습니다.
     bool        outlinerVisible_ = true;
+    // 좌버튼을 아웃라이너 목록 위에서 눌러 아직 떼지 않았는지. 그동안은 목록 리빌드를 미뤄
+    // 눌린 행 버튼이 뗄 때까지 살아 있게 합니다(DEF-83).
+    bool        outlinerPressHeld_ = false;
     // 직전 선택(= 지금 선택의 하나 앞). Actor 메뉴의 부착 액션이 부모로 씁니다.
     Actor*      prevSelected2_ = nullptr;
 
@@ -467,6 +480,9 @@ private:
     void        revealActor(Actor* a);          // 조상 체인을 모두 펼침
     void        flushOutlinerRebuild();         // 지연 리빌드 요청 소진
     void rebuildDetails();
+    // 쌓인 디테일 리빌드 요청을 소진합니다. tick·handleInput 첫머리에서 불러, 에디터 밖
+    // (게임 tick·플레이 시작·끝 처리)에서 표시 대상이 파괴된 경우를 잡습니다(DEF-92).
+    void flushDetailsRebuild();
     void rebuildLog();
     void rebuildContent();
     void rebuildBottomPanel();

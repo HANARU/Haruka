@@ -379,8 +379,10 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
     if (dragging_ && !leftDown) {
         const Transform after = selected->transform();
         // 잡았다가 그대로 놓은 드래그로 64칸 커맨드 스택이 빈 이력에 차지 않게 합니다.
-        if (!nearlyEqualT(undoSnap_, after))
+        if (!nearlyEqualT(undoSnap_, after)) {
             cmdStack.push(std::make_unique<SetTransformCmd>(selected, undoSnap_, after));
+            selected->notifyTransformCommitted();   // 물리 바디 등이 드래그 결과를 따라오게
+        }
         dragging_ = false;
         axis_     = -1;
         accumMove_ = accumAngle_ = dragReadout_ = 0.f;

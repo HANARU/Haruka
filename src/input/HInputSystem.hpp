@@ -38,7 +38,10 @@ public:
     void   unsubscribe(Handle h);
 
     // ── 프레임 갱신 (메인 루프에서 1회 호출) ──────────────────────────────────
-    void update(float dt, IWindow& win);
+    // keyboardCaptured 가 참이면(에디터 텍스트 입력 중) 모든 키를 뗀 것으로 봅니다. 그러지
+    // 않으면 이름을 타이핑하는 동안 같은 키에 바인딩된 게임 액션이 함께 발화합니다(DEF-67).
+    // 눌려 있던 액션은 Released 를 한 번 받습니다.
+    void update(float dt, IWindow& win, bool keyboardCaptured = false);
 
 private:
     HInputSystem() = default;

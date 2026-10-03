@@ -3,6 +3,7 @@
 #include <memory>
 
 class World;
+class Actor;
 struct JoltImpl;
 
 class PhysicsSystem : public IEngineModule {
@@ -17,8 +18,22 @@ public:
 
     void setWorld(World* w) { world_ = w; }
 
-    // Called by RigidBodyComponent::onDestroy()
+    // RigidBodyComponent 가 부릅니다(파괴·비활성·재생성). 지운 자리 주변의 잠든 바디를
+    // 깨웁니다. Jolt 는 받치던 바디가 사라져도 그 위에서 잠든 바디를 깨우지 않습니다(DEF-80).
     void removeBody(uint32_t id);
+    // 살아 있는 바디의 마찰·반발을 바꿉니다(재생성 없음, DEF-81).
+    void setMaterial(uint32_t id, float friction, float restitution);
+    // 바디를 액터의 지금 월드 위치·회전으로 옮기고 깨웁니다(에디터 트랜스폼 편집 확정).
+    void teleport(uint32_t id, const Actor& a);
+
+    // 진단·테스트용 조회. 바디가 없으면 false 를 돌려줍니다.
+    struct BodyInfo {
+        bool  active      = false;   // 깨어 있는지(잠들면 false)
+        float friction    = 0.f;
+        float restitution = 0.f;
+        float posY        = 0.f;
+    };
+    bool queryBody(uint32_t id, BodyInfo& out) const;
 
 private:
     std::unique_ptr<JoltImpl> impl_;

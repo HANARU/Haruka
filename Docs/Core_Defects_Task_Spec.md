@@ -28,6 +28,25 @@
 * **DEF-47과 DEF-48은 한 묶음이었습니다.** DEF-48의 sRGB 이중 디코드는 **흰색에서는 `pow(1, 2.2) = 1` 이라 증상이 드러나지 않으므로**, DEF-47을 고쳐 머티리얼에 색이 들어가는 순간 드러날 문제였습니다. 하나만 고쳤다면 잘못된 인과로 이어졌을 것이므로 함께 처리했습니다.
 * **머티리얼이 비어 있을 때 엔진이 값을 대체하지 않는다는 정책 결정**은 결함이 아니므로 DEF 번호를 부여하지 않고 11-14절에 두었습니다. **엔진 내 머티리얼 편집 요구**도 결함이 아니므로 11-15절에 등재만 했습니다. 둘 다 위 요약 매트릭스에는 넣지 않았습니다.
 
+**[갱신 · 2026-10-02 · 종합 오류 검출]** 코드와 다시 대조해 낡은 표기를 고쳤습니다. **DEF-07**(2026-08-26 A-1 에서
+`onActorDestroyed` 구독으로 해결)과 **DEF-38**(2026-08-27 라이팅 Phase 0 에서 해결)을 해결됨으로 바꿨습니다.
+**DEF-40 · DEF-43 · DEF-44** 는 "미검증" 이 아니라 코드로 성립을 확인했습니다. **DEF-03** 은 A-4(GPU 컬 제거,
+2026-08-27) 뒤로 indirect-count 드로우가 하나도 남지 않아, 고칠 것이 `drawIndirectCount` 기능 요구를 지우는
+일로 줄었습니다. **DEF-15** 는 TAA 판단(가짜 TAA 비활성, 진짜 TAA 는 OpenXR 뒤)이 이미 내려졌으므로 남은 TAA
+코드 정리로 범위가 바뀌었습니다. 라인 번호는 2026-08-24 실측값 그대로이니 파일·함수 이름으로 찾으십시오.
+신규 결함 DEF-76 ~ DEF-91 은 문서 끝의 "종합 오류 검출 신규 결함" 절에 있습니다.
+
+**[갱신 · 2026-10-02 · 종합 오류 검출 수정]** 사용자 결정("권장대로 1번부터")에 따라 세 묶음을 고쳤습니다.
+(1) 크래시·값 손실: DEF-76 · DEF-77, 그리고 고치는 중에 찾은 DEF-92. (2) 입력 정리: DEF-62 ~ DEF-67, DEF-78 · DEF-79,
+DEF-82 ~ DEF-84, DEF-87 · DEF-88 · DEF-90. (3) 물리·렌더·정리: DEF-40 · DEF-43 · DEF-44, DEF-59 · DEF-68, DEF-80 · DEF-81, DEF-85 · DEF-86 ·
+DEF-89. **DEF-64 는 사용자 결정으로 "메뉴가 열린 동안 바깥 첫 클릭은 닫기에만 쓴다" 를 의도된 동작으로 두고**, 메뉴보다
+먼저 도는 판정이 클릭을 가져가던 우회 경로만 고쳤습니다. 남은 것은 기반 공사 묶음(DEF-56 · DEF-57 · DEF-58 · DEF-60 ·
+DEF-69, 따로 진행)과 잠재 항목 DEF-91 입니다. 검증은 단위 테스트 2종 신설(`slate_input` 44개 · `physics_lifecycle` 23개
+검사, 고치기 전 코드에서 실패함을 확인, 검토 반영 뒤 46 · 29개)과 실기 체크리스트([Editor_QA_Checklist.md](Editor_QA_Checklist.md) 5절 "수정 후")로
+했습니다. 항목별 수정 내용은 문서 끝 "수정 결과" 절에 있습니다. 수정 뒤 독립 검토(코드 재검토)에서 나온 4건도
+반영했습니다: 바디를 옮길 때 이웃 바디 깨우기, 값이 실제로 바뀌었을 때만 바디 재생성, 숫자 칸 확정 판정을 입력 여부로,
+그리고 UI 패스 정점 버퍼의 같은 레이스(신규 DEF-93). 반영 뒤 테스트는 `slate_input` 46개 · `physics_lifecycle` 29개 검사입니다.
+
 | ID | 결함명 | 심각도 | 대상 파일 | 관련 라인 |
 |---|---|---|---|---|
 | **DEF-01** | Transform SSBO 인덱스 동기화 붕괴 | **해결됨** (2026-08-25, 원래 CRITICAL) | `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L215, L296, L313~326 |
@@ -36,7 +55,7 @@
 | **DEF-04** | `vkCmdPipelineBarrier2` (Synch2) 무조건 호출 | **HIGH** | `src/renderer/RenderContext.cpp`, `src/renderer/passes/CullPass.cpp`, `src/renderer/Renderer.cpp` | L167, L166·L194, L586 |
 | **DEF-05** | 스왑체인 리사이즈 시 GPU In-Flight 자원 파괴 | **해결됨** | `src/renderer/Renderer_swap.cpp` | L59~60 |
 | **DEF-06** | MSAA `LAZILY_ALLOCATED` 메모리 속성 누락 | **HIGH** | `src/renderer/passes/GeometryPass.cpp` | L239 |
-| **DEF-07** | `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터 | **MEDIUM** | `src/core/World.hpp`, `src/core/World.cpp` | L27, L27 |
+| **DEF-07** | `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터 | **해결됨 · 2026-08-26** (원래 MEDIUM, A-1: EditorApp 구독 + 컴포넌트 `notifyDestroy`) | `src/core/World.hpp`, `src/core/World.cpp` | L27, L27 |
 | **DEF-08** | 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성) | **HIGH** | `src/main.cpp`, `CMakeLists.txt` | L38, L186~191 |
 | **DEF-09** | 멀티뷰 절반 구현 (피처만 켜지고 경로 없음) | **HIGH** | `src/renderer/Renderer.cpp`, `Renderer_render.cpp`, `Renderer.hpp` | L577~583, L169, L167~170 |
 | **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **MEDIUM** | `src/renderer/RenderTypes.hpp`, `src/physics/PhysicsSystem.cpp` | L12, L81 |
@@ -60,13 +79,13 @@
 | **DEF-32** | 재투영 여유분만큼의 절두체 부풀리기 부재 | **MEDIUM** (착수: OpenXR 세션 도입 시) | `src/renderer/Renderer_render.cpp` | `extractFrustumPlanes` |
 | **DEF-36** | 섀도 샘플러 비교 규약 반전 (모든 라이트 기여가 0이 됨) | **해결됨 · 2026-08-25** (원래 CRITICAL) | `src/renderer/passes/ShadowPass.cpp` | L37 (증상은 `shaders/pbr.frag` L165), 11-1절 |
 | **DEF-37** | IBL 조도 추정기의 코사인 중복 적용 (저장값 약 2.09배 과다) | **해결됨 · 2026-08-25** (원래 HIGH) | `src/renderer/Renderer.cpp` | IBL 조도 큐브맵 생성 루프, 11-2절 |
-| **DEF-38** | 라이트 종류와 방향이 직렬화되지 않음 | **HIGH** | `src/assets/SceneSerializer.cpp` | `LIGHT:` 기록 및 복원 경로 |
+| **DEF-38** | 라이트 종류와 방향이 직렬화되지 않음 | **해결됨 · 2026-08-27** (원래 HIGH, 라이팅 Phase 0) | `src/assets/SceneSerializer.cpp` | `LIGHT:` 기록 및 복원 경로 |
 | **DEF-39** | `defaultCube` 탄젠트 handedness 반전 (여섯 면 전부) | **해결됨 · 2026-08-25** (원래 MEDIUM · 미검증 → 실측으로 성립 확인) | `src/assets/GltfLoader.cpp` | `defaultCube`, 11-4절 |
-| **DEF-40** | 라인 오버레이 정점 버퍼의 GPU 인플라이트 레이스 | **MEDIUM · 미검증** (착수 전 실측 필요) | `src/renderer/passes/GeometryPass.*` | 라인 오버레이 정점 버퍼 |
+| **DEF-40** | 라인 오버레이 정점 버퍼의 GPU 인플라이트 레이스 | **해결됨 · 2026-10-02** (원래 MEDIUM, 라인·기즈모 삼각형 버퍼를 프레임 슬롯별로 분리) | `src/renderer/passes/GeometryPass.*` | 라인 오버레이 정점 버퍼 |
 | **DEF-41** | 콜라이더가 `Transform.scale`을 반영하지 않음 | **해결됨 · 2026-08-25** (원래 MEDIUM · 절차 도형 선결 조건) | `src/physics/PhysicsSystem.cpp` | 바디 생성 지점, 11-6절 |
 | **DEF-42** | 힙이 1GB 미만일 때 Zone 오프셋이 실제 할당 범위를 넘음 | **MEDIUM** (Quest 포팅 전 필수) | `src/memory/HarukaAllocator.cpp`, `HarukaAllocator.hpp` | init 경로, Zone 상수 |
-| **DEF-43** | 세터 안의 `resetIfLive`로 인한 매 프레임 바디 재생성 | **LOW · 미검증** (착수 전 실측 필요) | `src/components/RigidBodyComponent.cpp` | `resetIfLive` |
-| **DEF-44** | `RIGID:`의 enum 서수 직렬화 | **LOW · 미검증** (착수 전 실측 필요) | `src/assets/SceneSerializer.cpp` | `RIGID:` 기록 경로 |
+| **DEF-43** | 세터 안의 `resetIfLive`로 인한 매 프레임 바디 재생성 | **해결됨 · 2026-10-02** (원래 LOW, 재생성을 편집 확정 훅으로 옮김) | `src/components/RigidBodyComponent.cpp` | `resetIfLive` |
+| **DEF-44** | `RIGID:`의 enum 서수 직렬화 | **해결됨 · 2026-10-02** (원래 LOW, 이름으로 기록하고 옛 순번도 읽음) | `src/assets/SceneSerializer.cpp` | `RIGID:` 기록 경로 |
 | **DEF-45** | `uploadMesh`의 핸들 누수 | **해결됨 · 2026-08-25** (원래 LOW) | `src/renderer/GpuScene.cpp` | `uploadMesh`, 11-10절 |
 | **DEF-46** | 에디터 float 스텝 0.01 고정으로 1cm 미만 편집 불가 | **MEDIUM** (절차 도형 작업 선결 조건) | `src/core/Reflect.hpp` | `PropDesc::step` |
 | **DEF-47** | glTF 스칼라 팩터를 한 번도 읽지 않음 (텍스처 없는 머티리얼이 전부 순백) | **해결됨 · 2026-08-25** (원래 HIGH) | `src/assets/GltfLoader.cpp` | 머티리얼 추출 경로, 11-12절 |
@@ -232,7 +251,11 @@
 
 ---
 
-## 7. [DEF-07] [MEDIUM] `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터
+## 7. [DEF-07] [해결됨 · 2026-08-26, 원래 MEDIUM] `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터
+
+> **해결(2026-08-26, Roadmap A-1):** `EditorApp::init` 이 `onActorDestroyed` 를 구독해 커맨드 스택을 걷어내고
+> 선택 포인터를 비웁니다. 물리·오디오는 `notifyDestroy` → 컴포넌트 `onDestroy` 로 정리합니다. 아래 본문은
+> 등재 당시의 분석입니다. 재진입 파괴와 주소 재사용(ABA) 한계는 `World::destroyImmediate` 주석에 남아 있습니다.
 
 ### 7-1. 대상 파일 및 위치
 * **파일**: [`src/core/World.hpp`](file:///e:/Haruka/src/core/World.hpp) ([L27](file:///e:/Haruka/src/core/World.hpp#L27) 선언), [`src/core/World.cpp`](file:///e:/Haruka/src/core/World.cpp) ([L27](file:///e:/Haruka/src/core/World.cpp#L27) 브로드캐스트)
@@ -665,7 +688,10 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 ---
 
-### 11-3. [DEF-38] [HIGH] 라이트 종류와 방향이 직렬화되지 않음
+### 11-3. [DEF-38] [해결됨 · 2026-08-27, 원래 HIGH] 라이트 종류와 방향이 직렬화되지 않음
+
+> **해결(2026-08-27, 라이팅 Phase 0):** `LIGHT:` 줄이 타입·Attenuation Radius·Cone 각·방향을 기록하고 읽으며,
+> 옛 파일은 기본값을 씁니다([Lighting_UE_Design.md](Lighting_UE_Design.md)). 아래 본문은 등재 당시의 분석입니다.
 
 #### 대상 파일 및 위치
 * **파일**: [`src/assets/SceneSerializer.cpp`](file:///e:/Haruka/src/assets/SceneSerializer.cpp)
@@ -713,7 +739,14 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 ---
 
-### 11-5. [DEF-40] [MEDIUM · 미검증 · 착수 전 실측 필요] 라인 오버레이 정점 버퍼의 GPU 인플라이트 레이스
+### 11-5. ✅ [DEF-40] [해결됨 · 2026-10-02] 라인 오버레이 정점 버퍼의 GPU 인플라이트 레이스 (원래 MEDIUM)
+
+> **수정했습니다(2026-10-02).** 라인과 기즈모 삼각형 정점 버퍼를 `MAX_FRAMES` 개씩 만들고, 기록할 때 펜스로 보호되는
+> 지금 슬롯(`frameIdx`)의 버퍼에만 씁니다. 실기 세션 전체에서 검증 레이어 메시지 0건이었습니다.
+
+> **확인(2026-10-02):** 정점 버퍼가 하나(`GeometryPass::lineVertBuf_`)이고 기록 중에 `memcpy` 합니다. 렌더 루프는
+> 현재 슬롯의 펜스만 기다리므로(`MAX_FRAMES = 2`) 직전 프레임이 아직 읽는 동안 덮어쓸 수 있습니다. 나중에 붙은
+> 기즈모 삼각형 버퍼(`triVertBuf_`)도 같은 구조입니다. 둘 다 프레임별 버퍼로 나눕니다.
 
 > **미검증 항목입니다.** 설계 검토자가 제시했으나 코드로 확인하지 않았습니다. **아래 실측을 먼저 수행하십시오.**
 
@@ -740,7 +773,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 > 부모 스케일은 합성하지 않습니다. 같은 지점의 회전이 `a->transform.rotation`(로컬)을 쓰는 것과 수준을 맞춘 것이며, 계층 변환 반영은 별도 항목입니다.
 
-> **남은 한계**: 바디는 생성 시점의 스케일로 만들어집니다. 에디터에서 기즈모로 스케일을 바꿔도 이미 만들어진 바디는 따라오지 않습니다. `RigidBodyComponent` 의 `resetIfLive` 가 `halfExtent` 세터에만 걸려 있기 때문이며, 스케일 변경을 여기에 연결하는 것은 DEF-43(커밋 훅)과 같은 작업 묶음입니다.
+> **남은 한계(2026-10-02 해결: DEF-43 의 트랜스폼 확정 훅이 스케일 변경 때 바디를 다시 만듭니다)**: 바디는 생성 시점의 스케일로 만들어집니다. 에디터에서 기즈모로 스케일을 바꿔도 이미 만들어진 바디는 따라오지 않습니다. `RigidBodyComponent` 의 `resetIfLive` 가 `halfExtent` 세터에만 걸려 있기 때문이며, 스케일 변경을 여기에 연결하는 것은 DEF-43(커밋 훅)과 같은 작업 묶음입니다.
 
 #### 대상 파일 및 위치
 * **파일**: [`src/physics/PhysicsSystem.cpp`](file:///e:/Haruka/src/physics/PhysicsSystem.cpp)
@@ -787,7 +820,19 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 ---
 
-### 11-8. [DEF-43] [LOW · 미검증 · 착수 전 실측 필요] 세터 안의 `resetIfLive` 로 인한 매 프레임 바디 재생성
+### 11-8. ✅ [DEF-43] [해결됨 · 2026-10-02] 세터 안의 `resetIfLive` 로 인한 매 프레임 바디 재생성 (원래 LOW)
+
+> **수정했습니다(2026-10-02).** 셰이프·모션·Half·질량 세터는 값을 바꾸고 표시만 합니다. 바디 재생성은 새 확정 훅
+> `Component::onPropsCommitted` 에서 한 번 합니다(숫자 칸 드래그 끝·입력 확정, 열거·토글 클릭, 그 편집의 undo·redo).
+> 같은 묶음으로 `Component::onTransformCommitted` 를 두어(기즈모 드래그 끝, 디테일 TRANSFORM 확정, 그 undo·redo),
+> 스케일이 바뀌었으면 바디를 다시 만들고 위치·회전만 바뀌었으면 바디를 그 자리로 옮깁니다. DEF-41 의 "남은 한계" 도
+> 이것으로 풀렸습니다. 게임 코드가 필드를 직접 바꾸면 `RigidBodyComponent::rebuildBody()` 를 부릅니다.
+> `physics_lifecycle` 테스트가 "드래그 10회 동안 재생성 0회, 확정 때 1회" 를 검산합니다.
+
+> **확인(2026-10-02):** Shape · Motion · HalfX/Y/Z 세터가 조건 없이 `resetIfLive` 를 부르고, `SNumberField` 는
+> 드래그 중 마우스가 움직일 때마다 세터를 부릅니다. 물리는 플레이 중에만 틱하므로 증상도 플레이 중에만
+> 납니다. 재생성을 드래그 끝(`compEnd`)으로 옮기고, 기즈모 스케일 변경이 바디를 다시 만들게 하는 일(DEF-43
+> 원래 묶음)과 함께 합니다. 반대 방향의 문제(Friction 등이 반영되지 않음)는 DEF-81 입니다.
 
 > **미검증 항목입니다.** 설계 검토자가 제시했으나 코드로 확인하지 않았습니다. **아래 실측을 먼저 수행하십시오.**
 
@@ -808,7 +853,15 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 ---
 
-### 11-9. [DEF-44] [LOW · 미검증 · 착수 전 실측 필요] `RIGID:` 의 enum 서수 직렬화
+### 11-9. ✅ [DEF-44] [해결됨 · 2026-10-02] `RIGID:` 의 enum 서수 직렬화 (원래 LOW)
+
+> **수정했습니다(2026-10-02).** `RIGID:box static` 처럼 이름으로 기록합니다. 읽을 때는 이름과 옛 순번(0~2)을 모두
+> 받고, 모르는 값은 오류 한 줄을 남기고 기본값(box · dynamic)으로 둡니다. 열거형에는 옛 순번과 같은 명시값을
+> 박았습니다. 실기에서 `RIGID:0 0` 이 `box static` 으로 읽혀 이름으로 다시 저장되고, `RIGID:9 dynamic` 은 오류
+> 한 줄과 함께 box 로 읽히는 것을 확인했습니다.
+
+> **확인(2026-10-02):** 저장 파일에 `RIGID:0 0`, `RIGID:0 1` 처럼 셰이프·모션 순번이 기록되고, 열거형에
+> 명시값이 없으며 읽을 때 범위 검사 없이 캐스트합니다. PRIM · AUDIO_3D 처럼 이름으로 쓰고 옛 숫자도 읽게 합니다.
 
 > **미검증 항목입니다.** 설계 검토자가 제시했으나 코드로 확인하지 않았습니다. **아래 실측을 먼저 수행하십시오.**
 
@@ -1112,18 +1165,18 @@ Vulkan·창·World 를 링크하지 않는 헤더 전용 테스트입니다.
 | ID | 심각도 | 내용 | 위치 |
 |---|---|---|---|
 | DEF-56 | MEDIUM | 클리핑 API 가 호출자 0인 죽은 코드입니다. 긴 목록과 문자열이 이웃 패널을 침범합니다 | `HPaintContext` 의 `pushClip`/`popClip`/`currentClip`, `HDrawElement` 에 클립 필드 없음 |
-| DEF-57 | MEDIUM | 휠이 위젯에 도달하지 않습니다(어떤 컨테이너도 `onScroll` 을 전달하지 않음). 포인터 캡처 중의 휠은 `onMouseMove` 로 잘못 라우팅됩니다 | `HSlateRenderer` 입력 분기, 컨테이너 위젯 전부 |
+| DEF-57 | MEDIUM · 일부 해결 2026-10-02(캡처 중 휠은 `onScroll` 로 감) | 휠이 위젯에 도달하지 않습니다(어떤 컨테이너도 `onScroll` 을 전달하지 않음). 포인터 캡처 중의 휠은 `onMouseMove` 로 잘못 라우팅됩니다 | `HSlateRenderer` 입력 분기, 컨테이너 위젯 전부 |
 | DEF-58 | MEDIUM | 키 리피트가 없어 백스페이스를 누르고 있어도 한 글자만 지워집니다(모든 텍스트 필드) | `GlfwWindow::keyCallback` 이 `GLFW_REPEAT` 를 즉시 버림, 키는 폴링 |
-| DEF-59 | MEDIUM | `setViewportRect` 가 오프셋만 바뀌어도 씬 렌더 타깃을 전량 재생성합니다. 스플리터 드래그 중 매 프레임 `vkDeviceWaitIdle` 과 TAA 히스토리 소실이 일어납니다 | `Renderer_swap.cpp` 의 비교식이 오프셋을 포함. 오프셋 소비처는 `PostPass` 하나 |
+| DEF-59 | **해결 2026-10-02** (크기가 같으면 오프셋만 저장) | `setViewportRect` 가 오프셋만 바뀌어도 씬 렌더 타깃을 전량 재생성합니다. 스플리터 드래그 중 매 프레임 `vkDeviceWaitIdle` 과 TAA 히스토리 소실이 일어납니다 | `Renderer_swap.cpp` 의 비교식이 오프셋을 포함. 오프셋 소비처는 `PostPass` 하나 |
 | DEF-60 | MEDIUM | `STextBlock` 의 폭 계산(`0.6 × fontSize` 근사)이 실제 글리프 advance 와 다릅니다 | `STextBlock::computeDesiredSize` vs `HFontAtlas::measureText` |
 | DEF-61 | MEDIUM | Output Log 의 표시 줄 수가 도킹 이후 갱신되지 않는 시드 상수 `bottomH_` 로 계산됩니다 | **해결 2026-09-17** (로그 L3: 행 영역 실측 높이로 행 수 결정) |
-| DEF-62 | LOW | Fill 슬롯의 패딩을 1패스는 합산하지 않고 2패스는 더해, 마지막 슬롯이 컨테이너 밖으로 밀려납니다. Fill 슬롯에 패딩을 준 곳에서만 드러납니다 | `SVerticalBox`·`SHorizontalBox` 의 `onArrangeChildren` |
-| DEF-63 | LOW | `SCollapseSection`·`STabBar` 가 프레스 추적 없이 마우스-업으로 발화합니다. `SCollapseSection` 헤더의 마우스-다운은 body 로 새어 들어갑니다 | 두 위젯의 `onMouseButton` |
-| DEF-64 | LOW | 메뉴 팝업 캐처가 메뉴 바 행을 제외한 전체를 덮어, 메뉴가 열린 동안 하단 크롬의 첫 클릭이 닫기에만 쓰입니다. 의도된 동작으로 볼지 먼저 판단해야 합니다 | `EditorApp::rebuildMenuPopup` 의 캐처 |
-| DEF-65 | LOW | `onMouseMove` 경로에서 자식이 돌려준 `HReply`(캡처·해제 요청)가 버려집니다 | `SOverlay`·`SBorder`(반환값 무시), `SHorizontalBox`·`SVerticalBox`(마지막 Handled 만 보존) |
-| DEF-66 | LOW | 오른쪽 Ctrl 로는 복사·붙여넣기·전체 선택·실행 취소·저장·찾기가 동작하지 않습니다 | `EditorApp` 이 `KEY_LEFT_CTRL` 만 확인, `IWindow.hpp` 에 오른쪽 상수 없음 |
-| DEF-67 | LOW · 잠재 | 게임 입력계가 텍스트 포커스를 무시해, 타이핑이 바인딩된 게임 액션을 함께 발화시킵니다. 현재 바인딩이 0건이라 증상은 없습니다 | `HInputSystem::update`(포커스 게이트 없음), `Engine::run` 이 매 프레임 호출 |
-| DEF-68 | LOW | `recreateRenderTargets` 가 계측되지 않아, 뷰포트 통계의 `Recreate/s` 가 뷰포트 크기 변경에 의한 재생성을 세지 않습니다 | `Renderer_swap.cpp`(`recreateSwapChain` 만 카운트) |
+| DEF-62 | **해결 2026-10-02** (1패스에서 Fill 슬롯 패딩도 고정 소비로 셈) | Fill 슬롯의 패딩을 1패스는 합산하지 않고 2패스는 더해, 마지막 슬롯이 컨테이너 밖으로 밀려납니다. Fill 슬롯에 패딩을 준 곳에서만 드러납니다 | `SVerticalBox`·`SHorizontalBox` 의 `onArrangeChildren` |
+| DEF-63 | **해결 2026-10-02** (두 위젯에 프레스 추적, 헤더 누름은 body 로 안 감) | `SCollapseSection`·`STabBar` 가 프레스 추적 없이 마우스-업으로 발화합니다. `SCollapseSection` 헤더의 마우스-다운은 body 로 새어 들어갑니다 | 두 위젯의 `onMouseButton` |
+| DEF-64 | **해결 2026-10-02** (우회 경로만 고침. 바깥 첫 클릭으로 닫기는 사용자 결정으로 의도된 동작) | 메뉴 팝업 캐처가 메뉴 바 행을 제외한 전체를 덮어, 메뉴가 열린 동안 하단 크롬의 첫 클릭이 닫기에만 쓰입니다. 의도된 동작으로 볼지 먼저 판단해야 합니다 | `EditorApp::rebuildMenuPopup` 의 캐처 |
+| DEF-65 | **해결 2026-10-02** (`HReply::merge` 로 응답을 합침) | `onMouseMove` 경로에서 자식이 돌려준 `HReply`(캡처·해제 요청)가 버려집니다 | `SOverlay`·`SBorder`(반환값 무시), `SHorizontalBox`·`SVerticalBox`(마지막 Handled 만 보존) |
+| DEF-66 | **해결 2026-10-02** (`IWindow::isCtrlDown`·`isShiftDown`, 좌우 구분 없음) | 오른쪽 Ctrl 로는 복사·붙여넣기·전체 선택·실행 취소·저장·찾기가 동작하지 않습니다 | `EditorApp` 이 `KEY_LEFT_CTRL` 만 확인, `IWindow.hpp` 에 오른쪽 상수 없음 |
+| DEF-67 | **해결 2026-10-02** (텍스트 입력 중에는 게임 입력이 모든 키를 뗀 것으로 봄) | 게임 입력계가 텍스트 포커스를 무시해, 타이핑이 바인딩된 게임 액션을 함께 발화시킵니다. 현재 바인딩이 0건이라 증상은 없습니다 | `HInputSystem::update`(포커스 게이트 없음), `Engine::run` 이 매 프레임 호출 |
+| DEF-68 | **해결 2026-10-02** (같은 카운터로 셈, 라벨 `Target recreate/s`) | `recreateRenderTargets` 가 계측되지 않아, 뷰포트 통계의 `Recreate/s` 가 뷰포트 크기 변경에 의한 재생성을 세지 않습니다 | `Renderer_swap.cpp`(`recreateSwapChain` 만 카운트) |
 | DEF-69 | LOW | Window 메뉴가 없고, `PanelDef::closable`·`PanelRegistry::order()` 를 읽는 곳이 0입니다 | `dock/DockTree.hpp`, `EditorApp::buildMenus` |
 
 ### 처리할 때 지켜야 할 순서 제약
@@ -1140,23 +1193,114 @@ Vulkan·창·World 를 링크하지 않는 헤더 전용 테스트입니다.
 - **DEF-64 를 고칠 때는 로그 Categories 팝업의 방식을 참고하십시오.** 그 팝업은 전면 캐처 없이, 프레스
   순간에 바깥이면 닫기만 하고 클릭을 흘려보냅니다(2026-09-17, 설계 문서 §7.2).
 
-### 디테일 패널 클릭 결함 (DEF-73 ~ DEF-75, 2026-10-02 관찰)
+### 디테일 패널 클릭 결함 (DEF-73 ~ DEF-75) — 닫음: 자동 조작 환경의 산물 (2026-10-02)
 
-사운드 기초 작업([Audio_Design.md](Audio_Design.md))을 에디터에서 실기 확인하다가 관찰했습니다. 원인은
-조사하지 않았습니다. 확인은 computer-use 자동 조작(누름 → 0.15초 → 뗌)으로 했으므로, **먼저 사람이 직접
-눌러 재현되는지부터 확인합니다.** 오디오 변경과는 무관합니다. 오디오 컴포넌트가 없는 ProbeSphere 로
-새로 띄운 에디터에서도 재현됐고, 창 최대화 여부와도 관계가 없었습니다. 같은 종합 오류 검출 작업에서 위
-DEF-56 ~ DEF-69 와 함께 처리합니다.
+사운드 기초 작업을 실기 확인하다가 관찰해 등재했고, 같은 날 종합 오류 검출에서 **엔진 결함이 아님**을
+확인해 닫았습니다. 근거는 두 가지입니다.
 
-| ID | 심각도 | 내용 | 관련 |
-|---|---|---|---|
-| DEF-73 | MEDIUM | 디테일 패널의 숫자 칸(`SNumberField`)을 이동 없이 눌렀다 떼도 인라인 입력 모드로 들어가지 않습니다. 같은 세션에서 접기 헤더를 누른 뒤 Scale Y 칸이 입력 모드가 된 적은 있어, 입력 경로 자체는 살아 있습니다 | DEF-63(헤더의 마우스-다운이 body 로 샘) |
-| DEF-74 | MEDIUM | 아웃라이너 행을 눌러 선택한 직후 디테일 패널의 아무 곳이나 누르면 선택이 풀립니다. 뷰포트에서 골라 선택한 뒤에는 풀리지 않습니다 | `EditorApp::addOutlinerRow`: `selectRow` 가 토글이고, 이름 칸이 떼는 위치를 다시 검사하지 않는 `SButton` 입니다(같은 함수의 주석) |
-| DEF-75 | MEDIUM | 플레이 중 디테일 패널의 토글(Spatialize)을 누른 클릭이 뷰포트 조작으로 처리됐습니다. Ground 가 선택되고 카메라가 이동(LMB 팬)했습니다. 같은 세션의 툴바·아웃라이너·콘텐츠 브라우저 클릭은 정상이었습니다 | `EditorApp::handleInput` 의 UI 디스패치 → `pickActor` 분기 |
+1. **화면 오른쪽을 Claude 데스크톱 앱 창이 덮고 있었습니다.** 그 지점의 창을 `WindowFromPoint` 로 물으면
+   `claude`(Chrome_WidgetWin_1, topmost 레이어드 창)가 나오고, 범위는 물리 좌표 (1372,20)~(1908,748)
+   이었습니다. 이 창은 자동 조작 스크린샷에서는 가려져 보이지 않지만 입력은 받습니다. 최대화한 에디터의
+   디테일 패널이 바로 그 범위에 있었습니다. 에디터 창을 그 범위 밖(0,0,1368,1032)으로 옮기자 숫자 칸 클릭이
+   정상으로 입력 모드에 들어갔습니다(누름·뗌이 위젯에 처리되고 `focusedField` 가 잡힘).
+2. **그 범위로 커서를 옮겨도 에디터는 이동 이벤트를 받지 못했습니다.** 엔진은 커서 위치를 OS 에 묻지 않고
+   이동 콜백이 받아 둔 값(`GlfwWindow::lastMouseX`)을 씁니다. 그래서 다음 클릭이 직전 위치에 떨어졌습니다.
+   진단 로그에서 "받아 둔 위치 (55,246) / 실제 위치 (1741,208)" 가 찍혔고, 그 클릭이 아웃라이너 같은 행을
+   다시 눌러 선택을 풀었습니다(DEF-74 의 정체). DEF-75 의 "Ground 선택 + 카메라 이동" 도 같은 구조로,
+   직전 위치(뷰포트)에 떨어진 클릭이 픽과 팬이 된 것입니다.
+
+실제 마우스는 언제나 이동 이벤트를 만들므로 손으로는 재현되지 않습니다(체크리스트 2-A2 에서 사람이 확인).
+처음에 적었던 DEF-74 의 원인 설명("이름 칸 `SButton` 이 떼는 위치를 재검사하지 않음")은 틀렸습니다.
+`SButton` 은 2026-09-09 부터 누른 곳과 뗀 곳이 모두 자기 위일 때만 발화합니다. `addOutlinerRow` 의 그 주석이
+낡은 것입니다(DEF-88 정리 대상과 함께 고침). 자동 조작 쪽 요령은 [Editor_QA_Checklist.md](Editor_QA_Checklist.md)
+머리말에 적었습니다.
 
 함께 적어 둘 한계: 디테일 패널은 스크롤이 없어(DEF-57) 내용이 패널보다 길면 아래가 잘립니다. 메시와
 오디오를 함께 가진 액터는 기본 레이아웃에서 오디오 컴포넌트 행이 보이지 않으므로, 지금은 하단 패널
 분할선을 내려 디테일 패널을 늘려야 합니다.
+
+### 2026-10-02 재확인 — DEF-56 ~ DEF-69 남은 13건
+
+코드 대조로 13건 모두 남아 있음을 다시 확인했고, 그중 실기로 드러나는 것은 기준선을 남겼습니다
+([Editor_QA_Checklist.md](Editor_QA_Checklist.md) 5절). 판단이 필요한 점만 적습니다.
+
+- **DEF-59:** 기본 레이아웃에서는 분할선을 끌 때 뷰포트 크기도 함께 바뀌므로, 매 프레임 재생성은 대부분
+  정당합니다. 오프셋만 바뀌는 프레임은 위치와 크기를 따로 내림하는 데서 우연히 생깁니다. TAA 가 꺼져 있어
+  "히스토리 소실" 은 지금 보이지 않습니다. 고칠 것은 "크기가 같으면 오프셋만 저장하고 반환" 한 줄입니다.
+- **DEF-64:** (사용자 결정 2026-10-02: 권고대로 의도된 동작으로 두고 우회 경로만 고쳤습니다.) 메뉴가 열린 동안
+  바깥 첫 클릭을 닫기에만 쓰는 것은 데스크톱 메뉴의 표준이라 **의도로 두기를 권합니다**(클릭을 흘려보내면 뷰포트 픽이 선택을 지웁니다). 진짜 결함은 메뉴보다 먼저 도는 히트테스트입니다.
+  탭·스플리터·기즈모·RMB 카메라 판정이 열린 드롭다운을 무시해서, File > Load Scene 행 왼쪽 끝(Outliner 탭과
+  겹치는 곳)을 누르면 탭 누름이 클릭을 가져가 메뉴가 열린 채로 남습니다(실기 재현).
+- **DEF-66:** 오른쪽 Shift 도 같은 이유로 무시됩니다.
+- **DEF-62 · DEF-65 · DEF-67:** 지금 화면에서 드러나는 곳이 없습니다(코드로만 확인).
+
+---
+
+## 종합 오류 검출 신규 결함 (DEF-76 ~ DEF-93, 2026-10-02 등재)
+
+**처리 시점: 종합 오류 검출 작업(이번 묶음).** 정적 검출(코드 대조 세 갈래)과 실기 기준선 확인에서
+나왔습니다. "실기" 칸은 2026-10-02 세션의 결과이고, 재현 절차는 [Editor_QA_Checklist.md](Editor_QA_Checklist.md)
+2-C 절에 있습니다.
+
+| ID | 심각도 | 내용 | 위치 | 실기 |
+|---|---|---|---|---|
+| DEF-76 | **해결 2026-10-02** · 원래 HIGH | 포인터 캡처가 raw 포인터라, 캡처된 위젯이 리빌드로 해제되면 다음 이동 이벤트가 해제된 위젯을 호출합니다(UAF). 디테일 숫자 칸을 누른 채 Delete, 또는 플레이 중 게임 코드가 선택 액터를 지우면 도달합니다 | `HSlateRenderer::capturedWidget_`, `handlePointerEvent`, 삭제 경로 `EditorApp.cpp` 의 `delEdge` | 생략(크래시 위험, ASan 빌드 권장) |
+| DEF-77 | **해결 2026-10-02** · 원래 HIGH | 숫자 칸이 자기 위에서 눌린 적 없는 마우스-업에도 입력 모드에 들어가고, 낡은 시작값(새 칸이면 0)으로 버퍼를 채웁니다. 어디서 확정하든 그 값이 들어가 원래 값이 사라지고 undo 로도 돌아오지 않습니다 | `SNumberField::onMouseButton`(프레스 추적 없음) | 재현: 제목 줄에서 눌러 Location Y 위에서 떼자 `0.000|`, 확정 후 -0.1 → 0, Ctrl+Z 무효 |
+| DEF-78 | **해결 2026-10-02** · 원래 MEDIUM | 휠을 아웃라이너·Output Log 밖에서 굴리면 위치와 상관없이 뷰포트 카메라 돌리로 갑니다 | `EditorApp::tick` 휠 라우팅, `tickEditorCamera`(뷰포트 판정 없음) | 재현: 디테일 위 휠 3칸 → 카메라 전진 |
+| DEF-79 | **해결 2026-10-02** · 원래 MEDIUM | 왼쪽 버튼을 누른 채 움직인 양이 어디서든 쌓였다가 다음 뷰포트 오빗에서 한꺼번에 적용돼 카메라가 튑니다 | `GlfwWindow::cursorPosCallback`(누적), `tickEditorCamera`(오빗일 때만 소비) | 재현: UI 위 250px 드래그 → 뷰포트 클릭 시 카메라 크게 이동 |
+| DEF-80 | **해결 2026-10-02** · 원래 MEDIUM | 플레이 중 비활성화한 액터의 물리 바디가 남아 시뮬레이션·충돌하고 위치를 되씁니다(A-2 에서 미룬 항목). 고칠 때는 지지하던 바디가 사라지면 그 위에서 잠든 바디를 깨워야 합니다 | `PhysicsSystem::tick`, `RigidBodyComponent`(onDisable 없음) | 재현: 바닥 Static 바디를 끄자 그 위 상자가 3초간 Y 0.58 그대로 |
+| DEF-81 | **해결 2026-10-02** · 원래 LOW | 플레이 중 Friction · Restitution · Mass 를 바꿔도 이미 만든 바디에 반영되지 않습니다(Shape · Half 는 반대로 매 프레임 재생성, DEF-43) | `RigidBodyComponent::buildProps` | 코드 확인 |
+| DEF-82 | **해결 2026-10-02** · 원래 LOW | 버튼 상태를 프레임마다 폴링해서, 한 프레임 안에 끝난 누름·뗌(터치패드 탭, 낮은 FPS)이 사라집니다. 키도 같습니다 | `Engine::run`(폴링), sticky 모드 미사용 | 재현: 빠른 클릭의 누름·뗌이 같은 시각에 들어와 UI 디스패치 없음 |
+| DEF-83 | **해결 2026-10-02** · 원래 LOW | 아웃라이너 검색창에 포커스가 있을 때 행을 한 번 누르면 선택되지 않습니다. 누름이 포커스를 풀며 같은 프레임에 아웃라이너를 다시 만들어, 방금 눌린 행 버튼이 사라집니다 | `handleInput` 첫머리의 포커스 해제 → `flushOutlinerRebuild` | 재현 |
+| DEF-84 | **해결 2026-10-02** · 원래 LOW | 입력보다 먼저 같은 프레임에 리빌드된 위젯은 배치 전이라 크기가 0 이고, 그 프레임의 클릭을 받지 못합니다(구조). 게임이 매 프레임 액터를 만들면 아웃라이너가 계속 이 상태가 됩니다 | `EditorApp::tick` 리빌드 → `handleInput`, 배치는 `record` 에서만 | 코드 확인 |
+| DEF-85 | **해결 2026-10-02** · 원래 LOW | 로그 6곳의 문자열이 한글이라 ASCII 전용 Output Log 에서 물음표로 보입니다 | `AssetManager.cpp:110`, `Actor.cpp:64`, `PrimitiveBuilder.cpp:623`, `PhysicsSystem.cpp:184`, `GpuScene.cpp:77`·`:104` | 코드 확인 |
+| DEF-86 | **해결 2026-10-02** · 원래 LOW · 잠재 | IBL 반정밀도 변환이 지수 범위를 처리하지 않고 형 변환으로 aliasing 위반입니다. 지금 하늘 값이 0.05 이상이라 드러나지 않습니다 | `Renderer::generateIBLCubemaps` 의 `genHalfFloat` | 코드 확인 |
+| DEF-87 | **해결 2026-10-02** · 원래 LOW | 콘텐츠 브라우저 항목이 가운데 정렬로 보입니다(버튼 기본 정렬 Center, 아웃라이너는 Fill 로 고침) | `EditorApp::rebuildBottomPanel` | 재현 |
+| DEF-88 | **해결 2026-10-02** · 원래 LOW | 회전 없는 액터의 ROTATION Y 가 `-0.000` 으로 보입니다. 같은 정리 묶음: `addOutlinerRow` 의 낡은 주석 | `syncEulerCache` · `SNumberField` 표시 | 재현 |
+| DEF-89 | **해결 2026-10-02** · 원래 LOW | 빌드 경고 C4505: `uploadCubemapMip` 는 쓰이지 않는 함수입니다(업로드는 영역 배열로 직접 함) | `Renderer.cpp:306` | 전체 재빌드에서 경고는 이것 하나 |
+| DEF-90 | **해결 2026-10-02** · 원래 LOW | 디테일 TRANSFORM 을 접어도 선택을 바꾸면 다시 펼쳐집니다(`expanded(true)` 고정) | `EditorApp::rebuildDetails` | 재현 |
+| DEF-91 | LOW · 잠재 | Slate·휠 우회는 창 좌표를, `inViewport` 는 프레임버퍼로 바꾼 좌표를 씁니다. 100% 배율에서는 같아 드러나지 않습니다 | `handleInput`, `tick` 휠 판정, `mouseToFb` | 코드 확인 |
+| DEF-92 | **해결 2026-10-02** · 원래 HIGH | 디테일 패널이 대상 액터가 파괴된 뒤에도 한 프레임 더 그 액터와 컴포넌트를 읽습니다(UAF 읽기). 값 접근자가 raw 포인터를 붙잡는데, 패널 리빌드는 다음 tick 의 선택 변경 감지에서야 일어나고 그사이 페인트·디스패치가 돕니다. Stop · Load · 아웃라이너 x 로 선택 액터를 지우거나 게임 코드가 지우면 도달합니다. DEF-76 을 고치다 찾았습니다 | `EditorApp` 의 `onActorDestroyed` 구독(디테일 리빌드 요청 없음), `rebuildDetails` 의 접근자 | 코드 확인(실기에서 Stop · Load · 삭제 뒤 크래시 없음은 확인) |
+| DEF-93 | **해결 2026-10-02** · 원래 MEDIUM | UI 패스의 정점 버퍼가 하나라, 렌더 루프가 지금 슬롯의 펜스만 기다리는 동안 직전 프레임의 UI 패스가 아직 읽는 정점을 덮어씁니다(DEF-40 과 같은 유형). 수정 뒤 독립 검토에서 찾았습니다 | `HSlateRenderer` 의 `vertexBuf_` · `vertexPtr_`, `record` 가 `frameIdx` 를 버림 | 코드 확인 |
+
+**코드로 성립을 확인한 기존 "미검증" 항목:** DEF-40(라인·기즈모 정점 버퍼 하나를 두 프레임이 공유,
+렌더 루프는 현재 슬롯 펜스만 기다림), DEF-43(플레이 중 Shape · Half 드래그가 매 프레임 바디 재생성),
+DEF-44(`RIGID:0 1` 처럼 순번 기록, 실기 저장으로 확인). 위 매트릭스와 각 절의 표기를 함께 고쳤습니다.
+
+### 수정 결과 (2026-10-02)
+
+"확인" 칸의 `slate_input` · `physics_lifecycle` 은 이번에 만든 단위 테스트입니다. 두 테스트 모두 고치기 전
+코드에서 해당 검사가 실패하는 것을 먼저 확인했습니다. 실기는 [Editor_QA_Checklist.md](Editor_QA_Checklist.md)
+5절 "수정 후" 표에 있습니다.
+
+| ID | 수정 | 확인 |
+|---|---|---|
+| DEF-76 | 캡처한 위젯을 `std::weak_ptr` 로 붙잡습니다. 위젯이 사라졌으면 그 누름의 뗌은 아무 데도 보내지 않고, 이동·휠은 보통 경로로 보냅니다. 캡처는 버튼보다 오래 살지 않습니다(버튼이 떨어진 이동에서 풂) | `slate_input`, 실기(숫자 칸을 누른 채 Delete → 크래시 없음) |
+| DEF-77 | 숫자 칸에 프레스 추적을 넣었습니다. 입력 버퍼는 지금 값으로 채우고, 아무것도 입력하지 않았으면 확정해도 값을 다시 쓰지 않습니다(예전에는 들어갔다 나오기만 해도 소수 셋째 자리로 잘림). 판정은 글자 비교가 아니라 입력 여부(`edited_`)입니다. 플레이 중 값이 바뀐 칸에 처음과 같은 글자를 쳐도 그 값이 들어갑니다. 입력 중 같은 칸을 다시 눌러도 치던 글자를 지킵니다 | `slate_input`, 실기(기준선 재현 절차에서 입력 모드 진입 없음) |
+| DEF-92 | 디테일이 보여 주는 액터(`detailsActor_`)를 선택 포인터와 따로 기억합니다. 파괴 구독이 리빌드를 요청하고, `tick` · `handleInput` 첫머리에서 디스패치·페인트보다 먼저 소진합니다 | 실기(Stop · Load · 삭제 뒤 정상) |
+| DEF-78 | 남은 휠은 `inViewport` 일 때만 카메라 돌리로 씁니다 | 실기 |
+| DEF-79 | 좌버튼 이동량을 오빗이 아닐 때도 매 프레임 비웁니다 | 실기(240px 드래그 뒤 뷰포트 클릭, 카메라 그대로) |
+| DEF-80 | `RigidBodyComponent::onDisable` 이 바디를 지우고, `PhysicsSystem::removeBody` 가 지운 영역에 닿는 바디를 깨웁니다(`ActivateBodiesInAABox`). 트랜스폼 확정으로 바디를 옮길 때(`teleport`)도 옮기기 전후 영역의 바디를 깨웁니다 | `physics_lifecycle`(깨우기를 빼면 실패함을 확인), 실기(바닥을 끄자 그 위의 구가 떨어짐) |
+| DEF-81 | 마찰·반발은 살아 있는 바디에 바로 씁니다(`setMaterial`). 질량은 확정 때 재생성으로 반영합니다. 재생성은 바디를 만들 때 쓴 값(`created*`)과 지금 값이 다를 때만 하므로, 마찰만 바꾼 편집의 undo 나 제자리로 돌린 드래그는 바디를 다시 만들지 않습니다 | `physics_lifecycle` |
+| DEF-82 | `GlfwWindow` 가 누름 이벤트를 걸쇠에 걸고 다음 `pollEvents` 에서 비웁니다. 키·버튼 상태는 "지금 눌림 또는 직전 폴링 이후 눌린 적 있음" 입니다 | 실기(바로 떼는 클릭·키가 동작. 자동 조작의 `left_click` · `key` 도 이제 통함) |
+| DEF-83 | 아웃라이너 목록 위에서 누른 동안에는 목록 리빌드를 미뤄 눌린 행 버튼이 뗄 때까지 살아 있게 했습니다. 검색 포커스 전환은 목록을 다시 만들지 않습니다(표시는 `Attr`) | 실기 |
+| DEF-84 | `handleInput` 첫머리에서 배치를 한 번 돌립니다(`HSlateRenderer::arrange`) | 코드 확인 |
+| DEF-85 | 로그 6곳과 메시 검증 보고 문구(디버그 빌드에서 로그로 나감)를 영어로 바꿨습니다 | 실기(구 콜라이더 경고가 영어로 보임) |
+| DEF-86 | `glm::packHalf1x16` 로 바꿨습니다. 음수·NaN 은 0, 범위를 넘는 값은 65504 | 코드 확인 |
+| DEF-87 | 콘텐츠 브라우저 항목 버튼을 `hAlign(Fill)` 로 | 실기 |
+| DEF-88 | 반올림하면 0 이 되는 음수를 0 으로 표시합니다(`SNumberField::formatValue`). `addOutlinerRow` 의 낡은 주석도 고쳤습니다 | `slate_input`, 실기 |
+| DEF-89 | 쓰이지 않던 `uploadCubemapMip` 를 지웠습니다 | 전체 재빌드 경고 0 |
+| DEF-90 | TRANSFORM 펼침 상태를 에디터가 기억합니다(`SCollapseSection::onToggle`) | 실기 |
+| DEF-93 | UI 정점 버퍼를 프레임 슬롯마다 두고 `frameIdx` 로 고릅니다. 슬롯 수는 `static_assert` 로 `MAX_FRAMES` 와 묶었습니다 | 실기(UI 정상, 검증 메시지 0) |
+
+**행동 변화로 알아 둘 것.** (1) 한 프레임 안에 눌렀다 뗀 키·버튼도 그 프레임에는 눌린 것으로 보입니다(DEF-82).
+(2) 플레이 중 기즈모·디테일로 액터를 옮기면 물리 바디도 그 자리로 옮겨지고, 스케일을 바꾸면 바디를 다시 만듭니다
+(DEF-43 의 확정 훅). (3) 뷰포트 통계의 `Swapchain recreate/s` 는 `Target recreate/s` 로 바뀌었고 뷰포트 크기 변경에
+의한 재생성도 셉니다(DEF-68). (4) 메뉴가 열린 동안에는 뷰포트 픽·기즈모·RMB 카메라·휠이 동작하지 않습니다(DEF-64).
+
+**남은 것.** 기반 공사 묶음 DEF-56(클리핑) · DEF-57(위젯 휠 경로) · DEF-58(키 반복) · DEF-60(글자 폭) · DEF-69(Window 메뉴)는
+사용자 결정으로 따로 진행합니다. DEF-91 은 Windows 에서 GLFW 창 좌표와 프레임버퍼 좌표가 같아 드러나지 않으므로, 좌표계가
+갈리는 플랫폼(macOS 등)으로 갈 때 입력 좌표를 프레임버퍼 하나로 통일하면서 함께 고칩니다.
 
 ---
 

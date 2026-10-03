@@ -93,19 +93,25 @@ private:
     VkPipeline transparentBackPipeline_  = VK_NULL_HANDLE;
     VkPipeline transparentFrontPipeline_ = VK_NULL_HANDLE;
 
-    // Line overlay
+    // Line overlay. 정점 버퍼는 프레임 슬롯마다 따로 둡니다. 하나를 같이 쓰면, 렌더 루프는
+    // 지금 슬롯의 펜스만 기다리므로 직전 프레임이 아직 읽는 버퍼를 덮어씁니다(DEF-40).
     VkPipeline       linePipeline_       = VK_NULL_HANDLE;
     VkPipelineLayout linePipelineLayout_ = VK_NULL_HANDLE;
-    VkBuffer         lineVertBuf_        = VK_NULL_HANDLE;
-    VkDeviceMemory   lineVertMem_        = VK_NULL_HANDLE;
-    void*            lineVertPtr_        = nullptr;
+    VkBuffer         lineVertBuf_[MAX_FRAMES] = {};
+    VkDeviceMemory   lineVertMem_[MAX_FRAMES] = {};
+    void*            lineVertPtr_[MAX_FRAMES] = {};
     std::vector<LineVertex> pendingLines_;
 
-    // 기즈모 삼각형 오버레이 (linePipelineLayout_ 을 공유, 토폴로지만 삼각형)
+    // 기즈모 삼각형 오버레이 (linePipelineLayout_ 을 공유, 토폴로지만 삼각형). 버퍼는 라인과
+    // 같은 이유로 프레임 슬롯마다 둡니다.
     static constexpr uint32_t kMaxTriVerts = 8192;
     VkPipeline       triPipeline_ = VK_NULL_HANDLE;
-    VkBuffer         triVertBuf_  = VK_NULL_HANDLE;
-    VkDeviceMemory   triVertMem_  = VK_NULL_HANDLE;
-    void*            triVertPtr_  = nullptr;
+    VkBuffer         triVertBuf_[MAX_FRAMES] = {};
+    VkDeviceMemory   triVertMem_[MAX_FRAMES] = {};
+    void*            triVertPtr_[MAX_FRAMES] = {};
     std::vector<LineVertex> pendingTris_;
+
+    // 호스트에서 쓰는 정점 버퍼 하나를 만들고 매핑합니다(라인·삼각형 공용).
+    void createHostVertexBuffer(VkDeviceSize size, const char* what,
+                                VkBuffer& buf, VkDeviceMemory& mem, void*& ptr);
 };

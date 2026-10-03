@@ -74,9 +74,9 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
     // 돌아오지 않으므로, 넘치기 전에 미리 알려 주는 것이 사후 throw 보다 낫습니다.
     const auto bud = budget();
     if (bud.vertPct >= 80.f || bud.idxPct >= 80.f)
-        HLOG(LogRenderer, Warning) << "메가버퍼 사용률 경고: 정점 " << bud.vertPct
-                                   << " %, 인덱스 " << bud.idxPct
-                                   << " %. 이 버퍼는 회수되지 않습니다.";
+        HLOG(LogRenderer, Warning) << "mega buffer usage high: vertices " << bud.vertPct
+                                   << " %, indices " << bud.idxPct
+                                   << " %. This space is never reclaimed";
 
     auto traverse = [&](glm::vec3& lo, glm::vec3& hi) {
         lo = glm::vec3( FLT_MAX);
@@ -101,8 +101,8 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
         const float eps = 1e-3f;
         if (glm::any(glm::lessThan(lo, h->aabbMin - eps)) ||
             glm::any(glm::greaterThan(hi, h->aabbMax + eps)))
-            HLOG(LogRenderer, Warning) << "해석 바운드가 실제 정점을 담지 못합니다. "
-                                          "컬링 경계에서 도형이 깜빡입니다.";
+            HLOG(LogRenderer, Warning) << "analytic bounds do not contain the actual vertices; "
+                                          "the shape will flicker at culling boundaries";
 #endif
     } else {
         glm::vec3 lo, hi;

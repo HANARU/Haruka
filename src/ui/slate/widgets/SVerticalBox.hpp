@@ -60,6 +60,9 @@ public:
                 // Fill — 가중치 미지정(0 이하)은 1로 간주.
                 // 0이면 슬롯 높이가 0이 되어 그리기는 넘쳐 보이지만 히트테스트가 죽는다.
                 fillTotal += (s.value > 0.f) ? s.value : 1.f;
+                // 패딩은 나눌 몫이 아니라 고정 소비입니다. 2패스가 몫에 패딩을 더하므로 여기서도
+                // 빼 두어야, 패딩 준 Fill 슬롯 뒤의 슬롯이 컨테이너 밖으로 밀리지 않습니다(DEF-62).
+                fixedHeight += s.padding.totalV();
             }
         }
 
@@ -108,10 +111,7 @@ public:
     HReply onMouseMove(const HPointerEvent& e) override {
         // Dispatch to ALL children so each can clear its own hover state
         HReply ret = HReply::Unhandled();
-        for (auto& s : slots_) {
-            auto r = s.widget->onMouseMove(e);
-            if (r.handled) ret = r;
-        }
+        for (auto& s : slots_) ret.merge(s.widget->onMouseMove(e));
         return ret;
     }
 

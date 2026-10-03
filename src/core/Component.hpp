@@ -34,6 +34,16 @@ public:
     virtual std::vector<PropDesc> buildProps()         { return {}; }
     virtual std::string           readOnlyInfo() const { return {}; }
 
+    // ── 에디터 편집 확정 ────────────────────────────────────────────────────────
+    // 에디터가 사용자의 편집 한 번을 확정할 때 부릅니다(숫자 칸 드래그 끝·입력 확정, 열거·
+    // 토글 칸 클릭, 그 편집의 undo·redo). 드래그 중에는 buildProps 의 세터가 마우스가
+    // 움직일 때마다 불리므로, 값이 바뀔 때 하는 무거운 일(물리 바디 재생성 등)은 세터가
+    // 아니라 여기서 합니다(DEF-43).
+    virtual void onPropsCommitted() {}
+    // 에디터가 소유 액터(또는 조상)의 트랜스폼 편집을 확정할 때 부릅니다(기즈모 드래그 끝,
+    // 디테일 TRANSFORM 확정, 그 undo·redo). Actor::notifyTransformCommitted 가 부릅니다.
+    virtual void onTransformCommitted() {}
+
     Actor* owner = nullptr;
 
     bool isEnabled() const { return enabled_; }

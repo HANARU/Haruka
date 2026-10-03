@@ -65,8 +65,7 @@ public:
         return child_ ? child_->onMouseButton(e) : HReply::Unhandled();
     }
     HReply onMouseMove(const HPointerEvent& e) override {
-        if (child_) child_->onMouseMove(e);
-        return HReply::Unhandled();
+        return child_ ? child_->onMouseMove(e) : HReply::Unhandled();
     }
 
 private:

@@ -107,7 +107,7 @@ AssetPair AssetManager::acquirePrimitive(const PrimitiveDesc& descIn) {
     // 이유가 이런 검사가 없었기 때문입니다 (DEF-39).
     std::string report;
     if (!PrimitiveBuilder::validate(desc, src, &report))
-        HLOG(LogPrimitive, Error) << "'" << key << "' 규약 위반:\n" << report;
+        HLOG(LogPrimitive, Error) << "'" << key << "' violates mesh conventions:\n" << report;
 #endif
 
     std::vector<Vertex> verts;

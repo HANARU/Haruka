@@ -558,6 +558,9 @@ void Renderer::drawFrame(World& world) {
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+6);
 
     // ── UI overlay ────────────────────────────────────────────────────────────
+    // UI 정점 버퍼는 fi 슬롯별입니다. 슬롯 수가 어긋나면 두 프레임이 한 버퍼를 같이 씁니다(DEF-93).
+    static_assert(HSlateRenderer::kFramesInFlight == MAX_FRAMES,
+                  "HSlateRenderer vertex buffers must match MAX_FRAMES");
     if (uiRenderer_) {
         ScopedCpuTimer t(ft.uiRecord);
         uiRenderer_->record(cmd, imgIdx, swapchain_->extent(), fi);

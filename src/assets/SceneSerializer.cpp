@@ -88,8 +88,11 @@ void SceneSerializer::writeActor(std::ostream& os, const Actor* actor, int paren
                            << " " << (ac->isEnabled() ? 1 : 0) << "\n"
            << "AUDIO_3D:" << ac->attenuation.toText() << "\n";
 
+    // 셰이프·모션은 이름으로 씁니다. 예전에는 열거형 순번을 써서, 값을 중간에 끼우면 옛 씬이
+    // 조용히 다른 도형으로 읽혔습니다(DEF-44). 옛 파일의 숫자는 parseLine 이 계속 읽습니다.
     if (auto* rb = actor->getComponent<RigidBodyComponent>())
-        os << "RIGID:" << (int)rb->shape << " " << (int)rb->motionType << "\n"
+        os << "RIGID:" << RigidBodyComponent::shapeName(rb->shape) << " "
+                       << RigidBodyComponent::motionName(rb->motionType) << "\n"
            << "RIGID_PROPS:" << F(rb->friction) << " " << F(rb->restitution) << " " << F(rb->mass)
                              << " " << F(rb->halfExtent.x) << " " << F(rb->halfExtent.y)
                              << " " << F(rb->halfExtent.z)
@@ -149,9 +152,22 @@ bool SceneSerializer::parseLine(const std::string& key, const std::string& val, 
             d.audioAtten = AudioAttenuationSettings{};
         }
     } else if (key == "RIGID") {
+        // 이름과 옛 순번(0~2)을 모두 받습니다. 모르는 값은 기본값(box·dynamic)으로 두고
+        // 알립니다. 예전에는 범위 검사 없이 캐스트했습니다(DEF-44).
         d.hasRigid = true;
         std::istringstream ss(val);
-        ss >> d.rigidShape >> d.rigidMotion;
+        std::string shapeTok, motionTok;
+        ss >> shapeTok >> motionTok;
+        EPhysicsShape shape  = EPhysicsShape::Box;
+        EMotionType   motion = EMotionType::Dynamic;
+        if (!RigidBodyComponent::shapeFromText(shapeTok, shape))
+            HLOG(LogScene, Error) << "actor '" << d.name << "': invalid RIGID shape '" << shapeTok
+                                  << "'; using box";
+        if (!RigidBodyComponent::motionFromText(motionTok, motion))
+            HLOG(LogScene, Error) << "actor '" << d.name << "': invalid RIGID motion '" << motionTok
+                                  << "'; using dynamic";
+        d.rigidShape  = (int)shape;
+        d.rigidMotion = (int)motion;
     } else if (key == "RIGID_PROPS") {
         std::istringstream ss(val);
         ss >> d.rigidFric >> d.rigidRest >> d.rigidMass

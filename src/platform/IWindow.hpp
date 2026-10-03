@@ -21,8 +21,10 @@ namespace HInput {
     constexpr int KEY_C = 67;
     constexpr int KEY_V = 86;
     constexpr int KEY_F = 70;
-    constexpr int KEY_LEFT_CTRL  = 341;  // GLFW_KEY_LEFT_CONTROL
-    constexpr int KEY_LEFT_SHIFT = 340;  // GLFW_KEY_LEFT_SHIFT
+    constexpr int KEY_LEFT_CTRL   = 341;  // GLFW_KEY_LEFT_CONTROL
+    constexpr int KEY_LEFT_SHIFT  = 340;  // GLFW_KEY_LEFT_SHIFT
+    constexpr int KEY_RIGHT_CTRL  = 345;  // GLFW_KEY_RIGHT_CONTROL
+    constexpr int KEY_RIGHT_SHIFT = 344;  // GLFW_KEY_RIGHT_SHIFT
     constexpr int KEY_DELETE    = 261;  // GLFW_KEY_DELETE
     constexpr int KEY_F2        = 291;  // GLFW_KEY_F2
     constexpr int KEY_BACKSPACE = 259;  // GLFW_KEY_BACKSPACE
@@ -57,9 +59,20 @@ public:
     virtual void  getMouseDelta(float& dx, float& dy) = 0;
     virtual void  getRightMouseDelta(float& dx, float& dy) = 0;
     virtual float getScrollDelta() = 0;
+    // 키·버튼 상태는 "지금 눌려 있거나, 직전 pollEvents 이후 눌린 적이 있음" 입니다. 한
+    // 프레임 안에 눌렀다 뗀 입력(터치패드 탭, 낮은 FPS)도 그 프레임에는 눌린 것으로 보여,
+    // 프레임마다 상태를 폴링하는 쪽이 놓치지 않습니다.
     virtual bool  isKeyDown(int key) const = 0;
     virtual bool  isMouseButtonDown(int button) const = 0;
     virtual void  getMousePosition(float& x, float& y) const = 0;
+
+    // 수정자 키는 좌우를 구분하지 않습니다(오른쪽 Ctrl 로도 단축키가 동작해야 합니다).
+    bool isCtrlDown() const {
+        return isKeyDown(HInput::KEY_LEFT_CTRL) || isKeyDown(HInput::KEY_RIGHT_CTRL);
+    }
+    bool isShiftDown() const {
+        return isKeyDown(HInput::KEY_LEFT_SHIFT) || isKeyDown(HInput::KEY_RIGHT_SHIFT);
+    }
 
     // Camera mode — caller decides when to activate based on viewport hit-test
     virtual void activateCameraMode()   = 0;

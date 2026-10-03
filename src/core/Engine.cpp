@@ -144,7 +144,7 @@ void Engine::run() {
         {
             ScopedCpuTimer t(gFrameTimings().tick);
             editor.tick(dt);
-            HInputSystem::get().update(dt, win);
+            HInputSystem::get().update(dt, win, editor.isTextInputActive());
             if (editor.isPlaying()) {
                 world.tick(dt);
                 gameModule.onTick(dt, ctx);

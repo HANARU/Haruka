@@ -79,6 +79,11 @@ private:
 
     std::vector<unsigned int> charQueue_;
 
+    // 직전 pollEvents 이후 눌린 적이 있는 키·버튼. 폴링만으로는 한 프레임 안에 눌렀다 뗀
+    // 입력이 사라지므로(DEF-82), 누름 이벤트를 여기 걸어 두었다가 다음 pollEvents 에서 비웁니다.
+    bool keyLatch_[GLFW_KEY_LAST + 1]             = {};
+    bool buttonLatch_[GLFW_MOUSE_BUTTON_LAST + 1] = {};
+
     GLFWcursor* cursorArrow_   = nullptr;
     GLFWcursor* cursorHResize_ = nullptr;
     GLFWcursor* cursorVResize_ = nullptr;

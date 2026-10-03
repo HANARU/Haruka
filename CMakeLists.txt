@@ -347,10 +347,49 @@ if(NOT ANDROID)
         set_target_properties(HarukaAudioTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- HSlate 입력 테스트 --------------------------------------------------
+    # 포인터 캡처와 숫자 칸의 프레스 추적을 화면 없이 검산합니다. 렌더러의 입력 경로는
+    # Vulkan 을 부르지 않지만, 같은 파일의 렌더 코드 때문에 Vulkan 로더에 링크합니다.
+    add_executable(HarukaSlateTest
+        tests/SlateInputTest.cpp
+        src/ui/slate/HSlateRenderer.cpp
+        src/ui/slate/HFontAtlas.cpp
+        src/ui/slate/HPaintContext.cpp
+        src/core/HLog.cpp
+    )
+    target_link_libraries(HarukaSlateTest PRIVATE Vulkan::Vulkan glm::glm)
+    target_include_directories(HarukaSlateTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR} ${Vulkan_INCLUDE_DIRS})
+    if(MSVC)
+        target_compile_options(HarukaSlateTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaSlateTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
+    # -- 물리 바디 생명주기 테스트 -------------------------------------------
+    # World + Actor + RigidBodyComponent + PhysicsSystem(Jolt) 만 링크합니다. 끈 액터의 바디
+    # 제거와 잠든 바디 깨우기, 편집 확정 때만 재생성, 마찰 즉시 반영, 이름 직렬화를 검산합니다.
+    add_executable(HarukaPhysicsTest
+        tests/PhysicsTest.cpp
+        src/physics/PhysicsSystem.cpp
+        src/components/RigidBodyComponent.cpp
+        src/core/World.cpp
+        src/core/Actor.cpp
+        src/core/Component.cpp
+        src/core/HLog.cpp
+    )
+    target_link_libraries(HarukaPhysicsTest PRIVATE glm::glm Jolt)
+    target_include_directories(HarukaPhysicsTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaPhysicsTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaPhysicsTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     enable_testing()
     add_test(NAME geometry_conventions COMMAND HarukaGeometryTest)
     add_test(NAME actor_lifecycle      COMMAND HarukaActorTest)
     add_test(NAME command_stack_purge  COMMAND HarukaCommandTest)
     add_test(NAME log_category         COMMAND HarukaLogTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
+    add_test(NAME slate_input          COMMAND HarukaSlateTest)
+    add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
 endif()

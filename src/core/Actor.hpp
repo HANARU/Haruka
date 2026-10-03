@@ -99,6 +99,10 @@ public:
     // Called by World::destroyActor — fires onDestroy on every component.
     void notifyDestroy();
 
+    // 에디터가 이 액터의 트랜스폼 편집을 확정했음을 알립니다. 자식의 월드 트랜스폼도 함께
+    // 바뀌므로 서브트리 전체 컴포넌트의 onTransformCommitted 를 부릅니다.
+    void notifyTransformCommitted();
+
 private:
     // 이 액터와 자식 서브트리의 모든 컴포넌트에 대해 실효 활성을 다시 계산하고,
     // 전이된 것만 onEnable/onDisable 을 발화시킵니다. setActive·attachTo·detach 가 호출합니다.

@@ -19,11 +19,12 @@ void HInputSystem::unsubscribe(Handle h) {
     listeners_.erase(h);
 }
 
-void HInputSystem::update(float dt, IWindow& win) {
+void HInputSystem::update(float dt, IWindow& win, bool keyboardCaptured) {
     for (auto& [action, binding] : bindings_) {
         bool held = false;
-        for (int key : binding.keys)
-            if (win.isKeyDown(key)) { held = true; break; }
+        if (!keyboardCaptured)
+            for (int key : binding.keys)
+                if (win.isKeyDown(key)) { held = true; break; }
 
         const bool pressed  = held && !binding.prevHeld;
         const bool released = !held && binding.prevHeld;

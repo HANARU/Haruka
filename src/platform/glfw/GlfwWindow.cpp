@@ -1,5 +1,7 @@
 #include "GlfwWindow.hpp"
 #include <stdexcept>
+#include <algorithm>
+#include <iterator>
 #include <string>
 
 #ifdef _WIN32
@@ -63,10 +65,15 @@ bool GlfwWindow::shouldClose() const {
 }
 
 void GlfwWindow::pollEvents() {
+    // 걸쇠는 이번 폴링에서 들어올 누름만 담아야 합니다. 비우고 나서 이벤트를 받습니다.
+    std::fill(std::begin(keyLatch_), std::end(keyLatch_), false);
+    std::fill(std::begin(buttonLatch_), std::end(buttonLatch_), false);
     glfwPollEvents();
 }
 
 void GlfwWindow::waitEvents() {
+    std::fill(std::begin(keyLatch_), std::end(keyLatch_), false);
+    std::fill(std::begin(buttonLatch_), std::end(buttonLatch_), false);
     glfwWaitEvents();
 }
 
@@ -164,10 +171,12 @@ float GlfwWindow::getScrollDelta() {
 }
 
 bool GlfwWindow::isKeyDown(int key) const {
+    if (key >= 0 && key <= GLFW_KEY_LAST && keyLatch_[key]) return true;
     return glfwGetKey(window, key) == GLFW_PRESS;
 }
 
 bool GlfwWindow::isMouseButtonDown(int button) const {
+    if (button >= 0 && button <= GLFW_MOUSE_BUTTON_LAST && buttonLatch_[button]) return true;
     return glfwGetMouseButton(window, button) == GLFW_PRESS;
 }
 
@@ -179,6 +188,8 @@ void GlfwWindow::getMousePosition(float& x, float& y) const {
 void GlfwWindow::mouseButtonCallback(GLFWwindow* w, int button, int action, int /*mods*/) {
     auto self = reinterpret_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
     bool pressing = (action == GLFW_PRESS);
+    if (pressing && button >= 0 && button <= GLFW_MOUSE_BUTTON_LAST)
+        self->buttonLatch_[button] = true;
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (pressing && !self->mouseLeftDown) self->firstMouse = true;
         self->mouseLeftDown = pressing;
@@ -257,6 +268,10 @@ static std::string keyLabel(int key) {
 
 void GlfwWindow::keyCallback(GLFWwindow* w, int key, int /*scancode*/, int action, int /*mods*/) {
     if (action == GLFW_REPEAT) return;
+    if (action == GLFW_PRESS && key >= 0 && key <= GLFW_KEY_LAST) {
+        auto self = reinterpret_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
+        self->keyLatch_[key] = true;
+    }
 
     // Esc 는 다른 키와 똑같이 흘려보냅니다. 예전에는 여기서 곧바로 창을 닫았는데,
     // 저장 여부를 묻는 경로가 없어 편집 중이던 씬이 그대로 사라졌습니다. 에디터에서

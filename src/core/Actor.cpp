@@ -61,8 +61,8 @@ void Actor::attachTo(Actor* parent) {
     // 이 한 곳을 막으면 사이클이 구조적으로 생길 수 없습니다.
     for (Actor* a = parent; a; a = a->parent_) {
         if (a == this) {
-            HLOG(LogScene, Warning) << "attachTo 거부: '" << name
-                                    << "' 를 자기 자신 또는 자손 아래에 붙일 수 없습니다(사이클).";
+            HLOG(LogScene, Warning) << "attachTo rejected: '" << name
+                                    << "' cannot be attached to itself or its descendant (cycle)";
             return;
         }
     }
@@ -90,4 +90,9 @@ void Actor::notifyDestroy() {
         if (c->isEnabled()) c->setEnabled(false);
         c->onDestroy();
     }
+}
+
+void Actor::notifyTransformCommitted() {
+    for (auto& c : components) c->onTransformCommitted();
+    for (Actor* child : children_) child->notifyTransformCommitted();
 }

@@ -41,11 +41,12 @@ public:
         if ((cp >= '0' && cp <= '9') || cp == '.' || cp == '-' || cp == '+') {
             if (selAll_) { editBuf_.clear(); selAll_ = false; }   // 전체 선택 → 교체
             editBuf_ += (char)cp;
+            edited_ = true;
         }
     }
     void onBackspace() {
-        if (selAll_) { editBuf_.clear(); selAll_ = false; return; }
-        if (!editBuf_.empty()) editBuf_.pop_back();
+        if (selAll_) { editBuf_.clear(); selAll_ = false; edited_ = true; return; }
+        if (!editBuf_.empty()) { editBuf_.pop_back(); edited_ = true; }
     }
     void selectAll() {
         if (editing_ && !editBuf_.empty()) selAll_ = true;
@@ -55,6 +56,11 @@ public:
         editing_ = false;
         selAll_  = false;
         if (sFocused_ == this) sFocused_ = nullptr;
+        // 아무것도 입력하지 않았으면 값을 다시 쓰지 않습니다. 버퍼는 소수 셋째 자리로 만든
+        // 표시 문자열이라, 들어갔다 나오기만 해도 1.23456 이 1.235 로 잘렸습니다. 판정은 글자
+        // 비교가 아니라 입력 여부로 합니다. 플레이 중 값이 바뀐 칸에 처음과 같은 글자를 쳐서
+        // 확정하면, 글자는 같아도 사용자가 그 값을 원한 것입니다.
+        if (!edited_) return;
         char* end = nullptr;
         float v = std::strtof(editBuf_.c_str(), &end);
         if (end && end != editBuf_.c_str() && setter_) {
@@ -109,8 +115,8 @@ public:
                 ctx.drawText(vg, editBuf_ + "|", fontSize_, {1.f, 1.f, 1.f, 1.f});
             }
         } else {
-            float val = getter_ ? getter_() : 0.f;
-            char buf[20]; std::snprintf(buf, sizeof(buf), "%.3f", val);
+            char buf[20];
+            formatValue(getter_ ? getter_() : 0.f, buf, sizeof(buf));
             ctx.drawText(vg, buf, fontSize_, {0.88f, 0.88f, 0.88f, 1.f});
         }
 
@@ -128,6 +134,9 @@ public:
     HReply onMouseButton(const HPointerEvent& e) override {
         if (e.button != 0) return HReply::Unhandled();
         if (e.down) {
+            // 입력 중인 칸을 다시 누르면 아무것도 하지 않습니다. 예전에는 입력 모드에 새로
+            // 들어가면서 버퍼를 지금 값으로 되돌려, 치던 글자가 사라졌습니다.
+            if (editing_) return HReply::Handled();
             isDragging_   = true;
             dragMoved_    = false;
             dragStartX_   = e.position.x;
@@ -135,25 +144,37 @@ public:
             if (beginFn_) beginFn_();
             return HReply::Handled().captureMouse(this);
         }
+        // 뗌은 내 위에서 시작한 누름의 짝일 때만 받습니다. 다른 곳에서 누르고 여기서 떼면
+        // 캡처가 없으니 트리 경로로 들어오는데, 예전에는 그대로 입력 모드에 들어가 낡은
+        // 시작값(새로 만든 칸이면 0)으로 버퍼를 채웠습니다. 그 값이 확정되면 원래 값이
+        // 사라지고, 시작값과 같아 보여 undo 기록도 남지 않았습니다(DEF-77).
+        if (!isDragging_) return HReply::Unhandled();
         isDragging_ = false;
         if (!dragMoved_) {
-            // 이동 없는 클릭 → 인라인 입력 모드 진입
+            // 이동 없는 클릭 → 인라인 입력 모드 진입. 버퍼는 지금 값으로 채웁니다.
             editing_      = true;
             selAll_       = false;
-            editStartVal_ = dragStartVal_;
-            char buf[20]; std::snprintf(buf, sizeof(buf), "%.3f", dragStartVal_);
-            editBuf_ = buf;
+            editStartVal_ = getter_ ? getter_() : dragStartVal_;
+            char buf[20];
+            formatValue(editStartVal_, buf, sizeof(buf));
+            editBuf_  = buf;
+            edited_   = false;
             sFocused_ = this;
             return HReply::Handled().releaseMouse();
         }
-        float endVal = getter_ ? getter_() : 0.f;
-        if (endFn_ && std::abs(endVal - dragStartVal_) > 1e-6f)
-            endFn_();
+        finishDrag();
         return HReply::Handled().releaseMouse();
     }
 
     HReply onMouseMove(const HPointerEvent& e) override {
         isHovered_ = cachedGeo_.contains(e.position);
+        // 뗌을 받지 못한 채 버튼이 떨어졌습니다(뗌이 다른 처리에 소비된 경우). 드래그만
+        // 마무리하고, 어디서 뗐는지 모르므로 입력 모드에는 들어가지 않습니다.
+        if (isDragging_ && !e.down) {
+            isDragging_ = false;
+            if (dragMoved_) finishDrag();
+            return HReply::Handled().releaseMouse();
+        }
         if (isDragging_ && setter_ && getter_) {
             // 3px 데드존 — 클릭(입력 모드)과 드래그(스크럽) 구분
             if (!dragMoved_ && std::abs(e.position.x - dragStartX_) > 3.f)
@@ -187,7 +208,22 @@ private:
     bool        editing_      = false;
     bool        selAll_       = false;
     std::string editBuf_;
+    bool        edited_ = false;  // 입력 모드에 들어온 뒤 글자를 넣거나 지웠는가
     float       editStartVal_ = 0.f;
+
+    // 표시용 문자열(소수 셋째 자리). 반올림하면 0 이 되는 음수는 0 으로 둡니다. 그대로 찍으면
+    // 회전 없는 액터의 오일러 값처럼 -0.0001 이 "-0.000" 으로 보입니다(DEF-88).
+    static void formatValue(float v, char* buf, size_t n) {
+        if (v > -0.0005f && v < 0.0005f) v = 0.f;
+        std::snprintf(buf, n, "%.3f", v);
+    }
+
+    // 스크럽 드래그의 끝. 값이 실제로 바뀌었을 때만 끝 콜백(undo 기록)을 부릅니다.
+    void finishDrag() {
+        float endVal = getter_ ? getter_() : 0.f;
+        if (endFn_ && std::abs(endVal - dragStartVal_) > 1e-6f)
+            endFn_();
+    }
 
     // 단일 에디터 창 전제의 전역 포커스 (메인 스레드 전용)
     inline static SNumberField* sFocused_ = nullptr;

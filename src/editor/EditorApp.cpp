@@ -41,17 +41,25 @@ struct PropsSnapshotCmd : ICommand {
     //   2) 컴포넌트만 제거(디테일 패널 x) → purgeComponent   → refersToComponent
     // 2번은 액터가 살아남아 이벤트가 발화하지 않으므로 1번이 잡지 못합니다.
     const Actor*          actor;
-    const Component*      comp;
+    Component*            comp;
     std::vector<PropDesc> props;
     std::vector<float>    before, after;
 
-    PropsSnapshotCmd(const Actor* owner, const Component* c, std::vector<PropDesc> p,
+    PropsSnapshotCmd(const Actor* owner, Component* c, std::vector<PropDesc> p,
                      std::vector<float> b, std::vector<float> a)
         : actor(owner), comp(c), props(std::move(p)),
           before(std::move(b)), after(std::move(a)) {}
 
-    void undo() override { size_t j=0; for (auto& pd : props) if (pd.setF) pd.setF(before[j++]); }
-    void redo() override { size_t j=0; for (auto& pd : props) if (pd.setF) pd.setF(after[j++]);  }
+    // 되돌린 값도 편집 확정입니다. 세터는 값만 바꾸므로, 물리 바디 재생성 같은 후속 처리는
+    // 확정 훅이 합니다(DEF-43).
+    void undo() override {
+        size_t j=0; for (auto& pd : props) if (pd.setF) pd.setF(before[j++]);
+        comp->onPropsCommitted();
+    }
+    void redo() override {
+        size_t j=0; for (auto& pd : props) if (pd.setF) pd.setF(after[j++]);
+        comp->onPropsCommitted();
+    }
     bool refersTo(const Actor* a) const override { return actor == a; }
     bool refersToComponent(const Component* c) const override { return comp == c; }
 };
@@ -108,6 +116,12 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
         // 서브트리 재귀 파괴 시 자손마다 따로 방송되어 접힘 상태가 남지 않습니다.
         outlinerCollapsed_.erase(a->id);
         if (prevSelected2_ == a) prevSelected2_ = nullptr;
+        // 디테일 패널이 이 액터를 보여 주고 있었다면 다시 만들어야 합니다. 지금 여기서
+        // 만들지 않는 이유는 이 방송이 위젯 콜백(아웃라이너 x·Stop) 안에서도 오기 때문입니다.
+        if (detailsActor_ == a) {
+            detailsActor_ = nullptr;
+            detailsDirty_ = true;
+        }
         if (ctx_.selected == a) {
             ctx_.selected = nullptr;
             // 리네임 중인 액터가 (조상 삭제로) 함께 사라질 수 있습니다. 여기서 끄지 않으면
@@ -154,6 +168,10 @@ static float cycleSpeed(float cur, int dir);
 
 void EditorApp::tick(float dt) {
     if (!ctx_.world) return;
+
+    // 플레이 시작·끝 처리(게임 모듈)에서 표시 대상이 파괴됐다면, 아래 tickRenameInput 의
+    // 숫자 칸 확정이 낡은 접근자를 부르기 전에 디테일 패널부터 다시 만듭니다(DEF-92).
+    flushDetailsRebuild();
 
     if (hotReloader_.reloadPending() && ctx_.renderer)
         ctx_.renderer->reloadPipelines();
@@ -230,6 +248,16 @@ void EditorApp::tick(float dt) {
     if (scroll != 0.f && ctx_.window && ctx_.window->isCameraModeActive()) {
         camSpeed_ = cycleSpeed(camSpeed_, scroll > 0.f ? 1 : -1);
         scroll    = 0.f;
+    }
+    // 남은 휠은 커서가 뷰포트 위일 때만 카메라 돌리로 씁니다. 예전에는 디테일·콘텐츠 브라우저
+    // 위에서 굴려도 카메라가 움직였습니다(DEF-78). 그 패널들은 위젯 휠 경로(DEF-57)가 생기면
+    // 스크롤을 받습니다. 판정은 픽·RMB 카메라 모드와 같은 inViewport 하나로 합니다.
+    if (scroll != 0.f && ctx_.window) {
+        float mx, my;
+        ctx_.window->getMousePosition(mx, my);
+        int wW = 1, wH = 1;
+        ctx_.window->getWindowSize(wW, wH);
+        if (!inViewport(mx, my, (float)wW, (float)wH)) scroll = 0.f;
     }
     tickEditorCamera(dt, scroll);
     tickRenameInput();
@@ -312,9 +340,13 @@ void EditorApp::tick(float dt) {
     }
 
     if (actorCount != prevActorCount_ || selChanged || renamChanged || outlinerDirty_) {
-        rebuildOutliner();
-        prevActorCount_ = actorCount;
-        outlinerDirty_  = false;
+        if (outlinerPressHeld_) {
+            outlinerDirty_ = true;   // 행을 누르는 동안은 미룹니다(DEF-83). 뗀 프레임에 합니다
+        } else {
+            rebuildOutliner();
+            prevActorCount_ = actorCount;
+            outlinerDirty_  = false;
+        }
     }
     prevRenaming_ = renaming_;
 
@@ -462,7 +494,7 @@ void EditorApp::buildWidgetTree() {
             const auto& f = gFrameTimings();
             char buf[512];
             snprintf(buf, sizeof(buf),
-                "%d FPS  |  Draw: %d  Culled: %d  Transp: %d  |  Swapchain recreate/s: %.0f\n"
+                "%d FPS  |  Draw: %d  Culled: %d  Transp: %d  |  Target recreate/s: %.0f\n"
                 "GPU   Shadow %.2f  Main %.2f  AO %.2f  Bloom %.2f  Tonemap %.2f  TAA %.2f  UI %.2f  Total %.2f\n"
                 "CPU   Fence %.2f  Acquire %.2f  ImgFence %.2f  Extract %.2f  Record %.2f (UI %.2f)  Submit %.2f  Present %.2f\n"
                 "LOOP  Poll %.2f  Tick %.2f  Input %.2f  DrawFrame %.2f  |  Frame %.2f ms",
@@ -1330,7 +1362,7 @@ void EditorApp::rebuildViewportToolbar() {
                  [this] { return snap_.enabled; },
                  [this] {
                      const int dir = (ctx_.window &&
-                                      ctx_.window->isKeyDown(HInput::KEY_LEFT_SHIFT)) ? -1 : 1;
+                                      ctx_.window->isShiftDown()) ? -1 : 1;
                      switch (gizmoMode_) {
                          case 1: snap_.move      = cycleFrom(kSnapMove,   snap_.move,      dir); break;
                          case 2: snap_.rotateDeg = cycleFrom(kSnapRotate, snap_.rotateDeg, dir); break;
@@ -1353,7 +1385,7 @@ void EditorApp::rebuildViewportToolbar() {
          [this] { return camSpeed_ != 5.f; },
          [this] {
              const bool back = ctx_.window &&
-                               ctx_.window->isKeyDown(HInput::KEY_LEFT_SHIFT);
+                               ctx_.window->isShiftDown();
              camSpeed_ = cycleSpeed(camSpeed_, back ? -1 : 1);
          });
 
@@ -1573,9 +1605,15 @@ void EditorApp::revealActor(Actor* a) {
 }
 
 void EditorApp::flushOutlinerRebuild() {
-    if (!outlinerDirty_) return;
+    if (!outlinerDirty_ || outlinerPressHeld_) return;   // 누르는 동안은 미룹니다(DEF-83)
     rebuildOutliner();
     outlinerDirty_ = false;
+}
+
+void EditorApp::flushDetailsRebuild() {
+    if (!detailsDirty_) return;
+    detailsDirty_ = false;
+    rebuildDetails();
 }
 
 // ── 텍스트 입력 포커스 중재 ───────────────────────────────────────────────────
@@ -1600,7 +1638,8 @@ void EditorApp::setTextFocus(EFocusTarget t) {
     } else if (prev == EFocusTarget::Rename) {
         renaming_ = false; renameSelAll_ = false; outlinerDirty_ = true;
     } else if (prev == EFocusTarget::Search) {
-        outlinerSearchFocused_ = false; searchSelAll_ = false; outlinerDirty_ = true;
+        // 검색창 표시는 Attr 로 읽으므로 목록을 다시 만들 필요가 없습니다(DEF-83).
+        outlinerSearchFocused_ = false; searchSelAll_ = false;
     } else if (prev == EFocusTarget::LogSearch) {
         logSearchFocused_ = false; logSearchSelAll_ = false; logViewDirty_ = true;
     }
@@ -1615,7 +1654,6 @@ void EditorApp::setTextFocus(EFocusTarget t) {
     } else if (t == EFocusTarget::Search) {
         outlinerSearchFocused_ = true;
         searchSelAll_          = !outlinerSearch_.empty();
-        outlinerDirty_         = true;
     } else if (t == EFocusTarget::LogSearch) {
         logSearchFocused_ = true;
         logSearchSelAll_  = !logSearch_.empty();
@@ -1741,7 +1779,7 @@ void EditorApp::flushChromeRebuilds() {
     if (menuBarDirty_)   { menuBarDirty_   = false; rebuildMenuBar();   }
     if (menuPopupDirty_) { menuPopupDirty_ = false; rebuildMenuPopup(); }
     if (toolbarDirty_)   { toolbarDirty_   = false; rebuildToolbar();   }
-    if (detailsDirty_)   { detailsDirty_   = false; rebuildDetails();   }
+    flushDetailsRebuild();
     if (logPopupDirty_)  { logPopupDirty_  = false; rebuildLogPopup();  }
     // 로그 행은 위젯을 만들지 않고 문자열만 바꾸므로 콜백 안에서 불려도 안전하지만, 필터
     // 토글을 여러 번 누른 프레임에 한 번만 계산하려고 같은 소진 지점에 둡니다.
@@ -1793,8 +1831,8 @@ void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
     // 폰트 아틀라스는 ASCII 전용이라 유니코드 삼각형·눈은 .notdef 로 찍힙니다.
     // 글리프는 'v' '>' 'O' 'o' '-' 만 씁니다.
     const char* arrowGlyph = (!r.hasKids || filtering) ? "" : (r.expanded ? "v" : ">");
-    // 작은 타깃은 SToggleButton 을 씁니다. 마우스-업에서 위치를 재검사하므로, 눌렀다가
-    // 다른 칸에서 떼면 발화하지 않습니다(SButton 은 재검사 없이 발화).
+    // 작은 타깃은 SToggleButton 을 씁니다. 누른 칸과 뗀 칸이 같을 때만 발화하므로(SButton 도
+    // 2026-09-09 부터 같은 규약), 눌렀다가 옆 칸에서 떼면 아무 일도 일어나지 않습니다.
     auto smallBtn = [&] {
         return HNew(SToggleButton)->padding(HPadding{0.f, 0.f})
                  ->isActive([] { return false; })          // 강제 파란 액센트 바 회피
@@ -1970,6 +2008,7 @@ void EditorApp::rebuildOutliner() {
 void EditorApp::rebuildDetails() {
     if (!detailsList_) return;
     detailsList_->clearSlots();
+    detailsActor_ = ctx_.selected;
 
     detailsList_->addSlot(
         HNew(SBorder)->background({0,0,0,0})->padding({s(8.f), s(8.f)})
@@ -2017,7 +2056,10 @@ void EditorApp::rebuildDetails() {
 
     // ── Transform (collapsible) ───────────────────────────────────────────────
     auto txBegin = [this, sel]{ undoSnapshot_ = sel->transform(); };
-    auto txEnd   = [this, sel]{ cmdStack_.push(std::make_unique<SetTransformCmd>(sel, undoSnapshot_, sel->transform())); };
+    auto txEnd   = [this, sel]{
+        cmdStack_.push(std::make_unique<SetTransformCmd>(sel, undoSnapshot_, sel->transform()));
+        sel->notifyTransformCommitted();   // 물리 바디 등이 편집 결과를 따라오게
+    };
 
     auto txBody = HNew(SVerticalBox);
     auto addTxRow = [&](const char* lbl, glm::vec4 lc,
@@ -2059,8 +2101,11 @@ void EditorApp::rebuildDetails() {
     addTxRow("Y", kGreen, [sel]{ return sel->transform().scale().y; }, setSclY, 0.01f);
     addTxRow("Z", kBlue,  [sel]{ return sel->transform().scale().z; }, setSclZ, 0.01f);
 
+    // 섹션은 리빌드마다 새로 만들어지므로 접힘 상태를 에디터가 기억합니다. 예전에는
+    // expanded(true) 고정이라, 접어 두어도 선택을 바꾸면 다시 펼쳐졌습니다(DEF-90).
     detailsList_->addSlot(
-        HNew(SCollapseSection)->title("TRANSFORM")->body(txBody)->expanded(true)
+        HNew(SCollapseSection)->title("TRANSFORM")->body(txBody)->expanded(detailsTxExpanded_)
+            ->onToggle([this](bool open) { detailsTxExpanded_ = open; })
             ->headerHeight(s(28.f))->fontSize(s(13.f)),
         SVerticalBox::ESizeRule::Auto);
 
@@ -2182,17 +2227,21 @@ void EditorApp::rebuildDetails() {
             // 걷히게 합니다. compEnd 는 패널이 살아있는 동안만 호출되므로 둘 다 유효합니다.
             cmdStack_.push(std::make_unique<PropsSnapshotCmd>(sel, comp, *props,
                                                              *snapBefore, std::move(after)));
+            comp->onPropsCommitted();
         };
 
+        // 열거·토글 칸은 클릭 한 번이 곧 확정이라 세터 직후에 확정 훅을 부릅니다.
         for (auto& pd : *props) {
             if (pd.kind == PropDesc::Float)
                 addNumRow(pd.label, pd.color,
                     [pd]{ return pd.getF(); }, [pd](float v){ pd.setF(v); },
                     pd.step, compBegin, compEnd);
             else if (pd.kind == PropDesc::Toggle)
-                addBoolRow(pd.label, pd.getB, pd.setB);
+                addBoolRow(pd.label, pd.getB,
+                           [comp, setB = pd.setB](bool v){ setB(v); comp->onPropsCommitted(); });
             else if (pd.kind == PropDesc::Enum)
-                addEnumRow(pd.label, pd.options, pd.getI, pd.setI);
+                addEnumRow(pd.label, pd.options, pd.getI,
+                           [comp, setI = pd.setI](int v){ setI(v); comp->onPropsCommitted(); });
         }
 
         std::string info = comp->readOnlyInfo();
@@ -2704,6 +2753,7 @@ void EditorApp::rebuildBottomPanel() {
                         ->hoveredColor({0.20f, 0.20f, 0.25f, 1.f})
                         ->pressedColor({0.07f, 0.33f, 0.58f, 1.f})
                         ->padding({s(8.f), s(3.f)})
+                        ->hAlign(EHAlign::Fill)   // 기본 Center 면 항목이 가운데로 몰립니다(DEF-87)
                         ->onClick([this, path, display]{
                             try {
                                 auto pairs = ctx_.assets->loadAll(path);
@@ -2750,6 +2800,7 @@ void EditorApp::rebuildBottomPanel() {
                         ->hoveredColor({0.20f, 0.20f, 0.25f, 1.f})
                         ->pressedColor({0.07f, 0.33f, 0.58f, 1.f})
                         ->padding({s(8.f), s(3.f)})
+                        ->hAlign(EHAlign::Fill)   // 기본 Center 면 항목이 가운데로 몰립니다(DEF-87)
                         ->onClick([this, stem, fullPath]{
                             // 선택한 액터에 지정합니다. 오디오 컴포넌트가 없으면 붙입니다. 예전에는
                             // 선택이 없거나 컴포넌트가 없으면 아무 반응 없이 무시됐습니다.
@@ -2787,6 +2838,7 @@ void EditorApp::rebuildBottomPanel() {
                         ->hoveredColor({0.20f, 0.20f, 0.25f, 1.f})
                         ->pressedColor({0.07f, 0.33f, 0.58f, 1.f})
                         ->padding({s(8.f), s(3.f)})
+                        ->hAlign(EHAlign::Fill)   // 기본 Center 면 항목이 가운데로 몰립니다(DEF-87)
                         ->onClick([this, path]{
                             if (!ctx_.world || !ctx_.assets) return;
                             Actor* a = PrefabManager::spawn(path, *ctx_.world, *ctx_.assets);
@@ -2995,7 +3047,7 @@ void EditorApp::tickShortcuts() {
     prevFDown_ = fNow;
 
     if (win.isCameraModeActive()) return;                 // WASD 비행 중 충돌 방지
-    if (!win.isKeyDown(HInput::KEY_LEFT_CTRL)) return;
+    if (!win.isCtrlDown()) return;
 
     if (sEdge) { saveScene(); return; }
 
@@ -3008,7 +3060,7 @@ void EditorApp::tickShortcuts() {
     // 텍스트 입력 중에는 씬 undo/redo가 직관에 어긋나므로 차단
     if (currentFocus() != EFocusTarget::None) return;   // 텍스트 입력 중에는 단축키를 막습니다
 
-    bool shift = win.isKeyDown(HInput::KEY_LEFT_SHIFT);
+    bool shift = win.isShiftDown();
     if (zEdge && !shift)                 undo();
     else if (yEdge || (zEdge && shift))  redo();
 }
@@ -3028,6 +3080,24 @@ void EditorApp::handleInput(float mouseX, float mouseY,
             self->flushChromeRebuilds();
         }
     } deferredRebuildGuard{ this };
+
+    // 디테일 패널이 보여 주던 액터가 에디터 tick 뒤(게임 tick·게임 모듈)에 파괴됐다면,
+    // 이벤트를 보내기 전에 패널부터 다시 만듭니다. 낡은 패널의 칸에 누름·드래그·확정이
+    // 닿으면 해제된 액터와 컴포넌트를 읽고 씁니다(DEF-92). 아래 포커스 해제의 확정도
+    // 그 접근자를 부르므로 반드시 그보다 앞이어야 합니다.
+    flushDetailsRebuild();
+
+    // 이벤트를 보내기 전에 배치부터 맞춥니다. 이번 프레임 tick 에서 리빌드된 위젯(아웃라이너
+    // 행·디테일 칸 등)은 아직 배치되지 않아 크기가 0 이라 클릭을 받지 못했습니다(DEF-84).
+    // 아래의 모든 히트테스트(메뉴·스플리터·탭·포커스)가 이 배치를 씁니다.
+    if (ctx_.window) {
+        int fw = 0, fh = 0;
+        ctx_.window->getFramebufferSize(fw, fh);
+        slateRenderer_.arrange({ (float)fw, (float)fh });
+    }
+
+    // 아웃라이너 목록 리빌드 보류(DEF-83)는 버튼을 떼면 풉니다. 거는 곳은 아래 UI 디스패치입니다.
+    if (!leftDown) outlinerPressHeld_ = false;
 
     // 편집 중에 다른 곳을 누르면 편집을 끝냅니다. 이 처리가 스플리터·탭·기즈모의 조기
     // return 보다 **앞**에 있어야 합니다. 뒤에 있으면 그 경로들이 커밋을 건너뛰어 편집
@@ -3062,6 +3132,14 @@ void EditorApp::handleInput(float mouseX, float mouseY,
         }
     }
 
+    // 열린 팝업(메뉴 드롭다운과 그 캐처, Categories 패널) 위의 누름은 아래 스플리터·탭 판정보다
+    // UI 가 먼저 받아야 합니다. 예전에는 File > Load Scene 행의 왼쪽 끝을 누르면 그 밑의 Outliner
+    // 탭이 클릭을 가져가 메뉴가 열린 채로 남았습니다(DEF-64 의 우회 경로).
+    const bool overPopup =
+        openMenu_ >= 0 ||
+        (logPopupOpen_ && logPopupPanel_ &&
+         logPopupPanel_->cachedGeometry().contains(glm::vec2{ mouseX, mouseY }));
+
     // ── Dock splitter resize ────────────────────────────────────────────────────
     // 도크 트리의 스플리터 핸들을 히트테스트해 분할 비율(ratios)을 조정합니다. 드래그 상태는
     // 위젯이 아니라 노드 기준이라, rebuildDockArea 로 위젯이 갈려도 안정적으로 이어집니다.
@@ -3070,6 +3148,7 @@ void EditorApp::handleInput(float mouseX, float mouseY,
         if (!dockDragNode_) {
             const float grab = s(4.f);   // 시각 핸들(5px)보다 넓은 잡기 존(좌표 오차·얇은 폭 보정)
             for (auto& h : dockSplitters_) {
+                if (overPopup) break;
                 if (!h.handle) continue;
                 const HGeometry& hg = h.handle->cachedGeometry();
                 if (hg.size.x < 1.f && hg.size.y < 1.f) continue;
@@ -3132,7 +3211,7 @@ void EditorApp::handleInput(float mouseX, float mouseY,
     if (ctx_.window && !ctx_.window->isCameraModeActive() && !dockDragNode_) {
         const glm::vec2 m{ mouseX, mouseY };
 
-        if (leftDown && !prevLeftDown_ && !tabPressPending_) {
+        if (leftDown && !prevLeftDown_ && !tabPressPending_ && !overPopup) {
             for (auto& t : dockTabHits_) {
                 if (t.widget && t.widget->cachedGeometry().contains(m)) {
                     tabPressPending_ = true; tabDragActive_ = false;
@@ -3228,6 +3307,13 @@ void EditorApp::handleInput(float mouseX, float mouseY,
 
     // ── UI event + actor pick ─────────────────────────────────────────────────
     if (!gizmoConsumed && leftDown && !prevLeftDown_) {
+        // 아웃라이너 행 위의 누름이면, 뗄 때까지 목록을 다시 만들지 않습니다. 다시 만들면 눌린 행
+        // 버튼이 새 버튼으로 바뀌어, 뗄 때 새 버튼은 눌린 적이 없으니 클릭이 사라집니다. 검색·리네임
+        // 포커스 해제, 게임이 매 프레임 액터를 만드는 경우가 그 경로였습니다(DEF-83). 미룬 리빌드는
+        // 뗀 프레임 끝(위 가드)에서 합니다. 스플리터·탭·기즈모가 가져간 누름은 여기까지 오지 않습니다.
+        if (outlinerVisible_ && outlinerList_ &&
+            outlinerList_->cachedGeometry().contains(glm::vec2{ mouseX, mouseY }))
+            outlinerPressHeld_ = true;
         e.button = 0; e.down = true;
         HReply r = slateRenderer_.handlePointerEvent(e);
         if (!r.handled && inViewport(mouseX, mouseY, winW, winH)) {
@@ -3343,6 +3429,10 @@ bool EditorApp::inViewport(float mx, float my, float winW, float winH) const {
     // 판정하면 뷰포트를 가린 패널의 빈 영역 클릭이 픽·오빗으로, RMB 가 카메라 모드로 새므로
     // (뷰포트가 화면에 없을 때는) 항상 false 로 게이팅합니다.
     if (!viewportVisible_) return false;
+    // 메뉴가 열려 있으면 뷰포트는 없는 것으로 봅니다. 드롭다운과 그 바깥 캐처가 클릭을 받아야
+    // 하는데, 이 판정을 쓰는 기즈모·RMB 카메라 모드·휠이 UI 디스패치보다 먼저 돌아 클릭을
+    // 가져갔습니다(DEF-64 의 우회 경로).
+    if (openMenu_ >= 0) return false;
     // 히트테스트도 프레임버퍼 공간으로 통일합니다. 마우스(윈도 픽셀)를 fb 로 변환해
     // 뷰포트 위젯의 실측 fb rect 와 비교하므로, 도킹·리사이즈·HiDPI 와 무관하게 정확합니다.
     const glm::vec2 fb = mouseToFb(mx, my, winW, winH);
@@ -3388,7 +3478,7 @@ void EditorApp::tickRenameInput() {
     // 키 엣지를 여기서 **한 번에** 계산하고 prev 상태를 조건 없이 갱신합니다. 예전에는
     // 숫자 필드 분기가 중간에서 return 해 F2·Delete 엣지가 갱신되지 않았고, 그 탓에 값을
     // 확정한 직후 눌린 채였던 Delete 가 선택 액터를 지웠습니다(undo 없음).
-    const bool ctrlHeld = win.isKeyDown(HInput::KEY_LEFT_CTRL);
+    const bool ctrlHeld = win.isCtrlDown();
     const bool vNow   = win.isKeyDown(HInput::KEY_V);
     const bool cNow   = win.isKeyDown(HInput::KEY_C);
     const bool aNow   = win.isKeyDown(HInput::KEY_A);
@@ -3537,10 +3627,12 @@ void EditorApp::tickEditorCamera(float dt, float scroll) {
         editorCam_->pitch  = std::clamp(editorCam_->pitch + ry * 0.003f, -1.5f, 1.5f);
     }
 
-    // LMB orbit pan
+    // LMB orbit pan. 이동량은 좌버튼을 누른 채 움직이면 어디서든 쌓이므로, 오빗이 아닐 때도
+    // 매 프레임 비웁니다. 안 비우면 UI 에서 끈 양이 남았다가 다음 오빗 첫 프레임에 한꺼번에
+    // 적용되어 카메라가 튑니다(DEF-79).
+    float lx, ly;
+    win.getMouseDelta(lx, ly);
     if (lmbOrbit_) {
-        float lx, ly;
-        win.getMouseDelta(lx, ly);
         if (lx != 0 || ly != 0) {
             glm::vec3 up = glm::cross(rgt, fwd);
             editorCamActor_->translateLocal(-rgt * (lx * 0.005f));

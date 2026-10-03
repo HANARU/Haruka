@@ -36,6 +36,16 @@ struct HReply {
 
     HReply& captureMouse(HWidget* w) { mouseCapture = w; return *this; }
     HReply& releaseMouse()           { mouseRelease  = true; return *this; }
+
+    // 이동 이벤트를 여러 자식에게 뿌린 컨테이너가 응답을 합칩니다. 캡처는 처음 요청한 자식의
+    // 것을 쓰고, 처리·해제는 하나라도 요청했으면 남깁니다. 예전에는 컨테이너가 응답을 버리거나
+    // 마지막 Handled 만 남겨 캡처·해제 요청이 사라졌습니다(DEF-65).
+    HReply& merge(const HReply& o) {
+        handled      = handled || o.handled;
+        if (!mouseCapture) mouseCapture = o.mouseCapture;
+        mouseRelease = mouseRelease || o.mouseRelease;
+        return *this;
+    }
 };
 
 // ── 포인터(마우스) 이벤트 ─────────────────────────────────────────────────────

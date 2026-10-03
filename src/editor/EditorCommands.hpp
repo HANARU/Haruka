@@ -8,7 +8,9 @@ struct SetTransformCmd : ICommand {
     Transform before, after;
 
     SetTransformCmd(Actor* a, Transform b, Transform af) : actor(a), before(b), after(af) {}
-    void undo() override { actor->setLocalTransform(before); }
-    void redo() override { actor->setLocalTransform(after);  }
+    // 되돌린 트랜스폼도 편집 확정입니다. 물리 바디처럼 트랜스폼을 따로 들고 있는 컴포넌트가
+    // 따라오게 알립니다(DEF-43).
+    void undo() override { actor->setLocalTransform(before); actor->notifyTransformCommitted(); }
+    void redo() override { actor->setLocalTransform(after);  actor->notifyTransformCommitted(); }
     bool refersTo(const Actor* a) const override { return actor == a; }
 };

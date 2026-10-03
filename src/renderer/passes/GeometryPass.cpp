@@ -196,46 +196,37 @@ void GeometryPass::create(RenderContext& rc, VkPipelineLayout pbrLayout,
     createLineBuffer();
 }
 
-void GeometryPass::createLineBuffer() {
+void GeometryPass::createHostVertexBuffer(VkDeviceSize size, const char* what,
+                                          VkBuffer& buf, VkDeviceMemory& mem, void*& ptr) {
     VkBufferCreateInfo bci{};
     bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bci.size  = kMaxLineVerts * sizeof(LineVertex);
+    bci.size  = size;
     bci.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if (vkCreateBuffer(rc_->device, &bci, nullptr, &lineVertBuf_) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create line vertex buffer!");
+    if (vkCreateBuffer(rc_->device, &bci, nullptr, &buf) != VK_SUCCESS)
+        throw std::runtime_error(std::string("Failed to create ") + what + " vertex buffer!");
 
     VkMemoryRequirements reqs;
-    vkGetBufferMemoryRequirements(rc_->device, lineVertBuf_, &reqs);
+    vkGetBufferMemoryRequirements(rc_->device, buf, &reqs);
     uint32_t memType = rc_->findMemType(reqs.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     VkMemoryAllocateInfo mai{};
     mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     mai.allocationSize = reqs.size; mai.memoryTypeIndex = memType;
-    if (vkAllocateMemory(rc_->device, &mai, nullptr, &lineVertMem_) != VK_SUCCESS)
-        throw std::runtime_error("Failed to allocate line vertex memory!");
-    vkBindBufferMemory(rc_->device, lineVertBuf_, lineVertMem_, 0);
-    vkMapMemory(rc_->device, lineVertMem_, 0, VK_WHOLE_SIZE, 0, &lineVertPtr_);
+    if (vkAllocateMemory(rc_->device, &mai, nullptr, &mem) != VK_SUCCESS)
+        throw std::runtime_error(std::string("Failed to allocate ") + what + " vertex memory!");
+    vkBindBufferMemory(rc_->device, buf, mem, 0);
+    vkMapMemory(rc_->device, mem, 0, VK_WHOLE_SIZE, 0, &ptr);
+}
 
-    // 기즈모 삼각형 버퍼도 같은 방식으로 만듭니다.
-    VkBufferCreateInfo tbi{};
-    tbi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    tbi.size  = kMaxTriVerts * sizeof(LineVertex);
-    tbi.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    tbi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if (vkCreateBuffer(rc_->device, &tbi, nullptr, &triVertBuf_) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create gizmo tri vertex buffer!");
-    VkMemoryRequirements treqs;
-    vkGetBufferMemoryRequirements(rc_->device, triVertBuf_, &treqs);
-    uint32_t tMemType = rc_->findMemType(treqs.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    VkMemoryAllocateInfo tmai{};
-    tmai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    tmai.allocationSize = treqs.size; tmai.memoryTypeIndex = tMemType;
-    if (vkAllocateMemory(rc_->device, &tmai, nullptr, &triVertMem_) != VK_SUCCESS)
-        throw std::runtime_error("Failed to allocate gizmo tri vertex memory!");
-    vkBindBufferMemory(rc_->device, triVertBuf_, triVertMem_, 0);
-    vkMapMemory(rc_->device, triVertMem_, 0, VK_WHOLE_SIZE, 0, &triVertPtr_);
+void GeometryPass::createLineBuffer() {
+    // 라인과 기즈모 삼각형 버퍼를 프레임 슬롯마다 만듭니다(DEF-40).
+    for (int i = 0; i < MAX_FRAMES; ++i) {
+        createHostVertexBuffer(kMaxLineVerts * sizeof(LineVertex), "line",
+                               lineVertBuf_[i], lineVertMem_[i], lineVertPtr_[i]);
+        createHostVertexBuffer(kMaxTriVerts * sizeof(LineVertex), "gizmo tri",
+                               triVertBuf_[i], triVertMem_[i], triVertPtr_[i]);
+    }
 }
 
 void GeometryPass::acquireSizeDependent() {
@@ -502,12 +493,14 @@ void GeometryPass::destroy() {
     releaseSizeDependent();
     destroyPipelines();
     if (linePipelineLayout_) { vkDestroyPipelineLayout(rc_->device, linePipelineLayout_, nullptr); linePipelineLayout_ = VK_NULL_HANDLE; }
-    if (lineVertPtr_) { vkUnmapMemory(rc_->device, lineVertMem_); lineVertPtr_ = nullptr; }
-    if (lineVertBuf_) { vkDestroyBuffer(rc_->device, lineVertBuf_, nullptr); lineVertBuf_ = VK_NULL_HANDLE; }
-    if (lineVertMem_) { vkFreeMemory(rc_->device, lineVertMem_, nullptr);    lineVertMem_ = VK_NULL_HANDLE; }
-    if (triVertPtr_)  { vkUnmapMemory(rc_->device, triVertMem_); triVertPtr_ = nullptr; }
-    if (triVertBuf_)  { vkDestroyBuffer(rc_->device, triVertBuf_, nullptr); triVertBuf_ = VK_NULL_HANDLE; }
-    if (triVertMem_)  { vkFreeMemory(rc_->device, triVertMem_, nullptr);    triVertMem_ = VK_NULL_HANDLE; }
+    for (int i = 0; i < MAX_FRAMES; ++i) {
+        if (lineVertPtr_[i]) { vkUnmapMemory(rc_->device, lineVertMem_[i]); lineVertPtr_[i] = nullptr; }
+        if (lineVertBuf_[i]) { vkDestroyBuffer(rc_->device, lineVertBuf_[i], nullptr); lineVertBuf_[i] = VK_NULL_HANDLE; }
+        if (lineVertMem_[i]) { vkFreeMemory(rc_->device, lineVertMem_[i], nullptr);    lineVertMem_[i] = VK_NULL_HANDLE; }
+        if (triVertPtr_[i])  { vkUnmapMemory(rc_->device, triVertMem_[i]); triVertPtr_[i] = nullptr; }
+        if (triVertBuf_[i])  { vkDestroyBuffer(rc_->device, triVertBuf_[i], nullptr); triVertBuf_[i] = VK_NULL_HANDLE; }
+        if (triVertMem_[i])  { vkFreeMemory(rc_->device, triVertMem_[i], nullptr);    triVertMem_[i] = VK_NULL_HANDLE; }
+    }
     if (pass_)        { vkDestroyRenderPass(rc_->device, pass_, nullptr);    pass_        = VK_NULL_HANDLE; }
 }
 
@@ -610,28 +603,28 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& 
 
     // 기즈모 삼각형 오버레이 (subpass 2). 라인보다 먼저 그려서, 와이어 박스와
     // 회전 원호 같은 라인 핸들이 솔리드 화살표 위에 겹쳐 보이게 합니다.
-    if (triVertPtr_ && !pendingTris_.empty()) {
+    if (triVertPtr_[frameIdx] && !pendingTris_.empty()) {
         uint32_t count = std::min((uint32_t)pendingTris_.size(), kMaxTriVerts);
-        memcpy(triVertPtr_, pendingTris_.data(), count * sizeof(LineVertex));
+        memcpy(triVertPtr_[frameIdx], pendingTris_.data(), count * sizeof(LineVertex));
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, triPipeline_);
         vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &sc);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             linePipelineLayout_, 0, 1, &in.frameSet, 0, nullptr);
         VkDeviceSize offT = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &triVertBuf_, &offT);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &triVertBuf_[frameIdx], &offT);
         vkCmdDraw(cmd, count, 1, 0, 0);
     }
 
     // Line overlay (in subpass 2)
-    if (lineVertPtr_ && !pendingLines_.empty()) {
+    if (lineVertPtr_[frameIdx] && !pendingLines_.empty()) {
         uint32_t count = std::min((uint32_t)pendingLines_.size(), kMaxLineVerts);
-        memcpy(lineVertPtr_, pendingLines_.data(), count * sizeof(LineVertex));
+        memcpy(lineVertPtr_[frameIdx], pendingLines_.data(), count * sizeof(LineVertex));
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, linePipeline_);
         vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &sc);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             linePipelineLayout_, 0, 1, &in.frameSet, 0, nullptr);
         VkDeviceSize offV = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &lineVertBuf_, &offV);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &lineVertBuf_[frameIdx], &offV);
         vkCmdDraw(cmd, count, 1, 0, 0);
     }
 

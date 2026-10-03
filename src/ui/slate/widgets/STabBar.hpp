@@ -67,21 +67,22 @@ public:
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
-        if (e.button == 0 && !e.down) {
-            float x = 0.f;
-            for (int i = 0; i < (int)tabs_.size(); i++) {
-                HGeometry tg = cachedGeo_.makeChild({x, 0.f}, {tabW_, tabH_});
-                if (tg.contains(e.position)) {
-                    if (onChange_) onChange_(i);
-                    return HReply::Handled();
-                }
-                x += tabW_;
-            }
+        if (e.button != 0) return HReply::Unhandled();
+        // 누른 탭과 뗀 탭이 같을 때만 바꿉니다(버튼류와 같은 프레스 추적). 예전에는 다른
+        // 곳에서 누르고 탭 위에서 떼도 그 탭으로 바뀌었습니다(DEF-63).
+        const int hit = tabAt(e.position);
+        if (e.down) {
+            pressedTab_ = hit;
+            return hit >= 0 ? HReply::Handled() : HReply::Unhandled();
         }
-        return HReply::Unhandled();
+        const bool fire = (hit >= 0 && hit == pressedTab_);
+        pressedTab_ = -1;
+        if (fire && onChange_) onChange_(hit);
+        return hit >= 0 ? HReply::Handled() : HReply::Unhandled();
     }
     HReply onMouseMove(const HPointerEvent& e) override {
         hoverPos_ = e.position;
+        if (!e.down) pressedTab_ = -1;   // 탭에서 눌러 밖에서 뗀 경우
         return HReply::Unhandled();
     }
 
@@ -93,6 +94,17 @@ private:
     float     tabW_     = 145.f;
     float     fontSize_ = 10.f;
     glm::vec2 hoverPos_{ -1.f, -1.f };
+    int       pressedTab_ = -1;   // 누른 탭(없으면 -1)
+
+    int tabAt(glm::vec2 p) const {
+        float x = 0.f;
+        for (int i = 0; i < (int)tabs_.size(); i++) {
+            HGeometry tg = cachedGeo_.makeChild({x, 0.f}, {tabW_, tabH_});
+            if (tg.contains(p)) return i;
+            x += tabW_;
+        }
+        return -1;
+    }
 
     std::shared_ptr<STabBar> self() {
         return std::static_pointer_cast<STabBar>(shared_from_this());

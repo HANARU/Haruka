@@ -34,6 +34,7 @@
 | [Audio_Design.md](Audio_Design.md) | 오디오: 재생 규칙(일시정지·비활성), 청취자·3D 감쇠 설정, 씬 형식, 시험 음원 |
 | [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) | 결함 심층 분석 + 마스터 체크리스트(정본) |
 | [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) | 결함 작업 지시서(정본, Stabilization 과 상태 일치) |
+| [Editor_QA_Checklist.md](Editor_QA_Checklist.md) | 에디터 실기 체크리스트: 준비·결함 재현·기능 회귀·결과 기록, 자동 조작 요령 |
 
 ## 결정 기록 (ADR)
 

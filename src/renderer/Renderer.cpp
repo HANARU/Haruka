@@ -5,6 +5,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
 #include <glm/gtc/random.hpp>
+#include <glm/gtc/packing.hpp>
 #include <stdexcept>
 #include <cstring>
 #include <cmath>
@@ -303,18 +304,6 @@ static glm::vec3 cubeDir(int face, float u, float v) {
     }
 }
 
-static void uploadCubemapMip(VkCommandBuffer cmd, VkBuffer staging,
-    VkImage img, uint32_t mip, uint32_t size, uint32_t mipFace,
-    VkDeviceSize& offset) {
-    VkBufferImageCopy region{};
-    region.bufferOffset      = offset;
-    region.imageSubresource  = { VK_IMAGE_ASPECT_COLOR_BIT, mip, mipFace, 1 };
-    region.imageExtent       = { size, size, 1 };
-    vkCmdCopyBufferToImage(cmd, staging, img,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    offset += (VkDeviceSize)size * size * 8;  // R16G16B16A16_SFLOAT = 8 bytes/pixel
-}
-
 void Renderer::generateIBLCubemaps() {
     // ── Irradiance: 32×32 per face, 1 mip ────────────────────────────────────
     constexpr uint32_t kIrrSize = 32;
@@ -325,15 +314,12 @@ void Renderer::generateIBLCubemaps() {
     std::mt19937 rng(42);
     std::uniform_real_distribution<float> dist(0.f, 1.f);
 
+    // IEEE 반정밀도로 바꿉니다. 예전의 비트 조작은 지수 범위를 처리하지 않아 아주 작거나 큰
+    // 값이 엉뚱한 수가 됐고, float 를 정수 포인터로 읽어 aliasing 규칙도 어겼습니다(DEF-86).
+    // 음수·NaN 은 0, 반정밀도로 담을 수 없는 큰 값은 최댓값(65504)으로 둡니다.
     auto genHalfFloat = [](float f) -> uint16_t {
-        // Simple half-float conversion (not a full IEEE 754 half float, but good enough)
-        // Use GLM's packHalf for correctness — replace with proper library if needed
-        uint32_t x = *reinterpret_cast<uint32_t*>(&f);
-        uint16_t h = (uint16_t)(((x >> 16) & 0x8000) |
-                     (((x >> 23) - 127 + 15) << 10) |
-                     ((x >> 13) & 0x03ff));
-        if (f <= 0.f) return 0;
-        return h;
+        if (!(f > 0.f)) return 0;
+        return glm::packHalf1x16(std::min(f, 65504.f));
     };
 
     // Generate irradiance cubemap data

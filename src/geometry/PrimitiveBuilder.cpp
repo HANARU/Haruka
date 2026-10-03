@@ -621,7 +621,7 @@ MeshSourceData PrimitiveBuilder::build(const PrimitiveDesc& descIn) {
             // 아직 구현하지 않은 셰이프입니다. 다른 도형으로 조용히 대체하지
             // 않습니다. 빈 메시가 돌아가면 호출자가 즉시 알아차립니다.
             HLOG(LogPrimitive, Warning) << "'" << primitiveShapeName(desc.shape)
-                                        << "' 는 아직 구현되지 않았습니다. 빈 메시를 반환합니다.";
+                                        << "' is not implemented yet; returning an empty mesh";
             return d;
     }
 
@@ -758,11 +758,12 @@ bool PrimitiveBuilder::validate(const PrimitiveDesc& desc,
     char buf[256];
 
     if (mesh.vertices.empty() || mesh.indices.empty()) {
-        if (report) *report = "  - 빈 메시입니다.\n";
+        // 보고 문구는 로그로 나가므로 ASCII(영어)로 씁니다. Output Log 폰트는 ASCII 전용입니다.
+        if (report) *report = "  - empty mesh\n";
         return false;
     }
     if (mesh.indices.size() % 3 != 0)
-        fail("인덱스 개수가 3의 배수가 아닙니다. 삼각형 목록이 아닙니다.");
+        fail("index count is not a multiple of 3; not a triangle list");
 
     const uint32_t vn = (uint32_t)mesh.vertices.size();
     auto P = [&](uint32_t i) {
@@ -777,14 +778,14 @@ bool PrimitiveBuilder::validate(const PrimitiveDesc& desc,
 
     // 1. 인덱스 범위
     for (uint32_t idx : mesh.indices)
-        if (idx >= vn) { fail("인덱스가 정점 배열을 벗어납니다."); break; }
+        if (idx >= vn) { fail("index out of the vertex array"); break; }
 
     // 2. 노멀의 단위 길이
     for (uint32_t i = 0; i < vn; ++i) {
         const float len = glm::length(N(i));
         if (std::fabs(len - 1.f) > 1e-3f) {
             std::snprintf(buf, sizeof(buf),
-                          "정점 %u 의 노멀 길이가 %.4f 입니다. 단위 벡터가 아닙니다.", i, len);
+                          "vertex %u normal length is %.4f; not a unit vector", i, len);
             fail(buf); break;
         }
     }
@@ -822,13 +823,13 @@ bool PrimitiveBuilder::validate(const PrimitiveDesc& desc,
     }
     if (badWinding) {
         std::snprintf(buf, sizeof(buf),
-                      "삼각형 %d 개의 와인딩이 뒤집혀 있습니다. 바깥에서 CCW 여야 합니다.", badWinding);
+                      "%d triangle(s) have reversed winding; must be CCW seen from outside", badWinding);
         fail(buf);
     }
     if (badHand) {
         std::snprintf(buf, sizeof(buf),
-                      "정점 참조 %d 건에서 탄젠트 handedness 가 UV 유도 bitangent 와 반대입니다. "
-                      "노멀맵의 Y 가 뒤집혀 볼록이 오목으로 보입니다.", badHand);
+                      "%d vertex reference(s) have tangent handedness opposite to the UV bitangent; "
+                      "normal map Y flips and bumps look like dents", badHand);
         fail(buf);
     }
 
@@ -842,8 +843,8 @@ bool PrimitiveBuilder::validate(const PrimitiveDesc& desc,
     if (glm::any(glm::lessThan(lo, ab.aabbMin - eps)) ||
         glm::any(glm::greaterThan(hi, ab.aabbMax + eps))) {
         std::snprintf(buf, sizeof(buf),
-                      "정점이 해석 바운드를 벗어납니다. 순회 (%.3f %.3f %.3f)~(%.3f %.3f %.3f), "
-                      "해석 (%.3f %.3f %.3f)~(%.3f %.3f %.3f).",
+                      "vertices exceed the analytic bounds: traversed (%.3f %.3f %.3f)~(%.3f %.3f %.3f), "
+                      "analytic (%.3f %.3f %.3f)~(%.3f %.3f %.3f)",
                       lo.x, lo.y, lo.z, hi.x, hi.y, hi.z,
                       ab.aabbMin.x, ab.aabbMin.y, ab.aabbMin.z,
                       ab.aabbMax.x, ab.aabbMax.y, ab.aabbMax.z);
@@ -855,13 +856,13 @@ bool PrimitiveBuilder::validate(const PrimitiveDesc& desc,
     const uint32_t ei = PrimitiveBuilder::estimateIndexCount(desc);
     if (ev && ev != vn) {
         std::snprintf(buf, sizeof(buf),
-                      "정점 수가 예측과 다릅니다. 예측 %u, 실제 %u. 예산 검사가 무의미해집니다.",
+                      "vertex count differs from the estimate: estimated %u, actual %u; budget checks become meaningless",
                       ev, vn);
         fail(buf);
     }
     if (ei && ei != (uint32_t)mesh.indices.size()) {
         std::snprintf(buf, sizeof(buf),
-                      "인덱스 수가 예측과 다릅니다. 예측 %u, 실제 %u.",
+                      "index count differs from the estimate: estimated %u, actual %u",
                       ei, (uint32_t)mesh.indices.size());
         fail(buf);
     }

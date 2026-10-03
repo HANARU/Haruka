@@ -61,6 +61,8 @@ public:
                 // Fill — 가중치 미지정(0 이하)은 1로 간주.
                 // 0이면 슬롯 폭이 0이 되어 그리기는 넘쳐 보이지만 히트테스트가 죽는다.
                 fillTotal += (s.value > 0.f) ? s.value : 1.f;
+                // 패딩은 나눌 몫이 아니라 고정 소비입니다(SVerticalBox 와 같은 이유, DEF-62).
+                fixedWidth += s.padding.totalH();
             }
         }
 
@@ -109,10 +111,7 @@ public:
     }
     HReply onMouseMove(const HPointerEvent& e) override {
         HReply ret = HReply::Unhandled();
-        for (auto& s : slots_) {
-            auto r = s.widget->onMouseMove(e);
-            if (r.handled) ret = r;
-        }
+        for (auto& s : slots_) ret.merge(s.widget->onMouseMove(e));
         return ret;
     }
 

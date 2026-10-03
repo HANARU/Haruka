@@ -65,9 +65,10 @@ public:
     // 위젯이 해제 이벤트를 받지 못해 하이라이트가 켜진 채로 굳습니다. 각 위젯은 자기
     // geometry 로 포함 여부를 다시 판정하므로 넓게 뿌려도 결과는 정확합니다.
     HReply onMouseMove(const HPointerEvent& e) override {
+        HReply ret = HReply::Unhandled();
         for (int i = (int)slots_.size() - 1; i >= 0; --i)
-            slots_[i].widget->onMouseMove(e);
-        return HReply::Unhandled();
+            ret.merge(slots_[i].widget->onMouseMove(e));
+        return ret;
     }
 
 private:

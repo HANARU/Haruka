@@ -16,6 +16,8 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
+#include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
+#include <Jolt/Physics/Collision/ObjectLayer.h>
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -144,8 +146,54 @@ void PhysicsSystem::removeBody(uint32_t id) {
     if (!impl_) return;
     JPH::BodyID jid(id);
     auto& bi = impl_->physics->GetBodyInterface();
+    if (!bi.IsAdded(jid)) return;
+    // 지우기 전에 차지하던 영역을 기억했다가, 지운 뒤 그 영역에 닿는 바디를 깨웁니다.
+    // 그러지 않으면 바닥을 끈 뒤에도 그 위에서 잠든 상자가 공중에 그대로 남습니다(DEF-80).
+    JPH::AABox bounds = bi.GetTransformedShape(jid).GetWorldSpaceBounds();
     bi.RemoveBody(jid);
     bi.DestroyBody(jid);
+    bounds.ExpandBy(JPH::Vec3::sReplicate(0.05f));
+    bi.ActivateBodiesInAABox(bounds, JPH::BroadPhaseLayerFilter(), JPH::ObjectLayerFilter());
+}
+
+void PhysicsSystem::setMaterial(uint32_t id, float friction, float restitution) {
+    if (!impl_) return;
+    JPH::BodyID jid(id);
+    auto& bi = impl_->physics->GetBodyInterface();
+    if (!bi.IsAdded(jid)) return;
+    bi.SetFriction(jid, friction);
+    bi.SetRestitution(jid, restitution);
+}
+
+bool PhysicsSystem::queryBody(uint32_t id, BodyInfo& out) const {
+    if (!impl_) return false;
+    JPH::BodyID jid(id);
+    const auto& bi = impl_->physics->GetBodyInterface();
+    if (!bi.IsAdded(jid)) return false;
+    out.active      = bi.IsActive(jid);
+    out.friction    = bi.GetFriction(jid);
+    out.restitution = bi.GetRestitution(jid);
+    out.posY        = (float)bi.GetPosition(jid).GetY();
+    return true;
+}
+
+void PhysicsSystem::teleport(uint32_t id, const Actor& a) {
+    if (!impl_) return;
+    JPH::BodyID jid(id);
+    auto& bi = impl_->physics->GetBodyInterface();
+    if (!bi.IsAdded(jid)) return;
+    const glm::vec3 pos = a.worldPosition();
+    const glm::quat q   = a.worldRotation();
+    // 옮기기 전후 자리에 닿는 바디를 깨웁니다. Jolt 는 옮긴 바디 자신만 깨우고(정적 바디는 그것도
+    // 안 함), 받치던 바닥을 내리면 그 위에서 잠든 상자가 공중에 남습니다(removeBody 와 같은 이유).
+    JPH::AABox before = bi.GetTransformedShape(jid).GetWorldSpaceBounds();
+    bi.SetPositionAndRotation(jid, JPH::RVec3(pos.x, pos.y, pos.z),
+                              JPH::Quat(q.x, q.y, q.z, q.w), JPH::EActivation::Activate);
+    JPH::AABox after = bi.GetTransformedShape(jid).GetWorldSpaceBounds();
+    before.ExpandBy(JPH::Vec3::sReplicate(0.05f));
+    after.ExpandBy(JPH::Vec3::sReplicate(0.05f));
+    bi.ActivateBodiesInAABox(before, JPH::BroadPhaseLayerFilter(), JPH::ObjectLayerFilter());
+    bi.ActivateBodiesInAABox(after,  JPH::BroadPhaseLayerFilter(), JPH::ObjectLayerFilter());
 }
 
 void PhysicsSystem::tick(float dt) {
@@ -159,8 +207,8 @@ void PhysicsSystem::tick(float dt) {
         auto*  rb = a->getComponent<RigidBodyComponent>();
         // activeInHierarchy() 게이트(A-2): 비활성 액터(또는 비활성 부모 아래)는 바디를
         // 만들지 않습니다. 바디가 없으면 아래 sync 루프(bodyId_ 검사)도 자동으로 건너뛰어,
-        // 렌더·틱과 물리가 일관되게 꺼집니다. 한계: 이미 만들어진 바디를 플레이 도중
-        // setActive(false)로 끄는 경로는 아직 바디를 해제하지 않습니다(현재 그 호출부 없음).
+        // 렌더·틱과 물리가 일관되게 꺼집니다. 이미 만든 바디는 플레이 도중 꺼질 때
+        // RigidBodyComponent::onDisable 이 지웁니다(DEF-80).
         if (!rb || !rb->isEnabled() || !a->activeInHierarchy()
             || rb->bodyId_ != 0xFFFFFFFFu || rb->createFailed_) continue;
 
@@ -182,9 +230,9 @@ void PhysicsSystem::tick(float dt) {
             const float minSc = std::min({ sc.x, sc.y, sc.z });
             if (maxSc - minSc > 1e-4f * std::max(1.f, maxSc))
                 HLOG(LogPhysics, Warning) << "'" << a->name << "': " << shapeName
-                                          << " 콜라이더는 균등 스케일만 표현할 수 있습니다. scale("
+                                          << " collider supports only uniform scale; scale("
                                           << sc.x << ", " << sc.y << ", " << sc.z
-                                          << ") 를 최대 성분 " << maxSc << " 로 보수 근사합니다.";
+                                          << ") approximated by its largest component " << maxSc;
             return maxSc;
         };
 
@@ -242,8 +290,14 @@ void PhysicsSystem::tick(float dt) {
         JPH::Body* body = bi.CreateBody(bcs);
         if (!body) continue;
         bi.AddBody(body->GetID(), JPH::EActivation::Activate);
-        rb->bodyId_  = body->GetID().GetIndexAndSequenceNumber();
-        rb->physSys_ = this;
+        rb->bodyId_       = body->GetID().GetIndexAndSequenceNumber();
+        rb->physSys_      = this;
+        // 편집 확정 때 바디를 다시 만들어야 하는지 이 값들과 비교합니다(RigidBodyComponent).
+        rb->createdScale_  = sc;
+        rb->createdShape_  = rb->shape;
+        rb->createdMotion_ = rb->motionType;
+        rb->createdHalf_   = rb->halfExtent;
+        rb->createdMass_   = rb->mass;
     }
 
     // Fixed-step simulation
