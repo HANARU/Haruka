@@ -3,6 +3,8 @@
 > **문서 지위**: 이 문서는 Haruka Engine의 정체성과 계층 경계를 정의하는 **기준 문서**입니다.
 > 다른 문서가 이 문서와 충돌하면 이 문서를 따릅니다.
 > 작성 2026-08-24 · 근거는 `src/` 코드 실측과 [Carbon_Source_Audit.md](archive/Carbon_Source_Audit.md)입니다.
+>
+> **[갱신 · 2026-10-04]** §3 판정표와 §4 · §6 의 상태를 2026-10-04 의 두 작업(남은 결함 정리, VR 첫걸음)에 맞췄습니다. 바뀐 항목은 OpenXR 연결 · 두 눈 렌더 · 두 눈 컬링 · 카메라 자세 · VR 입력 · 물리 API · 숫자 칸 단위 · 셰이더 빌드입니다.
 
 ---
 
@@ -64,20 +66,20 @@
 | 1GB Core Heap 할당기 (Zone A/B/C) | 구현됨 | Zone C 펜스 추적 미비 |
 | World / Actor / Component | 구현됨 | |
 | HSlate UI + 에디터 | 구현됨 | |
-| **OpenXR 세션 + 스테레오 스왑체인** | **미구현** | VR 엔진의 핵심. `ISwapchain` 추상화만 준비됨 |
-| **Multiview 스테레오 렌더링** | **절반** | 피처는 켜졌으나 `viewMask` 없음, `viewProj[1] = viewProj[0]` |
-| **스테레오 대응 컬링 (두 눈 합집합 절두체)** | **미구현** (`DEF-31`, HIGH) | 컬링이 한쪽 눈 절두체만 씁니다. 한쪽 눈에서만 물체가 사라지면 양안 경합이 되므로 VR 엔진의 필수 요소이며 도메인과 무관합니다. Quest 2·Pro·3 의 두 눈 시야는 평행하고 비대칭입니다(기울어진 canted 화면이 아님, 2026-10-04 정정). 두 눈 절두체를 각각 판정하는 방식이 정확하고 간단합니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-1절 |
-| **재투영 여유분만큼의 절두체 부풀리기** | 미구현 (`DEF-32`, MEDIUM) | 예측 포즈로 렌더하고 실제 포즈로 재투영하므로 주변부가 빌 수 있습니다. 여유분 폭은 실기 측정이 필요합니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-2절 |
-| **Foveated Rendering (FFR)** | **미구현** | `Renderer.hpp:167-170` 멤버만 선언됨 |
+| **OpenXR 세션 + 스테레오 스왑체인** | **구현 · 2026-10-04**(PC, 헤드셋 확인 전) | VR 엔진의 핵심입니다. `src/xr/XrSystem` 이 렌더러보다 먼저 OpenXR 인스턴스를 만들고, 런타임이 고른 GPU 로 Vulkan 장치를 만듭니다(XR_KHR_vulkan_enable2). 세션, LOCAL 원점 공간(원점 = 활성 카메라의 위치 + 요), 두 층 배열 스왑체인 하나를 두고, 렌더러에는 `Renderer::attachXrSwapchain` 으로 이미지를 붙입니다. `--xr` 로 켜며 런타임이 없으면 데스크톱으로 계속합니다. Quest 단독 실행은 Android 진입점과 함께 합니다 |
+| **Multiview 스테레오 렌더링** | **첫 단계 구현 · 2026-10-04** (`DEF-09`) | 지금은 눈마다 두 번 그립니다. 셰이더는 `FrameUBO` 의 눈별 `viewProj[2]` · `eyePos[2]` 를 눈 번호(`HARUKA_VIEW_INDEX`, 푸시 상수)로 고르므로, 멀티뷰로 갈 때는 그 번호를 `gl_ViewIndex` 로 바꾸고 `viewMask` · 배열 층을 켭니다(Quest 이식 때). 쓰지 않던 멀티뷰 기능 요청은 지웠습니다 |
+| **스테레오 대응 컬링 (두 눈 절두체)** | **해결 · 2026-10-04** (`DEF-31`, 원래 HIGH) | 눈마다 절두체를 판정해 하나라도 통과하면 그립니다(`FrustumCull.hpp` 의 `sphereInAnyView`). 한쪽 눈에서만 물체가 사라지면 양안 경합이 되므로 VR 엔진의 필수 요소이며 도메인과 무관합니다. Quest 2·Pro·3 의 두 눈 시야는 평행하고 비대칭입니다(기울어진 canted 화면이 아님, 2026-10-04 정정). 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-1절 |
+| **재투영 여유분만큼의 절두체 부풀리기** | 보류 · 2026-10-04 (`DEF-32`, 원래 MEDIUM) | 한 프레임에 눈 자세를 한 번 받아 컬링 · 렌더 · 제출에 함께 쓰는 동안에는, 런타임이 재투영해도 렌더한 자세가 기준이라 여유분이 필요 없습니다. 늦은 자세 갱신이나 과주사를 넣을 때 다시 엽니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-2절 |
+| **Foveated Rendering (FFR)** | **미구현** | 선언만 있던 `Renderer.hpp` 의 멤버는 2026-10-04 에 지웠습니다. OpenXR 에서는 런타임이 밀도 맵 이미지를 주는 구조라 그 멤버와 모양이 맞지 않았습니다. Quest 이식 때 새로 둡니다 |
 | **VR 입력 (아날로그 축 + 6DOF 포즈)** | **구현 · 2026-10-04**(헤드셋 확인 전) | XR 모듈(`src/xr`)이 OpenXR 액션으로 만들고 `HInputSystem` 이 아날로그 축 · 버튼 · 자세로 내줌(DEF-20). 창(`IWindow`)은 키보드 · 마우스만 |
-| **6DOF 카메라 자세 (쿼터니언)** | **미구현** | `CameraComponent`가 yaw/pitch 오일러각만 사용 |
-| **물리 힘·임펄스·속도·레이캐스트 API** | **미구현** | 중력도 하드코딩되어 세터가 없음 |
+| **6DOF 카메라 자세 (쿼터니언)** | **구현 · 2026-10-04** (`DEF-21`) | `CameraComponent::viewMatrix` 가 액터의 월드 회전(쿼터니언)과 월드 위치로 뷰를 만듭니다. yaw · pitch 는 에디터 카메라만 갖습니다. 눈별 투영은 OpenXR 시야각으로 만들고(`projFromFov`), 헤드셋 자세는 카메라의 XR 원점(`xrOrigin`: 위치 + 요) 위에 올립니다 |
+| **물리 힘·임펄스·속도·레이캐스트 API** | **구현 · 2026-10-04** (`DEF-19`) | 중력 세터, 힘 · 토크 · 충격량 · 선속도 · 각속도, 레이캐스트, 구 겹침을 `PhysicsSystem` 과 `RigidBodyComponent` 에 두었습니다. 규칙은 UE 식입니다(힘은 프레임 충격량을 그 프레임의 스텝들에 나눠 넣고, 게임 코드가 Dynamic 액터를 옮기면 순간 이동하며 속도를 유지) |
 | **감쇠 운동 적분기 (dt 독립)** | 미구현 | Carbon `destiny`에서 도입. 아래 §5 참조 |
-| **깊이 규약 정책 (Reverse-Z 포함)** | 미구현 | 전역 정책으로. 아래 §4 참조 |
+| **깊이 규약 정책 (Reverse-Z 포함)** | 미구현 | 전역 정책으로. 아래 §5 참조. 깊이 범위(0 ~ 1) 매크로는 2026-10-04 에 CMake 한 곳으로 모았습니다(`DEF-95`) |
 | **정점 패킹 (QTangent)** | 미구현 | 48B → 24B. Carbon `mesh`에서 도입 |
 | **인스턴싱 (instanceCount)** | **미구현** | 다섯 곳에 `1`이 리터럴로 박혀 있음 |
 | **패스 확장 지점** | **미구현** | 패스 레지스트리 없음 |
-| **에디터 단위 표시와 적응형 스텝** | 미구현 (`DEF-46`, MEDIUM) | `PropDesc::step`이 `0.01f`로 선언 시점에 고정되어 미터 단위에서 1 cm 미만을 편집할 수 없고, 100 m 구조물에는 반대로 지나치게 잘습니다. 범용 에디터 기능이며 도메인과 무관합니다. 단위 규약 자체는 §2의 전역 규약이고 여기는 표시와 입력 계층입니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md)와 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 7-7절 |
+| **에디터 단위 표시와 적응형 스텝** | **해결 · 2026-10-04** (`DEF-46`, 원래 MEDIUM) | 숫자 칸이 단위 종류(`PropUnit` · `ENumberUnit`)에 따라 끌기 감도를 정합니다(거리 1cm/px, 크기는 시작값의 1%/px, 각도 0.5°/px). UE 식으로 Shift 는 10배, Ctrl 은 0.1배이고, 표시는 끝의 0 을 지운 고정 소수점이라 1 mm 미만도 보입니다. 예전에는 `PropDesc::step` 이 `0.01f` 로 고정되어 1 cm 미만을 편집할 수 없었습니다. 범용 에디터 기능이며 도메인과 무관합니다. 단위 규약 자체는 §2의 전역 규약이고 여기는 표시와 입력 계층입니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md)와 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 7-7절 |
 | **머티리얼 편집 (엔진 내 머티리얼 속성 조정)** | **미구현** | 사용자 요청 항목입니다. `MaterialHandle`이 `TexSlot` 다섯 개만 가지고 **스칼라 팩터를 보관하지 않으며**, 팩터는 `GltfLoader`가 로드 시점에 픽셀로 굽기 때문에 이후 조정할 수 없습니다. `StaticMeshComponent`도 `MaterialHandle*`만 들고 있어 에디터 노출이 없고 `SceneSerializer`에도 저장되지 않습니다. **`DEF-47`의 구현 방식(팩터 굽기) 재검토가 선행됩니다.** 범용 에디터 기능이며 도메인과 무관합니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 11-15절, [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) 2-F절, [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 8-11절 |
 | **배정밀도 월드 좌표 옵션** | 미구현 | 대규모 씬 일반의 문제이지 우주 전용이 아님 |
 | **오디오 보이스 예산** | 미구현 | Carbon `audio`에서 도입 |
@@ -124,16 +126,16 @@
 | `Renderer_render.cpp:243`, `GeometryPass.cpp:530`, `:556`, `ShadowPass.cpp:192` | `instanceCount = 1`이 리터럴로 박혀 있고 `GeometryPass::DrawItem`에 해당 멤버가 없습니다. 파편장 인스턴싱이 원리상 불가능합니다 |
 | `HPass.hpp:8-15` | `HPass`가 의도적으로 `create()`와 `record()`를 제외한 수명주기 전용 인터페이스입니다. 패스 레지스트리가 없고 여섯 패스가 `Renderer`의 구체 멤버로 여섯 곳에서 손으로 열거됩니다. **새 렌더 패스를 Layer 2에서 추가할 수 없습니다** |
 | `IGameModule.hpp:9-14` | `EngineContext`에 렌더러 참조가 없습니다. 게임 모듈이 렌더러에 닿을 수 없습니다 |
-| `CMakeLists.txt:94-108` | 셰이더 목록이 파일명으로 하드코딩되어 있습니다. 도메인 셰이더를 드롭인할 수 없습니다 |
+| `CMakeLists.txt` 의 `GLSL_SHADERS` | 셰이더 목록이 파일명으로 하드코딩되어 있습니다. 도메인 셰이더를 드롭인할 수 없습니다. 2026-10-04 사용자 결정으로 목록은 글롭 대신 명시로 두고, 목록 밖 셰이더 파일은 구성 단계에서 경고합니다(`DEF-11`). 그래서 Layer 2 셰이더도 이 목록에 넣어야 합니다 |
 | `RenderTypes.hpp:12`, `PhysicsSystem.cpp:81` | `kMaxDraws = 1024`, `kMaxBodies = 4096` 이중 상한. "수천 개 파편"이 양쪽에 걸립니다 |
 
 ### 심각 (배관이 없어 기능이 성립하지 않음)
 
 | 지점 | 문제 |
 |---|---|
-| `PhysicsSystem.cpp:103` | 중력이 하드코딩되어 있고 세터가 없습니다. **힘·임펄스·속도·레이캐스트 API가 하나도 없어 Layer 2가 바디를 밀 방법이 없습니다.** 게다가 동기화 루프(`:232-238`)가 매 프레임 Dynamic 바디의 트랜스폼을 덮어씁니다 |
-| `HInputSystem.cpp:22-42`, `IWindow.hpp:51-62` | 디지털 입력 전용입니다. 아날로그 축도 VR 포즈도 없어 RCS 추력 입력을 받을 수 없습니다 |
-| `CameraComponent.cpp:6-14` | yaw/pitch 오일러각으로 뷰를 만들고 `owner->transform.rotation`을 무시합니다. 6DOF 자유 자세도 롤도 머리와 몸체의 분리도 불가능합니다 |
+| `PhysicsSystem`, `RigidBodyComponent` | **해결 · 2026-10-04 (`DEF-19`).** 중력 세터와 힘 · 토크 · 충격량 · 속도 · 레이캐스트 · 구 겹침 API 를 두었습니다. 동기화 루프가 매 프레임 Dynamic 바디의 트랜스폼을 덮어써 게임 코드의 이동이 사라지던 문제는, 물리가 쓴 값을 기억해 게임 코드가 옮긴 경우를 순간 이동(속도 유지)으로 반영하는 방식으로 정리했습니다(UE 식). 예전에는 중력이 하드코딩되어 세터가 없고 힘 · 임펄스 · 속도 · 레이캐스트 API 가 하나도 없어, Layer 2 가 바디를 밀 방법이 없었습니다 |
+| `HInputSystem`, `src/xr` | **해결 · 2026-10-04 (`DEF-20`, 헤드셋 확인 전).** XR 모듈이 OpenXR 액션으로 입력을 만들고, `HInputSystem` 이 아날로그 축(`bindAxis` · `axis`) · 컨트롤러 버튼(`bindXrButton`) · 머리와 손 자세(`xr()`)를 내줍니다. 창(`IWindow`)은 키보드 · 마우스만 맡습니다. 예전에는 디지털 입력 전용이라 아날로그 축도 VR 포즈도 없어 RCS 추력 입력을 받을 수 없었습니다 |
+| `CameraComponent` | **해결 · 2026-10-04 (`DEF-21`).** 뷰를 액터의 월드 회전(쿼터니언)과 월드 위치로 만들고, 헤드셋 자세는 카메라의 XR 원점(위치 + 요) 위에 올립니다. 예전에는 yaw/pitch 오일러각으로 뷰를 만들고 `owner->transform.rotation` 을 무시해, 6DOF 자유 자세도 롤도 머리와 몸체의 분리도 불가능했습니다 |
 | `main.cpp:38`, `:115-119` | `GlfwWindow`를 조건 없이 생성하며 안드로이드에서는 컴파일되지 않습니다. `World::tick`은 에디터 Play 상태에서만 돌아 런타임 빌드에 게임 루프가 없습니다 |
 | `SceneSerializer.hpp:18-40` | 컴포넌트 5종이 구조체 필드로 하드코딩되어 새 컴포넌트가 `.hscene` 왕복을 하지 못합니다 |
 
@@ -142,9 +144,9 @@
 | 지점 | 문제 |
 |---|---|
 | `RenderTypes.hpp:16-24` | `FrameUBO`에 `invViewProj`가 없습니다. 레이마칭 배경이나 화면 공간 굴절에 필요합니다 |
-| `shaders/include/noise.glsl`, `sdf.glsl` | 존재하지만 어떤 셰이더도 `#include` 하지 않습니다. 게다가 CMake `DEPENDS`에 include 파일이 없어, 쓰기 시작하면 낡은 SPIR-V를 배포하게 됩니다 |
+| `shaders/include/noise.glsl`, `sdf.glsl` | **해결 · 2026-10-04 (`DEF-11`).** 쓰지 않던 두 파일은 지웠고, 셰이더 include 는 `glslc -MD` 의 depfile 로 추적해 include 파일이 바뀌면 다시 컴파일합니다. 예전에는 두 파일을 어떤 셰이더도 `#include` 하지 않았고, CMake `DEPENDS` 에 include 파일이 없어 쓰기 시작하면 낡은 SPIR-V 를 배포하게 되어 있었습니다 |
 | `PostPass.cpp:153-155` | 포스트 푸시 상수가 리터럴로 고정된 구조체입니다. 멀미 억제용 비네팅 반경을 게임 상태에서 넘길 수 없습니다 |
-| `Renderer.cpp:54-57` | `GlfwSwapchain`을 직접 생성합니다. `XrSwapchain`을 주입할 팩토리가 없습니다 |
+| `Renderer::init` | `GlfwSwapchain` 을 직접 생성합니다. XR 스왑체인은 2026-10-04 에 `ISwapchain` 구현체 대신 `Renderer::attachXrSwapchain` 으로 이미지를 붙이는 방식으로 넣었습니다(PC OpenXR). 창이 없는 Quest 단독 실행에서 창 스왑체인을 어떻게 뺄지는 Android 이식(`DEF-08`) 때 정합니다 |
 | `Renderer_render.cpp` (`updateLightSSBO`) | 라이트 개수 불일치 자체는 해결되었고(`DEF-24`, 2026-08-25) 상한도 256으로 올렸습니다. 다만 상한에 걸릴 때 **어느 라이트를 살릴지 정하는 정책이 없습니다.** 액터 생성 순서로 앞에서부터 자르므로, Layer 2가 광원을 많이 두면 가까운 조명이 꺼지고 먼 조명이 켜질 수 있습니다(`DEF-33`). 상세는 결함 문서를 참조하십시오 |
 
 ---
@@ -199,22 +201,22 @@ Carbon Engine 저장소를 원본으로 확인한 결과, **코어에 들어갈 
 - IBL 조도 추정기의 코사인 중복 (`DEF-37`, **완료 2026-08-25**). `src/renderer/Renderer.cpp`의 몬테카를로 루프를 코사인 가중 샘플링에 맞게 정규화했습니다. `DEF-36`과 같은 검증 사이클에서 함께 고쳐야 효과가 눈에 보입니다.
 - 머티리얼 팩터와 색 공간 (`DEF-47` HIGH, `DEF-48` MEDIUM, **둘 다 완료 2026-08-25**). `src/assets/GltfLoader.cpp`가 glTF 스칼라 팩터를 읽지 않아 팩터만 지정한 머티리얼이 전부 순백이 되던 문제와, `shaders/pbr.frag`가 이미 선형인 sRGB 샘플을 한 번 더 디코드하던 문제입니다. **다만 팩터를 로드 시점에 픽셀로 굽는 방식이라 §3의 "머티리얼 편집" 항목이 이 결정에 묶여 있습니다.**
 - 밝기 밸런스 (**적용됨 2026-08-25 · 결함 아님**). 방향광 기본 강도 `0.85 → 3.0`, 하늘 복사휘도에 `kSkyRadianceScale = 0.30`, 톤매핑 노출 `1.0 → 0.4`를 한 세트로 움직였습니다. `src/components/LightComponent.hpp`, `src/renderer/Renderer.cpp`, `src/renderer/passes/PostPass.cpp`입니다. **문서 기록 없이 코드에만 들어가 있던 것을 검수에서 확인해 등재했으며, 실측 기록은 확인되지 않았습니다.** 상세는 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 8-12절입니다.
-- 모바일 Vulkan 폴백 (`drawIndirectCount`, `synchronization2`)
+- 모바일 Vulkan 폴백. `drawIndirectCount` 요구는 GPU 컬링과 함께 지웠습니다(**2026-10-04**, `DEF-03`). 남은 것은 Vulkan 1.4 장치 전제(`DEF-97`: Quest 는 1.1 · 1.3 이고 `synchronization2` · push descriptor 는 확장으로 있음)이며, Quest 이식 때 `DEF-04` 와 함께 처리합니다.
 - 라이팅 확인 씬 (미착수, **현재 최우선**). `DEF-36` 수정으로 명암은 보이게 되었으나 **그림자가 떨어질 바닥이 없어 섀도 자체를 아직 검증하지 못했습니다.** `DEF-26`과 `DEF-27`의 검증도 이 씬이 선결 조건입니다. 상세는 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 9절
 
 **1단계: VR 엔진으로서의 코어 완성.** 이것이 엔진의 정의이므로 우주 기능보다 앞섭니다.
 - Quest 런타임 진입점 (`AndroidWindow` 인스턴스화, `IWindow` 팩토리, 별도 `main`)
-- OpenXR 세션과 `XrSwapchain` 구현체, 스왑체인 주입 지점
-- Multiview 완성 (`viewMask`, 셰이더의 `gl_ViewIndex`, 이미지 `arrayLayers`)
-- 컬링의 스테레오 대응 (`DEF-31` 좌우 두 절두체를 감싸는 합집합 절두체 HIGH, `DEF-32` 재투영 여유분 반영 MEDIUM). 절두체는 뷰 행렬에서 나오므로 OpenXR이 실제 눈 포즈를 주기 시작하는 시점에 함께 처리해야 합니다. 상세는 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md)와 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md)를 보십시오.
-- VR 입력 (아날로그 축, 6DOF 포즈)
-- 6DOF 카메라 자세
+- OpenXR 세션과 XR 스왑체인, 스왑체인 주입 지점 (**PC OpenXR 완료 2026-10-04**, 헤드셋 확인 전). `src/xr/XrSystem` 이 세션 · LOCAL 원점 공간 · 두 층 배열 스왑체인을 만들고, 렌더러에는 `Renderer::attachXrSwapchain` 으로 이미지를 붙입니다. Quest 단독 실행은 위 진입점과 함께 합니다.
+- Multiview 완성 (`viewMask`, 셰이더의 `gl_ViewIndex`, 이미지 `arrayLayers`). 첫 단계인 눈마다 두 번 그리기는 **완료 2026-10-04**(`DEF-09`)입니다. 셰이더 · UBO 가 두 눈 기준이라, 멀티뷰는 Quest 이식 때 뷰 번호만 바꿔 켭니다.
+- 컬링의 스테레오 대응. `DEF-31` 은 **완료 2026-10-04**(두 눈 절두체를 각각 판정해 하나라도 통과하면 그림)이고, `DEF-32` 재투영 여유분은 한 프레임에 자세 하나로 컬링 · 렌더 · 제출하는 동안 필요 없어 **보류**했습니다. 상세는 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md)와 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md)를 보십시오.
+- VR 입력 (아날로그 축, 6DOF 포즈) (**완료 2026-10-04**, `DEF-20`, 헤드셋 확인 전)
+- 6DOF 카메라 자세 (**완료 2026-10-04**, `DEF-21`)
 
 **2단계: Layer 2를 가능하게 하는 확장 지점.**
 - 패스 등록 구조와 `record(RenderView&)` 진입점
 - 인스턴싱 (`instanceCount` 경로)
-- 물리 힘·임펄스 API와 중력 설정
-- 셰이더 목록 글롭화, `FrameUBO.invViewProj`
+- 물리 힘·임펄스 API와 중력 설정 (**완료 2026-10-04**, `DEF-19`)
+- `FrameUBO.invViewProj`. 셰이더 목록은 글롭으로 바꾸지 않고 명시 목록과 목록 밖 파일 경고로 정했습니다(사용자 결정 2026-10-04, `DEF-11`).
 
 **3단계: Carbon 유래 코어 기능.**
 - 감쇠 운동 적분기, QTangent 정점 패킹, 보이스 예산, 깊이 정책 구조
@@ -222,7 +224,7 @@ Carbon Engine 저장소를 원본으로 확인한 결과, **코어에 들어갈 
 **4단계: 우주 도메인 레이어.**
 - `ZeroGControllerComponent`, 파편장, 생존 규칙, 우주 비주얼
 
-우주 기능을 먼저 얹고 싶은 유혹이 있겠지만, 2단계 없이는 Layer 2 코드를 작성해도 동작시킬 방법이 없습니다. 예를 들어 `ZeroGControllerComponent`를 완성해도 추력을 넣을 입력 계층이 없고 바디를 밀 물리 API가 없습니다.
+우주 기능을 먼저 얹고 싶은 유혹이 있겠지만, 2단계 없이는 Layer 2 코드를 작성해도 동작시킬 방법이 없습니다. `ZeroGControllerComponent` 에 필요한 입력 축과 물리 힘 API 는 2026-10-04 에 들어왔지만, `DebrisFieldComponent` 는 인스턴싱 경로가 없으면 수천 개 파편을 그릴 수 없고 우주 배경은 패스 확장 지점이 없으면 넣을 자리가 없습니다.
 
 ---
 
