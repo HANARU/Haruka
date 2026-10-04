@@ -66,7 +66,7 @@ graph TD
     end
 
     subgraph S10["DEF-31~DEF-32 VR 스테레오 컬링 요구사항 (미해결)"]
-        D10["두 눈 합집합 절두체 부재 (HIGH, canted 디스플레이라 확장 근사 불가)<br/>재투영 여유분만큼의 절두체 부풀리기 부재 (MEDIUM, 실기 측정 필요)<br/>착수 시점은 둘 다 OpenXR 세션 도입 시"]
+        D10["두 눈 합집합 절두체 부재 (HIGH, 두 눈 절두체를 각각 판정)<br/>재투영 여유분만큼의 절두체 부풀리기 부재 (MEDIUM, 실기 측정 필요)<br/>착수 시점은 둘 다 OpenXR 세션 도입 시"]
     end
 
     subgraph S11["DEF-33~DEF-35 라이팅 후속 항목 (미해결)"]
@@ -175,7 +175,7 @@ graph TD
 
 ---
 
-### ⚠️ [DEF-03] [HIGH] `drawIndirectCount` 무조건 요구 및 폴백 부재
+### ✅ [DEF-03] [해결됨 · 2026-10-04, 원래 HIGH] `drawIndirectCount` 무조건 요구 및 폴백 부재
 
 #### 1) 현상 및 발생 메커니즘
 
@@ -296,7 +296,7 @@ graph TD
 
 ---
 
-### ⚠️ [DEF-10] [MEDIUM] `kMaxDraws` / `kMaxBodies` 이중 상한
+### ⚠️ [DEF-10] [MEDIUM · 2026-10-04 초과 진단 추가] `kMaxDraws` / `kMaxBodies` 이중 상한
 
 * **위치**: [`RenderTypes.hpp:L12`](file:///e:/Haruka/src/renderer/RenderTypes.hpp#L12) (`kMaxDraws = 1024`), [`PhysicsSystem.cpp:L81`](file:///e:/Haruka/src/physics/PhysicsSystem.cpp#L81) (`kMaxBodies = 4096`)
 * **문제점**: 렌더러와 물리 양쪽에 독립된 상한이 박혀 있어, 다수 객체를 쓰는 도메인이 두 한도에 모두 걸립니다. 두 값이 서로를 모르므로 한쪽만 올리면 다른 쪽에서 조용히 잘립니다.
@@ -304,7 +304,7 @@ graph TD
 
 ---
 
-### ⚠️ [DEF-11] [MEDIUM] 셰이더 빌드 파이프라인 결함
+### ✅ [DEF-11] [해결됨 · 2026-10-04, 원래 MEDIUM] 셰이더 빌드 파이프라인 결함
 
 * **위치**: [`CMakeLists.txt:L94-L108`](file:///e:/Haruka/CMakeLists.txt#L94-L108), `shaders/include/`
 * **문제점**:
@@ -332,7 +332,7 @@ graph TD
 
 ---
 
-### 🔍 [DEF-14] [LOW] `GpuTransform` 셰이더 4곳 중복 선언
+### ✅ [DEF-14] [해결됨 · 2026-10-04, 원래 LOW] `GpuTransform` 셰이더 4곳 중복 선언
 
 * **위치**: [`pbr.vert:L25`](file:///e:/Haruka/shaders/pbr.vert#L25), [`depth.vert:L18`](file:///e:/Haruka/shaders/depth.vert#L18), [`shadow.vert:L18`](file:///e:/Haruka/shaders/shadow.vert#L18), [`triangle.vert:L19`](file:///e:/Haruka/shaders/triangle.vert#L19)
 * **문제점**: 동일한 구조체가 네 셰이더에 각각 선언되어 있고 공유 GLSL include가 없습니다. C++ 측 `RenderTypes.hpp:27-29`의 정의와도 따로 놉니다. 한 곳을 바꾸면 나머지가 조용히 어긋납니다.
@@ -341,7 +341,7 @@ graph TD
 
 ---
 
-### 🔍 [DEF-15] [LOW] `prevViewProj` 선언만 존재, TAA 입력 미비
+### ✅ [DEF-15] [해결됨 · 2026-10-04, 원래 LOW] `prevViewProj` 선언만 존재, TAA 입력 미비
 
 * **위치**: [`post.frag:L48-L51`](file:///e:/Haruka/shaders/post.frag#L48-L51) 외 4개 셰이더
 * **문제점**: `prevViewProj`가 셰이더 5곳에 선언되어 있으나 읽는 곳이 없습니다. 현재 TAA는 모션 벡터도, 깊이 샘플링도, 투영 지터도 없습니다.
@@ -473,7 +473,7 @@ Release/Debug 빌드 통과, 신규 경고 0, 실행 정상, 검증 레이어 �
 
 ---
 
-### 🔍 [DEF-35] [LOW] `evalLight`의 0 나눗셈 가능성
+### ✅ [DEF-35] [해결됨 · 2026-10-04, 원래 LOW] `evalLight`의 0 나눗셈 가능성
 
 * **위치**: [`pbr.frag`](file:///e:/Haruka/shaders/pbr.frag) `evalLight`
 * **메커니즘**: 점광원 또는 스팟 처리에서 `lightDir = toLight / dist`를 계산합니다. 라이트와 표면점이 정확히 일치하면 `dist`가 0이 되어 `lightDir`이 NaN이 됩니다.
@@ -564,7 +564,7 @@ CPU와 GPU가 **서로 다른 바운딩 도형**으로 컬링하고 있었습니
 
 ---
 
-### 🔍 [DEF-28] [MEDIUM] 머티리얼 null 항목의 드로우 강행
+### ✅ [DEF-28] [해결됨 · 2026-10-04, 원래 MEDIUM] 머티리얼 null 항목의 드로우 강행
 
 * **위치**: [`GeometryPass.cpp:L526`](file:///e:/Haruka/src/renderer/passes/GeometryPass.cpp#L526), [`GeometryPass.cpp:L552`](file:///e:/Haruka/src/renderer/passes/GeometryPass.cpp#L552)
 * **메커니즘**: 두 지점의 `if (item.material)` 가드가 **푸시 디스크립터 바인딩만 건너뛰고** `vkCmdDrawIndexed`는 그대로 실행합니다. 따라서 직전 항목의 set 3이 남아 있으면 엉뚱한 텍스처로 그려지고, 해당 항목이 첫 항목이면 미바인딩 상태에서 드로우가 발행됩니다.
@@ -573,7 +573,7 @@ CPU와 GPU가 **서로 다른 바운딩 도형**으로 컬링하고 있었습니
 
 ---
 
-### 🔍 [DEF-29] [LOW] `VkDeviceCreateInfo`의 검증 레이어 설정
+### ✅ [DEF-29] [해결됨 · 2026-10-04, 원래 LOW] `VkDeviceCreateInfo`의 검증 레이어 설정
 
 * **위치**: [`Renderer.cpp:L625-L626`](file:///e:/Haruka/src/renderer/Renderer.cpp#L625-L626)
 * **메커니즘**: `Renderer.cpp:625-626`이 `VkDeviceCreateInfo`에 검증 레이어를 넣습니다. 이 필드는 Vulkan 1.0부터 무시되며, 검증 레이어가 `VUID-VkDeviceCreateInfo-enabledLayerCount-12384`로 경고합니다. 2026-08-25 시점에 stderr에 남아 있는 **유일한 검증 레이어 위반**입니다.
@@ -581,7 +581,7 @@ CPU와 GPU가 **서로 다른 바운딩 도형**으로 컬링하고 있었습니
 
 ---
 
-### 🔍 [DEF-30] [LOW] 투명 정렬 comparator의 매핑 메모리 읽기
+### ✅ [DEF-30] [해결됨 · 2026-10-04, 원래 LOW] 투명 정렬 comparator의 매핑 메모리 읽기
 
 * **위치**: `Renderer_render.cpp`의 투명 정렬 comparator
 * **메커니즘**: comparator가 `tfData[...].model[3]`을 직접 읽어 깊이를 비교합니다. `tfData`는 HOST_VISIBLE 매핑 메모리이며 uncached이므로, 정렬 과정에서 **N log N 번의 uncached read**가 발생합니다. 정렬 대상이 늘어날수록 CPU 프레임 시간에 비선형으로 반영됩니다.
@@ -608,7 +608,7 @@ DEF-25를 수정하면서 CPU와 GPU의 컬링 판정을 하나로 통일했습�
 * **평면 화면과 다른 점**: 평면 게임에서 같은 오류는 화면 가장자리의 팝인으로 끝납니다. 그러나 스테레오에서는 두 눈이 서로 다른 장면을 보게 되므로 **즉각적인 불쾌감으로 이어집니다.** 심각도를 HIGH로 잡은 이유가 이것입니다.
 * **수정 가이드라인**:
   * 좌우 두 절두체를 **모두 감싸는 합집합 절두체**에서 평면을 뽑아야 합니다.
-  * **Quest Pro는 디스플레이가 안쪽으로 기울어져 있어(canted) 두 절두체가 평행하지 않습니다. 따라서 한쪽 절두체를 좌우로 넓히는 확장 근사는 쓸 수 없습니다.** 그런 근사는 두 절두체가 평행할 때만 성립합니다. 실제 합집합을 보수적으로 감싸는 방식이어야 합니다.
+  * (2026-10-04 정정) 예전 판은 Quest Pro 화면이 안쪽으로 기울어져(canted) 있다고 적었지만 사실이 아닙니다. HMD 기하 데이터베이스에서 Quest 2·Pro·3 의 두 눈 시야 회전은 0° 이고 시야가 비대칭일 뿐입니다(기울어진 화면은 Valve Index 등). 권장은 두 눈 절두체를 각각 판정해 하나라도 통과하면 그리는 방식입니다. 정확하고, 기울어진 기기에도 그대로 맞습니다.
   * `cullViewProj` 하나를 넘기는 구조 대신 **컬링 평면 집합 자체를 넘기는 구조**로 바꾸는 편이 자연스럽습니다. 그러면 `CullPush`의 `mat4` 전제도 함께 정리됩니다.
   * **DEF-25의 재발 방지 계약이 그대로 적용됩니다.** 합집합 절두체를 도입하면 CPU와 GPU 양쪽의 평면 입력이 동시에 바뀌므로, `Renderer_render.cpp`와 `shaders/cull.comp`를 반드시 같이 고쳐야 합니다.
 * **관련 항목**: 멀티뷰 완성(DEF-09)과 같은 작업 단위로 묶는 것이 합리적입니다.
@@ -943,7 +943,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 ---
 
-### 🔍 [DEF-46] [MEDIUM] 에디터 float 스텝이 0.01로 고정되어 1cm 미만을 편집할 수 없음
+### ✅ [DEF-46] [해결됨 · 2026-10-04, 원래 MEDIUM] 에디터 float 스텝이 0.01로 고정되어 1cm 미만을 편집할 수 없음
 
 * **위치**: [`src/core/Reflect.hpp`](file:///e:/Haruka/src/core/Reflect.hpp)의 `PropDesc`, 필드 `float step {0.01f};`
 
@@ -1188,7 +1188,7 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
  │                          (근거: RenderView.opaqueSpheres,
  │                           CullPass::uploadInput(fi, opaque, spheres)의 크기 assert,
  │                           CullPass::sphereData() 접근자 제거. 대상: cull.comp:54,57)
- ├── [ ] DEF-03. [HIGH]     drawIndirectCount 피처 분리 및 폴백 경로
+ ├── [x] DEF-03. [해결됨]   drawIndirectCount 요구 제거  ✅ 2026-10-04 (장치 버전 전제는 DEF-97)
  ├── [ ] DEF-04. [HIGH]     synchronization2 피처 분리 및 배리어 래퍼
  ├── [ ] DEF-06. [HIGH]     MSAA LAZILY_ALLOCATED 메모리 타입 탐색 및 폴백
  ├── [x] DEF-38. [해결됨]   LIGHT: 직렬화에 lightType과 direction 추가  ✅ 2026-08-27 (라이팅 Phase 0, 2026-10-02 대조)
@@ -1207,7 +1207,7 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
  ├── [ ] DEF-02. [MEDIUM]   Zone C 랩어라운드 주기 계측 후 파티셔닝 또는 테일 가드
  ├── [x] DEF-26. [해결됨]   섀도 캐스터 라이트 슬롯 전달 및 Lo *= shadow 범위 축소  2026-08-27
  ├── [x] DEF-27. [해결됨]   섀도 패스용 라이트 프러스텀 드로우 목록 분리(카메라 우선 2단계)  2026-08-27
- ├── [ ] DEF-28. [MEDIUM]   머티리얼 null 항목 드로우 건너뛰기 (GeometryPass.cpp:526, :552)
+ ├── [x] DEF-28. [해결됨]   머티리얼 null → 자홍색 오류 머티리얼 + 액터별 경고  ✅ 2026-10-04
  ├── [x] DEF-07. [해결됨]   onActorDestroyed 구독자 연결  ✅ 2026-08-26 (Roadmap A-1, 2026-10-02 대조)
  ├── [ ] DEF-42. [MEDIUM]   힙 축소 시 Zone 오프셋 조정 (HarukaAllocator init 경로 및 Zone 상수)
  │                          (Quest 실기에서 1GB를 못 받을 수 있으므로 포팅 전에 처리할 것)
@@ -1216,7 +1216,7 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
  │                           처리하기로 했으므로, 이것 없이 절차 도형을 얹으면
  │                           배치한 모든 물체의 콜리전 크기가 틀립니다)
  │                          (비균일 스케일 규칙을 먼저 확정할 것)
- ├── [ ] DEF-46. [MEDIUM]   에디터 float 스텝 고정 해소 (Reflect.hpp의 PropDesc::step)
+ ├── [x] DEF-46. [해결됨]   단위 종류(PropUnit) · UE 식 수정 키 · 표시 규칙  ✅ 2026-10-04
  │                          (★ 절차 도형 작업 선결 조건입니다. 미터 단위에서 0.01은 1cm이므로
  │                           5mm짜리 물체를 슬라이더로 만들 수 없습니다)
  │                          (단위는 미터로 확정되었으므로 해법은 이쪽입니다. 배경은 2-E절 DEF-46 1)절)
@@ -1231,7 +1231,7 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
  ├── [ ] DEF-12. [MEDIUM]   런타임 게임 루프 (World::tick을 에디터 Play 상태에서 분리)
  ├── [ ] DEF-09. [HIGH]     멀티뷰 완성 (viewMask, gl_ViewIndex, arrayLayers)
  ├── [ ] DEF-31. [HIGH]     두 눈 합집합 절두체 (착수: OpenXR 세션 도입 시)
- │                          (canted 디스플레이라 단안 절두체 확장 근사는 쓸 수 없음)
+ │                          (Quest 2·Pro·3 의 두 눈 시야는 평행·비대칭. 두 절두체를 각각 판정)
  │                          (대상: RenderView.cullViewProj, CullPass.cpp:179-181의 CullPush)
  ├── [ ] DEF-32. [MEDIUM]   재투영 여유분만큼 절두체 부풀리기 (착수: OpenXR 세션 도입 시)
  │                          (여유분 크기는 실기 재투영 폭 측정 후에만 확정 가능)
@@ -1243,16 +1243,16 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
  ├── [ ] DEF-18. [CRITICAL] EngineContext에 렌더러 참조 추가 (DEF-17과 동일 작업 단위)
  ├── [ ] DEF-16. [CRITICAL] 인스턴싱 경로 (DrawItem.instanceCount, 리터럴 다섯 곳 제거)
  ├── [ ] DEF-19. [HIGH]     물리 힘·임펄스·속도·레이캐스트 API 및 중력 세터
- ├── [ ] DEF-11. [MEDIUM]   셰이더 목록 글롭화 및 CMake DEPENDS에 include 추가
+ ├── [x] DEF-11. [해결됨]   depfile 로 include 추적, 목록 밖 셰이더 경고  ✅ 2026-10-04
  ├── [ ] DEF-22. [HIGH]     SceneSerializer 타입 등록 기반 직렬화
- ├── [ ] DEF-10. [MEDIUM]   kMaxDraws / kMaxBodies 이중 상한 설정화 및 초과 진단
+ ├── [ ] DEF-10. [MEDIUM]   kMaxDraws / kMaxBodies 이중 상한 설정화 (초과 진단은 2026-10-04 완료)
  └── [ ] DEF-13. [LOW]      FrameUBO.invViewProj 추가
 
 [정리 작업 — 순서 의존성에 주의]
- ├── [ ] DEF-29. [LOW]      VkDeviceCreateInfo의 검증 레이어 두 줄 삭제 (Renderer.cpp:625-626)
- ├── [ ] DEF-30. [LOW]      투명 정렬 comparator의 위치 로컬 캐시화
- ├── [ ] DEF-14. [LOW]      GpuTransform 공유 GLSL include로 통합 (DEF-11 이후에)
- ├── [ ] DEF-15. [LOW]      TAA 채택 여부 결정 후 prevViewProj 활용 또는 제거
+ ├── [x] DEF-29. [해결됨]   VkDeviceCreateInfo의 검증 레이어 삭제  ✅ 2026-10-04
+ ├── [x] DEF-30. [해결됨]   투명 정렬 키를 미리 계산  ✅ 2026-10-04
+ ├── [x] DEF-14. [해결됨]   공용 헤더 haruka_shared.h + static_assert  ✅ 2026-10-04
+ ├── [x] DEF-15. [해결됨]   가짜 TAA 잔재와 prevViewProj 제거  ✅ 2026-10-04
  ├── [x] DEF-45. [LOW]      uploadMesh의 용량 검사를 new보다 앞으로 이동 (GpuScene.cpp)  ✅ 2026-08-25
  ├── [x] DEF-43. [LOW]      RigidBodyComponent의 resetIfLive 를 드래그 끝으로 이동  ✅ 2026-10-02 (편집 확정 훅)
  │                          (2026-10-02 코드로 성립 확인, 플레이 중에만. DEF-81 과 같은 지점)

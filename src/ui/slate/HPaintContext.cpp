@@ -1,4 +1,10 @@
 #include "HPaintContext.hpp"
+#include <algorithm>
+
+void HPaintContext::applyClip(HDrawElement& e) const {
+    e.clipped = !clipStack.empty();
+    if (e.clipped) e.clip = clipStack.back().rect;
+}
 
 void HPaintContext::drawRect(const HGeometry& geo, glm::vec4 color) {
     HDrawElement e;
@@ -6,6 +12,7 @@ void HPaintContext::drawRect(const HGeometry& geo, glm::vec4 color) {
     e.rect    = {geo.position.x, geo.position.y, geo.size.x, geo.size.y};
     e.color   = color;
     e.layer   = layerBase_;
+    applyClip(e);
     elements.push_back(e);
 }
 
@@ -29,6 +36,7 @@ void HPaintContext::drawTexture(const HGeometry& geo, VkImageView tex,
     e.texture = tex;
     e.uvRect  = uvRect;
     e.layer   = layerBase_;
+    applyClip(e);
     elements.push_back(e);
 }
 
@@ -41,11 +49,19 @@ void HPaintContext::drawText(const HGeometry& geo, const std::string& text,
     e.text     = text;
     e.fontSize = fontSize;
     e.layer    = layerBase_;
+    applyClip(e);
     elements.push_back(e);
 }
 
 void HPaintContext::pushClip(const HGeometry& geo) {
-    clipStack.push_back({{geo.position.x, geo.position.y, geo.size.x, geo.size.y}});
+    glm::vec4 r{ geo.position.x, geo.position.y, geo.size.x, geo.size.y };
+    if (!clipStack.empty()) {
+        const glm::vec4& o = clipStack.back().rect;
+        const float x0 = std::max(r.x, o.x), y0 = std::max(r.y, o.y);
+        const float x1 = std::min(r.x + r.z, o.x + o.z), y1 = std::min(r.y + r.w, o.y + o.w);
+        r = { x0, y0, std::max(0.f, x1 - x0), std::max(0.f, y1 - y0) };
+    }
+    clipStack.push_back({ r });
 }
 
 void HPaintContext::popClip() {

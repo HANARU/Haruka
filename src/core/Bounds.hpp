@@ -1,6 +1,5 @@
 #pragma once
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 
 // 로컬 공간 바운드입니다. 렌더러와 지오메트리 생성기가 공유하므로

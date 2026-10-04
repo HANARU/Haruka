@@ -36,7 +36,7 @@ std::vector<PropDesc> AudioComponent::buildProps() {
     std::vector<PropDesc> props;
 
     props.push_back(makePropFloat("Volume", PropColor::Neutral, 0.01f,
-        [p]{ return p->volume; }, [p](float v){ p->volume = std::clamp(v, 0.f, 2.f); }));
+        [p]{ return p->volume; }, [p](float v){ p->volume = std::clamp(v, 0.f, 2.f); }, PropUnit::Ratio));
     props.push_back(makePropToggle("Loop",
         [p]{ return p->loop; }, [p](bool v){ p->loop = v; }));
     props.push_back(makePropToggle("AutoPlay",
@@ -57,10 +57,10 @@ std::vector<PropDesc> AudioComponent::buildProps() {
             [p](float v){
                 p->attenuation.minDistance = std::clamp(v, S::kMinDistanceFloor,
                     std::max(S::kMinDistanceFloor, p->attenuation.maxDistance - S::kMinGap));
-            }));
+            }, PropUnit::Size));
         props.push_back(makePropFloat("Max Distance", PropColor::Neutral, 1.f,
             [p]{ return p->attenuation.maxDistance; },
-            [p](float v){ p->attenuation.maxDistance = std::max(p->attenuation.minDistance + S::kMinGap, v); }));
+            [p](float v){ p->attenuation.maxDistance = std::max(p->attenuation.minDistance + S::kMinGap, v); }, PropUnit::Size));
         props.push_back(makePropFloat("Rolloff", PropColor::Neutral, 0.05f,
             [p]{ return p->attenuation.rolloff; },
             [p](float v){ p->attenuation.rolloff = std::max(0.f, v); }));

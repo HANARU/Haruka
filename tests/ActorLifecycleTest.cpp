@@ -8,8 +8,10 @@
 // 실행: build/Release/HarukaActorTest.exe
 
 #include "../src/core/Actor.hpp"
+#include "../src/components/LightComponent.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace {
@@ -147,6 +149,28 @@ int main() {
         // 사이클이 없으므로 activeInHierarchy 는 무한 재귀 없이 반환합니다.
         check(a.activeInHierarchy() && b.activeInHierarchy(),
               "사이클 없이 activeInHierarchy 정상 반환");
+    }
+
+    // 9. Attenuation Radius 최솟값(DEF-35). 예전 UI 는 0 까지 허용했고, 반경 0 이면 Point·Spot
+    //    라이트가 통째로 꺼졌습니다. 디테일 패널이 쓰는 것과 같은 setter(PropDesc)로 확인합니다.
+    std::printf("\n== 9. Attenuation Radius 최솟값 ==\n");
+    {
+        Actor a;
+        auto* lc = a.addComponent<LightComponent>();
+        lc->lightType = LightType::Point;
+        PropDesc* radius = nullptr;
+        auto props = lc->buildProps();
+        for (auto& pd : props)
+            if (std::strcmp(pd.label, "Attenuation Radius") == 0) radius = &pd;
+        check(radius != nullptr, "Point 라이트에 Attenuation Radius 행이 있음");
+        if (radius) {
+            radius->setF(0.f);
+            check(lc->attenuationRadius == LightComponent::kMinAttenuationRadius, "0 을 넣으면 최솟값(0.01m)");
+            radius->setF(-5.f);
+            check(lc->attenuationRadius == LightComponent::kMinAttenuationRadius, "음수를 넣어도 최솟값");
+            radius->setF(3.f);
+            check(lc->attenuationRadius == 3.f, "정상 값은 그대로");
+        }
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

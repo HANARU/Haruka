@@ -254,8 +254,18 @@ void AOPass::destroyPipelines() {
 }
 
 void AOPass::rebuildPipelines() {
-    destroyPipelines();
-    createPipelines();
+    // 새 파이프라인을 다 만든 뒤에만 옛 것을 지웁니다. 하나라도 실패하면 새로 만든 것만 지우고
+    // 옛 것을 되돌려, 핫 리로드가 실패해도 이전 파이프라인으로 계속 그립니다.
+    const VkPipeline oldLin = linDepthPipeline_, oldSsao = ssaoPipeline_;
+    linDepthPipeline_ = ssaoPipeline_ = VK_NULL_HANDLE;
+    try { createPipelines(); }
+    catch (...) {
+        destroyPipelines();
+        linDepthPipeline_ = oldLin; ssaoPipeline_ = oldSsao;
+        throw;
+    }
+    if (oldLin)  vkDestroyPipeline(rc_->device, oldLin,  nullptr);
+    if (oldSsao) vkDestroyPipeline(rc_->device, oldSsao, nullptr);
 }
 
 void AOPass::destroy() {

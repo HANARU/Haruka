@@ -96,6 +96,11 @@ public:
         if (expanded_ && body_) r = body_->onMouseMove(e);
         return r;
     }
+    HReply onScroll(const HPointerEvent& e) override {
+        if (expanded_ && body_ && body_->cachedGeometry().contains(e.position))
+            return body_->onScroll(e);
+        return HReply::Unhandled();
+    }
 
 private:
     std::string              title_;

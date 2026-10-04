@@ -6,6 +6,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
+#include <algorithm>
 
 static const char* kFontFallbacks[] = {
     "assets/fonts/default.ttf",
@@ -15,17 +16,14 @@ static const char* kFontFallbacks[] = {
     nullptr
 };
 
-// ── 초기화 ────────────────────────────────────────────────────────────────────
-void HFontAtlas::init(VkDevice device, VkPhysicalDevice physDevice,
-                      CmdBeginFn beginCmd, CmdEndFn endCmd,
-                      const std::string& fontPath)
-{
-    device_    = device;
-    physDevice_ = physDevice;
-    beginCmd_  = beginCmd;
-    endCmd_    = endCmd;
+// 레이아웃이 글자 폭을 재는 아틀라스(폰트를 읽은 마지막 인스턴스).
+static const HFontAtlas* g_metricsFont = nullptr;
 
-    // 폰트 파일 로드
+const HFontAtlas* HFontAtlas::metrics() { return g_metricsFont; }
+
+// ── 폰트 파일 ─────────────────────────────────────────────────────────────────
+bool HFontAtlas::loadFont(const std::string& fontPath) {
+    unloadFont();
     auto tryLoad = [&](const std::string& path) -> bool {
         std::ifstream f(path, std::ios::binary | std::ios::ate);
         if (!f.is_open()) return false;
@@ -39,13 +37,40 @@ void HFontAtlas::init(VkDevice device, VkPhysicalDevice physDevice,
     if (!fontPath.empty()) loaded = tryLoad(fontPath);
     for (int i = 0; !loaded && kFontFallbacks[i]; ++i)
         loaded = tryLoad(kFontFallbacks[i]);
+    if (!loaded) return false;
 
-    if (!loaded) throw std::runtime_error("[HFontAtlas] No font file found!");
+    auto* fi = new stbtt_fontinfo();
+    if (!stbtt_InitFont(fi, ttfData_.data(), 0)) {
+        delete fi;
+        ttfData_.clear();
+        return false;
+    }
+    fontInfo_     = fi;
+    g_metricsFont = this;
+    return true;
+}
 
-    fontInfo_ = new stbtt_fontinfo();
-    if (!stbtt_InitFont(static_cast<stbtt_fontinfo*>(fontInfo_),
-                        ttfData_.data(), 0))
-        throw std::runtime_error("[HFontAtlas] stbtt_InitFont failed!");
+void HFontAtlas::unloadFont() {
+    if (g_metricsFont == this) g_metricsFont = nullptr;
+    delete static_cast<stbtt_fontinfo*>(fontInfo_);
+    fontInfo_ = nullptr;
+    ttfData_.clear();
+    cache_.clear();
+    advanceCache_.clear();
+}
+
+// ── 초기화 ────────────────────────────────────────────────────────────────────
+void HFontAtlas::init(VkDevice device, VkPhysicalDevice physDevice,
+                      CmdBeginFn beginCmd, CmdEndFn endCmd,
+                      const std::string& fontPath)
+{
+    device_    = device;
+    physDevice_ = physDevice;
+    beginCmd_  = beginCmd;
+    endCmd_    = endCmd;
+
+    if (!loadFont(fontPath))
+        throw std::runtime_error("[HFontAtlas] No usable font file found!");
 
     // CPU 아틀라스 버퍼 초기화 (RGBA, 불투명 흰색 × 투명)
     cpuAtlas_.assign(kAtlasW * kAtlasH * 4, 0);
@@ -56,10 +81,12 @@ void HFontAtlas::init(VkDevice device, VkPhysicalDevice physDevice,
 }
 
 void HFontAtlas::cleanup() {
-    vkDestroyImageView(device_, atlasView_,  nullptr);
-    vkDestroyImage    (device_, atlasImage_, nullptr);
-    vkFreeMemory      (device_, atlasMem_,   nullptr);
-    delete static_cast<stbtt_fontinfo*>(fontInfo_);
+    if (device_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, atlasView_,  nullptr);
+        vkDestroyImage    (device_, atlasImage_, nullptr);
+        vkFreeMemory      (device_, atlasMem_,   nullptr);
+    }
+    unloadFont();
 }
 
 // ── 글리프 조회 / 래스터라이즈 ────────────────────────────────────────────────
@@ -74,18 +101,25 @@ HGlyphInfo HFontAtlas::getGlyph(char c, float size) {
     return info;
 }
 
-float HFontAtlas::measureText(const std::string& text, float size) const {
+float HFontAtlas::glyphAdvance(char c, float size) const {
+    if (!fontInfo_) return 0.f;
+    const uint64_t key = glyphKey(c, size);
+    if (auto it = advanceCache_.find(key); it != advanceCache_.end()) return it->second;
     auto* fi = static_cast<const stbtt_fontinfo*>(fontInfo_);
-    float scale = stbtt_ScaleForPixelHeight(fi, size);
-    float x = 0.f;
-    for (size_t i = 0; i < text.size(); ++i) {
-        int adv, lsb;
-        stbtt_GetCodepointHMetrics(fi, text[i], &adv, &lsb);
-        x += adv * scale;
-        if (i + 1 < text.size())
-            x += stbtt_GetCodepointKernAdvance(fi, text[i], text[i+1]) * scale;
+    int adv = 0, lsb = 0;
+    stbtt_GetCodepointHMetrics(fi, c, &adv, &lsb);
+    const float a = adv * stbtt_ScaleForPixelHeight(fi, size);
+    advanceCache_.emplace(key, a);
+    return a;
+}
+
+float HFontAtlas::measureText(std::string_view text, float size) const {
+    float x = 0.f, widest = 0.f;
+    for (char c : text) {
+        if (c == '\n') { widest = std::max(widest, x); x = 0.f; continue; }
+        x += glyphAdvance(c, size);
     }
-    return x;
+    return std::max(widest, x);
 }
 
 // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -111,6 +145,7 @@ void HFontAtlas::rasterizeGlyph(char c, float size, HGlyphInfo& out) {
     if (cursorY_ + gh + 1 > kAtlasH) {
         HLOG(LogUI, Error) << "Font atlas full";
         out = {};
+        out.advance = glyphAdvance(c, size);   // 그리지 못해도 자리는 측정과 같게 차지합니다
         return;
     }
 
@@ -137,9 +172,7 @@ void HFontAtlas::rasterizeGlyph(char c, float size, HGlyphInfo& out) {
     out.pixelSize = { (float)gw, (float)gh };
     out.size      = size;
 
-    int adv, lsb;
-    stbtt_GetCodepointHMetrics(fi, c, &adv, &lsb);
-    out.advance = adv * scale;
+    out.advance = glyphAdvance(c, size);
 
     cursorX_ += gw + 1;
     rowH_     = std::max(rowH_, gh);

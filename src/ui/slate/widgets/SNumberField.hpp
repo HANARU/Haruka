@@ -1,15 +1,19 @@
 #pragma once
 #include "../HWidget.hpp"
 #include "../HFontAtlas.hpp"
+#include <algorithm>
 #include <functional>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
 #include <string>
 
+// 숫자 칸의 단위 종류. 끌기 감도와 표시 자릿수를 정합니다(DEF-46). 에디터가 PropUnit 에서 옮겨 줍니다.
+enum class ENumberUnit { Scalar, Offset, Size, Angle, Ratio };
+
 // ── SNumberField ──────────────────────────────────────────────────────────────
 // UE5 스타일 숫자 필드:
-//   - LMB 좌우 드래그(3px 이상 이동) = 값 스크럽
+//   - LMB 좌우 드래그(3px 이상 이동) = 값 스크럽. Shift 는 10배 빠르게, Ctrl 은 0.1배로 정밀하게(UE 식)
 //   - 클릭(이동 없이 업)            = 인라인 텍스트 입력 모드
 // 입력 모드 중 키 입력은 EditorApp이 focusedField()로 라우팅한다.
 // Enter 또는 다른 곳 클릭으로 확정(commitEdit).
@@ -19,6 +23,30 @@ public:
     using SetterFn  = std::function<void(float)>;
     using CallbackFn = std::function<void()>;
 
+    static constexpr float kDeadzonePx = 3.f;    // 클릭과 끌기를 가르는 거리
+    static constexpr float kShiftMul   = 10.f;   // UE 식: Shift 는 빠르게
+    static constexpr float kCtrlMul    = 0.1f;   //        Ctrl 은 정밀하게
+
+    // 고정 소수점으로 쓰고 끝의 0 을 지웁니다(소수 한 자리는 남김). 반올림하면 0 이 되는 값은 0 으로
+    // 둬 "-0.0" 이 나오지 않습니다(DEF-88). float 의 유효 숫자는 7자리 남짓이라 그 이상은 쓰지 않고,
+    // 입력 필터가 'e' 를 받지 않으므로 지수 표기도 쓰지 않습니다.
+    static std::string formatTrimmed(float v, int maxDecimals) {
+        const float a = std::abs(v);
+        const int intDigits = a >= 1.f ? (int)std::floor(std::log10(a)) + 1 : 1;
+        const int dec = std::clamp(7 - intDigits, 1, std::max(1, maxDecimals));
+        if (a < 0.5f * std::pow(10.f, -(float)dec)) v = 0.f;
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%.*f", dec, v);
+        std::string s(buf);
+        const size_t dot = s.find('.');
+        if (dot != std::string::npos) {
+            size_t end = s.size();
+            while (end > dot + 2 && s[end - 1] == '0') --end;
+            s.resize(end);
+        }
+        return s;
+    }
+
     ~SNumberField() override {
         if (sFocused_ == this) sFocused_ = nullptr;   // rebuild로 파괴될 때 dangling 방지
     }
@@ -26,6 +54,7 @@ public:
     std::shared_ptr<SNumberField> get(GetterFn fn)        { getter_     = std::move(fn); return self(); }
     std::shared_ptr<SNumberField> set(SetterFn fn)        { setter_     = std::move(fn); return self(); }
     std::shared_ptr<SNumberField> step(float s)           { step_       = s;             return self(); }
+    std::shared_ptr<SNumberField> unit(ENumberUnit u)     { unit_       = u;             return self(); }
     std::shared_ptr<SNumberField> label(std::string l)    { label_      = std::move(l);  return self(); }
     std::shared_ptr<SNumberField> labelColor(glm::vec4 c) { labelColor_ = c;             return self(); }
     std::shared_ptr<SNumberField> fontSize(float f)       { fontSize_   = f;             return self(); }
@@ -66,7 +95,7 @@ public:
         if (end && end != editBuf_.c_str() && setter_) {
             setter_(v);
             float endVal = getter_ ? getter_() : v;
-            if (endFn_ && std::abs(endVal - editStartVal_) > 1e-6f)
+            if (endFn_ && valueChanged(editStartVal_, endVal))
                 endFn_();
         }
     }
@@ -115,9 +144,8 @@ public:
                 ctx.drawText(vg, editBuf_ + "|", fontSize_, {1.f, 1.f, 1.f, 1.f});
             }
         } else {
-            char buf[20];
-            formatValue(getter_ ? getter_() : 0.f, buf, sizeof(buf));
-            ctx.drawText(vg, buf, fontSize_, {0.88f, 0.88f, 0.88f, 1.f});
+            ctx.drawText(vg, formatTrimmed(getter_ ? getter_() : 0.f, displayDecimals()),
+                         fontSize_, {0.88f, 0.88f, 0.88f, 1.f});
         }
 
         // 호버 시 드래그 어포던스 (◀ ▶ — 좌우 드래그로 값 변경)
@@ -140,7 +168,9 @@ public:
             isDragging_   = true;
             dragMoved_    = false;
             dragStartX_   = e.position.x;
+            lastX_        = e.position.x;
             dragStartVal_ = getter_ ? getter_() : 0.f;
+            dragStep_     = dragStepFor(dragStartVal_);   // 끌기 동안 고정(Size 는 시작값 기준)
             if (beginFn_) beginFn_();
             return HReply::Handled().captureMouse(this);
         }
@@ -151,13 +181,12 @@ public:
         if (!isDragging_) return HReply::Unhandled();
         isDragging_ = false;
         if (!dragMoved_) {
-            // 이동 없는 클릭 → 인라인 입력 모드 진입. 버퍼는 지금 값으로 채웁니다.
+            // 이동 없는 클릭 → 인라인 입력 모드 진입. 버퍼는 지금 값으로 채웁니다. 표시보다 자릿수를
+            // 넉넉히 둬, 표시에서 줄여 보이던 값도 입력 모드에서는 그대로 보입니다(DEF-46).
             editing_      = true;
             selAll_       = false;
             editStartVal_ = getter_ ? getter_() : dragStartVal_;
-            char buf[20];
-            formatValue(editStartVal_, buf, sizeof(buf));
-            editBuf_  = buf;
+            editBuf_  = formatTrimmed(editStartVal_, editDecimals());
             edited_   = false;
             sFocused_ = this;
             return HReply::Handled().releaseMouse();
@@ -176,13 +205,21 @@ public:
             return HReply::Handled().releaseMouse();
         }
         if (isDragging_ && setter_ && getter_) {
-            // 3px 데드존 — 클릭(입력 모드)과 드래그(스크럽) 구분
-            if (!dragMoved_ && std::abs(e.position.x - dragStartX_) > 3.f)
+            // 3px 데드존 — 클릭(입력 모드)과 드래그(스크럽) 구분. 데드존을 지난 지점부터 셉니다.
+            // 예전에는 처음 넘는 순간 데드존 3px 까지 한꺼번에 더해졌습니다.
+            if (!dragMoved_) {
+                const float off = e.position.x - dragStartX_;
+                if (std::abs(off) <= kDeadzonePx) return HReply::Unhandled();
                 dragMoved_ = true;
-            if (dragMoved_) {
-                float delta = (e.position.x - dragStartX_) * step_;
-                setter_(dragStartVal_ + delta);
+                lastX_     = dragStartX_ + (off > 0.f ? kDeadzonePx : -kDeadzonePx);
             }
+            // 이동마다 그 변화량만 지금 값에 더합니다. 예전에는 끈 거리 전체에 스텝을 곱해, 도중에
+            // 배율이 바뀌면 값이 한꺼번에 뛰었습니다(DEF-46). 수정 키는 이벤트마다 읽고, 세터가
+            // 범위로 자른 뒤 되돌아올 때 헛도는 구간도 없습니다.
+            const float mul = e.shift ? kShiftMul : (e.ctrl ? kCtrlMul : 1.f);
+            const float dx  = e.position.x - lastX_;
+            lastX_ = e.position.x;
+            if (dx != 0.f) setter_(getter_() + dx * dragStep_ * mul);
         }
         return HReply::Unhandled();
     }
@@ -191,6 +228,7 @@ private:
     GetterFn    getter_;
     SetterFn    setter_;
     float       step_       = 0.005f;
+    ENumberUnit unit_       = ENumberUnit::Scalar;
     float       fontSize_   = 10.f;
     std::string label_;
     glm::vec4   labelColor_ = {0.85f, 0.85f, 0.85f, 1.f};
@@ -203,6 +241,8 @@ private:
     bool  isHovered_    = false;
     float dragStartX_   = 0.f;
     float dragStartVal_ = 0.f;
+    float lastX_        = 0.f;     // 직전 이동 이벤트의 x (이동마다 변화량만 더함)
+    float dragStep_     = 0.005f;  // 이번 끌기의 px 당 변화량
 
     // 인라인 편집 상태
     bool        editing_      = false;
@@ -211,17 +251,39 @@ private:
     bool        edited_ = false;  // 입력 모드에 들어온 뒤 글자를 넣거나 지웠는가
     float       editStartVal_ = 0.f;
 
-    // 표시용 문자열(소수 셋째 자리). 반올림하면 0 이 되는 음수는 0 으로 둡니다. 그대로 찍으면
-    // 회전 없는 액터의 오일러 값처럼 -0.0001 이 "-0.000" 으로 보입니다(DEF-88).
-    static void formatValue(float v, char* buf, size_t n) {
-        if (v > -0.0005f && v < 0.0005f) v = 0.f;
-        std::snprintf(buf, n, "%.3f", v);
+    // 단위 종류별 px 당 변화량(DEF-46). Size 는 끌기 시작값의 1% 이고, 0 근처에서 너무 느려지지
+    // 않게 그 속성 step 의 1/10 을 최솟값으로 둡니다.
+    float dragStepFor(float v0) const {
+        switch (unit_) {
+            case ENumberUnit::Offset: return 0.01f;
+            case ENumberUnit::Size:   return std::max(std::abs(v0) * 0.01f, step_ * 0.1f);
+            case ENumberUnit::Angle:  return 0.5f;
+            case ENumberUnit::Ratio:  return 0.005f;
+            default:                  return step_;
+        }
+    }
+    // 표시 자릿수. 1mm 미만 거리도 보이게 하되, 회전은 둘째 자리로 둬 오일러 변환의 잡음이
+    // 보이지 않게 합니다(DEF-88).
+    int displayDecimals() const {
+        switch (unit_) {
+            case ENumberUnit::Offset:
+            case ENumberUnit::Size:  return 5;
+            case ENumberUnit::Angle: return 2;
+            default:                 return 4;
+        }
+    }
+    int editDecimals() const { return unit_ == ENumberUnit::Angle ? 3 : 6; }
+
+    // 값이 실제로 바뀌었는가. 예전 기준은 절대값 1e-6 이라, 아주 작은 값(1µm 아래)의 편집은
+    // undo 기록이 남지 않았습니다. 이제 값 크기에 비례한 기준으로 봅니다(float 잡음은 걸러냄).
+    static bool valueChanged(float a, float b) {
+        return a != b && std::abs(a - b) > 1e-6f * std::max(std::abs(a), std::abs(b));
     }
 
     // 스크럽 드래그의 끝. 값이 실제로 바뀌었을 때만 끝 콜백(undo 기록)을 부릅니다.
     void finishDrag() {
         float endVal = getter_ ? getter_() : 0.f;
-        if (endFn_ && std::abs(endVal - dragStartVal_) > 1e-6f)
+        if (endFn_ && valueChanged(dragStartVal_, endVal))
             endFn_();
     }
 

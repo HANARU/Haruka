@@ -8,7 +8,6 @@
 #include "../renderer/MeshHandle.hpp"
 #include "../geometry/PrimitiveBuilder.hpp"
 
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 

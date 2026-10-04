@@ -1,7 +1,6 @@
 #pragma once
 #include "../core/Component.hpp"
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 
 // zFar uses makePropFloat directly to clamp against the live zNear value.

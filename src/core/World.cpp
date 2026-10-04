@@ -85,7 +85,8 @@ std::vector<StaticMeshComponent*> World::getVisibleMeshes() const {
     for (auto& a : actors)
         if (a->activeInHierarchy())
             if (auto* m = a->getComponent<StaticMeshComponent>())
-                if (m->isEnabled() && m->visible && m->mesh && m->material)
+                // 머티리얼은 거르지 않습니다. 없으면 렌더러가 오류 머티리얼로 그립니다(DEF-28).
+                if (m->isEnabled() && m->visible && m->mesh)
                     result.push_back(m);
     return result;
 }

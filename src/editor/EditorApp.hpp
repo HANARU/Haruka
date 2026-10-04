@@ -76,8 +76,8 @@ private:
     CameraComponent* editorCam_      = nullptr;
     bool             lmbOrbit_       = false;
 
-    // 휠은 tick 이 한 번만 읽어(getScrollDelta 는 consume-on-read) 아웃라이너와 카메라
-    // 중 한쪽으로 라우팅합니다. 여기서는 인자로 받은 값만 씁니다.
+    // 휠은 tick 이 한 번만 읽어(getScrollDelta 는 consume-on-read) 위젯과 카메라 중 한쪽으로
+    // 라우팅합니다. 여기서는 위젯이 받지 않고 남은 값만 받습니다.
     void tickEditorCamera(float dt, float scroll);
 
     // 로그: 코어 링 버퍼에서 마지막으로 본 seq. 달라진 프레임에만 Output Log·상태바를 갱신합니다.
@@ -142,8 +142,6 @@ private:
     uint64_t    logPinSeq_    = 0;   // 고정을 시작한 순간의 최신 seq. 이후 들어온 줄이 "new lines"
     int         logScrollReq_ = 0;   // 다음 갱신에 적용할 휠 이동(보이는 행 수, 양수 = 위)
     std::string logJumpText_;        // 꼬리로 돌아가는 버튼의 라벨 캐시(고정 중에만 표시)
-    // 하단 패널이 자기 리프에서 활성 탭인지. outlinerVisible_ 과 같은 이유로 휠 라우팅에 필요합니다.
-    bool        bottomVisible_ = true;
 
     // Dynamic panel refs
     std::shared_ptr<SHorizontalBox> toolbarBox_;
@@ -153,6 +151,11 @@ private:
     std::shared_ptr<SVerticalBox>   contentList_;
     std::shared_ptr<SBorder>        viewportWidget_;
     std::shared_ptr<SVerticalBox>   bottomContent_;
+    // 스크롤 상자(DEF-56·57). 내용을 다시 만들어도 상자는 남아 스크롤 위치를 지킵니다.
+    std::shared_ptr<SScrollBox>     detailsScroll_;
+    std::shared_ptr<SScrollBox>     bottomScroll_;      // Content Browser · GPU Stats
+    std::shared_ptr<SBorder>        bottomHost_;        // 탭에 따라 bottomScroll_ 또는 로그를 담음
+    int                             bottomScrollTab_ = -1;   // 스크롤 위치가 속한 탭
 
     // ── Panel sizes (viewportFbRect 프레임0 fallback + 기본 비율 시드로만 사용) ──
     // 실제 레이아웃은 도크 트리 비율(ratios)이 구동합니다. 이 값들은 첫 배치 전 프레임의
@@ -195,6 +198,8 @@ private:
         DockNode*   stack   = nullptr;
         int         tabIndex = 0;
         std::string panelId;
+        std::shared_ptr<HWidget> close;   // 닫기 x(닫을 수 없는 패널이면 없음)
+        std::shared_ptr<HWidget> row;     // 탭 줄 영역(자르는 테두리). 잘려 안 보이는 탭을 거릅니다
     };
     // 리프 히트: 드롭 타깃 판정용(리프 전체 rect).
     struct DockLeafHit {
@@ -215,10 +220,23 @@ private:
 
     std::shared_ptr<SDockOverlay> dockOverlay_;   // 드롭 존 하이라이트(최상위)
 
+    // ── 패널 닫기 · 다시 열기 (DEF-69) ───────────────────────────────────────
+    // 누른 탭 x(뗄 때 같은 x 위면 닫음). 위젯은 리빌드돼도 판정에 쓸 수 있게 붙잡아 둡니다.
+    std::shared_ptr<HWidget> tabCloseWidget_;
+    std::shared_ptr<HWidget> tabCloseRow_;      // 그 탭의 탭 줄 영역(뗄 때도 보이는 곳인지 봄)
+    std::string              tabClosePanel_;
+    // 닫은 패널 → 닫을 때 같은 리프에 있던 패널들. 다시 열 때 그 리프로 돌려보냅니다.
+    std::unordered_map<std::string, std::vector<std::string>> panelHome_;
+    void closePanel(const std::string& id);
+    void showPanel(const std::string& id);   // 열려 있으면 앞으로, 닫혀 있으면 다시 엶
+    // target 노드의 zone 쪽에 새 리프를 붙입니다(share = target 자리 중 새 리프의 몫).
+    void dockAttachSplit(DockNode* target, const std::string& panelId, EDockZone zone, float share);
+
     // ── 상단 메뉴 바 (Phase 1) ────────────────────────────────────────────────
     static constexpr float kMenuBarH   = 26.f;
     static constexpr float kStatusBarH = 24.f;
-    struct MenuItem { std::string label; std::function<void()> action; };
+    // checked 가 있으면 드롭다운 행 앞에 체크 표시를 둡니다(Window 메뉴의 열린 패널).
+    struct MenuItem { std::string label; std::function<void()> action; std::function<bool()> checked; };
     struct MenuDef  { std::string name;  std::vector<MenuItem> items; float x = 0.f; };
     std::vector<MenuDef>            menus_;
     int                             openMenu_ = -1;      // 열린 메뉴 인덱스(-1=없음)
@@ -279,6 +297,11 @@ private:
     static constexpr float kVpToolbarInset = 6.f;   // 뷰포트 가장자리 인셋(미스케일)
     float camSpeed_          = 5.f;    // 현행 하드코딩과 같은 기본값(m/s)
     int   vpToolbarLevel_    = -1;     // 폭 사다리 레벨(-1 = 미초기화)
+    // 단계별로 툴바가 실제로 요구하는 폭(스케일 픽셀, 인셋 포함). 라벨이 가장 길어지는 값으로
+    // 세운 툴바를 재서 얻습니다(DEF-60). 잰 배율·폰트가 지금과 다르면 tick 이 다시 잽니다.
+    float vpLevelNeed_[5]    = {};
+    float vpLevelNeedScale_  = 0.f;
+    const HFontAtlas* vpLevelNeedFont_ = nullptr;
     bool  vpToolbarDirty_    = true;   // 지연 리빌드 요청
     bool  prevGizmoDragging_ = false;  // 드래그 종료(하강 에지) 검출
     std::shared_ptr<SBorder>        viewportToolbarBar_;   // 배제 rect 의 진리원
@@ -304,6 +327,7 @@ private:
     enum class EFocusTarget { None, Rename, Search, NumberField, LogSearch };
     EFocusTarget currentFocus() const;
     void         setTextFocus(EFocusTarget t);
+    EFocusTarget backspaceFocus_ = EFocusTarget::None;   // 직전 tickRenameInput 의 포커스(DEF-58)
     // 지금 포커스를 가진 위젯이 이 좌표를 품는가(포커스 밖 클릭 판정).
     bool         focusWidgetContains(float x, float y) const;
 
@@ -347,7 +371,7 @@ private:
     std::string outlinerFilterPrev_;          // 직전 리빌드의 필터(바뀌면 스크롤을 맨 위로)
     // 아웃라이너가 자신의 리프에서 활성 탭인지. 뷰포트의 viewportVisible_ 과 같은 이유로
     // 필요합니다. 비활성이면 위젯이 배치되지 않아 cachedGeometry 가 stale 하고, 그 낡은
-    // rect 로 휠을 가로채면 그 자리를 차지한 다른 패널 위에서 카메라 돌리가 죽습니다.
+    // rect 로 목록 리빌드를 보류하면(outlinerPressHeld_) 다른 패널을 누를 때 걸립니다.
     bool        outlinerVisible_ = true;
     // 좌버튼을 아웃라이너 목록 위에서 눌러 아직 떼지 않았는지. 그동안은 목록 리빌드를 미뤄
     // 눌린 행 버튼이 뗄 때까지 살아 있게 합니다(DEF-83).
@@ -357,9 +381,9 @@ private:
 
     // Viewport overlay stats
     struct VpTimings {
-        int fps=0, drawCalls=0, culled=0, transparentDraws=0;
+        int fps=0, drawCalls=0, culled=0, transparentDraws=0, dropped=0;
         float shadowMs=0.f, mainMs=0.f, aoMs=0.f, bloomMs=0.f,
-              tonemapMs=0.f, taaBlitMs=0.f, uiMs=0.f, totalMs=0.f;
+              tonemapMs=0.f, uiMs=0.f, totalMs=0.f;
         // 초당 스왑체인 재생성 횟수입니다. 0 이 아니면 그 자체가 결함입니다.
         float recreatePerSec = 0.f;
     };
@@ -424,7 +448,9 @@ private:
     // ── Key edge tracking ─────────────────────────────────────────────────────
     bool prevDeleteDown_    = false;
     bool prevF2Down_        = false;
-    bool prevBackspaceDown_ = false;
+    // 포커스가 바뀔 때 눌려 있던 백스페이스. 뗄 때까지 지우기를 막습니다(DEF-58). 포커스 변화는
+    // tickRenameInput 이 직전 값(backspaceFocus_)과 비교해 잡습니다.
+    bool backspaceBlocked_  = false;
     bool prevEnterDown_     = false;
     bool prevEscapeDown_    = false;
     bool prevZDown_         = false;
@@ -463,7 +489,10 @@ private:
     void rebuildToolbar();
     // ── 뷰포트 툴바 (Phase 2) ────────────────────────────────────────────────
     void          rebuildViewportToolbar();
-    int           computeVpToolbarLevel() const;   // 뷰포트 폭 → 축약 단계(0=최대)
+    // 칩을 box 에 채웁니다. worstCase 면 바뀌는 라벨을 가장 넓은 값으로 고정합니다(폭 측정용).
+    void          fillViewportToolbar(SHorizontalBox& box, int lv, bool worstCase);
+    void          measureVpToolbarLevels();        // 단계별 요구 폭(vpLevelNeed_)을 잼
+    int           computeVpToolbarLevel(float margin) const;   // 뷰포트 폭 → 축약 단계(0=최대)
     HViewportRect viewportToolbarFbRect() const;   // 툴바가 가린 영역(프레임버퍼 픽셀)
     std::string   gizmoReadoutText() const;        // 드래그 중 값(뷰포트 하단 표시)
     void rebuildOutliner();

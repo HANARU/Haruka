@@ -1,6 +1,20 @@
 #include "PostPass.hpp"
 #include <stdexcept>
 
+// 저장할 때 GPU 가 선형 → sRGB 로 바꾸는 포맷인지.
+static bool isSrgbFormat(VkFormat f) {
+    switch (f) {
+        case VK_FORMAT_B8G8R8A8_SRGB:
+        case VK_FORMAT_R8G8B8A8_SRGB:
+        case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+        case VK_FORMAT_R8G8B8_SRGB:
+        case VK_FORMAT_B8G8R8_SRGB:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void PostPass::create(RenderContext& rc) {
     rc_ = &rc;
 
@@ -32,10 +46,10 @@ void PostPass::create(RenderContext& rc) {
             throw std::runtime_error("Failed to create post render pass!");
     }
 
-    // Descriptor set layout: push descriptor — 0=HDR, 1=taaHist, 2=ssao, 3=bloom
+    // Descriptor set layout: push descriptor — 0=HDR, 1=ssao, 2=bloom
     {
-        VkDescriptorSetLayoutBinding bindings[4] = {};
-        for (int i = 0; i < 4; i++) {
+        VkDescriptorSetLayoutBinding bindings[3] = {};
+        for (int i = 0; i < 3; i++) {
             bindings[i].binding = (uint32_t)i;
             bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             bindings[i].descriptorCount = 1;
@@ -44,12 +58,12 @@ void PostPass::create(RenderContext& rc) {
         VkDescriptorSetLayoutCreateInfo dslci{};
         dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         dslci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-        dslci.bindingCount = 4; dslci.pBindings = bindings;
+        dslci.bindingCount = 3; dslci.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(rc.device, &dslci, nullptr, &setLayout_) != VK_SUCCESS)
             throw std::runtime_error("Failed to create post desc layout!");
     }
 
-    // Pipeline layout — push constants: aoStrength, bloomStrength, exposure, taaBlend, flags
+    // Pipeline layout — push constants: aoStrength, bloomStrength, exposure, flags
     {
         VkPushConstantRange pcr{};
         pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; pcr.offset = 0; pcr.size = 32;
@@ -72,31 +86,19 @@ void PostPass::acquire(const std::vector<VkImageView>& swapViews) {
         if (vkCreateFramebuffer(rc_->device, &fci, nullptr, &framebufs_[i]) != VK_SUCCESS)
             throw std::runtime_error("Failed to create post framebuffer!");
     }
-
-    // TAA history — HDR(renderExtent)과 1:1로 섞으므로 renderExtent 크기로 재생성
-    VkFormat hdrFmt = VK_FORMAT_R16G16B16A16_SFLOAT;
-    taaHistImage_ = rc_->createImage(rc_->renderExtent.width, rc_->renderExtent.height, 1, 1, VK_SAMPLE_COUNT_1_BIT,
-        hdrFmt, VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        0, taaHistAlloc_);
-    taaHistView_  = rc_->createImageView(taaHistImage_, hdrFmt, VK_IMAGE_ASPECT_COLOR_BIT);
-    taaHistValid_ = false;
 }
 
 void PostPass::releaseSizeDependent() {
     if (!rc_) return;
     for (auto fb : framebufs_) vkDestroyFramebuffer(rc_->device, fb, nullptr);
     framebufs_.clear();
-
-    if (taaHistView_)  { vkDestroyImageView(rc_->device, taaHistView_, nullptr); taaHistView_  = VK_NULL_HANDLE; }
-    if (taaHistImage_) { vkDestroyImage(rc_->device, taaHistImage_, nullptr);    taaHistImage_ = VK_NULL_HANDLE; }
-    if (taaHistAlloc_.isValid()) { rc_->allocator->freeB(taaHistAlloc_); taaHistAlloc_ = {}; }
-    taaHistValid_ = false;
 }
 
 void PostPass::rebuildPipelines() {
-    if (pipeline_) { vkDestroyPipeline(rc_->device, pipeline_, nullptr); pipeline_ = VK_NULL_HANDLE; }
-    pipeline_ = rc_->createFullscreenPipeline(pass_, 0, "shaders/post.frag.spv", pipeLayout_);
+    // 새 파이프라인을 먼저 만들고 성공했을 때만 옛 것을 지웁니다(핫 리로드 실패 시 이전 것 유지).
+    VkPipeline fresh = rc_->createFullscreenPipeline(pass_, 0, "shaders/post.frag.spv", pipeLayout_);
+    if (pipeline_) vkDestroyPipeline(rc_->device, pipeline_, nullptr);
+    pipeline_ = fresh;
 }
 
 void PostPass::destroy() {
@@ -111,17 +113,7 @@ void PostPass::destroy() {
 // ── recordTonemap ──────────────────────────────────────────────────────────────
 void PostPass::recordTonemap(VkCommandBuffer cmd, uint32_t imgIdx,
                              VkImageView hdrView, VkImageView ssaoView,
-                             VkImageView bloomView, VkSampler clampSampler,
-                             bool taaEnabled) {
-    // First frame: transition taaHist to readable layout
-    if (!taaHistValid_) {
-        RenderContext::transitionImage(cmd, taaHistImage_,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_PIPELINE_STAGE_2_NONE,  VK_ACCESS_2_NONE,
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-        taaHistValid_ = true;
-    }
-
+                             VkImageView bloomView, VkSampler clampSampler) {
     VkRenderPassBeginInfo rpbi{};
     rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpbi.renderPass = pass_; rpbi.framebuffer = framebufs_[imgIdx];
@@ -138,61 +130,36 @@ void PostPass::recordTonemap(VkCommandBuffer cmd, uint32_t imgIdx,
     vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &sc);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
 
-    VkDescriptorImageInfo hdrI  { clampSampler, hdrView,      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-    VkDescriptorImageInfo taaI  { clampSampler, taaHistView_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-    VkDescriptorImageInfo ssaoI { clampSampler, ssaoView,     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-    VkDescriptorImageInfo blmI  { clampSampler, bloomView,    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkDescriptorImageInfo hdrI  { clampSampler, hdrView,   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkDescriptorImageInfo ssaoI { clampSampler, ssaoView,  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkDescriptorImageInfo blmI  { clampSampler, bloomView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
 
-    VkWriteDescriptorSet ws[4] = {};
-    for (int i = 0; i < 4; i++) {
+    VkWriteDescriptorSet ws[3] = {};
+    for (int i = 0; i < 3; i++) {
         ws[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         ws[i].dstBinding = (uint32_t)i;
         ws[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         ws[i].descriptorCount = 1;
     }
     ws[0].pImageInfo = &hdrI;
-    ws[1].pImageInfo = &taaI;
-    ws[2].pImageInfo = &ssaoI;
-    ws[3].pImageInfo = &blmI;
-    vkCmdPushDescriptorSet(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout_, 0, 4, ws);
+    ws[1].pImageInfo = &ssaoI;
+    ws[2].pImageInfo = &blmI;
+    vkCmdPushDescriptorSet(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout_, 0, 3, ws);
 
-    // Push constants: aoStrength, bloomStrength, exposure, taaBlend, enabled flags
-    struct PostPC { float aoStr, bloomStr, exposure, taaBlend; float enableAO, enableBloom, enableTAA, pad; };
+    // Push constants: aoStrength, bloomStrength, exposure, enabled flags, encodeSrgb
+    struct PostPC { float aoStr, bloomStr, exposure, enableAO; float enableBloom, encodeSrgb, pad0, pad1; };
+    // sRGB 스왑체인이면 GPU 가 저장할 때 선형 → sRGB 로 바꿉니다. 그때 셰이더가 또 바꾸면 두 번 들어가
+    // 화면이 밝고 흐려졌습니다(DEF-96). UNORM 으로 떨어진 기기에서만 셰이더가 곡선을 적용합니다.
+    const float encodeSrgb = isSrgbFormat(rc_->swapFormat) ? 0.f : 1.f;
     // exposure 는 1.0 이었다. 태양 0.85 + 하늘 1.0 배 조합에서 흰 표면의 선형값이
     // 0.72 여서 ACES 숄더에 얹혀 있었고, 코드값 221 부근에 몰려 평탄해 보였다.
-    // 태양 3.0 / 하늘 0.30 배에 맞춘 값이 0.4 이고, 이때 평면이 코드값 169 로
-    // 중간톤에 앉는다. 셋은 한 세트라서 따로 움직이면 대비가 다시 죽는다.
-    PostPC ppc{ 0.8f, 0.04f, 0.4f, 0.1f, 1.f, 1.f, taaEnabled ? 1.f : 0.f, 0.f };
+    // 태양 3.0 / 하늘 0.30 배에 맞춘 값이 0.4 였고, 이때 평면이 코드값 169 로 중간톤에 앉았다.
+    // 다만 그 0.4 는 감마가 두 번 들어간 화면을 보며 맞춘 값이었다(DEF-96). 감마를 바로잡은 뒤
+    // 같은 목표(흰 평면이 중간톤)로 돌아가는 값이 약 1.0 이라 1.0 으로 둔다(2026-10-04 사용자 결정).
+    // 태양·하늘·노출은 한 세트라서 따로 움직이면 대비가 다시 죽는다.
+    PostPC ppc{ 0.8f, 0.04f, 1.0f, 1.f, 1.f, encodeSrgb, 0.f, 0.f };
     vkCmdPushConstants(cmd, pipeLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, &ppc);
 
     vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndRenderPass(cmd);
-}
-
-// ── recordHistoryBlit ──────────────────────────────────────────────────────────
-// hdrImage는 main pass finalLayout인 SHADER_READ_ONLY 상태로 들어온다.
-void PostPass::recordHistoryBlit(VkCommandBuffer cmd, VkImage hdrImage) {
-    RenderContext::transitionImage(cmd, hdrImage,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
-    RenderContext::transitionImage(cmd, taaHistImage_,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-        VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
-
-    VkImageBlit region{};
-    region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    region.srcOffsets[1]  = { (int32_t)rc_->renderExtent.width, (int32_t)rc_->renderExtent.height, 1 };
-    region.dstSubresource = region.srcSubresource;
-    region.dstOffsets[1]  = region.srcOffsets[1];
-    vkCmdBlitImage(cmd,
-        hdrImage,      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        taaHistImage_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        1, &region, VK_FILTER_LINEAR);
-
-    RenderContext::transitionImage(cmd, taaHistImage_,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
 }

@@ -1,7 +1,6 @@
 #pragma once
 
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -13,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <stdexcept>
+#include <unordered_set>
 
 #include "Vertex.hpp"
 #include "MeshHandle.hpp"
@@ -27,7 +27,6 @@
 #include "passes/ShadowPass.hpp"
 #include "passes/PostPass.hpp"
 #include "passes/GeometryPass.hpp"
-#include "passes/CullPass.hpp"
 #include "../platform/IWindow.hpp"
 #include "../memory/HarukaAllocator.hpp"
 
@@ -70,9 +69,11 @@ public:
     // UI 패스는 아예 측정되지 않고 있었습니다 (ts[5] 를 기록만 하고 읽지 않았습니다).
     struct GpuTimings {
         float shadowMs=0.f, mainMs=0.f, aoMs=0.f, bloomMs=0.f,
-              tonemapMs=0.f, taaBlitMs=0.f, uiMs=0.f, totalMs=0.f;
+              tonemapMs=0.f, uiMs=0.f, totalMs=0.f;
     };
-    struct FrameStats  { uint32_t drawCalls=0, culled=0, transparentDraws=0; };
+    // dropped = 카메라에 보이지만 행 예산(kMaxDraws)이 차서 그리지 못한 메시 수. culled 와 따로
+    // 셉니다. 예전에는 조용히 잘린 메시가 culled 에 섞여 보였습니다(DEF-10).
+    struct FrameStats  { uint32_t drawCalls=0, culled=0, transparentDraws=0, dropped=0; };
 
     void init(IWindow* window);
     void cleanup();
@@ -154,7 +155,7 @@ private:
     // ── Bloom ─────────────────────────────────────────────────────────────────
     BloomPass bloom_;
 
-    // ── Post-process (+ TAA history) ──────────────────────────────────────────
+    // ── Post-process (ACES 톤매핑 + AO/블룸 합성) ─────────────────────────────
     PostPass post_;
 
     // ── IBL ───────────────────────────────────────────────────────────────────
@@ -173,8 +174,12 @@ private:
     // ── 자산 GPU 자원 (메가버퍼 + 텍스처 슬롯) ────────────────────────────────
     GpuScene scene_;
 
-    // ── GPU-driven culling ────────────────────────────────────────────────────
-    CullPass cull_;
+    // 머티리얼이 없는 메시를 그릴 때 쓰는 오류 머티리얼(자홍색, 스스로 빛남). 빠진 메시가 눈에
+    // 띄도록 일부러 튀는 색입니다. 엔진이 그럴듯한 값을 대신 채우지 않는다는 정책과 같은
+    // 방향입니다(DEF-28). 액터마다 한 번만 경고합니다.
+    MaterialHandle*              errorMaterial_ = nullptr;
+    std::unordered_set<uint64_t> noMaterialWarned_;
+    bool                         dropWarned_    = false;   // kMaxDraws 초과 경고(한 번)
 
     // ── FFR (Fixed Foveated Rendering) ────────────────────────────────────────
     bool             ffrEnabled_    = false;
@@ -189,8 +194,8 @@ private:
     VkPipelineCache pipelineCache_   = VK_NULL_HANDLE;
     // 프레임당 타임스탬프 슬롯 수입니다. 배치는 Renderer_render.cpp 의 drawFrame 참조.
     //   0 frame start / 1 shadow / 2 main(3서브패스+resolve) / 3 AO / 4 Bloom
-    //   5 tonemap / 6 TAA blit / 7 UI
-    static constexpr uint32_t kTimestampsPerFrame = 8;
+    //   5 tonemap / 6 UI
+    static constexpr uint32_t kTimestampsPerFrame = 7;
     VkQueryPool     timestampPool_   = VK_NULL_HANDLE;
     float           timestampPeriod_ = 1.f;
     GpuTimings      timings_;
@@ -203,7 +208,7 @@ private:
     // ── Frame counters ────────────────────────────────────────────────────────
     VkCommandPool cmdPool   = VK_NULL_HANDLE;
     uint32_t      frameIdx  = 0;
-    uint32_t      frameNum_ = 0;  // monotonically increasing frame counter (for TAA)
+    uint32_t      frameNum_ = 0;  // monotonically increasing frame counter
     float         time_     = 0.f;
 
     // ── 섀도 캐스터 선택 (DEF-26) ─────────────────────────────────────────────
@@ -240,13 +245,13 @@ private:
     // Resize
     void cleanupSwapChain();
     void recreateSwapChain();
-    // 스왑체인은 그대로 두고 renderExtent 의존 씬 타깃(HDR·깊이·AO·Bloom·TAA 히스토리)만
+    // 스왑체인은 그대로 두고 renderExtent 의존 씬 타깃(HDR·깊이·AO·Bloom)만
     // 재생성합니다. setViewportRect 가 뷰포트 변경을 감지했을 때 호출합니다.
     void recreateRenderTargets();
 
     // ── RenderView — 한 프레임의 렌더 입력 스냅샷 (docs/RendererRefactor.md §4) ──
     // extractRenderView()가 World를 읽는 유일한 지점. 이후 패스 기록은 view만 소비한다.
-    // v1: 추출 과정에서 프레임별 mapped 버퍼(UBO/라이트/트랜스폼/스피어) 업로드까지 수행.
+    // v1: 추출 과정에서 프레임별 mapped 버퍼(UBO/라이트/트랜스폼) 업로드까지 수행.
     //     시뮬레이션/렌더 스레드 분리 시 업로드를 기록 측으로 옮기면 된다.
     struct RenderView {
         std::vector<GpuDrawCmd>             opaqueDraws;
@@ -261,19 +266,7 @@ private:
         // 드로우 커맨드에서 O(1)로 머티리얼을 역참조할 수 있다. buildDrawCommands가
         // 행을 할당하는 바로 그 지점에서 채우므로 두 목록이 어긋날 수 없다.
         std::vector<const MaterialHandle*>  materialRows;
-        // GPU 컬링 입력. opaqueDraws와 **같은 인덱스 규칙**(opaque 목록 위치)을 쓴다.
-        // cull.comp가 spheres[id]와 inDraws[id]를 같은 id로 읽으므로 두 배열은
-        // 반드시 나란히 push되어야 한다. 전역 행 번호로 인덱싱하면 투명 메시가
-        // 앞 행을 차지하는 순간 어긋난다.
-        std::vector<GpuBoundSphere>         opaqueSpheres;
         AOPass::CameraParams                aoCam;
-        // 컬링에 쓰는 view-projection.
-        // ★ VR 확장 지점: 지금은 단안이라 viewProj[0]을 그대로 쓰지만, 스테레오에서는
-        //   **좌우 두 절두체를 모두 감싸는 합집합**에서 뽑아야 한다. 한쪽 눈 기준으로
-        //   컬링하면 반대쪽 눈에만 물체가 사라져 양안 경합이 생긴다.
-        //   Quest Pro는 디스플레이가 기울어져 두 절두체가 평행하지 않으므로, 한쪽을
-        //   좌우로 넓히는 근사는 쓸 수 없다. 상세는 Docs/Core_Defects_Task_Spec.md 참조.
-        glm::mat4                           cullViewProj{1.f};
     };
     RenderView extractRenderView(World& world);
 
@@ -290,7 +283,6 @@ private:
                           std::vector<GpuDrawCmd>& opaqueOut,
                           std::vector<GpuDrawCmd>& transpOut,
                           std::vector<const MaterialHandle*>& materialRowsOut,
-                          std::vector<GpuBoundSphere>& opaqueSpheresOut,
                           std::vector<GpuDrawCmd>& shadowOut);
 
     // Low-level helpers — RenderContext로 위임 (1단계 마이그레이션)

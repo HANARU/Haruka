@@ -12,6 +12,17 @@
 // 워처 스레드에서도 로그를 남깁니다. HLOG 는 어느 스레드에서나 안전합니다(Threading.md 규칙 4).
 static constinit HLogCategory LogHotReload{ "HotReload", ELogVerbosity::Log };
 
+static int64_t nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+bool HotReloader::reloadPending() {
+    if (!pending_.load(std::memory_order_acquire)) return false;
+    if (nowMs() - lastChangeMs_.load(std::memory_order_acquire) < kQuietMs) return false;
+    return pending_.exchange(false, std::memory_order_acq_rel);
+}
+
 void HotReloader::start(const std::string& watchDir, Renderer& renderer) {
     renderer_ = &renderer;
     watchDir_ = watchDir;
@@ -64,23 +75,31 @@ void HotReloader::watchLoop() {
 
         if (!GetOverlappedResult(hDir, &ov, &returned, FALSE)) continue;
 
-        // Scan notification records for .spv changes
-        const FILE_NOTIFY_INFORMATION* info =
-            reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buf);
         bool changed = false;
-        do {
-            std::wstring wname(info->FileName, info->FileNameLength / sizeof(wchar_t));
-            if (wname.size() >= 4 &&
-                wname.compare(wname.size() - 4, 4, L".spv") == 0) {
-                changed = true;
-            }
-            if (info->NextEntryOffset == 0) break;
-            info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(
-                reinterpret_cast<const char*>(info) + info->NextEntryOffset);
-        } while (true);
+        if (returned == 0) {
+            // 버퍼가 넘쳐 OS 가 변경 목록을 버렸습니다. 무엇이 바뀌었는지 모르므로 변경으로 칩니다.
+            // 예전에는 이때 지난번 버퍼 내용을 다시 읽었습니다.
+            changed = true;
+        } else {
+            // Scan notification records for .spv changes
+            const FILE_NOTIFY_INFORMATION* info =
+                reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buf);
+            do {
+                std::wstring wname(info->FileName, info->FileNameLength / sizeof(wchar_t));
+                if (wname.size() >= 4 &&
+                    wname.compare(wname.size() - 4, 4, L".spv") == 0) {
+                    changed = true;
+                }
+                if (info->NextEntryOffset == 0) break;
+                info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(
+                    reinterpret_cast<const char*>(info) + info->NextEntryOffset);
+            } while (true);
+        }
 
         if (changed) {
-            HLOG(LogHotReload, Log) << "Shader change detected - reload queued";
+            if (!pending_.load(std::memory_order_acquire))
+                HLOG(LogHotReload, Log) << "Shader change detected - reload queued";
+            lastChangeMs_.store(nowMs(), std::memory_order_release);
             pending_.store(true, std::memory_order_release);
         }
     }

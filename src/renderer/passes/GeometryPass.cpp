@@ -1,7 +1,9 @@
 #include "GeometryPass.hpp"
 #include "../Vertex.hpp"
 #include "../MaterialHandle.hpp"
+#include <cassert>
 #include <cstring>
+#include <iterator>
 #include <stdexcept>
 
 // ── Helper: push material descriptor (set 3) ─────────────────────────────────
@@ -484,8 +486,20 @@ void GeometryPass::destroyPipelines() {
 }
 
 void GeometryPass::rebuildPipelines() {
-    destroyPipelines();
-    createPipelines();
+    // 새 파이프라인을 다 만든 뒤에만 옛 것을 지웁니다. 하나라도 실패하면 새로 만든 것만 지우고
+    // 옛 것을 되돌려, 핫 리로드가 실패해도 이전 파이프라인으로 계속 그립니다.
+    VkPipeline* slots[] = { &depthPipeline_, &opaquePipeline_, &transparentBackPipeline_,
+                            &transparentFrontPipeline_, &linePipeline_, &triPipeline_ };
+    VkPipeline old[std::size(slots)];
+    for (size_t i = 0; i < std::size(slots); ++i) { old[i] = *slots[i]; *slots[i] = VK_NULL_HANDLE; }
+    try { createPipelines(); }
+    catch (...) {
+        destroyPipelines();
+        for (size_t i = 0; i < std::size(slots); ++i) *slots[i] = old[i];
+        throw;
+    }
+    for (VkPipeline p : old)
+        if (p) vkDestroyPipeline(rc_->device, p, nullptr);
 }
 
 void GeometryPass::destroy() {
@@ -543,10 +557,16 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& 
         vkCmdBindIndexBuffer(cmd, in.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
     }
 
+    // 머티리얼이 null 인 항목은 세 서브패스 모두에서 건너뜁니다. 컬러 패스에서만 빼면 깊이만
+    // 남아 뒤에 있는 물체를 가립니다(DEF-28). Renderer 가 오류 머티리얼로 바꿔 넣으므로 정상
+    // 경로에서는 일어나지 않습니다.
     if (in.opaqueItems) {
-        for (const auto& item : *in.opaqueItems)
+        for (const auto& item : *in.opaqueItems) {
+            assert(item.material && "DrawItem without material");
+            if (!item.material) continue;
             vkCmdDrawIndexed(cmd, item.indexCount, 1, item.firstIndex,
                              item.vertexOffset, item.firstInstance);
+        }
     }
 
     // — Subpass 1: Opaque PBR (CPU draws with push descriptors) ———————————————
@@ -563,9 +583,9 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& 
 
     if (in.opaqueItems) {
         for (const auto& item : *in.opaqueItems) {
-            if (item.material)
-                pushMaterialDesc(cmd, pbrLayout_, item.material,
-                                 in.textureSampler, in.clampSampler);
+            if (!item.material) continue;
+            pushMaterialDesc(cmd, pbrLayout_, item.material,
+                             in.textureSampler, in.clampSampler);
             vkCmdDrawIndexed(cmd, item.indexCount, 1, item.firstIndex,
                              item.vertexOffset, item.firstInstance);
         }
@@ -588,9 +608,10 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& 
 
         auto drawAll = [&]{
             for (const auto& item : *in.transparentItems) {
-                if (item.material)
-                    pushMaterialDesc(cmd, pbrLayout_, item.material,
-                                     in.textureSampler, in.clampSampler);
+                assert(item.material && "DrawItem without material");
+                if (!item.material) continue;
+                pushMaterialDesc(cmd, pbrLayout_, item.material,
+                                 in.textureSampler, in.clampSampler);
                 vkCmdDrawIndexed(cmd, item.indexCount, 1, item.firstIndex,
                                  item.vertexOffset, item.firstInstance);
             }

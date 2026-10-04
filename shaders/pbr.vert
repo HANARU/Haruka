@@ -1,4 +1,6 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "haruka_shared.h"
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -12,17 +14,8 @@ layout(location = 3) out vec3 fragB;
 layout(location = 4) out vec3 fragN;
 layout(location = 5) out vec4 fragShadowCoord;
 
-layout(set = 0, binding = 0) uniform FrameUBO {
-    mat4 viewProj[2];
-    mat4 lightViewProj;
-    mat4 prevViewProj;
-    vec4 cameraPos;     // xyz=pos, w=nearPlane
-    vec4 screenParams;  // xy=screenSize, z=farPlane, w=aoStrength
-    vec4 timeParams;    // x=time, y=frame, z=bloomThreshold, w=exposure
-    ivec4 miscParams;   // x=lightCount, y=taaFrame, z=ssaoEnabled, w=shadowLightIndex(<0=none)
-} ubo;
+layout(set = 0, binding = 0) uniform FrameBlock { FrameUBO ubo; };
 
-struct GpuTransform { mat4 model; };
 layout(set = 2, binding = 0) readonly buffer TransformBuffer {
     GpuTransform transforms[];
 };

@@ -3,7 +3,6 @@
 #include <functional>
 
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 
 // ── Alignment enums ───────────────────────────────────────────────────────────
@@ -55,7 +54,18 @@ struct HPointerEvent {
     int       button     = -1;  // -1=none, 0=left, 1=right, 2=middle
     bool      down       = false;
     float     wheelDelta = 0.f;
+    // 이벤트를 만들 때의 수정 키 상태(좌우 구분 없음). 숫자 칸 끌기 배율에 씁니다(DEF-46).
+    bool      shift      = false;
+    bool      ctrl       = false;
 };
+
+// 잘라 낸 영역 밖의 이동을 자식에게 알릴 때 쓰는 이벤트입니다. 좌표가 어떤 위젯에도 들지
+// 않아, 자식들은 호버를 풀되 잘려 보이지 않는 자리에서 호버를 켜지 않습니다(DEF-56).
+// 버튼 상태(down)는 그대로 실어, 눌림 정리 규칙은 같게 동작합니다.
+inline HPointerEvent HOutsideEvent(HPointerEvent e) {
+    e.position = { -1.0e9f, -1.0e9f };
+    return e;
+}
 
 // ── 글리프 정보 (폰트 아틀라스) ──────────────────────────────────────────────
 struct HGlyphInfo {

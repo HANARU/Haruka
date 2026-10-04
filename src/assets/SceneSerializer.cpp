@@ -10,7 +10,6 @@
 #include "../components/AudioComponent.hpp"
 #include "../components/RigidBodyComponent.hpp"
 
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -238,6 +237,14 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
         lc->intensity       = d.lightIntensity;
         lc->lightType       = static_cast<LightType>(d.lightType);
         lc->attenuationRadius = d.lightRange;
+        // 반경은 0 보다 커야 합니다(DEF-35). Point·Spot 에서 0 이하(또는 NaN)가 들어오면
+        // 최솟값으로 고치고 알립니다. Directional 은 반경을 쓰지 않으므로 조용히 고칩니다.
+        if (!(lc->attenuationRadius >= LightComponent::kMinAttenuationRadius)) {
+            if (lc->lightType != LightType::Directional)
+                HLOG(LogScene, Warning) << "Light on '" << a->name << "' has attenuation radius "
+                    << d.lightRange << "; clamped to " << LightComponent::kMinAttenuationRadius << " m";
+            lc->attenuationRadius = LightComponent::kMinAttenuationRadius;
+        }
         lc->innerConeAngle  = d.lightSpotInner;
         lc->outerConeAngle  = d.lightSpotOuter;
         lc->direction       = d.lightDir;

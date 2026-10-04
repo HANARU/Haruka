@@ -1,5 +1,6 @@
 #pragma once
 #include "../HWidget.hpp"
+#include <functional>
 
 // ── SBorder ───────────────────────────────────────────────────────────────────
 // 단색 배경 + 선택적 테두리를 가진 단일 자식 컨테이너.
@@ -25,6 +26,18 @@ public:
     }
     std::shared_ptr<SBorder> vAlign(EVAlign a) {
         vAlign_ = a; return self();
+    }
+    // 자식이 이 테두리 밖으로 그려지지 않게 자릅니다(DEF-56). 도크 리프가 패널 내용을 자르는
+    // 데 씁니다. 자르는 테두리는 영역 밖의 이동을 자식에게 "바깥" 으로 알려, 잘려 보이지 않는
+    // 자리에서 호버가 켜지지 않게 합니다(누름과 휠은 원래 영역 안에서만 받습니다).
+    std::shared_ptr<SBorder> clipChildren(bool c) {
+        clip_ = c; return self();
+    }
+    // 휠 처리기. 자식이 받지 않은 휠이 이 테두리 위에서 굴려지면 부르고, 참을 돌려주면 받은
+    // 것으로 칩니다(DEF-57). 보이는 행만 위젯으로 만드는 목록(아웃라이너·Output Log)처럼
+    // 스크롤 상자 대신 스스로 스크롤하는 곳이 씁니다.
+    std::shared_ptr<SBorder> onWheel(std::function<bool(float)> fn) {
+        onWheel_ = std::move(fn); return self();
     }
 
     glm::vec2 computeDesiredSize() override {
@@ -54,8 +67,11 @@ public:
             ctx.drawRect(geo, bgColor_);
         if (borderThick_ > 0.f && borderColor_.a > 0.f)
             ctx.drawBorder(geo, borderColor_, borderThick_);
-        if (child_ && child_->isVisible())
+        if (child_ && child_->isVisible()) {
+            if (clip_) ctx.pushClip(geo);
             child_->paint(ctx, child_->cachedGeometry());
+            if (clip_) ctx.popClip();
+        }
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
@@ -65,7 +81,16 @@ public:
         return child_ ? child_->onMouseButton(e) : HReply::Unhandled();
     }
     HReply onMouseMove(const HPointerEvent& e) override {
-        return child_ ? child_->onMouseMove(e) : HReply::Unhandled();
+        if (!child_) return HReply::Unhandled();
+        if (clip_ && !cachedGeo_.contains(e.position)) return child_->onMouseMove(HOutsideEvent(e));
+        return child_->onMouseMove(e);
+    }
+    HReply onScroll(const HPointerEvent& e) override {
+        if (!cachedGeo_.contains(e.position)) return HReply::Unhandled();
+        if (child_)
+            if (auto r = child_->onScroll(e); r.handled) return r;
+        if (onWheel_ && onWheel_(e.wheelDelta)) return HReply::Handled();
+        return HReply::Unhandled();
     }
 
 private:
@@ -76,6 +101,8 @@ private:
     HPadding  padding_     {};
     EHAlign   hAlign_      = EHAlign::Fill;
     EVAlign   vAlign_      = EVAlign::Fill;
+    bool      clip_        = false;
+    std::function<bool(float)> onWheel_;
 
     std::shared_ptr<SBorder> self() {
         return std::static_pointer_cast<SBorder>(shared_from_this());

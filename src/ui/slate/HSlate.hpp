@@ -20,3 +20,4 @@
 #include "widgets/SCollapseSection.hpp"
 #include "widgets/STabBar.hpp"
 #include "widgets/SSearchBox.hpp"
+#include "widgets/SScrollBox.hpp"

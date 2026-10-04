@@ -24,7 +24,9 @@ public:
 
     // CPU 드로우 항목 (머티리얼 푸시 디스크립터 포함)
     struct DrawItem {
-        const MaterialHandle* material;     // null이면 머티리얼 푸시 생략
+        // 항상 유효합니다. 머티리얼이 없는 메시는 Renderer 가 오류 머티리얼로 바꿔 넣습니다.
+        // 그래도 null 이 오면 세 서브패스 모두 그 항목을 건너뜁니다(DEF-28).
+        const MaterialHandle* material;
         uint32_t indexCount;
         uint32_t firstIndex;
         int32_t  vertexOffset;
@@ -35,11 +37,7 @@ public:
         VkDescriptorSet frameSet, sceneSet, transformSet;
         VkBuffer        vertexBuffer, indexBuffer;
         VkSampler       textureSampler, clampSampler;
-        // GPU indirect (subpass 0 depth pre-pass)
-        VkBuffer        opaqueDrawBuf  = VK_NULL_HANDLE;
-        VkBuffer        opaqueCountBuf = VK_NULL_HANDLE;
-        bool            hasOpaque      = false;
-        // CPU 드로우 (subpass 1/2)
+        // CPU 드로우 (subpass 0/1 은 opaqueItems, subpass 2 는 transparentItems)
         const std::vector<DrawItem>* opaqueItems      = nullptr;
         const std::vector<DrawItem>* transparentItems = nullptr;
     };

@@ -36,7 +36,13 @@ public:
     bool      useTemperature = false;
     float     temperatureK   = 6500.f;
 
-    // UE: Attenuation Radius — Point/Spot 의 도달 반경(감쇠식·컬링 경계). Directional 은 무시.
+    // UE: Attenuation Radius — Point/Spot 의 도달 반경. Directional 은 무시.
+    // 2026-10-04 부터 밝기는 실제 점광원처럼 거리의 역제곱으로 줄고(intensity = 1m 거리의 밝기,
+    // 2m 면 1/4), 이 반경은 밝기를 정하지 않고 꼬리를 0 으로 부드럽게 자르는 지점입니다(pbr.frag).
+    // 0 이하는 허용하지 않습니다. 예전에는 0 이면 라이트가 꺼지고 음수면 감쇠 없이 무한히
+    // 비췄는데, 주석은 "0=무한" 이라고 적혀 있었습니다(DEF-35). UE·Unity·Godot 모두 반경을
+    // 0 보다 크게 강제합니다. UI·씬 불러오기·GPU 업로드 세 곳이 이 최솟값을 씁니다.
+    static constexpr float kMinAttenuationRadius = 0.01f;   // 1 cm
     float     attenuationRadius = 10.f;
     // UE: Inner/Outer Cone Angle(도) — Spot 원뿔. Inner 안쪽은 최대, Outer 바깥은 0 으로 페이드.
     float     innerConeAngle = 15.f;

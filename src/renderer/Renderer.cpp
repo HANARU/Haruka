@@ -2,6 +2,7 @@
 #include "../core/World.hpp"
 #include "../ui/slate/HSlateRenderer.hpp"
 #include "../assets/GltfLoader.hpp"
+#include "../assets/MeshSource.hpp"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
 #include <glm/gtc/random.hpp>
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <set>
 #include <fstream>
+#include <filesystem>
 #include <algorithm>
 #include <random>
 
@@ -97,6 +99,15 @@ void Renderer::init(IWindow* win) {
     ao_.create(rc_);               // 노이즈 텍스처/커널 UBO 등 영구 자원만
     generateBRDFLUT();             // ~1 MB — needs cmdPool + pipelineCache only
     generateIBLCubemaps();         // ~7 MB
+    // 오류 머티리얼(DEF-28): 머티리얼이 없는 메시를 자홍색으로 그립니다. 알베도와 이미시브를
+    // 모두 자홍색으로 두어 조명과 상관없이 눈에 띕니다. 영구 자원이라 크기 의존 할당보다 먼저.
+    {
+        TexSourceData magenta;
+        magenta.data    = { 255, 0, 255, 255 };
+        magenta.w       = magenta.h = 1;
+        magenta.hasData = true;
+        errorMaterial_ = scene_.uploadMaterial(magenta, {}, {}, {}, magenta);
+    }
     geometry_.create(rc_, frames_.pbrLayout(), frames_.frameLayout());  // main pass + 라인 버퍼
 
     // Swapchain-size resources (allocated above the permanent block)
@@ -104,10 +115,8 @@ void Renderer::init(IWindow* win) {
     ao_.acquireSizeDependent();
     bloom_.create(rc_);
 
-    // Post + culling (cull_.create는 createAllPipelines의 rebuildPipelines보다 선행 필수)
     post_.create(rc_);
     post_.acquire(swapchain_->imageViews());
-    cull_.create(rc_);
     createAllPipelines();
 
     // 프레임별 버퍼/디스크립터/커맨드/동기화 (Zone C)
@@ -140,7 +149,7 @@ void Renderer::cleanup() {
     // AO (linDepth + SSAO)
     ao_.destroy();
 
-    // Post (+ TAA history)
+    // Post
     post_.destroy();
 
     // Shadow
@@ -149,8 +158,8 @@ void Renderer::cleanup() {
     // Geometry (main pass + MSAA/depth/HDR + 라인)
     geometry_.destroy();
 
-    // Culling + mega buffers
-    cull_.destroy();
+    // Error material + mega buffers
+    if (errorMaterial_) { scene_.freeMaterial(errorMaterial_); errorMaterial_ = nullptr; }
     scene_.destroy();
 
     cleanupSwapChain();
@@ -596,14 +605,12 @@ void Renderer::createLogicalDevice() {
     VkPhysicalDeviceMultiviewFeatures multiviewFeat{};
     multiviewFeat.sType     = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
     multiviewFeat.multiview = VK_TRUE;
-    VkPhysicalDeviceVulkan12Features vk12Feat{};
-    vk12Feat.sType              = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vk12Feat.drawIndirectCount  = VK_TRUE;
-    vk12Feat.pNext              = &multiviewFeat;
+    // drawIndirectCount 는 요구하지 않습니다. GPU 컬링(유일한 사용처)을 지웠고, 이 기능이 없는
+    // 기기에서는 장치 생성부터 실패합니다(DEF-03).
     VkPhysicalDeviceVulkan13Features vk13Feat{};
     vk13Feat.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     vk13Feat.synchronization2 = VK_TRUE;
-    vk13Feat.pNext            = &vk12Feat;
+    vk13Feat.pNext            = &multiviewFeat;
     VkPhysicalDeviceVulkan14Features vk14Feat{};
     vk14Feat.sType          = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
     vk14Feat.pushDescriptor = VK_TRUE;
@@ -618,10 +625,8 @@ void Renderer::createLogicalDevice() {
     ci.pEnabledFeatures        = &feat;
     ci.enabledExtensionCount   = (uint32_t)kDeviceExtensions.size();
     ci.ppEnabledExtensionNames = kDeviceExtensions.data();
-    if (kEnableValidation) {
-        ci.enabledLayerCount   = (uint32_t)kValidationLayers.size();
-        ci.ppEnabledLayerNames = kValidationLayers.data();
-    }
+    // 장치 레이어는 지정하지 않습니다. 현재 사양은 enabledLayerCount 를 0 으로 두도록 정하고,
+    // 검증 레이어는 인스턴스에서 켠 것이 장치에도 적용됩니다(DEF-29).
     if (vkCreateDevice(physDevice, &ci, nullptr, &device) != VK_SUCCESS)
         throw std::runtime_error("Failed to create logical device!");
     vkGetDeviceQueue(device, idx.graphics.value(), 0, &graphicsQueue);
@@ -734,8 +739,8 @@ void Renderer::createTimestampPool() {
     VkQueryPoolCreateInfo ci{};
     ci.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
     ci.queryType  = VK_QUERY_TYPE_TIMESTAMP;
-    // 프레임당 8 개입니다. AO 와 Bloom 을 한 덩어리로 재던 것을 쪼개고,
-    // TAA 히스토리 블릿과 UI 패스를 각각 볼 수 있게 늘렸습니다.
+    // 프레임당 kTimestampsPerFrame(7) 개입니다. AO 와 Bloom 을 한 덩어리로 재던 것을 쪼개고
+    // UI 패스를 따로 볼 수 있게 늘렸습니다. 쓰지 않던 TAA 블릿 칸은 2026-10-04 에 뺐습니다.
     ci.queryCount = MAX_FRAMES * kTimestampsPerFrame;
     if (vkCreateQueryPool(device, &ci, nullptr, &timestampPool_) != VK_SUCCESS)
         throw std::runtime_error("Failed to create timestamp pool!");
@@ -750,8 +755,42 @@ void Renderer::setUIRenderer(HSlateRenderer* r) {
 
 // ── Hot reload ────────────────────────────────────────────────────────────────
 
+// 다시 읽기 전에 .spv 가 온전한지 봅니다. 복사가 끝나기 전에 감시 스레드가 알리면 덜 쓴 파일이
+// 들어오는데, 예전에는 그 파일로 파이프라인을 만들다 예외가 나 에디터가 종료됐습니다.
+static bool spirvLooksValid(const std::filesystem::path& p, std::string& why) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(p, ec);
+    if (ec || size < 20 || size % 4 != 0) {
+        why = "size " + std::to_string(ec ? 0 : size);
+        return false;
+    }
+    std::ifstream f(p, std::ios::binary);
+    uint32_t magic = 0;
+    if (!f.read(reinterpret_cast<char*>(&magic), sizeof(magic)) || magic != 0x07230203u) {
+        why = "bad magic";
+        return false;
+    }
+    return true;
+}
+
 void Renderer::reloadPipelines() {
+    std::error_code ec;
+    for (const auto& e : std::filesystem::directory_iterator("shaders", ec)) {
+        if (e.path().extension() != ".spv") continue;
+        std::string why;
+        if (!spirvLooksValid(e.path(), why)) {
+            HLOG(LogRenderer, Warning) << "Shader reload skipped: " << e.path().filename().string()
+                                       << " is not valid SPIR-V yet (" << why << ")";
+            return;
+        }
+    }
     vkDeviceWaitIdle(device);
-    createAllPipelines();
-    HLOG(LogRenderer, Log) << "Pipelines hot-reloaded.";
+    try {
+        createAllPipelines();
+        HLOG(LogRenderer, Log) << "Pipelines hot-reloaded.";
+    } catch (const std::exception& ex) {
+        // 각 패스는 새 파이프라인을 다 만든 뒤에만 옛 것을 지우므로, 실패한 패스는 이전
+        // 파이프라인으로 계속 그립니다.
+        HLOG(LogRenderer, Error) << "Shader reload failed, keeping previous pipelines: " << ex.what();
+    }
 }

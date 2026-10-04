@@ -65,15 +65,17 @@ bool GlfwWindow::shouldClose() const {
 }
 
 void GlfwWindow::pollEvents() {
-    // 걸쇠는 이번 폴링에서 들어올 누름만 담아야 합니다. 비우고 나서 이벤트를 받습니다.
+    // 걸쇠와 누름 횟수는 이번 폴링에서 들어올 이벤트만 담아야 합니다. 비우고 나서 받습니다.
     std::fill(std::begin(keyLatch_), std::end(keyLatch_), false);
     std::fill(std::begin(buttonLatch_), std::end(buttonLatch_), false);
+    std::fill(std::begin(keyPresses_), std::end(keyPresses_), uint8_t(0));
     glfwPollEvents();
 }
 
 void GlfwWindow::waitEvents() {
     std::fill(std::begin(keyLatch_), std::end(keyLatch_), false);
     std::fill(std::begin(buttonLatch_), std::end(buttonLatch_), false);
+    std::fill(std::begin(keyPresses_), std::end(keyPresses_), uint8_t(0));
     glfwWaitEvents();
 }
 
@@ -175,6 +177,10 @@ bool GlfwWindow::isKeyDown(int key) const {
     return glfwGetKey(window, key) == GLFW_PRESS;
 }
 
+int GlfwWindow::keyPressCount(int key) const {
+    return (key >= 0 && key <= GLFW_KEY_LAST) ? keyPresses_[key] : 0;
+}
+
 bool GlfwWindow::isMouseButtonDown(int button) const {
     if (button >= 0 && button <= GLFW_MOUSE_BUTTON_LAST && buttonLatch_[button]) return true;
     return glfwGetMouseButton(window, button) == GLFW_PRESS;
@@ -267,11 +273,14 @@ static std::string keyLabel(int key) {
 }
 
 void GlfwWindow::keyCallback(GLFWwindow* w, int key, int /*scancode*/, int action, int /*mods*/) {
+    auto self = reinterpret_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
+    const bool known = (key >= 0 && key <= GLFW_KEY_LAST);
+    // 누름과 OS 자동 반복을 셉니다. 예전에는 반복을 여기서 버려, 백스페이스를 누르고 있어도
+    // 한 글자만 지워졌습니다(DEF-58). 키 상태(걸쇠)와 로그에는 반복을 넣지 않습니다.
+    if (known && (action == GLFW_PRESS || action == GLFW_REPEAT) && self->keyPresses_[key] < 255)
+        ++self->keyPresses_[key];
     if (action == GLFW_REPEAT) return;
-    if (action == GLFW_PRESS && key >= 0 && key <= GLFW_KEY_LAST) {
-        auto self = reinterpret_cast<GlfwWindow*>(glfwGetWindowUserPointer(w));
-        self->keyLatch_[key] = true;
-    }
+    if (action == GLFW_PRESS && known) self->keyLatch_[key] = true;
 
     // Esc 는 다른 키와 똑같이 흘려보냅니다. 예전에는 여기서 곧바로 창을 닫았는데,
     // 저장 여부를 묻는 경로가 없어 편집 중이던 씬이 그대로 사라졌습니다. 에디터에서

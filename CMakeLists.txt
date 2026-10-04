@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 project(HarukaEngine VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -89,8 +89,14 @@ find_program(GLSLC glslc
 
 set(SHADER_SRC_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_BIN_DIR  ${CMAKE_CURRENT_BINARY_DIR}/shaders)
-file(MAKE_DIRECTORY ${SHADER_BIN_DIR})
+# glslc 의존성 파일(.d)은 실행 폴더로 복사되는 SHADER_BIN_DIR 밖에 둡니다.
+set(SHADER_DEP_DIR  ${CMAKE_CURRENT_BINARY_DIR}/shader_deps)
+# 실행 파일 옆 shaders/ (핫 리로드 감시 폴더). 셰이더 명령이 바뀐 .spv 를 바로 복사하므로
+# Shaders 타깃만 빌드해도 실행 중인 에디터가 다시 읽습니다.
+set(SHADER_RUN_DIR  $<TARGET_FILE_DIR:HarukaEngine>/shaders)
+file(MAKE_DIRECTORY ${SHADER_BIN_DIR} ${SHADER_DEP_DIR})
 
+# 셰이더 목록은 직접 적습니다. 목록에 없는 셰이더 파일은 컴파일되지 않으므로 구성 단계에서 경고합니다.
 set(GLSL_SHADERS
     shadow.vert shadow.frag
     depth.vert  depth.frag
@@ -107,27 +113,28 @@ set(GLSL_SHADERS
     line.vert   line.frag
 )
 
+file(GLOB SHADER_FILES_ON_DISK RELATIVE ${SHADER_SRC_DIR}
+    ${SHADER_SRC_DIR}/*.vert ${SHADER_SRC_DIR}/*.frag ${SHADER_SRC_DIR}/*.comp)
+foreach(F ${SHADER_FILES_ON_DISK})
+    if(NOT F IN_LIST GLSL_SHADERS)
+        message(WARNING "shaders/${F} is not in GLSL_SHADERS and will not be compiled")
+    endif()
+endforeach()
+
+# DEPFILE: glslc -MD 가 셰이더가 #include 한 파일 목록을 쓰고, CMake 가 그 목록으로 다시
+# 컴파일 여부를 정합니다(Visual Studio 생성기는 CMake 3.21 부터 지원). 이것이 없으면 include
+# 파일만 고쳤을 때 아무것도 다시 컴파일되지 않아 낡은 SPIR-V 가 배포됩니다(DEF-11).
 foreach(SHADER ${GLSL_SHADERS})
     set(IN  ${SHADER_SRC_DIR}/${SHADER})
     set(OUT ${SHADER_BIN_DIR}/${SHADER}.spv)
+    set(DEP ${SHADER_DEP_DIR}/${SHADER}.d)
     add_custom_command(
         OUTPUT  ${OUT}
-        COMMAND ${GLSLC} ${IN} -I ${SHADER_SRC_DIR}/include -o ${OUT}
+        COMMAND ${GLSLC} -MD -MF ${DEP} ${IN} -I ${SHADER_SRC_DIR}/include -o ${OUT}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_RUN_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OUT} ${SHADER_RUN_DIR}/${SHADER}.spv
         DEPENDS ${IN}
-        COMMENT "glslc -> ${SHADER}.spv"
-    )
-    list(APPEND SPIRV_OUTPUTS ${OUT})
-endforeach()
-
-# Compute shaders (no -fshader-stage flag needed, glslc detects .comp)
-set(COMP_SHADERS cull.comp)
-foreach(SHADER ${COMP_SHADERS})
-    set(IN  ${SHADER_SRC_DIR}/${SHADER})
-    set(OUT ${SHADER_BIN_DIR}/${SHADER}.spv)
-    add_custom_command(
-        OUTPUT  ${OUT}
-        COMMAND ${GLSLC} ${IN} -I ${SHADER_SRC_DIR}/include -o ${OUT}
-        DEPENDS ${IN}
+        DEPFILE ${DEP}
         COMMENT "glslc -> ${SHADER}.spv"
     )
     list(APPEND SPIRV_OUTPUTS ${OUT})
@@ -167,7 +174,6 @@ set(CORE_SOURCES
     src/renderer/passes/ShadowPass.cpp
     src/renderer/passes/PostPass.cpp
     src/renderer/passes/GeometryPass.cpp
-    src/renderer/passes/CullPass.cpp
     src/geometry/PrimitiveDesc.cpp
     src/geometry/PrimitiveBuilder.cpp
     src/assets/GltfLoader.cpp
@@ -226,6 +232,14 @@ else()
     target_link_libraries(HarukaEngine PRIVATE Vulkan::Vulkan glfw glm::glm tinygltf Jolt)
     target_include_directories(HarukaEngine PRIVATE ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
 endif()
+
+# ── GLM 설정 ──────────────────────────────────────────────────────────────────
+# 투영 행렬의 깊이 범위를 Vulkan 규약 [0,1] 로 둡니다. 예전에는 헤더마다 #define 했는데, 매크로 없이
+# GLM 을 먼저 포함한 헤더(Reflect.hpp)가 있으면 그 번역 단위는 OpenGL 규약 [-1,1] 로 굳었습니다.
+# 그래서 카메라 투영만 [-1,1] 이 되어 실제 근평면이 두 배(0.2m)였습니다(DEF-95). 소스의 개별 정의는
+# 두지 않습니다. 이 디렉터리의 대상(엔진·테스트)에는 위치와 상관없이 붙고, 이 줄보다 먼저 추가한
+# 외부 라이브러리 하위 디렉터리(GLFW 등)에는 붙지 않도록 외부 라이브러리를 다 불러온 뒤에 둡니다.
+add_compile_definitions(GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 add_dependencies(HarukaEngine Shaders)
 target_include_directories(HarukaEngine PRIVATE
@@ -294,6 +308,7 @@ if(NOT ANDROID)
         src/core/Actor.cpp
         src/core/Component.cpp
         src/core/HLog.cpp
+        src/components/LightComponent.cpp
     )
     target_link_libraries(HarukaActorTest PRIVATE glm::glm)
     target_include_directories(HarukaActorTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

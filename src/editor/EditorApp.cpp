@@ -15,7 +15,6 @@
 #include "../assets/SceneSerializer.hpp"
 #include "../platform/IWindow.hpp"
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -31,6 +30,17 @@
 // ── Helpers ────────────────────────────────────────────────────────────────────
 static glm::vec3 quatToEulerDeg(const glm::quat& q) {
     return glm::degrees(glm::vec3(glm::pitch(q), glm::yaw(q), glm::roll(q)));
+}
+
+// 속성의 단위 종류(core)를 숫자 칸의 단위 종류(UI)로 옮깁니다(DEF-46). 두 계층이 서로를 모르게 둡니다.
+static ENumberUnit toNumberUnit(PropUnit u) {
+    switch (u) {
+        case PropUnit::Offset: return ENumberUnit::Offset;
+        case PropUnit::Size:   return ENumberUnit::Size;
+        case PropUnit::Angle:  return ENumberUnit::Angle;
+        case PropUnit::Ratio:  return ENumberUnit::Ratio;
+        default:               return ENumberUnit::Scalar;
+    }
 }
 
 struct PropsSnapshotCmd : ICommand {
@@ -202,56 +212,43 @@ void EditorApp::tick(float dt) {
         vpTimings_.aoMs            = t.aoMs;
         vpTimings_.bloomMs         = t.bloomMs;
         vpTimings_.tonemapMs       = t.tonemapMs;
-        vpTimings_.taaBlitMs       = t.taaBlitMs;
         vpTimings_.uiMs            = t.uiMs;
         vpTimings_.totalMs         = t.totalMs;
         vpTimings_.drawCalls       = s.drawCalls;
         vpTimings_.culled          = s.culled;
         vpTimings_.transparentDraws= s.transparentDraws;
+        vpTimings_.dropped         = s.dropped;
     }
 
     // 휠은 프로세스 전체에서 이 한 줄로만 읽습니다(getScrollDelta 는 consume-on-read라
-    // 두 곳에서 읽으면 한쪽이 항상 0 을 받습니다). 커서가 아웃라이너 목록 위이고 카메라
-    // 모드가 아닐 때만 목록 스크롤로 가로채고, 나머지는 카메라 돌리로 넘깁니다.
+    // 두 곳에서 읽으면 한쪽이 항상 0 을 받습니다).
     float scroll = ctx_.window ? ctx_.window->getScrollDelta() : 0.f;
-    // 좌버튼을 누르고 있는 동안에는 목록을 스크롤하지 않습니다. 스크롤하면 리빌드가 행
-    // 위젯을 통째로 갈아 끼우는데, HSlate 에는 포인터 캡처도 프레스 추적도 없어서 마우스-업이
-    // "그 자리에 새로 온" 다른 액터의 버튼으로 배달됩니다(누른 적 없는 액터가 삭제됨).
-    // 아웃라이너가 비활성 탭이면 위젯이 배치되지 않아 geometry 가 stale 하므로 제외합니다.
-    if (scroll != 0.f && outlinerList_ && outlinerVisible_ && ctx_.window &&
-        !ctx_.window->isCameraModeActive() &&
-        !ctx_.window->isMouseButtonDown(HInput::MOUSE_BUTTON_LEFT)) {
-        float mx, my;
-        ctx_.window->getMousePosition(mx, my);
-        // 히트테스트 좌표계는 handleInput 의 e.position 과 같은 윈도 좌표로 통일합니다.
-        if (outlinerList_->cachedGeometry().contains(glm::vec2{mx, my})) {
-            outlinerScrollTop_ = std::max(0, outlinerScrollTop_ + (scroll > 0.f ? -3 : 3));
-            outlinerDirty_     = true;
-            scroll             = 0.f;
-        }
-    }
-    // Output Log 도 같은 우회로 스크롤합니다(DEF-57). 로그 행은 위젯을 다시 만들지 않고
-    // 문자열만 바꾸므로, 아웃라이너와 달리 좌버튼을 누른 채 굴려도 클릭이 엇갈리지 않습니다.
-    // 이동량은 여기서 쌓기만 하고, 필터를 적용한 실제 이동은 refreshLogView 가 합니다.
-    if (scroll != 0.f && logRowsBox_ && bottomVisible_ && bottomTab_ == 1 && ctx_.window &&
-        !ctx_.window->isCameraModeActive()) {
-        float mx, my;
-        ctx_.window->getMousePosition(mx, my);
-        if (logRowsBox_->cachedGeometry().contains(glm::vec2{mx, my})) {
-            logScrollReq_ += (scroll > 0.f) ? 3 : -3;
-            logViewDirty_  = true;
-            scroll         = 0.f;
-        }
-    }
     // RMB 비행 중 휠은 돌리가 아니라 이동 속도 조절입니다. 카메라 모드를 놓으면
     // 종전처럼 돌리로 돌아갑니다.
     if (scroll != 0.f && ctx_.window && ctx_.window->isCameraModeActive()) {
         camSpeed_ = cycleSpeed(camSpeed_, scroll > 0.f ? 1 : -1);
         scroll    = 0.f;
     }
-    // 남은 휠은 커서가 뷰포트 위일 때만 카메라 돌리로 씁니다. 예전에는 디테일·콘텐츠 브라우저
-    // 위에서 굴려도 카메라가 움직였습니다(DEF-78). 그 패널들은 위젯 휠 경로(DEF-57)가 생기면
-    // 스크롤을 받습니다. 판정은 픽·RMB 카메라 모드와 같은 inViewport 하나로 합니다.
+    // 나머지 휠은 커서 아래 위젯에 먼저 보냅니다(DEF-57). 맨 위 위젯부터 받으므로, 열린
+    // 메뉴·팝업이 아래 패널보다 먼저 받습니다. 스크롤 상자(디테일·콘텐츠 브라우저·GPU Stats)와
+    // 스스로 스크롤하는 목록(아웃라이너·Output Log)이 여기서 받습니다. 예전에는 컨테이너가
+    // 휠을 전달하지 않아, 아웃라이너와 Output Log 만 여기서 직접 히트테스트하는 우회로
+    // 스크롤했습니다. 이번 tick 에서 다시 만든 위젯도 받도록 배치부터 맞춥니다(DEF-84 와 같은
+    // 이유). 히트테스트 좌표는 handleInput 의 e.position 과 같은 윈도 좌표입니다.
+    if (scroll != 0.f && ctx_.window) {
+        float mx, my;
+        ctx_.window->getMousePosition(mx, my);
+        int fw = 0, fh = 0;
+        ctx_.window->getFramebufferSize(fw, fh);
+        slateRenderer_.arrange({ (float)fw, (float)fh });
+        HPointerEvent we;
+        we.position   = { mx, my };
+        we.wheelDelta = scroll;
+        if (slateRenderer_.handlePointerEvent(we).handled) scroll = 0.f;
+    }
+    // 위젯이 받지 않은 휠은 커서가 뷰포트 위일 때만 카메라 돌리로 씁니다. 예전에는 디테일·
+    // 콘텐츠 브라우저 위에서 굴려도 카메라가 움직였습니다(DEF-78). 판정은 픽·RMB 카메라
+    // 모드와 같은 inViewport 하나로 합니다.
     if (scroll != 0.f && ctx_.window) {
         float mx, my;
         ctx_.window->getMousePosition(mx, my);
@@ -356,17 +353,17 @@ void EditorApp::tick(float dt) {
         prevSelected2_ = prevSelected_;
         prevSelected_  = ctx_.selected;
     }
-    // 뷰포트 툴바 축약 단계. 더 넓은 구성으로 되돌아갈 때만 여유 폭을 요구해, 스플리터를
+    // 뷰포트 툴바 축약 단계. 더 넓은 구성으로 되돌아갈 때만 여유 폭을 더 요구해, 스플리터를
     // 임계 폭 근처에서 끌 때 단계가 매 프레임 오가며 리빌드가 반복되는 것을 막습니다.
     {
-        int lv = computeVpToolbarLevel();
+        if (vpLevelNeedScale_ != uiScale_ || vpLevelNeedFont_ != HFontAtlas::metrics())
+            measureVpToolbarLevels();
+        int lv = computeVpToolbarLevel(s(20.f));
         if (vpToolbarLevel_ >= 0 && lv < vpToolbarLevel_) {
-            static constexpr float kUpgrade[5] = { 660.f, 595.f, 540.f, 455.f, 365.f };
-            const float w = viewportFbRect().width / std::max(0.01f, uiScale_);
             // 여유가 모자라면 한 칸만 덜 펼칩니다. 직전 레벨을 그대로 되돌리면, 폭이
             // 한 프레임에 크게 뛰었을 때(빠른 드래그·창 최대화) 숨김 단계에 갇혀
             // 툴바가 영영 돌아오지 않습니다.
-            if (w < kUpgrade[lv]) lv = std::min(vpToolbarLevel_, lv + 1);
+            if (computeVpToolbarLevel(s(40.f)) > lv) lv = std::min(vpToolbarLevel_, lv + 1);
         }
         if (lv != vpToolbarLevel_) { vpToolbarLevel_ = lv; vpToolbarDirty_ = true; }
         if (vpToolbarDirty_) { vpToolbarDirty_ = false; rebuildViewportToolbar(); }
@@ -469,7 +466,17 @@ void EditorApp::buildWidgetTree() {
         ->content(HNew(VR)
             ->addSlot(HNew(BR)->background({0,0,0,0})->padding(HPadding{s(4.f), s(3.f)})
                 ->content(outlinerSearch), VR::ESizeRule::Fixed, s(34.f))
-            ->addSlot(outlinerList_, VR::ESizeRule::Fill)
+            // 목록은 보이는 행만 위젯으로 만드는 창 기반 가상 스크롤이라, 스크롤 상자 대신
+            // 휠로 시작 행을 옮기고 다시 만듭니다(DEF-57). 좌버튼을 누른 동안에는 굴려도 움직이지
+            // 않습니다. 그동안은 목록 리빌드가 보류되어(DEF-83) 뗄 때 한꺼번에 튀기 때문입니다.
+            ->addSlot(HNew(BR)->background({0,0,0,0})->content(outlinerList_)
+                ->onWheel([this](float d) {
+                    if (ctx_.window && ctx_.window->isMouseButtonDown(HInput::MOUSE_BUTTON_LEFT))
+                        return true;
+                    outlinerScrollTop_ = std::max(0, outlinerScrollTop_ + (d > 0.f ? -3 : 3));
+                    outlinerDirty_     = true;
+                    return true;
+                }), VR::ESizeRule::Fill)
             // 액터 개수 줄. outlinerList_ 바깥이라 rebuildOutliner 의 clearSlots 와 무관하게
             // 남습니다. 문자열은 rebuildOutliner 가 캐시해 두고 여기서는 읽기만 합니다
             // (Attr 은 computeDesiredSize/paint 에서 매 프레임 여러 번 평가됩니다).
@@ -481,8 +488,11 @@ void EditorApp::buildWidgetTree() {
                 VR::ESizeRule::Fixed, s(kOutFooterH)));
 
     // ── Panel: Details ─────────────────────────────────────────────────────────
-    detailsList_ = HNew(VR);
-    auto detailsPanel = HNew(BR)->background(kBgPanel)->content(detailsList_);
+    // 컴포넌트가 많으면 패널보다 길어지므로 스크롤 상자에 담습니다(DEF-56·57). 예전에는 넘친
+    // 칸이 아래 패널 위에 그려졌고, 그 칸은 눌리지도 않았습니다.
+    detailsList_   = HNew(VR);
+    detailsScroll_ = HNew(SScrollBox)->wheelStep(s(48.f))->barWidth(s(4.f))->content(detailsList_);
+    auto detailsPanel = HNew(BR)->background(kBgPanel)->content(detailsScroll_);
 
     // ── Panel: Viewport (transparent + stats overlay) ─────────────────────────
     viewportWidget_ = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
@@ -494,14 +504,14 @@ void EditorApp::buildWidgetTree() {
             const auto& f = gFrameTimings();
             char buf[512];
             snprintf(buf, sizeof(buf),
-                "%d FPS  |  Draw: %d  Culled: %d  Transp: %d  |  Target recreate/s: %.0f\n"
-                "GPU   Shadow %.2f  Main %.2f  AO %.2f  Bloom %.2f  Tonemap %.2f  TAA %.2f  UI %.2f  Total %.2f\n"
+                "%d FPS  |  Draw: %d  Culled: %d  Dropped: %d  Transp: %d  |  Target recreate/s: %.0f\n"
+                "GPU   Shadow %.2f  Main %.2f  AO %.2f  Bloom %.2f  Tonemap %.2f  UI %.2f  Total %.2f\n"
                 "CPU   Fence %.2f  Acquire %.2f  ImgFence %.2f  Extract %.2f  Record %.2f (UI %.2f)  Submit %.2f  Present %.2f\n"
                 "LOOP  Poll %.2f  Tick %.2f  Input %.2f  DrawFrame %.2f  |  Frame %.2f ms",
-                vpTimings_.fps, vpTimings_.drawCalls, vpTimings_.culled,
+                vpTimings_.fps, vpTimings_.drawCalls, vpTimings_.culled, vpTimings_.dropped,
                 vpTimings_.transparentDraws, vpTimings_.recreatePerSec,
                 vpTimings_.shadowMs, vpTimings_.mainMs, vpTimings_.aoMs, vpTimings_.bloomMs,
-                vpTimings_.tonemapMs, vpTimings_.taaBlitMs, vpTimings_.uiMs, vpTimings_.totalMs,
+                vpTimings_.tonemapMs, vpTimings_.uiMs, vpTimings_.totalMs,
                 f.fenceWait.v, f.acquire.v, f.imgFence.v, f.extract.v,
                 f.record.v, f.uiRecord.v, f.submit.v, f.present.v,
                 f.pollEvents.v, f.tick.v, f.handleInput.v, f.drawFrame.v, f.loopTotal.v);
@@ -544,6 +554,12 @@ void EditorApp::buildWidgetTree() {
 
     // ── Panel: Bottom (internal Content/Log/GPU tabs) ─────────────────────────
     bottomContent_ = HNew(VR);
+    // Content Browser 와 GPU Stats 는 스크롤 상자에 담고, Output Log 는 담지 않습니다
+    // (rebuildBottomPanel 이 탭마다 bottomHost_ 의 내용을 고릅니다). 로그 행 수는 행 영역의
+    // 실측 높이로 정하는데, 스크롤 상자 안에서는 그 높이가 내용을 따라 늘어나 행 수가 함께
+    // 불어나기 때문입니다.
+    bottomScroll_  = HNew(SScrollBox)->wheelStep(s(48.f))->barWidth(s(4.f));
+    bottomHost_    = HNew(BR)->background({0,0,0,0});
     auto tabBar = HNew(STabBar)
         ->addTab("Content Browser")
         ->addTab("Output Log")
@@ -555,7 +571,7 @@ void EditorApp::buildWidgetTree() {
         ->background(kBgPanel)
         ->content(HNew(VR)
             ->addSlot(tabBar,         VR::ESizeRule::Fixed, s(30.f))
-            ->addSlot(HNew(BR)->background({0,0,0,0})->content(bottomContent_), VR::ESizeRule::Fill));
+            ->addSlot(bottomHost_,    VR::ESizeRule::Fill));
 
     // ── Register panels (신규 위젯도 add 한 줄이면 도킹 대상 — 확장성 seam) ──────
     panelReg_.add("Outliner", "Outliner",       outlinerPanel);
@@ -666,11 +682,21 @@ void EditorApp::rebuildDockArea() {
     // 뷰포트가 활성 탭일 때만 그 위젯이 배치되어 viewportFbRect 가 유효합니다. 비활성이면
     // inViewport 게이팅을 꺼서(아래) stale rect 위 클릭이 픽·오빗·기즈모로 새지 않게 합니다.
     viewportVisible_ = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Viewport");
-    // 아웃라이너도 같은 이유로 필요합니다(휠 라우팅이 이 패널의 geometry 를 봅니다).
+    // 아웃라이너도 같은 이유로 필요합니다(목록 리빌드 보류가 이 패널의 geometry 를 봅니다).
     outlinerVisible_ = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Outliner");
-    bottomVisible_   = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Bottom");   // Output Log 휠
     if (dockHost_ && dockRoot_)
         dockHost_->content(buildDockWidget(dockRoot_.get()));
+
+    // 화면에서 사라진 패널(닫힘·가려진 탭)의 텍스트 포커스와 팝업을 정리합니다. 그대로 두면
+    // 보이지 않는 입력창으로 타이핑이 계속 들어갑니다(하단 탭 전환에 있던 규칙을 도크 전체로).
+    const bool bottomShown  = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Bottom");
+    const bool detailsShown = dockRoot_ && dockPanelIsActive(dockRoot_.get(), "Details");
+    const EFocusTarget f = currentFocus();
+    if ((!outlinerVisible_ && (f == EFocusTarget::Search || f == EFocusTarget::Rename)) ||
+        (!bottomShown  && f == EFocusTarget::LogSearch) ||
+        (!detailsShown && f == EFocusTarget::NumberField))
+        setTextFocus(EFocusTarget::None);
+    if (!bottomShown && logPopupOpen_) { logPopupOpen_ = false; logPopupDirty_ = true; }
 }
 
 // ── buildDockWidget ──────────────────────────────────────────────────────────────
@@ -685,20 +711,42 @@ std::shared_ptr<HWidget> EditorApp::buildDockWidget(DockNode* node) {
 
     if (node->isLeaf()) {
         auto tabRow = HNew(HR);
+        // 탭 줄은 리프 폭에서 자릅니다(DEF-56). 리프가 탭보다 좁으면 넘친 탭은 안 보이므로, handleInput
+        // 의 탭 판정도 이 영역 안의 점만 받습니다(dockTabHits_ 의 row).
+        auto tabRowArea = HNew(BR)->background(kBgHeader)->borderColor(kBorder)->borderThickness(1.f)
+            ->clipChildren(true)->content(tabRow);
         for (int i = 0; i < (int)node->panelIds.size(); ++i) {
             const PanelDef* def = panelReg_.find(node->panelIds[i]);
             std::string title = def ? def->title : node->panelIds[i];
             const bool active = (i == node->activeTab);
             // 탭은 시각 위젯입니다(onClick 없음). 클릭=활성 전환, 드래그=재도킹은
             // handleInput 이 dockTabHits_ 로 처리합니다(SButton onClick 과의 충돌 회피).
+            std::shared_ptr<HWidget> tabContent = HNew(STextBlock)->text(title)->fontSize(s(12.f))
+                ->color(active ? kTextBody : kTextDim)->vAlign(EVAlign::Center);
+            // 닫을 수 있는 패널은 탭에 x 를 붙입니다(DEF-69). 누름과 뗌은 탭 클릭과 같은 경로
+            // (handleInput)가 이 위젯의 geometry 로 판정하고, SButton 은 호버 색만 보여 줍니다.
+            // 닫은 패널은 Window 메뉴로 다시 엽니다.
+            std::shared_ptr<HWidget> closeBtn;
+            const bool closable = def && def->closable;
+            if (closable) {
+                closeBtn = HNew(SButton)
+                    ->normalColor({0.f, 0.f, 0.f, 0.f})->hoveredColor({0.30f, 0.30f, 0.34f, 1.f})
+                    ->pressedColor({0.f, 0.f, 0.f, 0.f})
+                    ->padding(HPadding{s(4.f), 0.f})
+                    ->content(HNew(STextBlock)->text("x")->fontSize(s(11.f))->color(kTextDim)
+                        ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
+                tabContent = HNew(HR)
+                    ->addSlot(tabContent, HR::ESizeRule::Auto)
+                    ->addSlot(spacer(),   HR::ESizeRule::Fixed, s(6.f))
+                    ->addSlot(closeBtn,   HR::ESizeRule::Auto);
+            }
             auto tab = HNew(BR)
                 ->background(active ? kBgPanel : kBgHeader)
                 ->borderColor(kBorder)->borderThickness(1.f)
-                ->padding(HPadding{s(12.f), s(6.f)})
-                ->content(HNew(STextBlock)->text(title)->fontSize(s(12.f))
-                    ->color(active ? kTextBody : kTextDim)->vAlign(EVAlign::Center));
+                ->padding(closable ? HPadding{s(12.f), s(6.f), s(4.f), s(6.f)} : HPadding{s(12.f), s(6.f)})
+                ->content(tabContent);
             tabRow->addSlot(tab, HR::ESizeRule::Auto);
-            dockTabHits_.push_back({ tab, node, i, node->panelIds[i] });
+            dockTabHits_.push_back({ tab, node, i, node->panelIds[i], closeBtn, tabRowArea });
         }
         tabRow->addSlot(spacer(), HR::ESizeRule::Fill);
 
@@ -708,10 +756,12 @@ std::shared_ptr<HWidget> EditorApp::buildDockWidget(DockNode* node) {
             if (def) content = def->widget;
         }
 
+        // 탭 줄과 패널 내용은 리프 영역에서 자릅니다(DEF-56). 예전에는 긴 목록·문자열·뷰포트
+        // 통계가 이웃 패널 위에 그려졌고, 넘친 부분은 조상 영역 판정에 막혀 눌리지도 않았습니다.
         auto leaf = HNew(VR)
-            ->addSlot(HNew(BR)->background(kBgHeader)->borderColor(kBorder)->borderThickness(1.f)
-                ->content(tabRow), VR::ESizeRule::Fixed, s(26.f))
-            ->addSlot(content ? content : spacer(), VR::ESizeRule::Fill);
+            ->addSlot(tabRowArea, VR::ESizeRule::Fixed, s(26.f))
+            ->addSlot(HNew(BR)->clipChildren(true)->content(content ? content : spacer()),
+                      VR::ESizeRule::Fill);
         dockLeafHits_.push_back({ leaf, node });
         return leaf;
     }
@@ -871,6 +921,27 @@ static bool dockContains(const DockNode* n, const std::string& id) {
     return false;
 }
 
+// 패널 id 가 들어 있는 리프를 찾습니다(없으면 nullptr = 닫힌 패널).
+static DockNode* dockFindLeaf(DockNode* n, const std::string& id) {
+    if (!n) return nullptr;
+    if (n->isLeaf()) {
+        for (const auto& p : n->panelIds) if (p == id) return n;
+        return nullptr;
+    }
+    for (auto& c : n->children)
+        if (DockNode* f = dockFindLeaf(c.get(), id)) return f;
+    return nullptr;
+}
+
+// 리프에서 탭 하나를 뺍니다. 활성 탭이 같은 패널을 계속 가리키게 맞추고, 뺀 탭이 활성이었으면
+// 옆 탭을 보입니다. 예전 재도킹은 크기만 맞춰, 활성 탭보다 앞의 탭을 끌어내면 활성 탭이 다른
+// 패널로 바뀌었습니다.
+static void dockRemoveTab(DockNode* leaf, int idx) {
+    leaf->panelIds.erase(leaf->panelIds.begin() + idx);
+    if (idx < leaf->activeTab) --leaf->activeTab;
+    leaf->activeTab = std::clamp(leaf->activeTab, 0, std::max(0, (int)leaf->panelIds.size() - 1));
+}
+
 // 특정 패널이 자신이 속한 리프에서 "활성 탭"인지(= 이번 프레임에 실제로 배치되는지) 검사합니다.
 // 비활성이면 그 위젯은 트리에 없어 arrange 되지 않고 geometry 가 stale 해집니다.
 static bool dockPanelIsActive(const DockNode* n, const std::string& id) {
@@ -894,42 +965,14 @@ void EditorApp::performRedock(DockNode* src, int srcIdx, const std::string& pane
     if (src == target && (zone == EDockZone::Center || src->panelIds.size() <= 1)) return;
 
     // 1) 소스에서 제거
-    src->panelIds.erase(src->panelIds.begin() + srcIdx);
-    if (src->activeTab >= (int)src->panelIds.size())
-        src->activeTab = std::max(0, (int)src->panelIds.size() - 1);
+    dockRemoveTab(src, srcIdx);
 
-    // 2) 타깃에 추가
+    // 2) 타깃에 추가(가장자리면 타깃 자리의 절반을 받는 분할)
     if (zone == EDockZone::Center) {
         target->panelIds.push_back(panelId);
         target->activeTab = (int)target->panelIds.size() - 1;
     } else {
-        const bool horiz  = (zone == EDockZone::Left || zone == EDockZone::Right);
-        const bool before = (zone == EDockZone::Left || zone == EDockZone::Top);
-        const DockNode::Split want = horiz ? DockNode::Split::Horizontal : DockNode::Split::Vertical;
-        auto newLeaf = DockNode::makeLeaf({ panelId });
-
-        int pidx = -1;
-        DockNode* parent = dockFindParent(dockRoot_.get(), target, pidx);
-        if (parent && parent->split == want) {
-            const int insertAt = before ? pidx : pidx + 1;
-            const float share = (pidx < (int)parent->ratios.size())
-                              ? parent->ratios[pidx]
-                              : 1.f / (float)std::max<size_t>(1, parent->children.size());
-            const float half = share * 0.5f;
-            if (pidx < (int)parent->ratios.size()) parent->ratios[pidx] = half;
-            parent->children.insert(parent->children.begin() + insertAt, std::move(newLeaf));
-            parent->ratios.insert(parent->ratios.begin() + insertAt, half);
-            dockNormalize(parent);
-        } else {
-            std::unique_ptr<DockNode> targetOwned =
-                parent ? std::move(parent->children[pidx]) : std::move(dockRoot_);
-            std::vector<std::unique_ptr<DockNode>> kids;
-            if (before) { kids.push_back(std::move(newLeaf)); kids.push_back(std::move(targetOwned)); }
-            else        { kids.push_back(std::move(targetOwned)); kids.push_back(std::move(newLeaf)); }
-            auto split = DockNode::makeSplit(want, std::move(kids), { 0.5f, 0.5f });
-            if (parent) parent->children[pidx] = std::move(split);
-            else        dockRoot_ = std::move(split);
-        }
+        dockAttachSplit(target, panelId, zone, 0.5f);
     }
 
     // 3) 소스 리프가 비면 정리
@@ -938,6 +981,105 @@ void EditorApp::performRedock(DockNode* src, int srcIdx, const std::string& pane
 
     rebuildDockArea();
     saveDockLayout();      // 재도킹 결과를 즉시 영속화(비정상 종료에도 보존)
+}
+
+// ── dockAttachSplit ──────────────────────────────────────────────────────────────
+// 패널 하나를 target 노드의 zone 쪽에 새 리프로 붙입니다. share 는 target 이 차지하던 자리 중
+// 새 리프가 받을 비율입니다. 부모가 같은 방향 분할이면 형제로 끼우고, 아니면 target 을 새
+// 분할로 감쌉니다(target 이 루트면 루트를 감쌉니다).
+void EditorApp::dockAttachSplit(DockNode* target, const std::string& panelId,
+                                EDockZone zone, float share) {
+    if (!target || !dockRoot_) return;
+    const bool horiz  = (zone == EDockZone::Left || zone == EDockZone::Right);
+    const bool before = (zone == EDockZone::Left || zone == EDockZone::Top);
+    const DockNode::Split want = horiz ? DockNode::Split::Horizontal : DockNode::Split::Vertical;
+
+    int pidx = -1;
+    DockNode* parent = dockFindParent(dockRoot_.get(), target, pidx);
+    if (!parent && target != dockRoot_.get()) return;   // 트리에 없는 노드
+    auto newLeaf = DockNode::makeLeaf({ panelId });
+    // target 이 바로 그 방향의 분할이면(다시 열기가 루트를 넘길 때) 감싸지 않고 맨 앞·뒤 자식으로 끼웁니다.
+    // 감싸면 같은 방향 분할이 두 겹이 됩니다.
+    if (!target->isLeaf() && target->split == want) {
+        for (float& r : target->ratios) r *= (1.f - share);
+        const size_t at = before ? 0 : target->children.size();
+        target->children.insert(target->children.begin() + at, std::move(newLeaf));
+        target->ratios.insert(target->ratios.begin() + std::min(at, target->ratios.size()), share);
+        dockNormalize(target);
+        return;
+    }
+    if (parent && parent->split == want) {
+        const int   insertAt = before ? pidx : pidx + 1;
+        const float cur   = (pidx < (int)parent->ratios.size())
+                          ? parent->ratios[pidx]
+                          : 1.f / (float)std::max<size_t>(1, parent->children.size());
+        const float given = cur * share;
+        if (pidx < (int)parent->ratios.size()) parent->ratios[pidx] = cur - given;
+        parent->children.insert(parent->children.begin() + insertAt, std::move(newLeaf));
+        parent->ratios.insert(parent->ratios.begin() + insertAt, given);
+        dockNormalize(parent);
+    } else {
+        std::unique_ptr<DockNode> targetOwned =
+            parent ? std::move(parent->children[pidx]) : std::move(dockRoot_);
+        std::vector<std::unique_ptr<DockNode>> kids;
+        std::vector<float>                     ratios;
+        if (before) { kids.push_back(std::move(newLeaf));     kids.push_back(std::move(targetOwned)); ratios = { share, 1.f - share }; }
+        else        { kids.push_back(std::move(targetOwned)); kids.push_back(std::move(newLeaf));     ratios = { 1.f - share, share }; }
+        auto split = DockNode::makeSplit(want, std::move(kids), std::move(ratios));
+        if (parent) parent->children[pidx] = std::move(split);
+        else        dockRoot_ = std::move(split);
+    }
+}
+
+// ── 패널 닫기 · 다시 열기 (Window 메뉴, DEF-69) ─────────────────────────────────
+// 탭의 x 로 닫습니다. 닫은 패널은 트리에서 빠질 뿐 위젯은 레지스트리에 남아, Window 메뉴로
+// 다시 열면 상태(스크롤·검색어 등)가 그대로입니다. 다시 열 때 같은 리프로 돌아가도록 그
+// 리프에 함께 있던 패널을 기억해 둡니다.
+void EditorApp::closePanel(const std::string& id) {
+    const PanelDef* def = panelReg_.find(id);
+    if (!def || !def->closable || !dockRoot_) return;
+    DockNode* leaf = dockFindLeaf(dockRoot_.get(), id);
+    if (!leaf) return;
+    // 루트 리프의 마지막 패널은 닫지 않습니다(빈 도크가 됩니다). 뷰포트는 닫을 수 없어 실제로는
+    // 생기지 않는 경우입니다.
+    if (leaf == dockRoot_.get() && leaf->panelIds.size() <= 1) return;
+    std::vector<std::string> companions;
+    for (const auto& p : leaf->panelIds) if (p != id) companions.push_back(p);
+    panelHome_[id] = std::move(companions);
+
+    const auto it = std::find(leaf->panelIds.begin(), leaf->panelIds.end(), id);
+    dockRemoveTab(leaf, (int)(it - leaf->panelIds.begin()));
+    if (leaf->panelIds.empty()) collapseEmptyLeaf(leaf);
+    rebuildDockArea();
+    saveDockLayout();
+}
+
+// Window 메뉴의 패널 항목입니다. 열려 있으면 그 탭을 앞으로 가져오고, 닫혀 있으면 다시 엽니다.
+void EditorApp::showPanel(const std::string& id) {
+    if (!dockRoot_ || !panelReg_.find(id)) return;
+    if (DockNode* leaf = dockFindLeaf(dockRoot_.get(), id)) {
+        for (int i = 0; i < (int)leaf->panelIds.size(); ++i)
+            if (leaf->panelIds[i] == id) leaf->activeTab = i;
+    } else {
+        // 닫을 때 같은 리프에 있던 패널이 지금 열려 있으면 그 리프에 탭으로 돌아갑니다.
+        DockNode* home = nullptr;
+        if (auto h = panelHome_.find(id); h != panelHome_.end())
+            for (const auto& other : h->second)
+                if ((home = dockFindLeaf(dockRoot_.get(), other)) != nullptr) break;
+        if (home) {
+            home->panelIds.push_back(id);
+            home->activeTab = (int)home->panelIds.size() - 1;
+        } else {
+            // 그런 패널이 없으면 기본 배치의 자리에 가깝게 붙입니다. 하단 패널은 도크 전체의
+            // 아래, 아웃라이너는 뷰포트 왼쪽, 그 밖(디테일과 앞으로 추가될 패널)은 뷰포트 오른쪽.
+            DockNode* vp = dockFindLeaf(dockRoot_.get(), "Viewport");
+            if (id == "Bottom" || !vp) dockAttachSplit(dockRoot_.get(), id, EDockZone::Bottom, 0.28f);
+            else if (id == "Outliner") dockAttachSplit(vp, id, EDockZone::Left,  0.25f);
+            else                       dockAttachSplit(vp, id, EDockZone::Right, 0.25f);
+        }
+    }
+    rebuildDockArea();
+    saveDockLayout();
 }
 
 // ── collapseEmptyLeaf ────────────────────────────────────────────────────────────
@@ -1047,6 +1189,17 @@ void EditorApp::buildMenus() {
     menus_.push_back({ "View", {
         { "Reset Layout", [this]{ buildDefaultDockLayout(); rebuildDockArea(); saveDockLayout(); } },
     }, 0.f });
+    // 등록된 패널을 등록 순서로 보입니다(DEF-69). 열린 패널은 체크 표시가 붙고, 누르면 그 탭을
+    // 앞으로 가져옵니다. 탭의 x 로 닫은 패널은 여기서 다시 엽니다.
+    std::vector<MenuItem> windowItems;
+    for (const std::string& id : panelReg_.order()) {
+        const PanelDef* def = panelReg_.find(id);
+        if (!def) continue;
+        windowItems.push_back({ def->title,
+                                [this, id] { showPanel(id); },
+                                [this, id] { return dockRoot_ && dockContains(dockRoot_.get(), id); } });
+    }
+    menus_.push_back({ "Window", std::move(windowItems), 0.f });
 }
 
 void EditorApp::rebuildMenuBar() {
@@ -1057,7 +1210,6 @@ void EditorApp::rebuildMenuBar() {
     float x = s(6.f);
     for (int mi = 0; mi < (int)menus_.size(); ++mi) {
         menus_[mi].x = x;                     // 팝업 위치용 x(스케일 픽셀)
-        const float w = s(58.f);
         const bool open = (openMenu_ == mi);
         auto btn = HNew(SButton)
                 ->normalColor (open ? glm::vec4{0.20f, 0.20f, 0.26f, 1.f}
@@ -1072,6 +1224,9 @@ void EditorApp::rebuildMenuBar() {
                 ->content(HNew(STextBlock)->text(menus_[mi].name)->fontSize(s(13.f))
                     ->color(kTextBody)->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
         menuButtons_[mi] = btn;
+        // 폭은 글자 실측에 맞추되 짧은 이름도 같은 최소 폭을 씁니다. 고정 폭이면 "Window" 처럼
+        // 긴 이름이 버튼 밖으로 넘칩니다.
+        const float w = std::max(s(58.f), btn->computeDesiredSize().x);
         menuBarBox_->addSlot(btn, SHorizontalBox::ESizeRule::Fixed, w);
         x += w;
     }
@@ -1088,6 +1243,26 @@ void EditorApp::rebuildMenuPopup() {
 
     const float rowH  = s(30.f);
     const float dropW = s(200.f);            // 최소 너비 고정 → Undo/Redo 같은 짧은 항목도 반듯한 박스
+
+    // 체크 상태를 가진 항목이 하나라도 있으면 모든 행 앞에 체크 열을 둡니다(줄 맞춤).
+    bool hasChecks = false;
+    for (const auto& it : md.items) hasChecks = hasChecks || (bool)it.checked;
+    auto rowContent = [&](const MenuItem& it) -> std::shared_ptr<HWidget> {
+        auto text = HNew(STextBlock)->text(it.label)->fontSize(s(13.f))
+            ->color(kTextBody)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center);
+        if (!hasChecks) return text;
+        std::shared_ptr<HWidget> mark = spacer();
+        if (it.checked) {
+            const bool on = it.checked();
+            mark = HNew(SBox)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)->content(
+                HNew(SBox)->widthOverride(s(10.f))->heightOverride(s(10.f))->content(
+                    HNew(SBorder)->background(on ? kAccent : glm::vec4{ 0.f, 0.f, 0.f, 0.f })
+                        ->borderColor({ 0.55f, 0.55f, 0.62f, 1.f })->borderThickness(1.f)));
+        }
+        return HNew(SHorizontalBox)
+            ->addSlot(mark, SHorizontalBox::ESizeRule::Fixed, s(20.f))
+            ->addSlot(text, SHorizontalBox::ESizeRule::Fill);
+    };
 
     auto items = HNew(SVerticalBox);
     for (int k = 0; k < (int)md.items.size(); ++k) {
@@ -1106,8 +1281,7 @@ void EditorApp::rebuildMenuPopup() {
                     menuBarDirty_ = menuPopupDirty_ = true;
                     if (act) act();
                 })
-                ->content(HNew(STextBlock)->text(md.items[k].label)->fontSize(s(13.f))
-                    ->color(kTextBody)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
+                ->content(rowContent(md.items[k])),
             SVerticalBox::ESizeRule::Fixed, rowH);
     }
     // 툴바(0.12)보다 확실히 어두운 배경 + 밝은 테두리 → 툴바 위에 "떠 있는" 패널로 읽히게 합니다.
@@ -1126,12 +1300,14 @@ void EditorApp::rebuildMenuPopup() {
     // 덮지 않습니다** — 캐처가 그 위까지 덮으면 다른 메뉴 버튼 클릭을 캐처가 먼저 삼켜(닫힘만 발생)
     // 메뉴 전환에 2클릭이 필요했습니다. VBox[ 상단 spacer(kMenuBarH) / 캐처(Fill) ] 로 캐처를 메뉴
     // 바 아래로만 두면, 메뉴 바 클릭은 spacer(Unhandled)를 통과해 곧장 메뉴 버튼으로 전달됩니다(1클릭).
+    // 메뉴가 열린 동안에는 휠도 아래 패널로 보내지 않습니다(뷰포트 휠을 막은 DEF-64 와 같은 규칙).
     auto catcher = HNew(SVerticalBox)
         ->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(kMenuBarH))
         ->addSlot(
-            HNew(SButton)->normalColor({0,0,0,0})->hoveredColor({0,0,0,0})->pressedColor({0,0,0,0})
-                ->onClick([this]{ openMenu_ = -1; menuBarDirty_ = menuPopupDirty_ = true; })
-                ->content(spacer()),
+            HNew(SBorder)->onWheel([](float) { return true; })->content(
+                HNew(SButton)->normalColor({0,0,0,0})->hoveredColor({0,0,0,0})->pressedColor({0,0,0,0})
+                    ->onClick([this]{ openMenu_ = -1; menuBarDirty_ = menuPopupDirty_ = true; })
+                    ->content(spacer())),
             SVerticalBox::ESizeRule::Fill);
     // 슬롯 순서 = z(뒤→앞): 캐처 / 섀도 / 드롭다운. 섀도는 드롭다운보다 (3,3)px 어긋나 깔립니다.
     auto inner = HNew(SOverlay);
@@ -1242,24 +1418,31 @@ static float cycleSpeed(float cur, int dir) {
     return kCamSpeeds[((best + dir) % n + n) % n];
 }
 
-// 뷰포트 폭에 따른 축약 단계입니다. HSlate 에는 클리핑이 없어서, 넘친 툴바는 이웃 패널
-// 위에 그려지면서 정작 클릭은 조상 컨테이너의 영역 판정에 막혀 죽습니다(아웃라이너에서
-// 겪은 폭 사다리와 같은 유형). 임계값은 레이아웃이 실제로 쓰는 폭 근사
-// (글자 수 x 폰트 크기 x 0.6 + 버튼 좌우 여백)로 계산했으므로, 라벨 문구나 폰트 크기를
-// 바꾸면 이 표도 함께 고쳐야 합니다.
-int EditorApp::computeVpToolbarLevel() const {
-    const HViewportRect r = viewportFbRect();
-    const float w = r.width / std::max(0.01f, uiScale_);
-    // 각 단계가 실제로 요구하는 폭(미스케일, 인셋·바 패딩 포함): 0=620, 1=555, 2=499,
-    // 3=414, 4=328. 임계값은 그보다 넉넉해야 합니다. 임계값이 요구 폭보다 작으면 그
-    // 구간에서 툴바가 뷰포트를 넘어가 이웃 패널에 가려지고, 가려진 칩은 보이지도
-    // 눌리지도 않습니다(클리핑이 없어 그림만 넘고 클릭은 조상에서 걸립니다).
-    if (w >= 640.f) return 0;   // 전체 라벨 + World/Local 두 버튼 + 스냅 토글·값
-    if (w >= 575.f) return 1;   // 도구 라벨 축약
-    if (w >= 520.f) return 2;   // 좌표계를 순환 버튼 하나로
-    if (w >= 435.f) return 3;   // 스냅 값 칩 생략(토글은 유지)
-    if (w >= 345.f) return 4;   // 스냅 그룹 생략 + 카메라 칩 축약
-    return 5;                   // 숨김
+// 뷰포트 폭에 따른 축약 단계입니다. 단계마다 툴바가 실제로 요구하는 폭(vpLevelNeed_)은 그
+// 단계의 툴바를 라벨이 가장 길어지는 값으로 세워서 잽니다(measureVpToolbarLevels). 예전에는
+// "글자 수 x 폰트 크기 x 0.6" 근사로 손으로 계산한 표를 썼는데, 글자 폭을 실측으로 바꾸면
+// (DEF-60) 표가 어긋나므로 표 자체를 없앴습니다. 넘친 툴바는 이제 뷰포트 리프에서 잘리지만
+// (DEF-56), 잘린 칩은 보이지도 눌리지도 않으므로 넘치지 않는 단계를 고릅니다. margin 은 요구
+// 폭에 더하는 여유입니다(tick 이 줄일 때와 넓힐 때 다른 여유를 줘 단계가 떨지 않게 합니다).
+int EditorApp::computeVpToolbarLevel(float margin) const {
+    const float w = viewportFbRect().width;
+    for (int lv = 0; lv < 5; ++lv)
+        if (w >= vpLevelNeed_[lv] + margin) return lv;
+    return 5;   // 숨김
+}
+
+// 단계별 요구 폭(인셋 포함)을 잽니다. 폰트 크기가 uiScale 을 따르므로 배율이나 폰트가
+// 바뀌면 tick 이 다시 부릅니다. 실제 툴바와 같은 함수(fillViewportToolbar)로 세워서 재므로,
+// 라벨 문구나 여백을 바꿔도 사다리를 따로 고칠 필요가 없습니다.
+void EditorApp::measureVpToolbarLevels() {
+    for (int lv = 0; lv < 5; ++lv) {
+        auto box = HNew(SHorizontalBox);
+        fillViewportToolbar(*box, lv, /*worstCase=*/true);
+        auto bar = HNew(SBorder)->padding(HPadding{ s(6.f), s(4.f) })->content(box);
+        vpLevelNeed_[lv] = bar->computeDesiredSize().x + 2.f * s(kVpToolbarInset);
+    }
+    vpLevelNeedScale_ = uiScale_;
+    vpLevelNeedFont_  = HFontAtlas::metrics();
 }
 
 // 드래그 중인 기즈모 값. 스냅이 실제로 걸리는지 눈으로 확인시키는 것이 목적입니다.
@@ -1292,31 +1475,74 @@ void EditorApp::rebuildViewportToolbar() {
         return;
     }
     viewportToolbarBar_->padding(HPadding{s(6.f), s(4.f)})->borderThickness(1.f);
+    fillViewportToolbar(*viewportToolbarBox_, lv, /*worstCase=*/false);
+}
 
-    auto label = [this](const std::string& t) {
-        return HNew(STextBlock)->text(t)->fontSize(s(12.f))->color(kTextBody)
+// 스냅 값 칩과 카메라 속도 칩의 라벨입니다. 칩과 폭 사다리 측정이 같은 함수를 씁니다.
+// 스냅이 꺼져 있으면 괄호로 감싸 "지금은 적용되지 않는 값"임을 알립니다(아이콘이 없으므로
+// ASCII 로만 구분).
+static std::string snapValueLabel(int gizmoMode, const HGizmoSnap& sn) {
+    char v[24];
+    switch (gizmoMode) {
+        case 1:  std::snprintf(v, sizeof v, "%.3f m", sn.move);      break;
+        case 2:  std::snprintf(v, sizeof v, "%g deg", sn.rotateDeg); break;
+        case 3:  std::snprintf(v, sizeof v, "x%.3f", sn.scale);      break;
+        default: std::snprintf(v, sizeof v, "--");                   break;
+    }
+    char out[32];
+    std::snprintf(out, sizeof out, sn.enabled ? "%s" : "(%s)", v);
+    return out;
+}
+
+static std::string camSpeedLabel(float speed, bool withPrefix) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, withPrefix ? "Cam %g m/s" : "%g m/s", speed);
+    return buf;
+}
+
+// 레이아웃이 쓰는 것과 같은 글자 폭(폰트가 없으면 STextBlock 과 같은 근사)입니다.
+static float layoutTextWidth(const std::string& t, float px) {
+    if (const HFontAtlas* f = HFontAtlas::metrics()) return f->measureText(t, px);
+    return (float)t.size() * px * 0.6f;
+}
+
+// 툴바 칩을 box 에 채웁니다. worstCase 면 상태를 따라 바뀌는 라벨(좌표계·스냅 값·카메라
+// 속도) 대신, 그 라벨이 가질 수 있는 가장 넓은 문자열을 고정 라벨로 둡니다. 폭 사다리는
+// 이 결과로 단계별 요구 폭을 잽니다(measureVpToolbarLevels).
+void EditorApp::fillViewportToolbar(SHorizontalBox& box, int lv, bool worstCase) {
+    const float fontPx = s(12.f);
+    auto label = [this, fontPx](const std::string& t) {
+        return HNew(STextBlock)->text(t)->fontSize(fontPx)->color(kTextBody)
                  ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center);
-    };
-    auto labelAttr = [this](std::function<std::string()> fn) {
-        return HNew(STextBlock)->text(AttrStr(std::move(fn)))->fontSize(s(12.f))
-                 ->color(kTextBody)->hAlign(EHAlign::Center)->vAlign(EVAlign::Center);
     };
     // 상태 표시는 전부 isActive/AttrStr 로 매 프레임 읽습니다. 그래서 클릭이 리빌드를
     // 부를 일이 없고(자기 콜백 안에서 자기 컨테이너를 지우는 자기 파괴가 원천 차단),
     // 단축키로 바꾼 상태도 UI 에 즉시 반영됩니다.
-    auto chip = [this](std::shared_ptr<HWidget> content,
-                       std::function<bool()> active, std::function<void()> click) {
-        viewportToolbarBox_->addSlot(
+    auto dynLabel = [&](std::function<std::string()> fn,
+                        const std::vector<std::string>& candidates) -> std::shared_ptr<HWidget> {
+        if (!worstCase)
+            return HNew(STextBlock)->text(AttrStr(std::move(fn)))->fontSize(fontPx)
+                     ->color(kTextBody)->hAlign(EHAlign::Center)->vAlign(EVAlign::Center);
+        std::string widest;
+        float       widestW = -1.f;
+        for (const auto& c : candidates) {
+            const float w = layoutTextWidth(c, fontPx);
+            if (w > widestW) { widestW = w; widest = c; }
+        }
+        return label(widest);
+    };
+    auto chip = [&](std::shared_ptr<HWidget> content,
+                    std::function<bool()> active, std::function<void()> click) {
+        box.addSlot(
             HNew(SToggleButton)->padding(HPadding{s(10.f), s(5.f)})
                 ->isActive(std::move(active))->onClick(std::move(click))
                 ->content(std::move(content)),
             SHorizontalBox::ESizeRule::Auto);
     };
-    auto divider = [this] {
-        viewportToolbarBox_->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f));
-        viewportToolbarBox_->addSlot(HNew(SBorder)->background(kBorder),
-                                     SHorizontalBox::ESizeRule::Fixed, 1.f);
-        viewportToolbarBox_->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f));
+    auto divider = [&] {
+        box.addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f));
+        box.addSlot(HNew(SBorder)->background(kBorder), SHorizontalBox::ESizeRule::Fixed, 1.f);
+        box.addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f));
     };
 
     // ── 변환 도구 ─────────────────────────────────────────────────────────────
@@ -1334,31 +1560,30 @@ void EditorApp::rebuildViewportToolbar() {
         chip(label("World"), [this] { return worldSpace_;  }, [this] { worldSpace_ = true;  });
         chip(label("Local"), [this] { return !worldSpace_; }, [this] { worldSpace_ = false; });
     } else {
-        chip(labelAttr([this] { return worldSpace_ ? std::string("World")
-                                                   : std::string("Local"); }),
+        chip(dynLabel([this] { return worldSpace_ ? std::string("World") : std::string("Local"); },
+                      { "World", "Local" }),
              [] { return false; }, [this] { worldSpace_ = !worldSpace_; });
     }
 
     // ── 스냅 ──────────────────────────────────────────────────────────────────
-    // 값 칩의 라벨은 지금 기즈모 모드를 따라갑니다. 스냅이 꺼져 있으면 괄호로 감싸
-    // "지금은 적용되지 않는 값"임을 알립니다(아이콘이 없으므로 ASCII 로만 구분).
+    // 값 칩의 라벨은 지금 기즈모 모드를 따라갑니다.
     if (lv <= 3) {
         divider();
         chip(label("Snap"), [this] { return snap_.enabled; },
              [this] { snap_.enabled = !snap_.enabled; });
-        if (lv <= 2)
-            chip(labelAttr([this] {
-                     char v[24];
-                     switch (gizmoMode_) {
-                         case 1:  std::snprintf(v, sizeof v, "%.3f m", snap_.move);      break;
-                         case 2:  std::snprintf(v, sizeof v, "%g deg", snap_.rotateDeg); break;
-                         case 3:  std::snprintf(v, sizeof v, "x%.3f", snap_.scale);      break;
-                         default: std::snprintf(v, sizeof v, "--");                      break;
-                     }
-                     char out[32];
-                     std::snprintf(out, sizeof out, snap_.enabled ? "%s" : "(%s)", v);
-                     return std::string(out);
-                 }),
+        if (lv <= 2) {
+            std::vector<std::string> candidates;   // 모드·프리셋·켜짐 여부의 모든 조합과 지금 값
+            if (worstCase) {
+                for (bool on : { true, false }) {
+                    HGizmoSnap sn = snap_;
+                    sn.enabled = on;
+                    for (int mode = 0; mode <= 3; ++mode) candidates.push_back(snapValueLabel(mode, sn));
+                    for (float v : kSnapMove)   { sn.move      = v; candidates.push_back(snapValueLabel(1, sn)); }
+                    for (float v : kSnapRotate) { sn.rotateDeg = v; candidates.push_back(snapValueLabel(2, sn)); }
+                    for (float v : kSnapScale)  { sn.scale     = v; candidates.push_back(snapValueLabel(3, sn)); }
+                }
+            }
+            chip(dynLabel([this] { return snapValueLabel(gizmoMode_, snap_); }, candidates),
                  [this] { return snap_.enabled; },
                  [this] {
                      const int dir = (ctx_.window &&
@@ -1370,6 +1595,7 @@ void EditorApp::rebuildViewportToolbar() {
                          default: break;
                      }
                  });
+        }
     }
 
     divider();
@@ -1377,18 +1603,19 @@ void EditorApp::rebuildViewportToolbar() {
     // ── 카메라 속도 ───────────────────────────────────────────────────────────
     // 클릭하면 프리셋을 한 칸 올리고 Shift 를 누른 채면 내립니다. 기본값(5)에서 벗어나
     // 있을 때만 활성으로 표시해, 종전과 다른 속도라는 것을 눈에 띄게 합니다.
-    chip(labelAttr([this, lv] {
-             char buf[32];
-             std::snprintf(buf, sizeof buf, lv <= 3 ? "Cam %g m/s" : "%g m/s", camSpeed_);
-             return std::string(buf);
-         }),
+    const bool camPrefix = (lv <= 3);
+    std::vector<std::string> camCandidates;
+    if (worstCase) {
+        camCandidates.push_back(camSpeedLabel(camSpeed_, camPrefix));
+        for (float v : kCamSpeeds) camCandidates.push_back(camSpeedLabel(v, camPrefix));
+    }
+    chip(dynLabel([this, camPrefix] { return camSpeedLabel(camSpeed_, camPrefix); }, camCandidates),
          [this] { return camSpeed_ != 5.f; },
          [this] {
              const bool back = ctx_.window &&
                                ctx_.window->isShiftDown();
              camSpeed_ = cycleSpeed(camSpeed_, back ? -1 : 1);
          });
-
 }
 
 // ── Play state ─────────────────────────────────────────────────────────────────
@@ -1669,7 +1896,6 @@ void EditorApp::setTextFocus(EFocusTarget t) {
         // 키 엣지를 현재 물리 상태로 다시 심습니다. 누른 채로 진입하면 그 키가 곧바로
         // 엣지로 잡혀(예: Enter 를 누른 채 리네임 진입) 편집이 즉시 끝나 버립니다.
         prevEnterDown_     = w.isKeyDown(HInput::KEY_ENTER);
-        prevBackspaceDown_ = w.isKeyDown(HInput::KEY_BACKSPACE);
         prevF2Down_        = w.isKeyDown(HInput::KEY_F2);
         prevDeleteDown_    = w.isKeyDown(HInput::KEY_DELETE);
         prevVDown_         = w.isKeyDown(HInput::KEY_V);
@@ -1688,13 +1914,18 @@ bool EditorApp::focusWidgetContains(float x, float y) const {
     const glm::vec2 p{ x, y };
     switch (currentFocus()) {
         case EFocusTarget::NumberField:
+            // 숫자 칸은 디테일 스크롤 상자 안에만 있습니다. 스크롤로 가려진 칸은 그 자리가 다른 패널이므로,
+            // 상자 영역 밖의 누름은 칸 밖으로 칩니다. 아니면 가려진 칸 위를 눌러도 편집이 끝나지 않습니다.
             if (auto* nf = SNumberField::focusedField())
-                return nf->cachedGeometry().contains(p);
+                return nf->cachedGeometry().contains(p) &&
+                       (!detailsScroll_ || detailsScroll_->cachedGeometry().contains(p));
             return false;
         case EFocusTarget::Search:
             return outlinerSearchBox_ && outlinerSearchBox_->cachedGeometry().contains(p);
         case EFocusTarget::LogSearch:
-            return logSearchBox_ && logSearchBox_->cachedGeometry().contains(p);
+            // 좁은 하단 패널에서는 필터 행이 잘립니다. 잘린 부분은 칸 밖으로 칩니다.
+            return logSearchBox_ && logSearchBox_->cachedGeometry().contains(p) &&
+                   (!bottomHost_ || bottomHost_->cachedGeometry().contains(p));
         case EFocusTarget::Rename:
             // 리네임 행 위젯은 리빌드마다 새로 만들어지므로 목록 전체를 기준으로 봅니다.
             return outlinerList_ && outlinerList_->cachedGeometry().contains(p);
@@ -2008,6 +2239,9 @@ void EditorApp::rebuildOutliner() {
 void EditorApp::rebuildDetails() {
     if (!detailsList_) return;
     detailsList_->clearSlots();
+    // 같은 액터를 다시 그릴 때(컴포넌트 추가·값 토글)는 스크롤 위치를 지키고, 다른 액터로
+    // 바뀔 때만 맨 위로 돌립니다.
+    if (detailsScroll_ && ctx_.selected != detailsActor_) detailsScroll_->scrollToTop();
     detailsActor_ = ctx_.selected;
 
     detailsList_->addSlot(
@@ -2038,7 +2272,7 @@ void EditorApp::rebuildDetails() {
     auto addNumRow = [&](const char* lbl, glm::vec4 lc,
                          std::function<float()>     getter,
                          std::function<void(float)> setter,
-                         float step,
+                         float step, ENumberUnit unit,
                          std::function<void()> bFn,
                          std::function<void()> eFn) {
         detailsList_->addSlot(
@@ -2047,7 +2281,7 @@ void EditorApp::rebuildDetails() {
                 ->addSlot(
                     HNew(SNumberField)
                         ->label(lbl)->labelColor(lc)->fontSize(s(12.f))
-                        ->get(std::move(getter))->set(std::move(setter))->step(step)
+                        ->get(std::move(getter))->set(std::move(setter))->step(step)->unit(unit)
                         ->onDragBegin(std::move(bFn))->onDragEnd(std::move(eFn)),
                     SHorizontalBox::ESizeRule::Fill)
                 ->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(8.f)),
@@ -2062,14 +2296,16 @@ void EditorApp::rebuildDetails() {
     };
 
     auto txBody = HNew(SVerticalBox);
+    // 단위 종류가 끌기 감도와 표시 자릿수를 정합니다(DEF-46): 위치는 거리, 회전은 각도, 크기는 Size.
     auto addTxRow = [&](const char* lbl, glm::vec4 lc,
-                        std::function<float()> getter, std::function<void(float)> setter, float step) {
+                        std::function<float()> getter, std::function<void(float)> setter,
+                        float step, ENumberUnit unit) {
         txBody->addSlot(
             HNew(SHorizontalBox)
                 ->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(12.f))
                 ->addSlot(HNew(SNumberField)
                     ->label(lbl)->labelColor(lc)->fontSize(s(12.f))
-                    ->get(std::move(getter))->set(std::move(setter))->step(step)
+                    ->get(std::move(getter))->set(std::move(setter))->step(step)->unit(unit)
                     ->onDragBegin(txBegin)->onDragEnd(txEnd),
                     SHorizontalBox::ESizeRule::Fill)
                 ->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(8.f)),
@@ -2081,25 +2317,25 @@ void EditorApp::rebuildDetails() {
     auto setPosX = [sel](float v){ glm::vec3 p = sel->transform().position(); p.x = v; sel->setLocalPosition(p); };
     auto setPosY = [sel](float v){ glm::vec3 p = sel->transform().position(); p.y = v; sel->setLocalPosition(p); };
     auto setPosZ = [sel](float v){ glm::vec3 p = sel->transform().position(); p.z = v; sel->setLocalPosition(p); };
-    addTxRow("X", kRed,   [sel]{ return sel->transform().position().x; }, setPosX, 0.01f);
-    addTxRow("Y", kGreen, [sel]{ return sel->transform().position().y; }, setPosY, 0.01f);
-    addTxRow("Z", kBlue,  [sel]{ return sel->transform().position().z; }, setPosZ, 0.01f);
+    addTxRow("X", kRed,   [sel]{ return sel->transform().position().x; }, setPosX, 0.01f, ENumberUnit::Offset);
+    addTxRow("Y", kGreen, [sel]{ return sel->transform().position().y; }, setPosY, 0.01f, ENumberUnit::Offset);
+    addTxRow("Z", kBlue,  [sel]{ return sel->transform().position().z; }, setPosZ, 0.01f, ENumberUnit::Offset);
     txBody->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
 
     txBody->addSlot(sectionHeader("ROTATION"), SVerticalBox::ESizeRule::Fixed, s(22.f));
     auto setEuler = [this,sel]{ sel->setLocalRotation(glm::quat(glm::radians(cachedEuler_))); };
-    addTxRow("X", kRed,   [this]{ return cachedEuler_.x; }, [this,setEuler](float v){ cachedEuler_.x=v; setEuler(); }, 0.5f);
-    addTxRow("Y", kGreen, [this]{ return cachedEuler_.y; }, [this,setEuler](float v){ cachedEuler_.y=v; setEuler(); }, 0.5f);
-    addTxRow("Z", kBlue,  [this]{ return cachedEuler_.z; }, [this,setEuler](float v){ cachedEuler_.z=v; setEuler(); }, 0.5f);
+    addTxRow("X", kRed,   [this]{ return cachedEuler_.x; }, [this,setEuler](float v){ cachedEuler_.x=v; setEuler(); }, 0.5f, ENumberUnit::Angle);
+    addTxRow("Y", kGreen, [this]{ return cachedEuler_.y; }, [this,setEuler](float v){ cachedEuler_.y=v; setEuler(); }, 0.5f, ENumberUnit::Angle);
+    addTxRow("Z", kBlue,  [this]{ return cachedEuler_.z; }, [this,setEuler](float v){ cachedEuler_.z=v; setEuler(); }, 0.5f, ENumberUnit::Angle);
     txBody->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
 
     txBody->addSlot(sectionHeader("SCALE"), SVerticalBox::ESizeRule::Fixed, s(22.f));
     auto setSclX = [sel](float v){ glm::vec3 s2 = sel->transform().scale(); s2.x = v; sel->setLocalScale(s2); };
     auto setSclY = [sel](float v){ glm::vec3 s2 = sel->transform().scale(); s2.y = v; sel->setLocalScale(s2); };
     auto setSclZ = [sel](float v){ glm::vec3 s2 = sel->transform().scale(); s2.z = v; sel->setLocalScale(s2); };
-    addTxRow("X", kRed,   [sel]{ return sel->transform().scale().x; }, setSclX, 0.01f);
-    addTxRow("Y", kGreen, [sel]{ return sel->transform().scale().y; }, setSclY, 0.01f);
-    addTxRow("Z", kBlue,  [sel]{ return sel->transform().scale().z; }, setSclZ, 0.01f);
+    addTxRow("X", kRed,   [sel]{ return sel->transform().scale().x; }, setSclX, 0.01f, ENumberUnit::Size);
+    addTxRow("Y", kGreen, [sel]{ return sel->transform().scale().y; }, setSclY, 0.01f, ENumberUnit::Size);
+    addTxRow("Z", kBlue,  [sel]{ return sel->transform().scale().z; }, setSclZ, 0.01f, ENumberUnit::Size);
 
     // 섹션은 리빌드마다 새로 만들어지므로 접힘 상태를 에디터가 기억합니다. 예전에는
     // expanded(true) 고정이라, 접어 두어도 선택을 바꾸면 다시 펼쳐졌습니다(DEF-90).
@@ -2235,7 +2471,7 @@ void EditorApp::rebuildDetails() {
             if (pd.kind == PropDesc::Float)
                 addNumRow(pd.label, pd.color,
                     [pd]{ return pd.getF(); }, [pd](float v){ pd.setF(v); },
-                    pd.step, compBegin, compEnd);
+                    pd.step, toNumberUnit(pd.unit), compBegin, compEnd);
             else if (pd.kind == PropDesc::Toggle)
                 addBoolRow(pd.label, pd.getB,
                            [comp, setB = pd.setB](bool v){ setB(v); comp->onPropsCommitted(); });
@@ -2701,9 +2937,11 @@ void EditorApp::rebuildLogPopup() {
     // 패널의 빈 곳(여백·열 제목)을 누른 클릭이 아래 패널(뷰포트 픽 등)로 새지 않게, 같은 자리에
     // 투명 버튼을 깔아 받아 둡니다. SButton 은 자식에게 클릭을 넘기지 않으므로 패널을 감싸지
     // 않고 형제로 뒤에 둡니다(오버레이는 앞 슬롯부터 판정).
+    // 휠도 같은 이유로 받아 둡니다(팝업 아래 Output Log 가 굴러가지 않게).
     auto absorber = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
-        HNew(SButton)->normalColor({ 0.f, 0.f, 0.f, 0.f })->hoveredColor({ 0.f, 0.f, 0.f, 0.f })
-            ->pressedColor({ 0.f, 0.f, 0.f, 0.f })->content(spacer()));
+        HNew(SBorder)->onWheel([](float) { return true; })->content(
+            HNew(SButton)->normalColor({ 0.f, 0.f, 0.f, 0.f })->hoveredColor({ 0.f, 0.f, 0.f, 0.f })
+                ->pressedColor({ 0.f, 0.f, 0.f, 0.f })->content(spacer())));
 
     // 버튼이 화면 아래쪽 절반에 있으면 위로, 위쪽이면 아래로 엽니다. Output Log 는 도킹으로
     // 어디든 옮겨질 수 있습니다.
@@ -2728,6 +2966,18 @@ void EditorApp::rebuildLogPopup() {
 void EditorApp::rebuildBottomPanel() {
     if (!bottomContent_) return;
     bottomContent_->clearSlots();
+    // Output Log 는 스크롤 상자 밖에 둡니다(buildWidgetTree 의 설명 참고). 탭이 바뀌면 스크롤을
+    // 맨 위로 돌리고, 같은 탭을 다시 그릴 때(Refresh 등)는 위치를 지킵니다.
+    if (bottomHost_ && bottomScroll_) {
+        if (bottomTab_ == 1) {
+            bottomScroll_->content(nullptr);
+            bottomHost_->content(bottomContent_);
+        } else {
+            bottomScroll_->content(bottomContent_);
+            bottomHost_->content(bottomScroll_);
+        }
+        if (bottomTab_ != bottomScrollTab_) { bottomScroll_->scrollToTop(); bottomScrollTab_ = bottomTab_; }
+    }
 
     // Output Log 탭에만 있는 위젯의 참조를 놓습니다. 다른 탭으로 가면 팝업을 닫고 로그 검색
     // 포커스도 풉니다. 풀지 않으면 보이지 않는 검색창으로 타이핑이 계속 들어갑니다.
@@ -2972,8 +3222,16 @@ void EditorApp::rebuildBottomPanel() {
         bottomContent_->addSlot(HNew(SBorder)->background(kBgHeader)->content(filterRow),
                                 SVerticalBox::ESizeRule::Fixed, s(28.f));
         // 패딩은 슬롯이 아니라 감싼 SBorder 에 줍니다. Fill 슬롯의 패딩은 이중 계산됩니다(DEF-62).
+        // 휠은 이 영역이 받습니다(DEF-57). 로그 행은 위젯을 다시 만들지 않고 문자열만 바꾸므로,
+        // 아웃라이너와 달리 좌버튼을 누른 채 굴려도 클릭이 엇갈리지 않습니다. 이동량은 여기서
+        // 쌓기만 하고, 필터를 적용한 실제 이동은 refreshLogView 가 합니다.
         bottomContent_->addSlot(HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f })
-                                    ->padding(HPadding{ s(4.f), s(2.f) })->content(rowsArea),
+                                    ->padding(HPadding{ s(4.f), s(2.f) })->content(rowsArea)
+                                    ->onWheel([this](float d) {
+                                        logScrollReq_ += (d > 0.f) ? 3 : -3;
+                                        logViewDirty_  = true;
+                                        return true;
+                                    }),
                                 SVerticalBox::ESizeRule::Fill);
         rebuildLogRows();
     } else {
@@ -2992,12 +3250,13 @@ void EditorApp::rebuildBottomPanel() {
         addStat("FPS",        AttrStr([this]{ return std::to_string(vpTimings_.fps); }));
         addStat("Draw Calls", AttrStr([this]{ return std::to_string(vpTimings_.drawCalls); }));
         addStat("Culled",     AttrStr([this]{ return std::to_string(vpTimings_.culled); }));
+        // 보이지만 행 예산(kMaxDraws)이 차서 못 그린 메시 수. 0 이 아니면 씬이 상한을 넘은 것입니다.
+        addStat("Dropped",    AttrStr([this]{ return std::to_string(vpTimings_.dropped); }));
         addStat("Transparent",AttrStr([this]{ return std::to_string(vpTimings_.transparentDraws); }));
         addStat("Shadow",     AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.shadowMs); return std::string(b); }));
         addStat("Main Pass",  AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.mainMs);   return std::string(b); }));
         addStat("AO",         AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.aoMs);      return std::string(b); }));
         addStat("Bloom",      AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.bloomMs);   return std::string(b); }));
-        addStat("TAA blit",   AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.taaBlitMs); return std::string(b); }));
         addStat("Tonemap",    AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.tonemapMs);return std::string(b); }));
         addStat("UI Pass",    AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.uiMs);     return std::string(b); }));
         addStat("CPU Frame",  AttrStr([]{ char b[32]; snprintf(b,32,"%.3f ms",gFrameTimings().loopTotal.v); return std::string(b); }));
@@ -3051,8 +3310,10 @@ void EditorApp::tickShortcuts() {
 
     if (sEdge) { saveScene(); return; }
 
-    // Ctrl+F → 아웃라이너 검색창 포커스 (기존 검색어는 전체 선택 → 바로 교체 가능)
+    // Ctrl+F → 아웃라이너 검색창 포커스 (기존 검색어는 전체 선택 → 바로 교체 가능). 아웃라이너가
+    // 닫혀 있거나 가려진 탭이면 먼저 앞으로 꺼냅니다. 그러지 않으면 보이지 않는 검색창으로 타이핑이 들어갑니다.
     if (fEdge) {
+        if (!outlinerVisible_) showPanel("Outliner");
         setTextFocus(EFocusTarget::Search);
         return;
     }
@@ -3113,7 +3374,8 @@ void EditorApp::handleInput(float mouseX, float mouseY,
     if (leftDown && !prevLeftDown_ && logPopupOpen_) {
         const glm::vec2 mp{ mouseX, mouseY };
         const bool inPanel  = logPopupPanel_ && logPopupPanel_->cachedGeometry().contains(mp);
-        const bool onButton = logCatButton_  && logCatButton_->cachedGeometry().contains(mp);
+        const bool onButton = logCatButton_  && logCatButton_->cachedGeometry().contains(mp) &&
+                              (!bottomHost_ || bottomHost_->cachedGeometry().contains(mp));   // 잘린 부분 제외
         if (!inPanel && !onButton) { logPopupOpen_ = false; logPopupDirty_ = true; }
     }
 
@@ -3211,8 +3473,18 @@ void EditorApp::handleInput(float mouseX, float mouseY,
     if (ctx_.window && !ctx_.window->isCameraModeActive() && !dockDragNode_) {
         const glm::vec2 m{ mouseX, mouseY };
 
-        if (leftDown && !prevLeftDown_ && !tabPressPending_ && !overPopup) {
+        if (leftDown && !prevLeftDown_ && !tabPressPending_ && !tabCloseWidget_ && !overPopup) {
             for (auto& t : dockTabHits_) {
+                // 리프 탭 줄 밖으로 넘쳐 잘린 탭은 안 보이므로 건너뜁니다. 건너뛰지 않으면 왼쪽 리프의
+                // 숨은 탭이 오른쪽 리프의 보이는 탭보다 먼저 잡혀, 보이지 않는 x 가 패널을 닫습니다.
+                if (!t.row || !t.row->cachedGeometry().contains(m)) continue;
+                // 탭의 x 는 버튼처럼 다룹니다. 누른 x 위에서 뗄 때만 닫고, 끌어도 재도킹하지 않습니다.
+                if (t.close && t.close->cachedGeometry().contains(m)) {
+                    tabCloseWidget_ = t.close;
+                    tabCloseRow_    = t.row;
+                    tabClosePanel_  = t.panelId;
+                    break;
+                }
                 if (t.widget && t.widget->cachedGeometry().contains(m)) {
                     tabPressPending_ = true; tabDragActive_ = false;
                     tabSrcStack_ = t.stack; tabSrcIndex_ = t.tabIndex;
@@ -3220,6 +3492,21 @@ void EditorApp::handleInput(float mouseX, float mouseY,
                     break;
                 }
             }
+        }
+
+        // 누른 x 는 뗄 때까지 이벤트를 소비합니다(픽·기즈모·탭 전환으로 새지 않게).
+        if (tabCloseWidget_) {
+            if (!leftDown) {
+                const bool        fire = tabCloseWidget_->cachedGeometry().contains(m) &&
+                                         tabCloseRow_ && tabCloseRow_->cachedGeometry().contains(m);
+                const std::string id   = tabClosePanel_;
+                tabCloseWidget_.reset();
+                tabCloseRow_.reset();
+                tabClosePanel_.clear();
+                if (fire) closePanel(id);
+            }
+            prevLeftDown_ = leftDown;
+            return;
         }
 
         if (tabPressPending_) {
@@ -3271,6 +3558,11 @@ void EditorApp::handleInput(float mouseX, float mouseY,
 
     HPointerEvent e;
     e.position = { mouseX, mouseY };
+    // 숫자 칸 끌기 배율(Shift 빠르게 · Ctrl 정밀하게)에 씁니다(DEF-46).
+    if (ctx_.window) {
+        e.shift = ctx_.window->isShiftDown();
+        e.ctrl  = ctx_.window->isCtrlDown();
+    }
 
     if (scrollDelta != 0.f) {
         e.wheelDelta = scrollDelta;
@@ -3486,6 +3778,17 @@ void EditorApp::tickRenameInput() {
     const bool delNow = win.isKeyDown(HInput::KEY_DELETE);
     const bool enNow  = win.isKeyDown(HInput::KEY_ENTER);
     const bool bsNow  = win.isKeyDown(HInput::KEY_BACKSPACE);
+    // 백스페이스는 누르고 있으면 OS 자동 반복 간격으로 거듭 지웁니다(DEF-58). 횟수는 직전
+    // 폴링 이후 들어온 누름과 반복의 수입니다. 포커스가 바뀐 프레임에 이미 눌려 있던 키는 뗄
+    // 때까지 무시합니다(엣지로 판정하던 때와 같은 규칙: 누른 채 진입한 키가 곧바로 지우지 않게).
+    // 판정을 여기서 하는 이유는 진입 경로가 여럿이기 때문입니다. 숫자 칸은 setTextFocus 를 거치지
+    // 않고 누름·뗌으로 직접 입력 모드에 들어갑니다.
+    if (const EFocusTarget f = currentFocus(); f != backspaceFocus_) {
+        backspaceFocus_   = f;
+        backspaceBlocked_ = bsNow;
+    }
+    if (backspaceBlocked_ && !bsNow) backspaceBlocked_ = false;
+    const int bsCount = backspaceBlocked_ ? 0 : win.keyPressCount(HInput::KEY_BACKSPACE);
     const bool escNow = win.isKeyDown(HInput::KEY_ESCAPE);
 
     const bool pasteEdge  = ctrlHeld && vNow && !prevVDown_;
@@ -3494,7 +3797,6 @@ void EditorApp::tickRenameInput() {
     const bool f2Edge     = f2Now  && !prevF2Down_;
     const bool delEdge    = delNow && !prevDeleteDown_;
     const bool enterEdge  = enNow  && !prevEnterDown_;
-    const bool bsEdge     = bsNow  && !prevBackspaceDown_;
     const bool escEdge    = escNow && !prevEscapeDown_;
 
     prevVDown_         = vNow;
@@ -3503,7 +3805,6 @@ void EditorApp::tickRenameInput() {
     prevF2Down_        = f2Now;
     prevDeleteDown_    = delNow;
     prevEnterDown_     = enNow;
-    prevBackspaceDown_ = bsNow;
     prevEscapeDown_    = escNow;
 
     const EFocusTarget focus = currentFocus();
@@ -3516,6 +3817,8 @@ void EditorApp::tickRenameInput() {
 
     // F2 — 리네임 진입·종료. 다른 텍스트 편집 중에는 반응하지 않습니다.
     if (f2Edge && (focus == EFocusTarget::None || focus == EFocusTarget::Rename)) {
+        // 리네임은 아웃라이너 행에서 보이므로, 닫혀 있거나 가려진 탭이면 먼저 꺼냅니다(Ctrl+F 와 같은 이유).
+        if (focus != EFocusTarget::Rename && !outlinerVisible_) showPanel("Outliner");
         setTextFocus(focus == EFocusTarget::Rename ? EFocusTarget::None
                                                    : EFocusTarget::Rename);
         return;
@@ -3532,7 +3835,7 @@ void EditorApp::tickRenameInput() {
         if (pasteEdge)
             for (char c : win.getClipboardText()) nf->onChar((unsigned char)c);
         if (copyEdge)  win.setClipboardText(nf->editBuffer());
-        if (bsEdge)    nf->onBackspace();
+        for (int i = 0; i < bsCount; ++i) nf->onBackspace();
         if (enterEdge) nf->commitEdit();
         return;
     }
@@ -3571,7 +3874,7 @@ void EditorApp::tickRenameInput() {
         }
         if (copyEdge) win.setClipboardText(buf);
 
-        if (bsEdge && !buf.empty()) {
+        for (int i = 0; i < bsCount && !buf.empty(); ++i) {
             if (selAll) clearIfSelAll();
             else        buf.pop_back();
             dirty = true;

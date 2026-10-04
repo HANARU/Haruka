@@ -28,7 +28,7 @@ GLFW 창(1600x900) 하나를 띄우고 그 안에서 엔진과 에디터가 함�
 | 컴파일러 | MSVC. `build.bat`은 `Visual Studio 18 2026`을 기본 생성기로 쓰고, 해당 설치 경로가 없고 2022가 있으면 `Visual Studio 17 2022`로 내려갑니다(`-A x64` 고정) |
 | CMake | 3.20 이상 |
 | Vulkan SDK | **1.4.x** — 코드가 `VK_API_VERSION_1_4`와 `VkPhysicalDeviceVulkan14Features.pushDescriptor`를 사용 |
-| GPU 드라이버 | Vulkan 1.4. 그 밖에 요구하는 기능: `synchronization2`, `drawIndirectCount`, `multiview`, `samplerAnisotropy` |
+| GPU 드라이버 | Vulkan 1.4. 그 밖에 요구하는 기능: `synchronization2`, `multiview`, `samplerAnisotropy` |
 | 네트워크 | 첫 CMake 구성 시 필요(의존성을 FetchContent로 내려받음) |
 
 미리 설치할 것은 Vulkan SDK 하나입니다. glm 1.0.1, GLFW 3.4, tinygltf v2.9.3, stb, miniaudio 0.11.21, JoltPhysics v5.1.0은 CMake FetchContent가 구성 시점에 내려받으며 저장소에는 포함되어 있지 않습니다. 셰이더는 런타임이 아니라 빌드 시점에 `glslc`로 SPIR-V(그래픽스 18 + 컴퓨트 1)로 컴파일되므로, `glslc`를 찾지 못하면 구성 단계에서 실패합니다.
@@ -70,7 +70,7 @@ ctest -C Release
 CMakeLists.txt   build.bat   run.bat
 src/
   core/        Engine · World · Actor · Component
-  renderer/    Vulkan 렌더러, passes/(Shadow · Geometry · AO · Bloom · Post · Cull)
+  renderer/    Vulkan 렌더러, passes/(Shadow · Geometry · AO · Bloom · Post)
   memory/      HarukaAllocator (자체 3존 할당자)
   ui/slate/    HSlate — 자체 리테인드 모드 위젯 시스템 (13종)
   editor/      EditorApp · 도킹 · 기즈모 · 커맨드 스택 · 셰이더 핫 리로드
@@ -104,8 +104,8 @@ Docs/          설계 · 결함 · 결정 기록 (색인: Docs/README.md)
 - Android/Quest 경로는 스텁입니다. `AndroidWindow::createSurface()`가 예외를 던지고, `Engine` 생성자가 `GlfwWindow`를 조건 없이 만들기 때문에 CMake의 ANDROID 분기는 컴파일되지 않습니다. gradle 등 안드로이드 빌드 파일도 없습니다.
 
 **렌더러**
-- TAA는 셰이더와 히스토리 타깃이 남아 있으나 호출부가 `taaEnabled=false`를 고정으로 넘겨 비활성입니다(지터·모션벡터 없는 구현이 고스팅만 냈다는 이유로 의도적으로 껐다고 코드에 기록되어 있습니다). 실제 안티에일리어싱은 MSAA가 전담합니다.
-- GPU 컴퓨트 컬링(`cull.comp`, `CullPass`)은 파이프라인이 생성되지만 프레임에서 dispatch하지 않습니다. 컬링은 CPU에서 합니다.
+- TAA는 없습니다. 지터·모션벡터 없는 구현이 고스팅만 내서 껐고, 남아 있던 코드도 2026-10-04 에 지웠습니다. 안티에일리어싱은 MSAA가 전담합니다.
+- 컬링은 CPU에서 합니다. GPU 컴퓨트 컬링은 순수 오버헤드여서 dispatch를 멈췄고, 코드도 2026-10-04 에 지웠습니다.
 - 섀도맵은 2048² 한 장이고 캐스케이드(CSM)가 없으며, 캐스터는 Directional 라이트 하나뿐입니다.
 - IBL이 절차 생성 큐브맵이라 외부 HDRI 환경 맵을 불러올 수 없습니다.
 - 프레임 인 플라이트 2, 프레임당 드로우 상한 1024(불투명/투명 각각).

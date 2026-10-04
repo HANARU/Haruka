@@ -70,6 +70,16 @@ public:
             ret.merge(slots_[i].widget->onMouseMove(e));
         return ret;
     }
+    // 휠은 누름과 같은 규칙으로 맨 위 슬롯부터 보내고, 받은 슬롯에서 멈춥니다. 예전에는 어떤
+    // 컨테이너도 휠을 전달하지 않아 위젯이 휠을 받을 수 없었습니다(DEF-57).
+    HReply onScroll(const HPointerEvent& e) override {
+        for (int i = (int)slots_.size() - 1; i >= 0; --i) {
+            if (!slots_[i].widget->isVisible()) continue;
+            if (slots_[i].widget->cachedGeometry().contains(e.position))
+                if (auto r = slots_[i].widget->onScroll(e); r.handled) return r;
+        }
+        return HReply::Unhandled();
+    }
 
 private:
     std::vector<FSlot> slots_;

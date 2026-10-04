@@ -78,8 +78,8 @@ void ShadowPass::create(RenderContext& rc, VkPipelineLayout pbrLayout) {
 }
 
 void ShadowPass::rebuildPipelines() {
-    if (pipeline_) { vkDestroyPipeline(rc_->device, pipeline_, nullptr); pipeline_ = VK_NULL_HANDLE; }
-
+    // 새 파이프라인을 먼저 만들고 성공했을 때만 옛 것을 지웁니다. 핫 리로드가 실패해도
+    // 이전 파이프라인으로 계속 그립니다.
     auto vert = rc_->createShaderModule(readFile("shaders/shadow.vert.spv"));
     auto frag = rc_->createShaderModule(readFile("shaders/shadow.frag.spv"));
 
@@ -148,8 +148,15 @@ void ShadowPass::rebuildPipelines() {
     ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
     ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
     ci.layout = pbrLayout_; ci.renderPass = pass_; ci.subpass = 0;
-    if (vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &pipeline_) != VK_SUCCESS)
+    VkPipeline fresh = VK_NULL_HANDLE;
+    const VkResult res = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &fresh);
+    if (res != VK_SUCCESS) {
+        vkDestroyShaderModule(rc_->device, vert, nullptr);
+        vkDestroyShaderModule(rc_->device, frag, nullptr);
         throw std::runtime_error("Failed to create shadow pipeline!");
+    }
+    if (pipeline_) vkDestroyPipeline(rc_->device, pipeline_, nullptr);
+    pipeline_ = fresh;
 
     vkDestroyShaderModule(rc_->device, vert, nullptr);
     vkDestroyShaderModule(rc_->device, frag, nullptr);

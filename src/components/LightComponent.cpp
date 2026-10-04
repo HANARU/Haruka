@@ -35,14 +35,14 @@ std::vector<PropDesc> LightComponent::buildProps() {
 
     props.push_back(makePropFloat("Intensity", PropColor::Neutral, 0.01f,
         [p]{ return p->intensity; },
-        [p](float v){ p->intensity = std::max(0.f, v); }));
+        [p](float v){ p->intensity = std::max(0.f, v); }, PropUnit::Size));
 
     props.push_back(makePropFloat("R", PropColor::Red,   0.01f,
-        [p]{ return p->color.r; }, [p](float v){ p->color.r = std::clamp(v, 0.f, 1.f); }));
+        [p]{ return p->color.r; }, [p](float v){ p->color.r = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
     props.push_back(makePropFloat("G", PropColor::Green, 0.01f,
-        [p]{ return p->color.g; }, [p](float v){ p->color.g = std::clamp(v, 0.f, 1.f); }));
+        [p]{ return p->color.g; }, [p](float v){ p->color.g = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
     props.push_back(makePropFloat("B", PropColor::Blue,  0.01f,
-        [p]{ return p->color.b; }, [p](float v){ p->color.b = std::clamp(v, 0.f, 1.f); }));
+        [p]{ return p->color.b; }, [p](float v){ p->color.b = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
 
     // 색온도: 토글이 켜졌을 때만 Kelvin 행을 노출(addBoolRow 도 변경 시 재구성).
     props.push_back(makePropToggle("Use Temperature",
@@ -56,16 +56,16 @@ std::vector<PropDesc> LightComponent::buildProps() {
     if (lightType != LightType::Directional)
         props.push_back(makePropFloat("Attenuation Radius", PropColor::Neutral, 0.1f,
             [p]{ return p->attenuationRadius; },
-            [p](float v){ p->attenuationRadius = std::max(0.f, v); }));
+            [p](float v){ p->attenuationRadius = std::max(kMinAttenuationRadius, v); }, PropUnit::Size));
 
     // Cone Angle 은 Spot 전용.
     if (lightType == LightType::Spot) {
         props.push_back(makePropFloat("Inner Cone Angle", PropColor::Neutral, 0.5f,
             [p]{ return p->innerConeAngle; },
-            [p](float v){ p->innerConeAngle = std::clamp(v, 0.f, 89.f); }));
+            [p](float v){ p->innerConeAngle = std::clamp(v, 0.f, 89.f); }, PropUnit::Angle));
         props.push_back(makePropFloat("Outer Cone Angle", PropColor::Neutral, 0.5f,
             [p]{ return p->outerConeAngle; },
-            [p](float v){ p->outerConeAngle = std::clamp(v, 0.f, 89.f); }));
+            [p](float v){ p->outerConeAngle = std::clamp(v, 0.f, 89.f); }, PropUnit::Angle));
     }
 
     // Cast Shadows 는 실제로 방향광만 섀도맵을 던지므로 Directional 에서만 노출(오해 방지).

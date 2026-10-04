@@ -66,7 +66,7 @@
 | HSlate UI + 에디터 | 구현됨 | |
 | **OpenXR 세션 + 스테레오 스왑체인** | **미구현** | VR 엔진의 핵심. `ISwapchain` 추상화만 준비됨 |
 | **Multiview 스테레오 렌더링** | **절반** | 피처는 켜졌으나 `viewMask` 없음, `viewProj[1] = viewProj[0]` |
-| **스테레오 대응 컬링 (두 눈 합집합 절두체)** | **미구현** (`DEF-31`, HIGH) | 컬링이 한쪽 눈 절두체만 씁니다. 한쪽 눈에서만 물체가 사라지면 양안 경합이 되므로 VR 엔진의 필수 요소이며 도메인과 무관합니다. Quest Pro는 디스플레이가 안쪽으로 기울어져 있어(canted) 두 절두체가 평행하지 않으므로 한쪽을 좌우로 넓히는 근사는 쓸 수 없습니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-1절 |
+| **스테레오 대응 컬링 (두 눈 합집합 절두체)** | **미구현** (`DEF-31`, HIGH) | 컬링이 한쪽 눈 절두체만 씁니다. 한쪽 눈에서만 물체가 사라지면 양안 경합이 되므로 VR 엔진의 필수 요소이며 도메인과 무관합니다. Quest 2·Pro·3 의 두 눈 시야는 평행하고 비대칭입니다(기울어진 canted 화면이 아님, 2026-10-04 정정). 두 눈 절두체를 각각 판정하는 방식이 정확하고 간단합니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-1절 |
 | **재투영 여유분만큼의 절두체 부풀리기** | 미구현 (`DEF-32`, MEDIUM) | 예측 포즈로 렌더하고 실제 포즈로 재투영하므로 주변부가 빌 수 있습니다. 여유분 폭은 실기 측정이 필요합니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-2절 |
 | **Foveated Rendering (FFR)** | **미구현** | `Renderer.hpp:167-170` 멤버만 선언됨 |
 | **VR 입력 (아날로그 축 + 6DOF 포즈)** | **미구현** | `HInputSystem`은 디지털 전용 |

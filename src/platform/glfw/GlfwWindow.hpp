@@ -30,6 +30,7 @@ public:
     void  getRightMouseDelta(float& dx, float& dy) override;
     float getScrollDelta() override;
     bool  isKeyDown(int key) const override;
+    int   keyPressCount(int key) const override;
     bool  isMouseButtonDown(int button) const override;
     void  getMousePosition(float& x, float& y) const override;
 
@@ -83,6 +84,8 @@ private:
     // 입력이 사라지므로(DEF-82), 누름 이벤트를 여기 걸어 두었다가 다음 pollEvents 에서 비웁니다.
     bool keyLatch_[GLFW_KEY_LAST + 1]             = {};
     bool buttonLatch_[GLFW_MOUSE_BUTTON_LAST + 1] = {};
+    // 직전 pollEvents 이후 들어온 누름과 OS 자동 반복(GLFW_REPEAT)의 횟수입니다(DEF-58).
+    uint8_t keyPresses_[GLFW_KEY_LAST + 1]        = {};
 
     GLFWcursor* cursorArrow_   = nullptr;
     GLFWcursor* cursorHResize_ = nullptr;

@@ -33,7 +33,6 @@ void Renderer::createAllPipelines() {
     ao_.rebuildPipelines();
     bloom_.rebuildPipelines();
     post_.rebuildPipelines();
-    cull_.rebuildPipelines();
 }
 
 
@@ -51,7 +50,7 @@ void Renderer::cleanupSwapChain() {
     // Geometry (메인 프레임버퍼 + MSAA + depth + HDR)
     geometry_.releaseSizeDependent();
 
-    // Post framebuffers + TAA history
+    // Post framebuffers
     post_.releaseSizeDependent();
 
     swapchain_->destroy();
@@ -89,8 +88,7 @@ void Renderer::recreateRenderTargets() {
     // 매 프레임 재생성을 일으켜도 통계에 0 으로 보였습니다(DEF-68).
     ++gFrameTimings().recreateCount;
     vkDeviceWaitIdle(device);
-    // 씬 타깃만 재생성합니다(스왑체인·UI 는 그대로). post 는 프레임버퍼가 스왑체인 뷰를
-    // 다시 가리키지만 renderExtent 가 바뀐 TAA 히스토리는 새로 만듭니다.
+    // 씬 타깃만 재생성합니다(스왑체인·UI 는 그대로). post 프레임버퍼는 스왑체인 뷰를 다시 가리킵니다.
     geometry_.releaseSizeDependent();
     ao_.releaseSizeDependent();
     bloom_.releaseSizeDependent();
@@ -114,7 +112,7 @@ void Renderer::setViewportRect(int x, int y, int w, int h) {
     const VkOffset2D newOff{ cx, cy };
     // 오프셋은 PostPass 가 기록할 때마다 읽어 합성 위치로만 씁니다. 크기가 같으면 오프셋만
     // 바꾸고 끝냅니다. 예전에는 오프셋만 달라져도 씬 타깃을 전부 다시 만들어, 스플리터를
-    // 끄는 동안 프레임마다 vkDeviceWaitIdle 과 TAA 히스토리 소실이 일어났습니다(DEF-59).
+    // 끄는 동안 프레임마다 vkDeviceWaitIdle 이 일어났습니다(DEF-59).
     rc_.viewportOffset = newOff;
     if (newExt.width  == rc_.renderExtent.width &&
         newExt.height == rc_.renderExtent.height)

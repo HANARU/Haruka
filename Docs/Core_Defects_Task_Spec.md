@@ -47,34 +47,53 @@ DEF-69, 따로 진행)과 잠재 항목 DEF-91 입니다. 검증은 단위 테�
 반영했습니다: 바디를 옮길 때 이웃 바디 깨우기, 값이 실제로 바뀌었을 때만 바디 재생성, 숫자 칸 확정 판정을 입력 여부로,
 그리고 UI 패스 정점 버퍼의 같은 레이스(신규 DEF-93). 반영 뒤 테스트는 `slate_input` 46개 · `physics_lifecycle` 29개 검사입니다.
 
+**[갱신 · 2026-10-03 · 기반 공사]** 남겨 두었던 기반 공사 묶음을 고쳤습니다. DEF-56(클리핑) · DEF-57(위젯 휠 경로) ·
+DEF-58(키 반복) · DEF-60(글자 폭 실측) · DEF-69(Window 메뉴)가 해결이고, 고치는 중에 찾은 DEF-94(재도킹 뒤 활성 탭이
+다른 패널로 바뀜)도 함께 고쳤습니다. 순서 제약은 모두 지켰습니다. DEF-60 은 뷰포트 툴바 폭 사다리와 함께 고쳤고(손으로
+계산한 임계값 표를 없애고 단계별 툴바를 세워서 잼), DEF-69 의 Window 메뉴와 탭 닫기 x 는 같은 작업에서 넣었으며,
+DEF-56 · DEF-57 뒤에 아웃라이너와 Output Log 의 휠 우회를 함께 위젯 경로로 옮겼습니다. 수정 뒤 독립 검토에서 나온 4건
+(잘려 안 보이는 탭이 클릭을 받음, 스크롤로 가려진 숫자 칸이 포커스를 놓지 않음, 닫힌 Outliner 로 Ctrl+F · F2 포커스가 들어감,
+백스페이스를 누른 채 숫자 칸에 들어가면 바로 지워짐)과 폰트 기준 포인터, 사소한 2건도 반영했습니다. 검증은 `slate_input` 79개 검사
+(새 검사 33개, 휠 전달 · 클립 기록 · 글자 폭 실측을 하나씩 되돌리면 실패함을 확인)와 실기 체크리스트
+([Editor_QA_Checklist.md](Editor_QA_Checklist.md) 5절 "2026-10-03 기반 공사 수정 후")로 했습니다. 남은 항목은 잠재 DEF-91
+하나입니다. 항목별 내용은 문서 끝 "기반 공사 수정 결과" 절에 있습니다.
+
+**[갱신 · 2026-10-04 · 1단계 정리 묶음]** 사용자 결정("추천대로 진행하되, 그 전에 다른 엔진들은 해당 문제를 어떻게
+해결했는지 조사를 선행")에 따라 남은 결함마다 다른 엔진의 해법을 조사하고 적용성을 확인한 뒤, 1단계 정리 묶음을
+고쳤습니다. DEF-03 · DEF-11 · DEF-14 · DEF-15 · DEF-28 · DEF-29 · DEF-30 · DEF-35 가 해결이고, DEF-10 은 진단만 넣었습니다
+(상한 설정화는 남음). 쓰지 않던 GPU 컬링 코드도 지웠습니다. 조사에서 새로 찾은 DEF-95 ~ DEF-103 을 등재했고, 그중
+DEF-98(셰이더 핫 리로드 종료)은 같은 묶음에서 고쳤습니다. Quest 화면이 기울어져(canted) 있다는 예전 주장 등 문서의
+틀린 전제도 바로잡았습니다. 수정 전후 뷰포트가 픽셀까지 같음을 확인했습니다. 항목별 내용은 문서 끝 "1단계 정리 묶음
+수정 결과와 신규 결함" 절에 있습니다.
+
 | ID | 결함명 | 심각도 | 대상 파일 | 관련 라인 |
 |---|---|---|---|---|
 | **DEF-01** | Transform SSBO 인덱스 동기화 붕괴 | **해결됨** (2026-08-25, 원래 CRITICAL) | `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L215, L296, L313~326 |
 | **DEF-02** | Zone C Ring Buffer 펜스 추적 부재 | **MEDIUM** (잠재) | `src/memory/HarukaAllocator.cpp` | L177~199 |
-| **DEF-03** | `drawIndirectCount` 무조건 요구 및 폴백 부재 | **HIGH** | `src/renderer/passes/GeometryPass.cpp`, `src/renderer/Renderer.cpp` | L507, L586 |
+| **DEF-03** | `drawIndirectCount` 무조건 요구 및 폴백 부재 | **해결됨 · 2026-10-04** (원래 HIGH, 요구 제거. 장치 버전 전제는 DEF-97) | `src/renderer/passes/GeometryPass.cpp`, `src/renderer/Renderer.cpp` | L507, L586 |
 | **DEF-04** | `vkCmdPipelineBarrier2` (Synch2) 무조건 호출 | **HIGH** | `src/renderer/RenderContext.cpp`, `src/renderer/passes/CullPass.cpp`, `src/renderer/Renderer.cpp` | L167, L166·L194, L586 |
 | **DEF-05** | 스왑체인 리사이즈 시 GPU In-Flight 자원 파괴 | **해결됨** | `src/renderer/Renderer_swap.cpp` | L59~60 |
 | **DEF-06** | MSAA `LAZILY_ALLOCATED` 메모리 속성 누락 | **HIGH** | `src/renderer/passes/GeometryPass.cpp` | L239 |
 | **DEF-07** | `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터 | **해결됨 · 2026-08-26** (원래 MEDIUM, A-1: EditorApp 구독 + 컴포넌트 `notifyDestroy`) | `src/core/World.hpp`, `src/core/World.cpp` | L27, L27 |
 | **DEF-08** | 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성) | **HIGH** | `src/main.cpp`, `CMakeLists.txt` | L38, L186~191 |
 | **DEF-09** | 멀티뷰 절반 구현 (피처만 켜지고 경로 없음) | **HIGH** | `src/renderer/Renderer.cpp`, `Renderer_render.cpp`, `Renderer.hpp` | L577~583, L169, L167~170 |
-| **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **MEDIUM** | `src/renderer/RenderTypes.hpp`, `src/physics/PhysicsSystem.cpp` | L12, L81 |
-| **DEF-11** | 셰이더 빌드 파이프라인 결함 (DEPENDS 누락·하드코딩·고아·죽은 파일) | **MEDIUM** | `CMakeLists.txt`, `shaders/include/` | L94~108 |
+| **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **MEDIUM** (2026-10-04 초과 진단만 추가, 상한 설정화는 남음) | `src/renderer/RenderTypes.hpp`, `src/physics/PhysicsSystem.cpp` | L12, L81 |
+| **DEF-11** | 셰이더 빌드 파이프라인 결함 (DEPENDS 누락·하드코딩·고아·죽은 파일) | **해결됨 · 2026-10-04** (원래 MEDIUM) | `CMakeLists.txt`, `shaders/include/` | L94~108 |
 | **DEF-12** | `World::tick`이 에디터 Play 상태에서만 실행 | **MEDIUM** | `src/main.cpp` | L115~119 |
-| **DEF-13** | `FrameUBO`에 `invViewProj` 부재 | **LOW** | `src/renderer/RenderTypes.hpp` | L16~24 |
-| **DEF-14** | `GpuTransform` 셰이더 4곳 중복 선언, 공유 include 부재 | **LOW** | `shaders/pbr.vert`, `depth.vert`, `shadow.vert`, `triangle.vert` | L25, L18, L18, L19 |
-| **DEF-15** | `prevViewProj` 선언만 존재, TAA 입력 미비 | **LOW** | `shaders/post.frag` 외 4개 셰이더 | L48~51 |
+| **DEF-13** | `FrameUBO`에 `invViewProj` 부재 | **LOW** (쓰는 곳 없음. 필요할 때 공용 헤더에 눈별 `[2]` 로 추가) | `src/renderer/RenderTypes.hpp` | L16~24 |
+| **DEF-14** | `GpuTransform` 셰이더 4곳 중복 선언, 공유 include 부재 | **해결됨 · 2026-10-04** (원래 LOW, `haruka_shared.h`) | `shaders/pbr.vert`, `depth.vert`, `shadow.vert`, `triangle.vert` | L25, L18, L18, L19 |
+| **DEF-15** | `prevViewProj` 선언만 존재, TAA 입력 미비 | **해결됨 · 2026-10-04** (원래 LOW, 가짜 TAA 잔재와 함께 제거) | `shaders/post.frag` 외 4개 셰이더 | L48~51 |
 | **DEF-23** | 스피어 인덱스 도메인 불일치 (DEF-01의 직계 형제) | **해결됨** (2026-08-25, 원래 CRITICAL) | `shaders/cull.comp`, `src/renderer/passes/CullPass.cpp`, `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L54·L57 |
 | **DEF-24** | 라이트 개수 이중 계산 | **해결됨 · 2026-08-25** (원래 HIGH) | `src/renderer/Renderer_render.cpp`, `src/renderer/Renderer.hpp`, `src/renderer/RenderTypes.hpp`, `shaders/pbr.frag` | 8-2절 |
 | **DEF-33** | 라이트 선택 정책 부재 (생성 순서로 절단) | MEDIUM | `src/renderer/Renderer_render.cpp` (`updateLightSSBO`) | 8-2-a절 |
 | **DEF-34** | 타일드/클러스터드 라이팅 부재 (픽셀당 전체 순회) | MEDIUM | `shaders/pbr.frag` | 8-2-b절 |
-| **DEF-35** | `evalLight`의 0 나눗셈 가능성 | LOW | `shaders/pbr.frag` | 8-2-c절 |
+| **DEF-35** | `evalLight`의 0 나눗셈 가능성 | **해결됨 · 2026-10-04** (원래 LOW, 반경 최솟값 포함) | `shaders/pbr.frag` | 8-2-c절 |
 | **DEF-25** | 깊이 프리패스와 컬러 서브패스의 가시 집합 불일치 (CPU는 AABB, GPU는 구) | **해결됨** (2026-08-25, 원래 HIGH) | `src/renderer/Renderer_render.cpp`, `src/renderer/Renderer.hpp` | `buildDrawCommands`의 `sphereInFrustum`, 증상은 `GeometryPass.cpp` L330·L88 |
 | **DEF-26** | 섀도 캐스터 라이트 선택 불일치 | **해결됨 · 2026-08-27** (원래 MEDIUM) | `src/renderer/Renderer_render.cpp`, `shaders/pbr.frag` | 8-4절 |
 | **DEF-27** | 섀도 패스가 카메라 프러스텀으로 걸러진 목록 사용 | **해결됨 · 2026-08-27** (원래 MEDIUM) | `src/renderer/Renderer_render.cpp` | 8-5절 |
-| **DEF-28** | 머티리얼 null 항목의 드로우 강행 | **MEDIUM** | `src/renderer/passes/GeometryPass.cpp` | L526, L552 |
-| **DEF-29** | `VkDeviceCreateInfo`의 검증 레이어 설정 | **LOW** | `src/renderer/Renderer.cpp` | L603~604 |
-| **DEF-30** | 투명 정렬 comparator의 매핑 메모리 읽기 | **LOW** | `src/renderer/Renderer_render.cpp` | 투명 정렬 comparator |
+| **DEF-28** | 머티리얼 null 항목의 드로우 강행 | **해결됨 · 2026-10-04** (원래 MEDIUM, 자홍색 오류 머티리얼) | `src/renderer/passes/GeometryPass.cpp` | L526, L552 |
+| **DEF-29** | `VkDeviceCreateInfo`의 검증 레이어 설정 | **해결됨 · 2026-10-04** (원래 LOW) | `src/renderer/Renderer.cpp` | L603~604 |
+| **DEF-30** | 투명 정렬 comparator의 매핑 메모리 읽기 | **해결됨 · 2026-10-04** (원래 LOW) | `src/renderer/Renderer_render.cpp` | 투명 정렬 comparator |
 | **DEF-31** | 두 눈 합집합 절두체 부재 (단안 절두체로 스테레오를 컬링) | **HIGH** (착수: OpenXR 세션 도입 시) | `src/renderer/Renderer_render.cpp`, `src/renderer/passes/CullPass.cpp` | `extractRenderView`의 `cullViewProj`, L179~181 |
 | **DEF-32** | 재투영 여유분만큼의 절두체 부풀리기 부재 | **MEDIUM** (착수: OpenXR 세션 도입 시) | `src/renderer/Renderer_render.cpp` | `extractFrustumPlanes` |
 | **DEF-36** | 섀도 샘플러 비교 규약 반전 (모든 라이트 기여가 0이 됨) | **해결됨 · 2026-08-25** (원래 CRITICAL) | `src/renderer/passes/ShadowPass.cpp` | L37 (증상은 `shaders/pbr.frag` L165), 11-1절 |
@@ -87,7 +106,7 @@ DEF-69, 따로 진행)과 잠재 항목 DEF-91 입니다. 검증은 단위 테�
 | **DEF-43** | 세터 안의 `resetIfLive`로 인한 매 프레임 바디 재생성 | **해결됨 · 2026-10-02** (원래 LOW, 재생성을 편집 확정 훅으로 옮김) | `src/components/RigidBodyComponent.cpp` | `resetIfLive` |
 | **DEF-44** | `RIGID:`의 enum 서수 직렬화 | **해결됨 · 2026-10-02** (원래 LOW, 이름으로 기록하고 옛 순번도 읽음) | `src/assets/SceneSerializer.cpp` | `RIGID:` 기록 경로 |
 | **DEF-45** | `uploadMesh`의 핸들 누수 | **해결됨 · 2026-08-25** (원래 LOW) | `src/renderer/GpuScene.cpp` | `uploadMesh`, 11-10절 |
-| **DEF-46** | 에디터 float 스텝 0.01 고정으로 1cm 미만 편집 불가 | **MEDIUM** (절차 도형 작업 선결 조건) | `src/core/Reflect.hpp` | `PropDesc::step` |
+| **DEF-46** | 에디터 float 스텝 0.01 고정으로 1cm 미만 편집 불가 | **해결됨 · 2026-10-04** (원래 MEDIUM, 단위 종류 · UE 식 수정 키) | `src/core/Reflect.hpp` | `PropDesc::step` |
 | **DEF-47** | glTF 스칼라 팩터를 한 번도 읽지 않음 (텍스처 없는 머티리얼이 전부 순백) | **해결됨 · 2026-08-25** (원래 HIGH) | `src/assets/GltfLoader.cpp` | 머티리얼 추출 경로, 11-12절 |
 | **DEF-48** | sRGB 이중 디코드 (SRGB 포맷인데 셰이더가 `pow(2.2)`를 한 번 더 적용) | **해결됨 · 2026-08-25** (원래 MEDIUM) | `shaders/pbr.frag` | albedo 및 emissive 샘플링, 11-13절 |
 
@@ -169,7 +188,7 @@ DEF-69, 따로 진행)과 잠재 항목 DEF-91 입니다. 검증은 단위 테�
 
 ---
 
-## 3. [DEF-03] [HIGH] `drawIndirectCount` 무조건 요구 및 폴백 부재
+## 3. [DEF-03] [해결됨 · 2026-10-04, 원래 HIGH] `drawIndirectCount` 무조건 요구 및 폴백 부재
 
 ### 3-1. 대상 파일 및 위치
 * **파일**: [`src/renderer/passes/GeometryPass.cpp`](file:///e:/Haruka/src/renderer/passes/GeometryPass.cpp), [`src/renderer/Renderer.cpp`](file:///e:/Haruka/src/renderer/Renderer.cpp)
@@ -358,7 +377,7 @@ Release/Debug 빌드 통과, 신규 경고 0, 실행 정상, 검증 레이어 �
 
 ---
 
-### 8-2-c. [DEF-35] [LOW] `evalLight`의 0 나눗셈 가능성
+### 8-2-c. [DEF-35] [해결됨 · 2026-10-04, 원래 LOW] `evalLight`의 0 나눗셈 가능성
 
 * **메커니즘**: `lightDir = toLight / dist`에서 라이트와 표면점이 정확히 일치하면 `dist`가 0이 되어 NaN이 됩니다.
 * **판단**: 극단적인 경우이므로 DEF-24 수정 시 함께 손대지 않았습니다. 광원이 표면과 겹칠 수 있는 연출을 넣을 때 재검토하십시오.
@@ -451,7 +470,7 @@ Release/Debug 빌드 통과, 신규 경고 0, 실행 정상, 검증 레이어 �
 
 ---
 
-### 8-6. [DEF-28] [MEDIUM] 머티리얼 null 항목의 드로우 강행
+### 8-6. [DEF-28] [해결됨 · 2026-10-04, 원래 MEDIUM] 머티리얼 null 항목의 드로우 강행
 
 #### 대상 파일 및 위치
 * [`GeometryPass.cpp:L526`](file:///e:/Haruka/src/renderer/passes/GeometryPass.cpp#L526), [`GeometryPass.cpp:L552`](file:///e:/Haruka/src/renderer/passes/GeometryPass.cpp#L552)
@@ -467,7 +486,7 @@ Release/Debug 빌드 통과, 신규 경고 0, 실행 정상, 검증 레이어 �
 
 ---
 
-### 8-7. [DEF-29] [LOW] `VkDeviceCreateInfo`의 검증 레이어 설정
+### 8-7. [DEF-29] [해결됨 · 2026-10-04, 원래 LOW] `VkDeviceCreateInfo`의 검증 레이어 설정
 
 #### 대상 파일 및 위치
 * [`Renderer.cpp:L625-L626`](file:///e:/Haruka/src/renderer/Renderer.cpp#L625-L626)
@@ -482,7 +501,7 @@ Release/Debug 빌드 통과, 신규 경고 0, 실행 정상, 검증 레이어 �
 
 ---
 
-### 8-8. [DEF-30] [LOW] 투명 정렬 comparator의 매핑 메모리 읽기
+### 8-8. [DEF-30] [해결됨 · 2026-10-04, 원래 LOW] 투명 정렬 comparator의 매핑 메모리 읽기
 
 #### 대상 파일 및 위치
 * [`src/renderer/Renderer_render.cpp`](file:///e:/Haruka/src/renderer/Renderer_render.cpp): 투명 정렬 comparator
@@ -521,7 +540,7 @@ DEF-25를 수정하면서 CPU와 GPU의 컬링 판정을 하나로 통일했습�
 
 #### 수정 가이드라인 (담당 에이전트 지시사항)
 * 좌우 두 절두체를 **모두 감싸는 합집합 절두체**에서 평면을 뽑아야 합니다.
-* **Quest Pro는 디스플레이가 안쪽으로 기울어져 있어(canted) 두 절두체가 평행하지 않습니다. 따라서 한쪽 절두체를 좌우로 넓히는 확장 근사는 쓸 수 없습니다.** 그런 근사는 두 절두체가 평행할 때만 성립합니다. 실제 합집합을 보수적으로 감싸는 방식이어야 합니다.
+* (2026-10-04 정정) 예전 판은 Quest Pro 화면이 안쪽으로 기울어져(canted) 있다고 적었지만 사실이 아닙니다. HMD 기하 데이터베이스에서 Quest 2·Pro·3 의 두 눈 시야 회전은 0° 이고 시야가 비대칭일 뿐입니다(기울어진 화면은 Valve Index 등). 권장은 두 눈 절두체를 각각 판정해 하나라도 통과하면 그리는 방식입니다. 정확하고, 기울어진 기기에도 그대로 맞습니다.
 * `cullViewProj` 하나를 넘기는 구조 대신 **컬링 평면 집합 자체를 넘기는 구조**로 바꾸는 편이 자연스럽습니다. 그러면 `CullPush`의 `mat4` 전제도 함께 정리됩니다.
 * **DEF-25의 재발 방지 계약이 그대로 적용됩니다.** 합집합 절두체를 도입하면 CPU와 GPU 양쪽의 평면 입력이 동시에 바뀌므로, `Renderer_render.cpp`와 `shaders/cull.comp`를 반드시 같이 고쳐야 합니다.
 * 멀티뷰 완성(DEF-09)과 같은 작업 단위로 묶는 것이 합리적입니다.
@@ -901,7 +920,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 ---
 
-### 11-11. [DEF-46] [MEDIUM] 에디터 float 스텝이 0.01로 고정되어 1cm 미만을 편집할 수 없음
+### 11-11. [DEF-46] [해결됨 · 2026-10-04, 원래 MEDIUM] 에디터 float 스텝이 0.01로 고정되어 1cm 미만을 편집할 수 없음
 
 #### 대상 파일 및 위치
 * **파일**: [`src/core/Reflect.hpp`](file:///e:/Haruka/src/core/Reflect.hpp)
@@ -1164,11 +1183,11 @@ Vulkan·창·World 를 링크하지 않는 헤더 전용 테스트입니다.
 
 | ID | 심각도 | 내용 | 위치 |
 |---|---|---|---|
-| DEF-56 | MEDIUM | 클리핑 API 가 호출자 0인 죽은 코드입니다. 긴 목록과 문자열이 이웃 패널을 침범합니다 | `HPaintContext` 의 `pushClip`/`popClip`/`currentClip`, `HDrawElement` 에 클립 필드 없음 |
-| DEF-57 | MEDIUM · 일부 해결 2026-10-02(캡처 중 휠은 `onScroll` 로 감) | 휠이 위젯에 도달하지 않습니다(어떤 컨테이너도 `onScroll` 을 전달하지 않음). 포인터 캡처 중의 휠은 `onMouseMove` 로 잘못 라우팅됩니다 | `HSlateRenderer` 입력 분기, 컨테이너 위젯 전부 |
-| DEF-58 | MEDIUM | 키 리피트가 없어 백스페이스를 누르고 있어도 한 글자만 지워집니다(모든 텍스트 필드) | `GlfwWindow::keyCallback` 이 `GLFW_REPEAT` 를 즉시 버림, 키는 폴링 |
+| DEF-56 | **해결 2026-10-03** · 원래 MEDIUM (클립 스택 + CPU 사각형 자르기, 도크 리프·스크롤 상자가 자름) | 클리핑 API 가 호출자 0인 죽은 코드입니다. 긴 목록과 문자열이 이웃 패널을 침범합니다 | `HPaintContext` 의 `pushClip`/`popClip`/`currentClip`, `HDrawElement` 에 클립 필드 없음 |
+| DEF-57 | **해결 2026-10-03** · 원래 MEDIUM (컨테이너가 휠을 전달, 디테일·콘텐츠 브라우저·GPU Stats 스크롤 상자, 아웃라이너·Output Log 우회 제거. 캡처 중 휠은 2026-10-02) | 휠이 위젯에 도달하지 않습니다(어떤 컨테이너도 `onScroll` 을 전달하지 않음). 포인터 캡처 중의 휠은 `onMouseMove` 로 잘못 라우팅됩니다 | `HSlateRenderer` 입력 분기, 컨테이너 위젯 전부 |
+| DEF-58 | **해결 2026-10-03** · 원래 MEDIUM (누름·OS 반복 횟수 `keyPressCount`, 텍스트 칸 백스페이스) | 키 리피트가 없어 백스페이스를 누르고 있어도 한 글자만 지워집니다(모든 텍스트 필드) | `GlfwWindow::keyCallback` 이 `GLFW_REPEAT` 를 즉시 버림, 키는 폴링 |
 | DEF-59 | **해결 2026-10-02** (크기가 같으면 오프셋만 저장) | `setViewportRect` 가 오프셋만 바뀌어도 씬 렌더 타깃을 전량 재생성합니다. 스플리터 드래그 중 매 프레임 `vkDeviceWaitIdle` 과 TAA 히스토리 소실이 일어납니다 | `Renderer_swap.cpp` 의 비교식이 오프셋을 포함. 오프셋 소비처는 `PostPass` 하나 |
-| DEF-60 | MEDIUM | `STextBlock` 의 폭 계산(`0.6 × fontSize` 근사)이 실제 글리프 advance 와 다릅니다 | `STextBlock::computeDesiredSize` vs `HFontAtlas::measureText` |
+| DEF-60 | **해결 2026-10-03** · 원래 MEDIUM (그리기와 같은 advance 로 실측, 툴바 사다리를 측정으로) | `STextBlock` 의 폭 계산(`0.6 × fontSize` 근사)이 실제 글리프 advance 와 다릅니다 | `STextBlock::computeDesiredSize` vs `HFontAtlas::measureText` |
 | DEF-61 | MEDIUM | Output Log 의 표시 줄 수가 도킹 이후 갱신되지 않는 시드 상수 `bottomH_` 로 계산됩니다 | **해결 2026-09-17** (로그 L3: 행 영역 실측 높이로 행 수 결정) |
 | DEF-62 | **해결 2026-10-02** (1패스에서 Fill 슬롯 패딩도 고정 소비로 셈) | Fill 슬롯의 패딩을 1패스는 합산하지 않고 2패스는 더해, 마지막 슬롯이 컨테이너 밖으로 밀려납니다. Fill 슬롯에 패딩을 준 곳에서만 드러납니다 | `SVerticalBox`·`SHorizontalBox` 의 `onArrangeChildren` |
 | DEF-63 | **해결 2026-10-02** (두 위젯에 프레스 추적, 헤더 누름은 body 로 안 감) | `SCollapseSection`·`STabBar` 가 프레스 추적 없이 마우스-업으로 발화합니다. `SCollapseSection` 헤더의 마우스-다운은 body 로 새어 들어갑니다 | 두 위젯의 `onMouseButton` |
@@ -1177,9 +1196,11 @@ Vulkan·창·World 를 링크하지 않는 헤더 전용 테스트입니다.
 | DEF-66 | **해결 2026-10-02** (`IWindow::isCtrlDown`·`isShiftDown`, 좌우 구분 없음) | 오른쪽 Ctrl 로는 복사·붙여넣기·전체 선택·실행 취소·저장·찾기가 동작하지 않습니다 | `EditorApp` 이 `KEY_LEFT_CTRL` 만 확인, `IWindow.hpp` 에 오른쪽 상수 없음 |
 | DEF-67 | **해결 2026-10-02** (텍스트 입력 중에는 게임 입력이 모든 키를 뗀 것으로 봄) | 게임 입력계가 텍스트 포커스를 무시해, 타이핑이 바인딩된 게임 액션을 함께 발화시킵니다. 현재 바인딩이 0건이라 증상은 없습니다 | `HInputSystem::update`(포커스 게이트 없음), `Engine::run` 이 매 프레임 호출 |
 | DEF-68 | **해결 2026-10-02** (같은 카운터로 셈, 라벨 `Target recreate/s`) | `recreateRenderTargets` 가 계측되지 않아, 뷰포트 통계의 `Recreate/s` 가 뷰포트 크기 변경에 의한 재생성을 세지 않습니다 | `Renderer_swap.cpp`(`recreateSwapChain` 만 카운트) |
-| DEF-69 | LOW | Window 메뉴가 없고, `PanelDef::closable`·`PanelRegistry::order()` 를 읽는 곳이 0입니다 | `dock/DockTree.hpp`, `EditorApp::buildMenus` |
+| DEF-69 | **해결 2026-10-03** · 원래 LOW (Window 메뉴 + 닫을 수 있는 탭의 x) | Window 메뉴가 없고, `PanelDef::closable`·`PanelRegistry::order()` 를 읽는 곳이 0입니다 | `dock/DockTree.hpp`, `EditorApp::buildMenus` |
 
 ### 처리할 때 지켜야 할 순서 제약
+
+(2026-10-03: 아래 제약을 모두 지켜 처리했습니다. 처리 내용은 문서 끝 "기반 공사 수정 결과" 절.)
 
 - **DEF-60 은 뷰포트 툴바 폭 사다리와 함께 고칩니다.** 사다리 임계값(640/575/520/435/345)과 승격
   임계값이 이 근사 위에서 튜닝되어 있어, 폭 계산만 실측으로 바꾸면 툴바가 엉뚱한 단계에서 접힙니다
@@ -1215,7 +1236,7 @@ Vulkan·창·World 를 링크하지 않는 헤더 전용 테스트입니다.
 낡은 것입니다(DEF-88 정리 대상과 함께 고침). 자동 조작 쪽 요령은 [Editor_QA_Checklist.md](Editor_QA_Checklist.md)
 머리말에 적었습니다.
 
-함께 적어 둘 한계: 디테일 패널은 스크롤이 없어(DEF-57) 내용이 패널보다 길면 아래가 잘립니다. 메시와
+(2026-10-03 해소: 디테일 패널이 휠로 스크롤됩니다.) 함께 적어 둘 한계: 디테일 패널은 스크롤이 없어(DEF-57) 내용이 패널보다 길면 아래가 잘립니다. 메시와
 오디오를 함께 가진 액터는 기본 레이아웃에서 오디오 컴포넌트 행이 보이지 않으므로, 지금은 하단 패널
 분할선을 내려 디테일 패널을 늘려야 합니다.
 
@@ -1236,7 +1257,7 @@ Vulkan·창·World 를 링크하지 않는 헤더 전용 테스트입니다.
 
 ---
 
-## 종합 오류 검출 신규 결함 (DEF-76 ~ DEF-93, 2026-10-02 등재)
+## 종합 오류 검출 신규 결함 (DEF-76 ~ DEF-94, 2026-10-02 등재 · DEF-94 는 10-03)
 
 **처리 시점: 종합 오류 검출 작업(이번 묶음).** 정적 검출(코드 대조 세 갈래)과 실기 기준선 확인에서
 나왔습니다. "실기" 칸은 2026-10-02 세션의 결과이고, 재현 절차는 [Editor_QA_Checklist.md](Editor_QA_Checklist.md)
@@ -1262,6 +1283,7 @@ Vulkan·창·World 를 링크하지 않는 헤더 전용 테스트입니다.
 | DEF-91 | LOW · 잠재 | Slate·휠 우회는 창 좌표를, `inViewport` 는 프레임버퍼로 바꾼 좌표를 씁니다. 100% 배율에서는 같아 드러나지 않습니다 | `handleInput`, `tick` 휠 판정, `mouseToFb` | 코드 확인 |
 | DEF-92 | **해결 2026-10-02** · 원래 HIGH | 디테일 패널이 대상 액터가 파괴된 뒤에도 한 프레임 더 그 액터와 컴포넌트를 읽습니다(UAF 읽기). 값 접근자가 raw 포인터를 붙잡는데, 패널 리빌드는 다음 tick 의 선택 변경 감지에서야 일어나고 그사이 페인트·디스패치가 돕니다. Stop · Load · 아웃라이너 x 로 선택 액터를 지우거나 게임 코드가 지우면 도달합니다. DEF-76 을 고치다 찾았습니다 | `EditorApp` 의 `onActorDestroyed` 구독(디테일 리빌드 요청 없음), `rebuildDetails` 의 접근자 | 코드 확인(실기에서 Stop · Load · 삭제 뒤 크래시 없음은 확인) |
 | DEF-93 | **해결 2026-10-02** · 원래 MEDIUM | UI 패스의 정점 버퍼가 하나라, 렌더 루프가 지금 슬롯의 펜스만 기다리는 동안 직전 프레임의 UI 패스가 아직 읽는 정점을 덮어씁니다(DEF-40 과 같은 유형). 수정 뒤 독립 검토에서 찾았습니다 | `HSlateRenderer` 의 `vertexBuf_` · `vertexPtr_`, `record` 가 `frameIdx` 를 버림 | 코드 확인 |
+| DEF-94 | **해결 2026-10-03** · 원래 LOW | 탭 하나를 다른 리프로 끌어내면, 그 탭이 활성 탭보다 앞에 있었을 때 활성 탭이 다른 패널로 바뀝니다. 재도킹이 탭을 뺀 뒤 활성 인덱스를 범위로만 맞췄기 때문입니다. 기반 공사(DEF-69)에서 탭 빼기를 공용으로 만들다가 찾았습니다 | `EditorApp::performRedock` 1단계 | 코드 확인 |
 
 **코드로 성립을 확인한 기존 "미검증" 항목:** DEF-40(라인·기즈모 정점 버퍼 하나를 두 프레임이 공유,
 렌더 루프는 현재 슬롯 펜스만 기다림), DEF-43(플레이 중 Shape · Half 드래그가 매 프레임 바디 재생성),
@@ -1299,10 +1321,49 @@ DEF-44(`RIGID:0 1` 처럼 순번 기록, 실기 저장으로 확인). 위 매트
 의한 재생성도 셉니다(DEF-68). (4) 메뉴가 열린 동안에는 뷰포트 픽·기즈모·RMB 카메라·휠이 동작하지 않습니다(DEF-64).
 
 **남은 것.** 기반 공사 묶음 DEF-56(클리핑) · DEF-57(위젯 휠 경로) · DEF-58(키 반복) · DEF-60(글자 폭) · DEF-69(Window 메뉴)는
-사용자 결정으로 따로 진행합니다. DEF-91 은 Windows 에서 GLFW 창 좌표와 프레임버퍼 좌표가 같아 드러나지 않으므로, 좌표계가
+사용자 결정으로 따로 진행합니다(2026-10-03 처리, 아래 "기반 공사 수정 결과" 절). DEF-91 은 Windows 에서 GLFW 창 좌표와 프레임버퍼 좌표가 같아 드러나지 않으므로, 좌표계가
 갈리는 플랫폼(macOS 등)으로 갈 때 입력 좌표를 프레임버퍼 하나로 통일하면서 함께 고칩니다.
 
 ---
+
+### 기반 공사 수정 결과 (2026-10-03)
+
+"확인" 칸의 `slate_input` 은 2026-10-02 에 만든 단위 테스트에 더한 검사입니다(46 → 79개, 검토 반영 포함). 실기는
+[Editor_QA_Checklist.md](Editor_QA_Checklist.md) 5절 "2026-10-03 기반 공사 수정 후" 표에 있습니다.
+
+| ID | 수정 | 확인 |
+|---|---|---|
+| DEF-56 | `HPaintContext` 에 실제 클립 스택을 두었습니다. 안쪽 클립은 바깥 클립과의 교집합이고, 그리는 요소마다 그때의 클립을 받아 둡니다. `HSlateRenderer::flush` 가 글리프까지 펼친 뒤 사각형마다 CPU 에서 잘라 냅니다(UV 도 같은 비율로 줄여 잘린 글자가 찌그러지지 않음). 요소가 모두 축 정렬 사각형이라 정확하고, 시저처럼 클립이 바뀔 때마다 배치를 끊지 않아도 됩니다. 자르는 곳은 도크 리프(탭 줄과 패널 내용)와 새 위젯 `SScrollBox`, 그리고 `SBorder::clipChildren(true)` 를 켠 곳입니다. 자르는 위젯은 영역 밖의 이동을 자식에게 "바깥" 좌표(`HOutsideEvent`)로 보내, 잘려 안 보이는 자리에서 호버가 켜지지 않습니다 | `slate_input`(클립 교집합 · 요소 클립 · UV 자르기 · 바깥 이동), 실기(디테일 · GPU Stats · 뷰포트 통계가 패널 경계에서 잘림) |
+| DEF-57 | 컨테이너(`SOverlay` · `SVerticalBox` · `SHorizontalBox` · `SBox` · `SBorder` · `SCollapseSection`)가 휠을 커서 아래 자식에게 전달합니다. 누름과 같은 규칙으로, 오버레이는 맨 위 슬롯부터 보내고 받은 곳에서 멈춥니다. `SBorder::onWheel` 은 자식이 받지 않은 휠의 처리기입니다. 에디터는 휠을 한 번 읽어 RMB 비행 속도를 먼저 처리하고, 나머지를 배치 뒤 위젯 경로로 보내며, 위젯이 받지 않은 휠만 뷰포트 돌리로 씁니다. 디테일과 하단 패널(Content Browser · GPU Stats)은 스크롤 상자에 담았고, 아웃라이너와 Output Log 는 보이는 행만 만드는 목록이라 `onWheel` 로 시작 행을 옮깁니다(예전 `tick` 의 직접 히트테스트 우회는 둘 다 지움). Output Log 탭은 스크롤 상자에 넣지 않습니다. 행 수를 행 영역의 실측 높이로 정하는데, 스크롤 상자 안에서는 그 높이가 내용을 따라 늘어나 행 수가 함께 불어나기 때문입니다. 열린 메뉴의 캐처와 Categories 팝업은 휠을 받아 두어 아래 패널이 굴러가지 않습니다 | `slate_input`(휠 경로 · 겹친 슬롯 · 스크롤 상자 · 안쪽 상자 우선), 실기 |
+| DEF-58 | `GlfwWindow` 가 키마다 직전 `pollEvents` 이후의 누름과 OS 자동 반복(`GLFW_REPEAT`) 횟수를 셉니다(`IWindow::keyPressCount`). 텍스트 칸(리네임 · 검색 · 로그 검색 · 숫자 칸)의 백스페이스는 그 횟수만큼 지웁니다. 반복 지연과 속도는 OS 설정을 따릅니다. 포커스에 들어올 때 이미 눌려 있던 백스페이스는 뗄 때까지 무시합니다(엣지로 판정하던 때와 같은 규칙). 키 상태(걸쇠)와 키 로그에는 반복을 넣지 않고, Delete · Enter 처럼 반복하면 안 되는 키는 계속 엣지로 판정합니다 | 실기(누름 1 + 반복 5 → 6글자). 합성 `hold_key` 는 OS 반복을 만들지 않아 `PostMessage` 로 확인 |
+| DEF-60 | `HFontAtlas::measureText` 가 그리기와 같은 글자별 advance 를 더합니다(그리기가 쓰지 않는 커닝은 뺌, 여러 줄이면 가장 긴 줄). 폰트 파일 읽기(`loadFont`)를 GPU 초기화와 떼어, 폰트를 읽은 아틀라스가 레이아웃의 글자 폭 기준(`HFontAtlas::metrics()`)으로 등록됩니다. `STextBlock` 은 그 기준으로 원하는 폭과 정렬을 잡고, 같은 문자열이면 다시 재지 않습니다. 폰트가 없을 때(폰트 없이 도는 테스트)만 예전 근사를 씁니다. 뷰포트 툴바 폭 사다리는 손으로 계산한 임계값 표를 없애고, 단계마다 라벨이 가장 길어지는 값으로 툴바를 세워 재서 요구 폭을 얻습니다(`measureVpToolbarLevels`, 배율·폰트가 바뀌면 다시 잼). 줄일 때 20px, 넓힐 때 40px 여유를 두고 넓히기에 실패하면 한 칸만 물러나는 규칙은 그대로입니다. 메뉴 바 버튼은 글자에 맞는 폭(최소 58px)을 씁니다 | `slate_input`(측정 = advance 합 · 여러 줄 · 원하는 폭 · 오른쪽 정렬), 실기(사다리 4단계 전환과 복귀) |
+| DEF-69 | 메뉴 바에 Window 를 두었습니다. 등록된 패널을 등록 순서로 보이고, 도크 트리에 있는 패널에는 체크 표시가 붙습니다. 누르면 열린 패널은 그 탭을 앞으로 가져오고, 닫힌 패널은 다시 엽니다. 닫을 수 있는 패널(`PanelDef::closable`)의 탭에는 x 가 있고, 버튼처럼 누른 x 위에서 뗄 때만 닫습니다. 다시 열 때는 닫을 때 같은 리프에 있던 패널이 열려 있으면 그 리프에 탭으로 돌아가고, 아니면 기본 배치의 자리에 가깝게 붙습니다(하단 패널은 도크 전체 아래, 아웃라이너는 뷰포트 왼쪽, 나머지는 뷰포트 오른쪽). 닫은 패널은 레이아웃 파일에서 빠지고, 위젯은 레지스트리에 남아 다시 열면 상태가 그대로입니다. 도크가 바뀌어 화면에서 사라진 패널의 텍스트 포커스와 Categories 팝업은 정리합니다 | 실기(세 패널 닫기 · 다시 열기, 체크 표시, x 를 누른 채 밖에서 떼면 그대로) |
+| DEF-94 | 탭 빼기를 공용 함수(`dockRemoveTab`)로 모으고, 뺀 탭이 활성 탭보다 앞이면 활성 인덱스를 하나 당깁니다. 재도킹의 가장자리 분할도 다시 열기와 같은 함수(`dockAttachSplit`)를 씁니다(재도킹은 몫 0.5 로 예전과 같음) | 코드 확인 |
+
+**행동 변화로 알아 둘 것.** (1) 패널 내용이 패널 밖으로 그려지지 않습니다. 예전에 넘쳐서 보이던 부분(좁은 디테일의
+ADD COMPONENT 버튼 등)은 이제 잘리고, 디테일은 휠로 스크롤해 봅니다. (2) 디테일 · Content Browser · GPU Stats 위의 휠은
+그 패널을 스크롤합니다. 넘치지 않으면 아무 일도 일어나지 않습니다(카메라로 가지 않는 것은 2026-10-02 와 같음).
+(3) 메뉴가 열린 동안에는 휠도 아래 패널로 가지 않습니다. (4) 텍스트 칸에서 백스페이스를 누르고 있으면 계속 지워집니다.
+(5) 뷰포트 툴바가 예전보다 좁은 폭에서도 전체 라벨을 보입니다(예전 근사가 글자를 넓게 잡아 일찍 접었음).
+(6) Outliner · Details · Content Drawer 탭에 x 가 생겼습니다. 닫은 패널은 Window 메뉴로 되살립니다.
+
+**독립 검토 반영.** 수정 뒤 코드 재검토에서 나온 것을 모두 확인하고 고쳤습니다. 크래시나 해제된 메모리 접근은 없었고,
+모두 "잘리거나 숨은 UI 를 원래 자리로 판정하는" 유형이었습니다. 에디터가 위젯 밖에서 직접 하는 판정은 자르는 조상의 영역도
+함께 봐야 한다는 것이 교훈입니다.
+
+| 지적 | 수정 | 확인 |
+|---|---|---|
+| 좁은 리프에서 잘려 안 보이는 탭이 클릭을 받음. 왼쪽 리프의 숨은 탭이 오른쪽 리프의 보이는 탭보다 먼저 잡혀, 숨은 x 가 패널을 닫음 | `DockTabHit` 에 탭 줄 영역(`row`)을 두고, 누름과 x 의 뗌 모두 그 영역 안일 때만 받음 | 실기(시험 레이아웃에서 숨은 Details x 자리를 눌러도 닫히지 않고, 보이는 부분은 정상) |
+| 스크롤로 가려진 숫자 칸이 포커스를 놓지 않음. 그 자리(아래 패널)를 눌러도 편집이 끝나지 않아, 나중의 Enter 가 낡은 값을 확정하거나 리빌드가 친 값을 버림 | `focusWidgetContains` 가 숫자 칸은 디테일 스크롤 상자 영역, 로그 검색은 하단 패널 영역도 함께 봄. Categories 버튼 판정도 같음 | 실기(가려진 B 칸 자리의 Output Log 를 누르자 편집 확정, 포커스 해제) |
+| Outliner 를 닫은 채 Ctrl+F · F2 를 누르면 보이지 않는 검색창·리네임으로 포커스가 들어감 | 아웃라이너가 보이지 않으면 먼저 `showPanel` 로 꺼낸 뒤 포커스 | 실기(닫은 뒤 Ctrl+F → 닫기 전 리프에 탭으로 돌아오고 검색 동작) |
+| 백스페이스를 누른 채 숫자 칸을 클릭하면 OS 반복으로 바로 지워짐(숫자 칸은 `setTextFocus` 를 거치지 않아 막는 장치가 걸리지 않음) | `tickRenameInput` 이 포커스가 바뀐 프레임을 직접 잡아, 그때 눌려 있던 백스페이스를 뗄 때까지 막음 | 실기(누른 채 진입 → 반복 5번 무시, 뗀 뒤 새 누름 → 한 글자) |
+| (가능성) 폰트를 읽은 아틀라스가 정리 없이 사라지면 글자 폭 기준 포인터가 남음 | `HFontAtlas` 소멸자가 등록을 풀고, 복사를 막음 | `slate_input` |
+| (사소) 스크롤 막대가 내용의 오른쪽 끝(컴포넌트 삭제 x)을 덮음 | 넘칠 때 막대 자리를 비우고 그만큼 좁게 배치 | `slate_input` |
+| (사소) 루트가 이미 세로 분할일 때 하단 패널을 다시 열면 세로 분할이 두 겹이 됨 | 같은 방향 분할이면 감싸지 않고 맨 앞·뒤 자식으로 끼움 | 코드 확인 |
+
+**남은 것.** DEF-91(잠재)은 그대로입니다. 스크롤 막대는 위치 표시만 하고 끌어서 스크롤하지는 못합니다. 아웃라이너 ·
+Output Log 의 휠은 예전처럼 한 프레임에 3줄씩 셉니다(휠 값의 크기를 쓰지 않음). 실제 키보드의 자동 반복과 실제
+터치패드 휠은 사람이 확인할 항목입니다.
 
 ## 로그 경로 결함 (DEF-70 ~ DEF-72, 2026-09-17 등재)
 
@@ -1319,3 +1380,95 @@ DEF-44(`RIGID:0 1` 처럼 순번 기록, 실기 저장으로 확인). 위 매트
 쌓여 200줄 링을 밀어냈고, 줄마다 DEF-70 의 리빌드를 일으켰습니다. 2026-09-17 에
 `GlfwWindow::keyCallback` 의 스위치(`kLogKeyEvents = false`)로 껐고, L2 에서 `Input` 카테고리의
 Verbose 로 옮깁니다.
+
+## 1단계 정리 묶음 수정 결과와 신규 결함 (2026-10-04)
+
+사용자 결정("추천대로 진행하되, 그 전에 다른 엔진들은 해당 문제를 어떻게 해결했는지 조사를 선행하고 알아낸 방법이
+적용가능한지 확인한 뒤에 보고")에 따라, 남은 결함마다 UE · Unity · Godot · Filament · Bevy 등의 해법을 조사하고 Haruka
+코드에 맞는지 확인했습니다. 1단계 정리 묶음은 그 결과대로 고쳤습니다. UE 소스는 EULA 대상이라 방식만 참고했습니다.
+
+**수정 결과**
+
+| 결함 | 다른 엔진의 방법 | 수정 | 확인 |
+|---|---|---|---|
+| DEF-03 | Godot · Granite 는 장치 버전에 맞춰 기능을 조회하고 지원하는 것만 켭니다 | 쓰는 곳이 없는 `drawIndirectCount` 요구를 지웠습니다 | 빌드, 실기 |
+| GPU 컬링 잔재 | Quest 용 자료(Meta · Qualcomm)는 GPU 주도 컬링을 요구하지 않습니다 | `CullPass` · `cull.comp` · 컬링 버퍼 · 구 목록 · `cullViewProj`(매 프레임 매핑 메모리 되읽기)를 지웠습니다. 다시 필요하면 스테레오 · 인스턴스 기준으로 새로 설계합니다 | 화면 픽셀 동일 |
+| DEF-10 (진단) | Godot 의 Jolt 모듈은 바디 생성 실패를 한 번 알리고 늘릴 설정 이름을 보여 줍니다 | 행 예산을 넘긴 메시를 `Dropped` 통계로 따로 세고 한 번 경고합니다(예전에는 `Culled` 에 섞임). 바디 생성 실패는 `createFailed_` 로 표시해 매 틱 재시도를 멈추고 한 번 경고합니다. `PhysicsSystem::Update` 의 오류 값을 확인합니다. 상한 설정화는 남았습니다 | 실기(통계 `Dropped: 0`), 코드 확인 |
+| DEF-11 | CMake 3.21 부터 Visual Studio 생성기도 depfile 을 지원합니다 | `glslc -MD -MF` 와 `DEPFILE` 로 include 를 추적합니다(최소 CMake 3.21). 목록 밖 셰이더 파일은 구성 단계에서 경고합니다. 셰이더 명령이 바뀐 `.spv` 를 실행 폴더로 바로 복사해 셰이더 타깃만 빌드해도 핫 리로드됩니다. 쓰지 않던 `triangle.*` · `noise.glsl` · `sdf.glsl` 은 지웠습니다(휴지통) | 공용 헤더의 시각만 바꾸자 그것을 include 하는 셰이더 5개만 다시 컴파일 |
+| DEF-14 | NVIDIA nvpro 샘플의 C++/GLSL 공용 헤더 방식 | `shaders/include/haruka_shared.h` 를 C++ 와 GLSL 이 함께 include 합니다. `RenderTypes.hpp` 가 크기 · 오프셋을 `static_assert` 로 확인합니다. 헤더에는 vec4 · ivec4 · mat4 만 둡니다 | 화면 픽셀 동일 |
+| DEF-15 | Godot · Bevy 는 효과를 켰을 때만 히스토리를 만듭니다. Quest 의 프레임 합성(AppSW)은 눈별 이전 행렬 · 물체별 이전 모델 행렬 · 모션 벡터를 요구합니다 | 히스토리 이미지 · 블릿 · TAA 분기 · 타임스탬프 칸 · "TAA blit" 통계 줄 · `prevViewProj` 를 지웠습니다. 모양이 달라 자리는 남기지 않았습니다 | 화면 픽셀 동일 |
+| DEF-28 | UE 는 기본 머티리얼, Unity 는 자홍색 오류 셰이더로 그립니다 | 머티리얼이 없는 메시를 자홍색 오류 머티리얼(알베도 · 이미시브)로 그리고 액터마다 한 번 경고합니다(사용자 결정). `World::getVisibleMeshes` 는 머티리얼로 거르지 않습니다. 그래도 null 항목이 오면 세 서브패스 모두 건너뜁니다(컬러에서만 빼면 깊이만 남아 뒤를 가림) | 실기(시험 빌드에서 Ground 머티리얼을 비우자 자홍색 + 경고 1회) |
+| DEF-29 | 현재 Vulkan 사양은 장치 레이어 값을 0 으로 두도록 정합니다 | 장치 레이어 설정을 지웠습니다 | 검증 메시지 0 |
+| DEF-30 | UE · Unity · Godot 모두 물체마다 거리 키를 한 번 계산합니다. AMD · VMA 문서는 이런 메모리를 CPU 로 읽지 말라고 합니다 | 행을 배정할 때 거리 제곱을 함께 저장해 정렬합니다(같은 거리면 행 번호 순). 키가 같아 순서는 예전과 같습니다 | 코드 확인 |
+| DEF-35 | UE · Unity · Godot · Filament 모두 반경을 0 보다 크게 강제하고 거리에 최솟값을 둡니다. "0 = 무한" 은 Filament 에만 있습니다 | 거리 0 보호(`inversesqrt(max(d², ε))`)와 반경 최솟값 0.01m(UI · 씬 불러오기 · 업로드). 감쇠 공식은 같은 날 실제 점광원과 같은 역제곱으로 바꿨습니다(아래 "화면 기준 재정렬") | `HarukaActorTest` 4개 검사(옛 setter 에서 2개 실패 확인) |
+| DEF-98 (신규) | UE 는 바뀐 셰이더를 다시 컴파일해 적용하고 실패하면 재시도합니다 | 다시 읽기 전에 SPIR-V 크기 · 매직 넘버를 확인합니다. 다섯 패스 모두 새 파이프라인을 만든 뒤에만 옛 것을 지워, 실패하면 이전 것으로 계속 그립니다. 감시는 변경이 300ms 멈춘 뒤 알리고, 버퍼 넘침도 변경으로 칩니다 | 실기(덜 쓴 파일 → 건너뜀 경고 · 에디터 유지, 되돌리면 정상 리로드, 셰이더 타깃만 빌드해도 반영) |
+
+사실과 다른 표기도 고쳤습니다: 메모리 로그의 "UMA"(ReBAR 를 켠 독립 GPU 도 같은 메모리 타입이 있음), Zone C 용량 주석
+(512MB → 64MB), `kMaxDraws` 설명, 코드 주석과 문서 4곳의 canted 주장.
+
+**신규 결함 (조사에서 발견)**
+
+| ID | 심각도 · 상태 | 내용 | 위치 |
+|---|---|---|---|
+| DEF-95 | MEDIUM · **해결 2026-10-04** | 카메라 투영의 깊이 범위가 Vulkan 의 [0,1] 이 아니라 [-1,1] 입니다. `Reflect.hpp` 가 `GLM_FORCE_DEPTH_ZERO_TO_ONE` 없이 GLM 을 먼저 포함해, 뒤에 정의한 매크로가 효과가 없습니다. 실제 근평면이 0.1m 가 아니라 약 0.2m 이고, 그림자 투영([0,1])과 규약이 섞여 있으며, SSAO 선형 깊이 계산은 [0,1] 을 가정합니다 | `CameraComponent.cpp` 의 `glm::perspective`, `Reflect.hpp`, `linDepth.frag` |
+| DEF-96 | MEDIUM · **해결 2026-10-04** | 감마가 두 번 적용됩니다. `post.frag` 가 `pow(1/2.2)` 를 한 값을 sRGB 스왑체인에 써서 GPU 가 한 번 더 변환합니다. 화면이 의도보다 밝고 흐리며, 노출은 이 상태에 맞춰져 있습니다. UI 도 같은 스왑체인에 그리므로 고치는 방법에 따라 UI 색도 바뀝니다 | `post.frag`, `GlfwSwapchain::chooseFormat` |
+| DEF-97 | HIGH · 열림 (Quest 이식) | 엔진이 Vulkan 1.4 장치를 전제합니다. 1.3 · 1.4 기능 구조체를 조건 없이 연결하고, 1.4 코어 이름 `vkCmdPushDescriptorSet` 를 6곳에서 직접 부릅니다. Quest 2 · Pro 는 1.1, Quest 3 은 1.3 입니다(push descriptor · synchronization2 는 확장으로 있음). DEF-04 와 함께 처리합니다 | `Renderer::createLogicalDevice`, 6개 호출부 |
+| DEF-98 | LOW · **해결 2026-10-04** | 셰이더 핫 리로드가 덜 복사된 .spv 로 파이프라인을 만들다 예외를 잡지 못해 에디터가 종료될 수 있었습니다(옛 파이프라인을 먼저 지움) | `HotReloader`, `Renderer::reloadPipelines`, 각 패스 `rebuildPipelines` |
+| DEF-99 | MEDIUM · 열림 (VR) | Kinematic 바디 동기화가 스텝 루프 뒤에 한 번 돌아 한 프레임 늦고, 한 프레임에 스텝이 여럿이면 목표를 지나칩니다. VR 손과 잡은 물체에서 드러납니다 | `PhysicsSystem::tick` |
+| DEF-100 | LOW · 잠재 | `AOPass::destroy` 가 Zone C 할당을 `freeB` 로 돌려줘, Zone B 빈 목록에 960MB 이상 범위가 들어갑니다. 지금은 종료할 때만 일어납니다 | `AOPass.cpp`, `HarukaAllocator::freeB`(구역 확인 없음) |
+| DEF-101 | LOW · 열림 | `StaticMeshComponent::transparent` 는 디테일에서 바꿀 수 있지만 저장되지 않고, 불러올 때 에셋 값으로 다시 정해집니다 | `SceneSerializer`, DEF-22 와 함께 |
+| DEF-102 | LOW · 열림 | 씬 카메라의 yaw · pitch 가 디테일에 없고 저장되지 않아, 씬 카메라는 방향을 정할 수 없고 저장하면 방향을 잃습니다 | `CameraComponent`, DEF-21 과 함께 |
+| DEF-103 | LOW · 열림 (Quest 이식) | `AndroidWindow` 가 `IWindow` 의 순수 가상 클립보드 함수 두 개를 구현하지 않아 추상 클래스입니다 | `AndroidWindow.hpp`, DEF-08 과 함께 |
+
+**문서 정정**
+- Quest 2 · Pro · 3 의 두 눈 시야는 기울어져(canted) 있지 않습니다(HMD 기하 데이터베이스의 시야 회전 0°). 9-1절,
+  Core_Stabilization_Spec.md, Layer_Architecture.md, VR_Transition_Masterplan.md 의 같은 주장을 고쳤습니다.
+- DEF-32 는 컬링 · 렌더 · 제출이 한 프레임의 같은 자세를 쓰면 필요 없습니다. 늦은 자세 갱신(late latching)이나 과주사
+  (overscan)를 넣을 때만 필요하고, 그때는 `d` 만이 아니라 평면 법선을 바깥으로 돌려야 합니다.
+- DEF-02 는 문서보다 위험합니다. 지금 Zone C 는 시작할 때만 할당하는 상주 영역처럼 쓰여, 매 프레임 할당하는 코드가
+  생기면 첫 랩어라운드가 상주 버퍼를 덮습니다.
+- DEF-06 의 손해는 대역폭이 아니라 메모리 점유입니다(렌더 패스는 이미 CLEAR/DONT_CARE 와 인라인 resolve).
+- DEF-91 은 Windows 에서는 배율과 상관없이 드러나지 않습니다(GLFW Win32 에서 창 크기 = 프레임버퍼 크기). macOS
+  Retina · Wayland 에서 드러납니다.
+- DEF-20 의 해결 방향은 `IWindow` 가 아니라 별도 XR 모듈입니다(UE · Unity · Godot 모두 그렇습니다). OpenXR 이 Vulkan
+  장치를 고르므로 XR 시스템은 렌더러보다 먼저 만들어야 합니다.
+
+**검증.** 수정 전 빌드를 두 번 찍어 뷰포트가 픽셀까지 같음(결정적)을 확인한 뒤, 수정 후 빌드와 비교해 차이 0 픽셀입니다.
+검증 레이어 메시지 0, 엔진 Error 0, `Clean exit`. 빌드 경고 0, 단위 테스트 7개 통과(`HarukaActorTest` 에 반경 검사 4개 추가).
+실기 절차는 [Editor_QA_Checklist.md](Editor_QA_Checklist.md) 5절 "2026-10-04 1단계 정리 묶음".
+
+### 화면 기준 재정렬 (2026-10-04)
+
+사용자 결정: 감마(DEF-96)와 깊이 규약(DEF-95)을 고치고, 감쇠 공식은 "현실은 어떤지 알아보고 거기에 맞춰".
+
+| 항목 | 수정 | 확인 |
+|---|---|---|
+| DEF-95 깊이 규약 | `GLM_FORCE_DEPTH_ZERO_TO_ONE` 를 소스 12곳의 개별 `#define` 대신 CMake `add_compile_definitions` 한 곳에서 정의합니다. 엔진·테스트 대상에만 붙고 외부 라이브러리(GLFW)에는 붙지 않도록 외부 라이브러리를 다 불러온 뒤에 둡니다. 카메라 투영이 [0,1] 이 되어 근평면이 설계값 0.1m 로 돌아오고, SSAO 선형 깊이 공식과 맞습니다. 피킹 · 기즈모 광선은 깊이 0 · 1 의 두 점으로 방향만 구해 영향이 없습니다 | 빌드 산출물에서 정의 범위 확인(엔진 · `HarukaActorTest` 있음, GLFW 없음), 실기 |
+| DEF-96 감마 | `post.frag` 의 `pow(1/2.2)` 를 지웠습니다. sRGB 스왑체인은 GPU 가 저장할 때 선형 → sRGB 로 바꿉니다. 스왑체인이 UNORM 으로 떨어진 기기에서만 셰이더가 sRGB 곡선(IEC 61966-2-1)을 적용합니다(`encodeSrgb` 푸시 상수). UI 는 같은 스왑체인에 그리지만 바꾸지 않아 지금 색 그대로입니다 | 실기 |
+| 감쇠 공식 | 실제 점광원은 역제곱 법칙을 따릅니다(같은 빛이 넓이 4πd² 인 구면에 퍼지므로 거리가 두 배면 1/4). 광원 크기의 5배보다 가까우면 어긋나므로 1cm 안쪽은 1cm 로 봅니다(Frostbite · Filament 값). 반경에서 0 이 되도록 창 함수 (1 - (d/r)⁴)² 를 곱합니다(UE · Frostbite · Filament). 세기는 상대값 그대로이고 intensity 는 1m 거리의 밝기입니다. 역제곱에서는 라이트 바로 앞의 매끈한 면이 16비트 HDR 최대값을 넘을 수 있어 최종 색을 60000 에서 자릅니다. 예전 `(1 - d/r)²` 은 Unity 가 "Legacy" 라고 부르는 반경 기준 2차 감쇠와 같은 계열이었습니다 | 실기(실행 폴더의 씬 사본에만 바닥 25cm 위 점광원을 넣어 확인: 밝은 원이 거리에 따라 부드럽게 어두워짐, 깨진 픽셀 없음, 검증 메시지 0. 사본은 원본으로 되돌림) |
+
+**화면 변화.** 기준 화면과 비교해 뷰포트 전 픽셀이 바뀌었습니다(감마 때문). 그늘진 바닥의 평균 코드값이 122 에서 47 로,
+먼 바닥은 159 에서 88 로 내려가 화면이 어두워지고 대비가 커졌습니다. 구 아래쪽에 보이던 SSAO 점무늬는 깊이 규약을 고친
+뒤 줄었습니다. 노출(0.4)은 예전 화면(감마 두 번)을 보며 "흰 평면이 코드값 169" 가 되도록 맞춘 값입니다. 계산하면 노출을
+약 1.0 으로 올리면 같은 목표로 돌아갑니다. **사용자 결정으로 노출을 1.0 으로 올렸습니다.** 해가 비치는 먼 바닥은
+예전 화면 159 · 노출 0.4 일 때 88 · 노출 1.0 에서 152 로 돌아왔고, 그늘은 122 · 47 · 96 이라 예전보다 대비가 큽니다.
+
+## 2단계 숫자 칸 수정 결과 (DEF-46, 2026-10-04)
+
+사용자 결정: 수정 키는 UE 식, 끄는 동안 커서는 고정하지 않음. UE 의 숫자 칸(SSpinBox)에 Shift · Ctrl · Ctrl+Alt 배율이
+있다는 것은 API 문서로 확인했지만 기본값은 문서에 없어, Shift 10배(빠르게) · Ctrl 0.1배(정밀)로 정했습니다(Unity 도
+Shift 가 빠르게 4배). 해법은 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 7-7절의 단위 표시 계획과
+같은 방향입니다.
+
+| 문제 | 수정 | 확인 |
+|---|---|---|
+| 끌기 감도가 값 크기와 상관없이 1cm/px | `PropDesc::unit`(`PropUnit`)과 `SNumberField::unit`(`ENumberUnit`)을 두었습니다. 거리 1cm/px, 크기는 끌기 시작값의 1%/px(최소 step 의 1/10), 각도 0.5°/px, 비율 0.005/px, 일반은 step 그대로. 트랜스폼은 위치 = 거리, 회전 = 각도, 배율 = 크기. 컴포넌트는 라이트 세기 · 반경 = 크기, 색 = 비율, 원뿔 각 = 각도, 물리 마찰 · 반발 = 비율, 질량 · 반 크기 = 크기, 사운드 볼륨 = 비율, 거리 = 크기 | `slate_input`(10 에서 10px → 11, 0 에서도 멈추지 않음) |
+| 수정 키 없음 | `HPointerEvent` 에 `shift` · `ctrl` 을 싣고 `EditorApp::handleInput` 이 채웁니다. Shift 10배, Ctrl 0.1배 | `slate_input` |
+| 끄는 도중 수정 키를 누르면 값이 튐 | 끈 거리 전체에 스텝을 곱하던 것을 이동마다 변화량만 지금 값에 더하는 방식으로 바꿨습니다. 세터가 범위로 자른 뒤 되돌아올 때 헛도는 구간도 없습니다 | `slate_input`(제자리 Shift 에 값 그대로, 옛 공식에서 6개 실패) |
+| 데드존을 넘는 순간 4px 만큼 한꺼번에 변함 | 데드존(3px)을 지난 지점부터 셉니다 | `slate_input` |
+| 1mm 미만이 0.000 으로 보임 | 끝의 0 을 지우는 고정 소수점(소수 한 자리는 남김, 유효 숫자 7자리, 지수 표기 없음). 거리 · 크기 다섯째, 일반 · 비율 넷째, 각도 둘째 자리. 반올림하면 0 인 음수는 0.0(DEF-88 유지). 입력 모드 버퍼는 자릿수를 넉넉히(각도 3, 나머지 6) | `slate_input`, 실기(Ground 선택 시 Location Y -0.1 · Scale 20.0 / 0.2 / 20.0) |
+| 아주 작은 값의 편집이 undo 에 남지 않음 | 변화 판정을 절대값 1e-6 에서 값 크기에 비례한 기준으로 바꿨습니다 | `slate_input`(0.0000005 입력이 기록됨, 옛 기준에서 실패) |
+
+검증: `slate_input` 79 → 97개 검사(표시 규칙이 바뀐 기존 3개의 기대값도 새 규칙으로 고침). 네 가지 핵심(수정 키 · 이동마다
+누적 · 크기 비례 감도 · undo 기준)을 하나씩 옛 식으로 되돌리면 새 검사가 실패함을 확인했습니다(2 · 6 · 2 · 1개). 빌드 경고 0,
+테스트 7개 통과, 실기 검증 메시지 0 · `Clean exit`. 실제 키보드의 Shift · Ctrl 끌기 감각은 사람이 확인할 항목입니다.

@@ -87,7 +87,8 @@ void HarukaAllocator::init(VkDevice dev, VkPhysicalDevice physDev) {
     HLOG(LogMemory, Log) << "Core Heap ready: "
                          << heapSize / (1024 * 1024) << "MB"
                          << " | memType[" << memType << "]"
-                         << (isUMA ? " | DEVICE_LOCAL+HOST_VISIBLE (UMA)"
+                         // 이 조합은 UMA(Quest 등)뿐 아니라 ReBAR 를 켠 독립 GPU 에도 있어 UMA 라고 단정하지 않습니다.
+                         << (isUMA ? " | DEVICE_LOCAL+HOST_VISIBLE (UMA or ReBAR)"
                                    : " | HOST_VISIBLE only (discrete GPU)");
 
     // Zone B free list init

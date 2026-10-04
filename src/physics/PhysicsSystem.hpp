@@ -42,4 +42,8 @@ private:
     // Fixed-step accumulator
     float accumulator_ = 0.f;
     static constexpr float kStep = 1.f / 60.f;
+    // 상한 진단(DEF-10). 바디 상한에 닿거나 접촉 버퍼가 넘치면 Jolt 는 아무 말이 없으므로
+    // 처음 한 번만 알립니다.
+    bool bodyCapWarned_     = false;
+    bool updateErrorWarned_ = false;
 };

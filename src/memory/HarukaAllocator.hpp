@@ -37,7 +37,7 @@ struct AllocStats {
     VkDeviceSize zoneAUsed;   // bytes consumed in Zone A (bump)
     VkDeviceSize zoneATotal;  // Zone A capacity (64 MB)
     VkDeviceSize zoneCUsed;   // bytes consumed in Zone C (ring, from start)
-    VkDeviceSize zoneCTotal;  // Zone C capacity (512 MB)
+    VkDeviceSize zoneCTotal;  // Zone C capacity (64 MB)
     VkDeviceSize heapTotal;   // total heap allocated (1 GB)
 };
 

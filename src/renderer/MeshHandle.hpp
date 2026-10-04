@@ -2,7 +2,6 @@
 #include <cfloat>
 #include "../core/Bounds.hpp"
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 
 // Offsets into the renderer's mega vertex/index buffers.

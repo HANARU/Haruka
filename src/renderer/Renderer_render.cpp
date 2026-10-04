@@ -5,10 +5,10 @@
 #include "../components/CameraComponent.hpp"
 #include "../components/LightComponent.hpp"
 #include "../core/FrameTimings.hpp"
+#include "RendererLog.hpp"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
 #define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
 #include <array>
@@ -19,8 +19,7 @@
 #include <cassert>
 #include <random>
 
-// Cross-frame state for TAA and shadow VP
-static glm::mat4 sPrevViewProj    { 1.f };
+// Cross-frame state for shadow VP
 static glm::mat4 sCurLightViewProj{ 1.f };
 
 // ── createCommandPool ─────────────────────────────────────────────────────────
@@ -90,26 +89,16 @@ static std::array<FrustumPlane, 6> extractFrustumPlanes(const glm::mat4& vp) {
     };
 }
 
-// 월드 공간 바운딩 구 대 절두체 판정.
+// 월드 공간 바운딩 구 대 절두체 판정. 깊이 프리패스와 컬러 패스가 이 한 판정으로 만든 같은
+// 목록을 그립니다(GPU 컬링은 A-4 에서 없앴고 2026-10-04 에 코드도 지웠습니다).
 //
-// ★ 이 함수는 shaders/cull.comp의 sphereInFrustum()과 **반드시 같은 판정을 내려야 한다.**
-//   CPU 컬링 결과는 GeometryPass subpass 1(컬러, depthWrite=FALSE)이 그리는 집합이 되고,
-//   GPU 컬링 결과는 subpass 0(깊이 프리패스, depthWrite=TRUE)이 그리는 집합이 된다.
-//   두 집합이 어긋나면 GPU가 버린 메시는 깊이를 어디에도 기록하지 못한 채 컬러 패스에서만
-//   그려져, 나중에 그려지는 더 먼 오브젝트가 그 위를 덮어쓴다(그리기 순서가 깊이를 이긴다).
-//   한쪽을 고치면 반드시 다른 쪽도 같이 고칠 것.
+//   예전에는 CPU가 AABB를, GPU가 구를 써서 두 판정이 갈렸다. 회전한 메시에서 여덟 꼭짓점을
+//   변환해 다시 축 정렬 상자로 감싸면 그 상자가 구보다 커질 수 있기 때문이다. 구는 회전에
+//   불변이므로 이 흔들림이 없다. GPU 컬링을 되살린다면 GPU 쪽도 같은 구 판정을 써야 한다.
 //
-//   예전에는 CPU가 AABB를, GPU가 구를 썼다. 회전한 메시에서 CPU가 여덟 꼭짓점을 변환해
-//   다시 축 정렬 상자로 감싸면 그 상자가 구보다 커질 수 있어(10x1x1 메시를 45도 회전하면
-//   대각 반경 약 5.52 대 구 반지름 약 5.05) CPU는 살리고 GPU는 버리는 구간이 생겼다.
-//   구는 회전에 불변이므로 이 흔들림 자체가 없다.
-//
-// ★ VR 확장 지점: planes는 지금 단일 카메라에서 뽑지만, 스테레오에서는 **좌우 두 절두체를
-//   모두 감싸는 합집합 절두체**에서 뽑아야 한다. 한쪽 눈으로 컬링하면 반대쪽 눈에만
-//   물체가 사라져 양안 경합이 생긴다. Quest Pro는 디스플레이가 기울어져 있어 두 절두체가
-//   평행하지 않으므로 한쪽을 좌우로 넓히는 근사는 쓸 수 없다.
-//   또한 예측 포즈로 렌더한 뒤 런타임이 실제 포즈로 재투영하므로, 절두체를 실측한 재투영
-//   여유분만큼 부풀려야 주변부에 구멍이 생기지 않는다. 평면 판정이라 p.d만 조정하면 된다.
+// ★ VR 확장 지점: 스테레오에서는 두 눈의 절두체를 각각 판정해 하나라도 통과하면 그린다.
+//   Quest 2·Pro·3 의 두 눈 시야는 평행하고 비대칭이다(기울어진 canted 화면이 아님).
+//   컬링·렌더·제출이 한 프레임의 같은 자세를 쓰는 동안에는 재투영 여유분이 필요 없다(DEF-32).
 static bool sphereInFrustum(const std::array<FrustumPlane, 6>& planes,
                             const glm::vec3& center, float radius) {
     for (const auto& p : planes)
@@ -143,14 +132,14 @@ uint32_t Renderer::updateLightSSBO(World& world) {
         } else if (lc->lightType == LightType::Point) {
             glm::vec3 pos = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
             gl.posOrDir  = glm::vec4(pos, 1.f);    // w=1 → point
-            gl.colorRange= glm::vec4(col, lc->attenuationRadius);
+            gl.colorRange= glm::vec4(col, std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius));
             gl.spotDir   = glm::vec4(0.f);
             gl.spotParams= glm::vec4(0.f);
         } else { // Spot
             glm::vec3 pos = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
             glm::vec3 dir = lc->worldDirection();   // 액터 회전 반영
             gl.posOrDir  = glm::vec4(pos, 2.f);    // w=2 → spot
-            gl.colorRange= glm::vec4(col, lc->attenuationRadius);
+            gl.colorRange= glm::vec4(col, std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius));
             gl.spotDir   = glm::vec4(dir, 0.f);
             gl.spotParams= glm::vec4(
                 std::cos(glm::radians(lc->innerConeAngle)),
@@ -181,8 +170,6 @@ void Renderer::updateUBO(World& world, uint32_t lightCount) {
     }
     ubo.viewProj[0] = curVP;
     ubo.viewProj[1] = curVP;
-    ubo.prevViewProj = sPrevViewProj;
-    sPrevViewProj    = curVP;
 
     // Directional light shadow camera (fixed 40m×40m orthographic).
     // 캐스터 선택은 updateLightSSBO 가 이미 끝냈습니다(shadowCasterSlot_/Dir_). 여기서 다시
@@ -213,7 +200,6 @@ void Renderer::buildDrawCommands(World& world,
                                   std::vector<GpuDrawCmd>& opaqueOut,
                                   std::vector<GpuDrawCmd>& transpOut,
                                   std::vector<const MaterialHandle*>& materialRowsOut,
-                                  std::vector<GpuBoundSphere>& opaqueSpheresOut,
                                   std::vector<GpuDrawCmd>& shadowOut) {
     CameraComponent* cam = world.getActiveCamera();
     std::array<FrustumPlane, 6> planes{};
@@ -242,10 +228,14 @@ void Renderer::buildDrawCommands(World& world,
     opaqueOut.clear();
     transpOut.clear();
     materialRowsOut.clear();
-    opaqueSpheresOut.clear();
     shadowOut.clear();
     materialRowsOut.reserve(allMeshes.size());
-    opaqueSpheresOut.reserve(allMeshes.size());
+
+    // 투명 정렬 키. 거리 제곱을 행을 배정할 때 한 번만 계산해 둡니다. 예전에는 정렬 비교마다
+    // 매핑된 transform SSBO(비디오 메모리)를 다시 읽었습니다(DEF-30).
+    struct TranspKeyed { float distSq; GpuDrawCmd cmd; };
+    std::vector<TranspKeyed> transpKeyed;
+    uint32_t droppedCam = 0;   // 카메라에 보이지만 행 예산이 차서 못 그린 메시(DEF-10)
 
     // 라이트 전용 캐스터(inLight && !inCam)는 카메라 드로우가 행 예산을 먼저 가져간 뒤에
     // 붙입니다. 그래야 카메라∪라이트 합집합이 kMaxDraws 를 넘겨도, 화면 밖 캐스터의 행이
@@ -261,11 +251,19 @@ void Renderer::buildDrawCommands(World& world,
 
     for (auto* mc : allMeshes) {
         if (!mc->visible || !mc->mesh) continue;
-        // 현재 World::getVisibleMeshes()(World.cpp:72)가 material까지 걸러주므로 이 검사는
-        // 도달하지 않는다. 그럼에도 남겨 두는 이유는 materialRowsOut에 nullptr이 들어가지
-        // 않는다는 불변식을 이 함수 안에서 스스로 보장하기 위해서다. World 쪽 필터가
-        // 바뀌어도 아래 materialForRow의 계약이 깨지지 않는다.
-        if (!mc->material) continue;
+        // 머티리얼이 없는 메시는 오류 머티리얼(자홍색)로 그리고 액터마다 한 번 경고합니다(DEF-28).
+        // 건너뛰지 않는 이유: 빠진 메시가 화면에서 보여야 알아챌 수 있습니다. 또 materialRowsOut
+        // 에 nullptr 이 들어가지 않는다는 불변식을 이 대체가 지킵니다.
+        const MaterialHandle* material = mc->material;
+        if (!material) {
+            material = errorMaterial_;
+            const uint64_t actorId = mc->owner ? mc->owner->id : 0;
+            if (noMaterialWarned_.insert(actorId).second)
+                HLOG(LogRenderer, Warning) << "Mesh on actor '"
+                    << (mc->owner ? mc->owner->name : std::string("?"))
+                    << "' has no material; drawing it with the magenta error material";
+            if (!material) continue;   // 오류 머티리얼을 만들기 전(초기화 중)에만
+        }
 
         glm::mat4 model = mc->owner ? mc->owner->worldMatrix() : glm::mat4(1.f);
 
@@ -274,8 +272,7 @@ void Renderer::buildDrawCommands(World& world,
         MeshHandle* mesh = mc->getMeshForDistanceSq(distSq);
         if (!mesh) continue;
 
-        // 월드 공간 바운딩 구를 여기서 한 번만 만들어 컬링 판정과 GPU 업로드에 함께 쓴다.
-        // 두 곳에서 따로 계산하면 그것이 곧 DEF-01/DEF-23과 같은 불일치의 씨앗이 된다.
+        // 월드 공간 바운딩 구를 여기서 한 번만 만들어 카메라·라이트 판정에 함께 쓴다.
         const float sx = glm::length(glm::vec3(model[0]));
         const float sy = glm::length(glm::vec3(model[1]));
         const float sz = glm::length(glm::vec3(model[2]));
@@ -291,18 +288,19 @@ void Renderer::buildDrawCommands(World& world,
         // 카메라 드로우가 예산을 먼저 확보하게 한다. 둘 다 아니면 그냥 버린다.
         if (!inCam) {
             if (inLight)
-                lightOnly.push_back({ model, mc->material,
+                lightOnly.push_back({ model, material,
                     mesh->indexCount, mesh->firstIndex, (int32_t)mesh->firstVertex });
             continue;
         }
 
         // 여기부터 inCam. transform SSBO 행은 이 한 곳(과 2단계)에서만 배정한다(DEF-01 원칙).
-        // 카메라 행이 예산을 채우면 여기서 break — 과거의 opaque+transp 상한과 동일한 지점이다.
-        if (ssboIdx >= kMaxDraws) break;
+        // 카메라 행이 예산을 채우면 그 뒤의 메시는 세기만 하고 그리지 않는다. 예전에는 조용히
+        // 잘라 culled 에 섞였다(DEF-10).
+        if (ssboIdx >= kMaxDraws) { ++droppedCam; continue; }
         uint32_t idx = ssboIdx++;
         tfData[idx].model = model;
         // 행 번호와 push 순서가 1:1이므로 materialRowsOut[idx]가 곧 이 행의 머티리얼이다.
-        materialRowsOut.push_back(mc->material);
+        materialRowsOut.push_back(material);
 
         GpuDrawCmd cmd{};
         cmd.indexCount    = mesh->indexCount;
@@ -311,17 +309,10 @@ void Renderer::buildDrawCommands(World& world,
         cmd.vertexOffset  = (int32_t)mesh->firstVertex;
         cmd.firstInstance = idx;  // → gl_InstanceIndex → transform SSBO row
 
-        if (mc->transparent) {
-            transpOut.push_back(cmd);   // 투명은 GPU 컬링 대상이 아니다
-        } else {
-            // cull.comp는 spheres[id]와 inDraws[id]를 같은 id로 읽는다(shaders/cull.comp:54,57).
-            // 따라서 스피어는 전역 행 번호가 아니라 **opaque 목록 위치**로 인덱싱되어야 하며,
-            // 그것을 보장하는 유일한 방법이 opaqueOut과 나란히 push하는 것이다.
-            // 위에서 컬링 판정에 쓴 것과 **같은 값**을 올린다. GPU가 CPU와 다른 구로 판정하면
-            // 두 컬링 결과가 갈려 깊이 프리패스와 컬러 패스의 집합이 어긋난다.
+        if (mc->transparent)
+            transpKeyed.push_back({ distSq, cmd });
+        else
             opaqueOut.push_back(cmd);
-            opaqueSpheresOut.push_back({ glm::vec4(wCenter, wRadius) });
-        }
         // 카메라에도 보이면서 라이트 안이면 그림자도 던진다(같은 행 재사용).
         if (inLight)
             shadowOut.push_back(cmd);
@@ -329,9 +320,10 @@ void Renderer::buildDrawCommands(World& world,
 
     // 2단계: 카메라 예산을 채운 뒤 남은 행에만 라이트 전용 캐스터를 붙인다. 행-머티리얼
     // 1:1 불변식을 위해 여기서도 materialRow 를 함께 push 한다(섀도는 머티리얼을 안 쓰지만
-    // materialForRow 의 범위 계약을 지키기 위함). opaque/스피어 목록은 건드리지 않는다.
+    // materialForRow 의 범위 계약을 지키기 위함). opaque 목록은 건드리지 않는다.
+    uint32_t droppedShadow = 0;
     for (const auto& lo : lightOnly) {
-        if (ssboIdx >= kMaxDraws) break;
+        if (ssboIdx >= kMaxDraws) { ++droppedShadow; continue; }
         uint32_t idx = ssboIdx++;
         tfData[idx].model = lo.model;
         materialRowsOut.push_back(lo.material);
@@ -345,24 +337,33 @@ void Renderer::buildDrawCommands(World& world,
         shadowOut.push_back(cmd);
     }
 
-    frameStats_.culled = totalCnt - (uint32_t)(opaqueOut.size() + transpOut.size());
-    frameStats_.transparentDraws = (uint32_t)transpOut.size();
-
-    // Sort transparent back-to-front for correct blending
-    if (!transpOut.empty() && hasCam) {
-        std::sort(transpOut.begin(), transpOut.end(),
-            [&](const GpuDrawCmd& a, const GpuDrawCmd& b) {
-                glm::vec3 pa = glm::vec3(tfData[a.firstInstance].model[3]);
-                glm::vec3 pb = glm::vec3(tfData[b.firstInstance].model[3]);
-                return glm::length2(camPos - pa) > glm::length2(camPos - pb);
+    // Sort transparent back-to-front for correct blending. 키는 위에서 LOD 선택에 쓴 것과 같은
+    // 피벗 거리 제곱이라 순서는 예전과 같고, 같은 거리면 행 번호 순으로 정해 결과가 흔들리지 않는다.
+    if (hasCam) {
+        std::sort(transpKeyed.begin(), transpKeyed.end(),
+            [](const TranspKeyed& a, const TranspKeyed& b) {
+                if (a.distSq != b.distSq) return a.distSq > b.distSq;
+                return a.cmd.firstInstance < b.cmd.firstInstance;
             });
+    }
+    transpOut.reserve(transpKeyed.size());
+    for (const auto& t : transpKeyed) transpOut.push_back(t.cmd);
+
+    frameStats_.dropped = droppedCam;
+    frameStats_.culled  = totalCnt - (uint32_t)(opaqueOut.size() + transpOut.size()) - droppedCam;
+    frameStats_.transparentDraws = (uint32_t)transpOut.size();
+    if ((droppedCam || droppedShadow) && !dropWarned_) {
+        dropWarned_ = true;
+        HLOG(LogRenderer, Warning) << "Draw row budget kMaxDraws=" << kMaxDraws << " exceeded: "
+            << droppedCam << " visible mesh(es) and " << droppedShadow
+            << " shadow-only caster(s) were not drawn (warned once; see the Dropped stat)";
     }
 }
 
 // ── extractRenderView ──────────────────────────────────────────────────────────
 // World를 읽는 유일한 지점 (docs/RendererRefactor.md §4). 이후 패스 기록에서는
 // World/Actor/Component 참조 금지 — 시뮬레이션/렌더 스레드 분리의 경계가 된다.
-// v1: 프레임별 mapped 버퍼(UBO/라이트/트랜스폼/스피어) 업로드를 추출 단계에서 수행.
+// v1: 프레임별 mapped 버퍼(UBO/라이트/트랜스폼) 업로드를 추출 단계에서 수행.
 
 Renderer::RenderView Renderer::extractRenderView(World& world) {
     RenderView v;
@@ -370,12 +371,8 @@ Renderer::RenderView Renderer::extractRenderView(World& world) {
     // 순서 주의: 라이트 SSBO를 먼저 채워 실제 개수를 확정한 뒤 UBO에 싣는다.
     const uint32_t lightCount = updateLightSSBO(world);
     updateUBO(world, lightCount);
-    buildDrawCommands(world, v.opaqueDraws, v.transpDraws, v.materialRows, v.opaqueSpheres, v.shadowDraws);
+    buildDrawCommands(world, v.opaqueDraws, v.transpDraws, v.materialRows, v.shadowDraws);
     frameStats_.drawCalls = (uint32_t)v.opaqueDraws.size();
-
-    v.cullViewProj = frames_.uboPtr(frameIdx) ?
-        reinterpret_cast<FrameUBO*>(frames_.uboPtr(frameIdx))->viewProj[0]
-        : glm::mat4(1.f);
 
     if (auto* cam = world.getActiveCamera()) {
         v.aoCam.zNear = cam->zNear;
@@ -390,10 +387,9 @@ Renderer::RenderView Renderer::extractRenderView(World& world) {
     // transform SSBO 행이자 materialRows의 인덱스이므로 역참조는 O(1)이다.
     // (이전 판은 World를 재순회하며 별도 카운터를 돌려, 컬링된 메시나 투명 메시가
     //  하나라도 있으면 모든 항목의 firstInstance가 어긋났다.)
-    // row < materialRows.size()는 buildDrawCommands의 불변식이므로 항상 참이다.
-    // assert로 못박아 둔다. 여기서 조용히 nullptr을 돌려주면 GeometryPass가 머티리얼
-    // 푸시만 건너뛰고 드로우는 그대로 실행해, 직전 메시의 텍스처로 그려지는
-    // 추적하기 가장 어려운 형태의 오류가 된다.
+    // row < materialRows.size()는 buildDrawCommands의 불변식이므로 항상 참이다(assert).
+    // 그래도 nullptr 이 나오면 GeometryPass 가 그 항목을 세 서브패스 모두에서 건너뛴다.
+    // 예전에는 머티리얼 푸시만 건너뛰고 그려서, 직전 메시의 텍스처로 그려졌다(DEF-28).
     auto materialForRow = [&v](uint32_t row) -> const MaterialHandle* {
         assert(row < v.materialRows.size() && "firstInstance가 materialRows 범위를 벗어났습니다");
         return row < v.materialRows.size() ? v.materialRows[row] : nullptr;
@@ -434,17 +430,17 @@ void Renderer::drawFrame(World& world) {
                 sizeof(ts), ts, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
             float ns2ms = timestampPeriod_ * 1e-6f;
             // 슬롯 배치: 0 시작 / 1 섀도 / 2 메인(3서브패스+resolve) / 3 AO /
-            //           4 Bloom / 5 톤매핑 / 6 TAA 블릿 / 7 UI
+            //           4 Bloom / 5 톤매핑 / 6 UI
             // 예전에는 6 개를 기록하고 5 개만 읽어 UI 패스가 총합에서 빠져 있었고,
             // ts2 가 불투명 서브패스 직후에 찍혀 있어 라벨이 전부 어긋나 있었습니다.
+            // 가짜 TAA 블릿 슬롯(빈 구간이라 늘 0ms)은 2026-10-04 에 지웠습니다(DEF-15).
             timings_.shadowMs  = float(ts[1] - ts[0]) * ns2ms;
             timings_.mainMs    = float(ts[2] - ts[1]) * ns2ms;   // 3 서브패스 + resolve
             timings_.aoMs      = float(ts[3] - ts[2]) * ns2ms;
             timings_.bloomMs   = float(ts[4] - ts[3]) * ns2ms;
             timings_.tonemapMs = float(ts[5] - ts[4]) * ns2ms;
-            timings_.taaBlitMs = float(ts[6] - ts[5]) * ns2ms;
-            timings_.uiMs      = float(ts[7] - ts[6]) * ns2ms;
-            timings_.totalMs   = float(ts[7] - ts[0]) * ns2ms;
+            timings_.uiMs      = float(ts[6] - ts[5]) * ns2ms;
+            timings_.totalMs   = float(ts[6] - ts[0]) * ns2ms;
         }
     }
 
@@ -510,8 +506,8 @@ void Renderer::drawFrame(World& world) {
     if (timestampPool_)
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+1);
 
-    // A-4: GPU 컬링 dispatch 제거(순수 오버헤드였음). CullPass 는 향후 GPU 구동 컬러 패스
-    // 트랙에서 되살립니다. 지금은 깊이 프리패스·컬러 모두 CPU opaqueItems 를 그립니다.
+    // A-4: GPU 컬링 dispatch 제거(순수 오버헤드였음). 깊이 프리패스·컬러 모두 CPU opaqueItems 를
+    // 그립니다. GPU 구동 경로가 필요해지면 스테레오·인스턴스 기준으로 새로 설계합니다.
 
     // ── Main render pass (3 subpasses) ────────────────────────────────────────
     GeometryPass::Inputs gin{};
@@ -545,17 +541,11 @@ void Renderer::drawFrame(World& world) {
     // 0이면서 이동 시 고스팅과 노출 미적용(D-5) 밝기 오류만 냈습니다. AA 는 4x MSAA 가
     // 맡습니다. 진짜 TAA 는 OpenXR 이후 별도 트랙(Transparency_Temporal_Design.md 4절).
     post_.recordTonemap(cmd, imgIdx, geometry_.hdrView(fi), ao_.ssaoView(),
-                        bloom_.resultView(), clampSampler_, /*taaEnabled=*/false);
+                        bloom_.resultView(), clampSampler_);
 
     // Timestamp 5: after tonemap
     if (timestampPool_)
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+5);
-
-    // TAA 히스토리 blit 제거: 풀해상도 RGBA16F blit 한 번을 매 프레임 아꼈습니다(대역폭 절감).
-
-    // Timestamp 6: after TAA history blit
-    if (timestampPool_)
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+6);
 
     // ── UI overlay ────────────────────────────────────────────────────────────
     // UI 정점 버퍼는 fi 슬롯별입니다. 슬롯 수가 어긋나면 두 프레임이 한 버퍼를 같이 씁니다(DEF-93).
@@ -566,9 +556,9 @@ void Renderer::drawFrame(World& world) {
         uiRenderer_->record(cmd, imgIdx, swapchain_->extent(), fi);
     }
 
-    // Timestamp 7: after UI
+    // Timestamp 6: after UI
     if (timestampPool_)
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+7);
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+6);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS)
         throw std::runtime_error("Failed to record command buffer!");

@@ -34,7 +34,7 @@ public:
     VkExtent2D extent{};   // 스왑체인(창) 크기 — UI·post 최종 합성 대상
 
     // 씬을 그리는 3D 뷰포트 크기와 스왑체인 내 오프셋입니다(Viewport_Render_Design.md).
-    // 씬 타깃(HDR·깊이·AO·Bloom·TAA 히스토리)과 세 투영은 renderExtent 를 기준으로 삼고,
+    // 씬 타깃(HDR·깊이·AO·Bloom)과 세 투영은 renderExtent 를 기준으로 삼고,
     // post 는 renderExtent HDR 을 스왑체인의 viewportOffset+renderExtent 서브렉트에 합성합니다.
     // 기본값은 extent 와 같아(오프셋 0), 에디터가 setViewportRect 로 바꾸기 전까지 전체 렌더입니다.
     VkExtent2D renderExtent{};

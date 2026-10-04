@@ -1,4 +1,6 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "haruka_shared.h"
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec2 fragUV;
@@ -11,16 +13,8 @@ layout(location = 0) out vec4 outColor;
 
 const float PI = 3.14159265359;
 
-// Set 0: FrameUBO
-layout(set = 0, binding = 0) uniform FrameUBO {
-    mat4 viewProj[2];
-    mat4 lightViewProj;
-    mat4 prevViewProj;
-    vec4 cameraPos;
-    vec4 screenParams;
-    vec4 timeParams;
-    ivec4 miscParams;
-} ubo;
+// Set 0: FrameUBO (haruka_shared.h)
+layout(set = 0, binding = 0) uniform FrameBlock { FrameUBO ubo; };
 
 // Set 1: Scene resources
 layout(set = 1, binding = 0) uniform sampler2DShadow shadowMap;
@@ -28,13 +22,7 @@ layout(set = 1, binding = 1) uniform samplerCube     irradianceMap;
 layout(set = 1, binding = 2) uniform samplerCube     prefilterMap;
 layout(set = 1, binding = 3) uniform sampler2D       brdfLUT;
 
-struct GpuLight {
-    vec4 posOrDir;   // xyz=pos or dir, w=type (0=dir,1=point,2=spot)
-    vec4 colorRange; // xyz=color*intensity, w=range
-    vec4 spotDir;    // xyz=spot forward direction
-    vec4 spotParams; // x=cosInner, y=cosOuter
-};
-layout(set = 1, binding = 4) readonly buffer LightBuffer { GpuLight lights[]; };
+layout(set = 1, binding = 4) readonly buffer LightBuffer { GpuLight lights[]; };   // GpuLight: haruka_shared.h
 
 // Set 3: PBR material (push descriptor)
 layout(set = 3, binding = 0) uniform sampler2D albedoMap;
@@ -98,12 +86,22 @@ vec3 evalLight(GpuLight L, vec3 N, vec3 V, vec3 worldPos,
     if (type == 0) {
         lightDir = normalize(-L.posOrDir.xyz);
     } else {
-        vec3 toLight = L.posOrDir.xyz - worldPos;
-        float dist   = length(toLight);
-        lightDir     = toLight / dist;
-        float range  = L.colorRange.w;
-        float ratio  = clamp(1.0 - (dist / range), 0.0, 1.0);
-        atten        = ratio * ratio;
+        vec3  toLight = L.posOrDir.xyz - worldPos;
+        float dist2   = dot(toLight, toLight);
+        // 픽셀이 라이트 위치와 겹치면(거리 0) 0 으로 나눠 NaN 이 났습니다(DEF-35). 거리 제곱에
+        // 최솟값을 두면 겹친 픽셀의 방향은 0 벡터가 되어 아래 NdotL 조기 종료로 빠집니다.
+        lightDir      = toLight * inversesqrt(max(dist2, 1e-12));
+        // 거리 감쇠는 실제 점광원처럼 역제곱입니다. 같은 빛이 넓이 4πd² 인 구면에 퍼지므로 거리가
+        // 두 배면 밝기는 1/4 입니다. 예전 (1 - d/r)² 은 반경에 묶인 비물리 곡선이었습니다(2026-10-04).
+        //  - 1cm 안쪽은 1cm 로 계산합니다. 실제 광원은 점이 아니라 크기가 있기 때문입니다
+        //    (Frostbite · Filament 와 같은 값).
+        //  - Attenuation Radius 는 밝기를 정하는 값이 아니라, 꼬리를 0 으로 부드럽게 자르는
+        //    지점입니다. 창 함수 (1 - (d/r)^4)^2 는 UE · Frostbite · Filament 와 같습니다.
+        //  - 세기는 여전히 상대값입니다. intensity 는 1m 거리에서 받는 밝기입니다.
+        float range   = L.colorRange.w;   // CPU 가 항상 0 보다 크게 올립니다(최솟값 0.01m)
+        float r2      = range * range;
+        float t       = clamp(1.0 - (dist2 * dist2) / (r2 * r2), 0.0, 1.0);
+        atten         = (t * t) / max(dist2, 1e-4);
         if (type == 2) {
             float cosA     = dot(-lightDir, normalize(L.spotDir.xyz));
             float cosInner = L.spotParams.x;
@@ -193,5 +191,8 @@ void main() {
 
     // ── Final ─────────────────────────────────────────────────────────────────
     vec3 color = ambient + Lo + emissive;
+    // HDR 타깃은 16비트 부동소수(최대 65504)입니다. 역제곱 감쇠에서는 라이트 바로 앞의 매끈한 면이
+    // 이 값을 넘을 수 있고, 넘으면 inf 가 되어 블룸·AO 로 번집니다. 그 전에 잘라 둡니다.
+    color      = min(color, vec3(60000.0));
     outColor   = vec4(color, alpha);
 }

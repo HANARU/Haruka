@@ -479,6 +479,8 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
             glyph.texture = fonts_.atlasView();
             glyph.color   = e.color;
             glyph.layer   = e.layer;
+            glyph.clip    = e.clip;
+            glyph.clipped = e.clipped;
             glyph.rect    = { penX + g.bearing.x,
                               baseY - g.bearing.y,
                               g.pixelSize.x,
@@ -553,6 +555,10 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
             tex    = whiteView_;
             uvRect = { 0.f, 0.f, 1.f, 1.f };
         }
+        // 클립은 사각형을 CPU 에서 잘라 적용합니다. 요소가 모두 축 정렬 사각형이라 정확하고,
+        // 시저처럼 클립이 바뀔 때마다 배치를 끊지 않아도 됩니다(DEF-56).
+        glm::vec4 rect = e.rect;
+        if (e.clipped && !HClipQuad(rect, uvRect, e.clip)) continue;
 
         if (tex != curTex) {
             flushBatch();
@@ -560,7 +566,7 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
             pushDescriptor(cmd, curTex);
         }
 
-        if (!emitQuad(e.rect, uvRect, e.color)) {
+        if (!emitQuad(rect, uvRect, e.color)) {
             // 예산을 넘으면 나머지가 조용히 사라집니다. 화면만 보고는 원인을 알 수 없으므로
             // 한 번은 알립니다(매 프레임 찍으면 로그 패널이 잠깁니다).
             static bool warned = false;

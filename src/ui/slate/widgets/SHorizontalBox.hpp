@@ -109,6 +109,15 @@ public:
         }
         return HReply::Unhandled();
     }
+    // 휠도 누름과 같은 규칙입니다(DEF-57).
+    HReply onScroll(const HPointerEvent& e) override {
+        for (auto& s : slots_) {
+            if (!s.widget->isVisible()) continue;
+            if (s.widget->cachedGeometry().contains(e.position))
+                if (auto r = s.widget->onScroll(e); r.handled) return r;
+        }
+        return HReply::Unhandled();
+    }
     HReply onMouseMove(const HPointerEvent& e) override {
         HReply ret = HReply::Unhandled();
         for (auto& s : slots_) ret.merge(s.widget->onMouseMove(e));

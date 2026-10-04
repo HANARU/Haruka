@@ -288,7 +288,19 @@ void PhysicsSystem::tick(float dt) {
         }
 
         JPH::Body* body = bi.CreateBody(bcs);
-        if (!body) continue;
+        if (!body) {
+            // 바디 상한(kMaxBodies)에 닿으면 Jolt 는 아무 말 없이 null 을 돌려줍니다. 실패를
+            // 표시해 매 틱 셰이프를 다시 만들며 재시도하지 않게 하고(Play·속성 편집 때 다시
+            // 시도), 처음 한 번 알립니다(DEF-10).
+            rb->createFailed_ = true;
+            if (!bodyCapWarned_) {
+                bodyCapWarned_ = true;
+                HLOG(LogPhysics, Warning) << "Body creation failed for '" << a->name << "' ("
+                    << impl_->physics->GetNumBodies() << "/" << impl_->physics->GetMaxBodies()
+                    << " bodies). Further failures are not logged; raise kMaxBodies for larger scenes";
+            }
+            continue;
+        }
         bi.AddBody(body->GetID(), JPH::EActivation::Activate);
         rb->bodyId_       = body->GetID().GetIndexAndSequenceNumber();
         rb->physSys_      = this;
@@ -303,7 +315,18 @@ void PhysicsSystem::tick(float dt) {
     // Fixed-step simulation
     accumulator_ += dt;
     while (accumulator_ >= kStep) {
-        impl_->physics->Update(kStep, 1, impl_->tempAllocator.get(), impl_->jobSystem.get());
+        const JPH::EPhysicsUpdateError err =
+            impl_->physics->Update(kStep, 1, impl_->tempAllocator.get(), impl_->jobSystem.get());
+        // 접촉·바디 쌍 버퍼가 넘치면 일부 충돌을 건너뛴 것입니다. 예전에는 반환값을 버렸습니다(DEF-10).
+        if (err != JPH::EPhysicsUpdateError::None && !updateErrorWarned_) {
+            updateErrorWarned_ = true;
+            const auto has = [err](JPH::EPhysicsUpdateError f) { return ((uint32_t)err & (uint32_t)f) != 0; };
+            HLOG(LogPhysics, Warning) << "Physics step overflow:"
+                << (has(JPH::EPhysicsUpdateError::ManifoldCacheFull)      ? " manifold-cache" : "")
+                << (has(JPH::EPhysicsUpdateError::BodyPairCacheFull)      ? " body-pair-cache" : "")
+                << (has(JPH::EPhysicsUpdateError::ContactConstraintsFull) ? " contact-constraints" : "")
+                << " full; some contacts were ignored this step (warned once)";
+        }
         accumulator_ -= kStep;
     }
 

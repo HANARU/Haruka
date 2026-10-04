@@ -15,7 +15,8 @@ Haruka 라이팅의 성격은 **All-Movable · 무단위(Unitless) · 하드튜�
   않습니다. Lumen·VSM·Distance Field·Baked GI 도 같은 이유로 스킵입니다.
 - **무단위**: `intensity`(기본 3.0)는 물리 단위가 아니라 UE의 legacy Unitless 모드에 해당합니다.
   Point/Spot 감쇠도 `(1-d/range)²`라는 비물리식이라 lumen/candela 의미가 성립하지 않습니다.
-- **하드튜닝**: 태양 3.0 / 하늘 0.30(kSkyRadianceScale) / 노출 0.4가 **한 세트로 묶여** 있습니다.
+- **하드튜닝**: 태양 3.0 / 하늘 0.30(kSkyRadianceScale) / 노출이 **한 세트로 묶여** 있습니다. 노출은 0.4 였다가
+  감마 이중 적용(DEF-96)을 고친 2026-10-04 에 같은 중간톤 목표로 돌아가도록 1.0 으로 올렸습니다.
   하나만 바꾸면 밝기 균형이 깨집니다.
 
 따라서 UE 용어 작업의 대부분은 **이미 있는 것에 이름표 붙이기**이고, 새로 만들 것은 소수(색온도·
@@ -45,7 +46,7 @@ Haruka 라이팅의 성격은 **All-Movable · 무단위(Unitless) · 하드튜�
 | UE 용어 | 정의 | Haruka 현재 | 채택 |
 |---|---|---|---|
 | Directional Light | 무한 원거리 평행광(태양). 방향만, 위치 무관 | 있음(Sun), worldDirection() | now |
-| Point Light | 한 점에서 전방위, 반경 내 역제곱 감쇠 | 있음(감쇠 비물리) | now |
+| Point Light | 한 점에서 전방위, 반경 내 역제곱 감쇠 | 있음(2026-10-04 부터 역제곱 + 창 함수) | now |
 | Spot Light | Point를 원뿔로 제한 | 있음 | now |
 | Rect Light (Area) | 사각 면광원, LTC 해석 적분 | 없음 | advanced |
 | Sky Light | 하늘 큐브맵으로 앰비언트+반사 | **이미 있음**(IBL, 타입은 아님) | now(재명명) |
@@ -184,9 +185,12 @@ LightComponent (UE 어휘):
 1. ✅ **결정(2026-08-27): "UE 명칭만".** UE 이름·드롭다운(Intensity/Attenuation Radius/Candela/Kelvin 등)
    은 도입하되 **내부 값은 영구 상대값(π 정규화)** 으로 유지합니다. 물리 단위(lux/candela/lumen)의 실제
    물리값 산입·노출계(EV100)·역제곱 물리 감쇠·커플드 세트 재보정은 **하지 않습니다.** `intensityUnits`
-   드롭다운은 UI·문서용 명목 표기이고, 하드튜닝 세트(태양 3.0/하늘 0.30/노출 0.4)는 그대로 둡니다.
+   드롭다운은 UI·문서용 명목 표기이고, 하드튜닝 세트(태양 3.0/하늘 0.30/노출 0.4, 2026-10-04 부터 노출 1.0)는 그대로 둡니다.
    → **Phase 4(물리 단위·감쇠)는 명목 명칭만 남기고 물리 구현은 스킵.** Inverse Square Falloff 는 필요 시
    시각 개선용으로만 선택 도입(단위 의미와 무관).
+   **(2026-10-04 갱신)** 사용자 지시("현실은 어떤지 알아보고 거기에 맞춰")로 Point·Spot 의 감쇠 **모양**은 실제 점광원과
+   같은 역제곱 + 창 함수로 바꿨습니다(1cm 최소 거리, 반경은 꼬리를 자르는 지점). 단위는 여전히 상대값이고(intensity =
+   1m 거리의 밝기) 물리 단위 산입·노출계는 하지 않습니다. 근거와 확인은 Core_Defects_Task_Spec.md "화면 기준 재정렬".
 2. **exposure 재보정 범위**: 물리 단위/역제곱을 건드리면 커플드 세트 전부(intensity·exposure·skyRadiance +
    bloom·ao·taa) 재조정 필요 — 한 번에 vs 단계적.
 3. ✅ **결정: 완전 제거(2026-08-27).** LightComponent 에서 `ambient` 삭제. 직렬화는 옛 파일 호환을 위해

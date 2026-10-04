@@ -61,6 +61,10 @@ public:
     HReply onMouseMove(const HPointerEvent& e) override {
         return child_ ? child_->onMouseMove(e) : HReply::Unhandled();
     }
+    HReply onScroll(const HPointerEvent& e) override {
+        if (!cachedGeo_.contains(e.position)) return HReply::Unhandled();
+        return child_ ? child_->onScroll(e) : HReply::Unhandled();
+    }
 
 private:
     std::shared_ptr<HWidget> child_;

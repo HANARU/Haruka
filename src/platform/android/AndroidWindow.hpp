@@ -32,6 +32,7 @@ public:
     void  getRightMouseDelta(float& dx, float& dy) override   { dx = 0.f; dy = 0.f; }
     float getScrollDelta() override                           { return 0.f; }
     bool  isKeyDown(int) const override                       { return false; }
+    int   keyPressCount(int) const override                   { return 0; }
     bool  isMouseButtonDown(int) const override               { return false; }
     void  getMousePosition(float& x, float& y) const override { x = 0.f; y = 0.f; }
     void  activateCameraMode() override                       {}

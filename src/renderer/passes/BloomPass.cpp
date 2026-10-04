@@ -140,8 +140,17 @@ void BloomPass::destroyPipelines() {
 }
 
 void BloomPass::rebuildPipelines() {
-    destroyPipelines();
-    createPipelines();
+    // 새 파이프라인을 다 만든 뒤에만 옛 것을 지웁니다(핫 리로드 실패 시 이전 것 유지).
+    const VkPipeline oldT = threshPipe_, oldD = downPipe_, oldU = upPipe_;
+    threshPipe_ = downPipe_ = upPipe_ = VK_NULL_HANDLE;
+    try { createPipelines(); }
+    catch (...) {
+        destroyPipelines();
+        threshPipe_ = oldT; downPipe_ = oldD; upPipe_ = oldU;
+        throw;
+    }
+    for (VkPipeline p : { oldT, oldD, oldU })
+        if (p) vkDestroyPipeline(rc_->device, p, nullptr);
 }
 
 void BloomPass::destroy() {

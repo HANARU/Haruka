@@ -63,6 +63,9 @@ public:
     // 프레임 안에 눌렀다 뗀 입력(터치패드 탭, 낮은 FPS)도 그 프레임에는 눌린 것으로 보여,
     // 프레임마다 상태를 폴링하는 쪽이 놓치지 않습니다.
     virtual bool  isKeyDown(int key) const = 0;
+    // 직전 pollEvents 이후 이 키의 누름과 OS 자동 반복이 몇 번 들어왔는지입니다. 누르고 있으면
+    // 거듭 동작해야 하는 편집 키(백스페이스)가 씁니다(DEF-58). 반복 지연과 속도는 OS 설정을 따릅니다.
+    virtual int   keyPressCount(int key) const = 0;
     virtual bool  isMouseButtonDown(int button) const = 0;
     virtual void  getMousePosition(float& x, float& y) const = 0;
 
