@@ -37,6 +37,16 @@ glm::vec3 Actor::worldScale() const {
                    : transform_.scale();
 }
 
+void Actor::setWorldPosition(const glm::vec3& p) {
+    if (!parent_) { transform_.setPosition(p); return; }
+    transform_.setPosition(glm::vec3(glm::inverse(parent_->worldMatrix()) * glm::vec4(p, 1.f)));
+}
+
+void Actor::setWorldRotation(const glm::quat& q) {
+    if (!parent_) { transform_.setRotation(q); return; }
+    transform_.setRotation(glm::normalize(glm::inverse(parent_->worldRotation()) * q));
+}
+
 void Actor::setActive(bool v) {
     if (activeSelf_ == v) return;
     activeSelf_ = v;

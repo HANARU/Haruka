@@ -52,8 +52,9 @@ VKAPI_ATTR VkBool32 VKAPI_CALL Renderer::debugCallback(
 
 // ── init / cleanup ────────────────────────────────────────────────────────────
 
-void Renderer::init(IWindow* win) {
-    window = win;
+void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
+    window       = win;
+    deviceHooks_ = deviceHooks;
     createInstance();
     setupDebugMessenger();
     createSurface();
@@ -62,9 +63,13 @@ void Renderer::init(IWindow* win) {
     allocator.init(device, physDevice);
 
     auto qfi = findQueueFamilies(physDevice);
-    swapchain_ = std::make_unique<GlfwSwapchain>(
+    auto swap = std::make_unique<GlfwSwapchain>(
         window, surface, physDevice, device,
         qfi.graphics.value(), qfi.present.value());
+    // XR 중에는 헤드셋이 루프 속도를 정합니다. 데스크톱 표시가 모니터 주사율로 기다리면 헤드셋
+    // 프레임을 놓치므로 기다리지 않는 표시 방식을 고릅니다.
+    swap->setPreferNonBlocking(xrCompatible_);
+    swapchain_ = std::move(swap);
     swapchain_->create();
 
     depthFormat = findDepthFormat();
@@ -83,9 +88,10 @@ void Renderer::init(IWindow* win) {
     rc_.swapFormat    = swapchain_->format();
     rc_.depthFormat   = depthFormat;
     rc_.extent        = swapchain_->extent();
-    // 뷰포트 미지정 시 씬은 창 전체로 렌더(renderExtent == extent, 오프셋 0).
-    rc_.renderExtent   = rc_.extent;
+    // 뷰포트 미지정 시 씬은 창 전체로 렌더(오프셋 0, 단안이면 renderExtent == extent).
     rc_.viewportOffset = { 0, 0 };
+    rc_.viewportExtent = rc_.extent;
+    rc_.renderExtent   = desiredRenderExtent();
 
     // 셰이더 계약 (set 0~3 + PBR 파이프라인 레이아웃) — 패스 생성보다 선행
     frames_.createLayouts(rc_);
@@ -127,11 +133,13 @@ void Renderer::init(IWindow* win) {
     frames_.writeSceneSets(shadow_.sampler(), shadow_.shadowView(),
                            iblSampler_, iblIrradianceView_, iblPrefilterView_,
                            brdfSampler_, brdfLutView_);
+    deviceHooks_ = nullptr;   // 장치를 만든 뒤에는 쓰지 않습니다
 }
 
 void Renderer::cleanup() {
     vkDeviceWaitIdle(device);
     savePipelineCache();
+    detachXrSwapchain(false);   // 보통은 엔진이 세션을 지우기 전에 이미 뗐습니다
 
     // Timestamp
     if (timestampPool_) { vkDestroyQueryPool(device, timestampPool_, nullptr); timestampPool_ = VK_NULL_HANDLE; }
@@ -547,7 +555,19 @@ void Renderer::createInstance() {
         dci.pfnUserCallback = debugCallback;
         ci.pNext            = &dci;
     }
-    if (vkCreateInstance(&ci, nullptr, &instance) != VK_SUCCESS)
+    // XR 이면 런타임이 자기 인스턴스 확장을 덧붙여 만듭니다(XR_KHR_vulkan_enable2). 런타임이 실패하면
+    // XR 없이 직접 만들어 데스크톱으로 계속합니다.
+    VkResult r = VK_ERROR_INITIALIZATION_FAILED;
+    if (deviceHooks_) {
+        r = deviceHooks_->createVulkanInstance(ci, instance);
+        if (r != VK_SUCCESS) {
+            HLOG(LogRenderer, Warning) << "The OpenXR runtime could not create the Vulkan instance (VkResult "
+                                       << (int)r << "); XR is disabled for this run";
+            deviceHooks_ = nullptr;
+        }
+    }
+    if (!deviceHooks_) r = vkCreateInstance(&ci, nullptr, &instance);
+    if (r != VK_SUCCESS)
         throw std::runtime_error("Failed to create Vulkan instance!");
 }
 
@@ -570,13 +590,27 @@ void Renderer::createSurface() {
 }
 
 void Renderer::pickPhysicalDevice() {
-    uint32_t cnt = 0;
-    vkEnumeratePhysicalDevices(instance, &cnt, nullptr);
-    if (!cnt) throw std::runtime_error("No Vulkan-capable GPU found!");
-    std::vector<VkPhysicalDevice> devs(cnt);
-    vkEnumeratePhysicalDevices(instance, &cnt, devs.data());
-    for (auto& d : devs)
-        if (isDeviceSuitable(d)) { physDevice = d; break; }
+    // XR 이면 헤드셋이 연결된 GPU 를 씁니다. 그 GPU 가 창에도 그릴 수 있어야 에디터 뷰포트에 비출 수
+    // 있습니다. 못 그리면(노트북의 다른 GPU 등) 직접 고르고 XR 은 쓰지 않습니다.
+    if (deviceHooks_) {
+        const VkPhysicalDevice xrDev = deviceHooks_->vulkanPhysicalDevice(instance);
+        if (xrDev != VK_NULL_HANDLE && isDeviceSuitable(xrDev)) {
+            physDevice    = xrDev;
+            xrCompatible_ = true;
+        } else {
+            HLOG(LogRenderer, Warning) << "The GPU chosen by the OpenXR runtime cannot present to the "
+                                          "editor window; XR is disabled for this run";
+        }
+    }
+    if (physDevice == VK_NULL_HANDLE) {
+        uint32_t cnt = 0;
+        vkEnumeratePhysicalDevices(instance, &cnt, nullptr);
+        if (!cnt) throw std::runtime_error("No Vulkan-capable GPU found!");
+        std::vector<VkPhysicalDevice> devs(cnt);
+        vkEnumeratePhysicalDevices(instance, &cnt, devs.data());
+        for (auto& d : devs)
+            if (isDeviceSuitable(d)) { physDevice = d; break; }
+    }
     if (physDevice == VK_NULL_HANDLE)
         throw std::runtime_error("No suitable GPU found!");
     VkPhysicalDeviceProperties p;
@@ -602,15 +636,14 @@ void Renderer::createLogicalDevice() {
         qci.queueFamilyIndex = qf; qci.queueCount = 1; qci.pQueuePriorities = &prio;
         qcis.push_back(qci);
     }
-    VkPhysicalDeviceMultiviewFeatures multiviewFeat{};
-    multiviewFeat.sType     = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
-    multiviewFeat.multiview = VK_TRUE;
+    // 멀티뷰는 켜지 않습니다. 지금 두 눈은 눈마다 따로 그립니다(DEF-09 첫 단계). 예전에는 기능만 켜고
+    // 쓰는 경로가 없었습니다. 셰이더와 UBO 는 두 눈 기준이라, 멀티뷰로 옮길 때(Quest) 이 자리에서 켜고
+    // 렌더 패스 viewMask · 배열 층 · gl_ViewIndex 를 함께 바꿉니다.
     // drawIndirectCount 는 요구하지 않습니다. GPU 컬링(유일한 사용처)을 지웠고, 이 기능이 없는
     // 기기에서는 장치 생성부터 실패합니다(DEF-03).
     VkPhysicalDeviceVulkan13Features vk13Feat{};
     vk13Feat.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     vk13Feat.synchronization2 = VK_TRUE;
-    vk13Feat.pNext            = &multiviewFeat;
     VkPhysicalDeviceVulkan14Features vk14Feat{};
     vk14Feat.sType          = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
     vk14Feat.pushDescriptor = VK_TRUE;
@@ -627,7 +660,18 @@ void Renderer::createLogicalDevice() {
     ci.ppEnabledExtensionNames = kDeviceExtensions.data();
     // 장치 레이어는 지정하지 않습니다. 현재 사양은 enabledLayerCount 를 0 으로 두도록 정하고,
     // 검증 레이어는 인스턴스에서 켠 것이 장치에도 적용됩니다(DEF-29).
-    if (vkCreateDevice(physDevice, &ci, nullptr, &device) != VK_SUCCESS)
+    // XR 이면 런타임이 자기 장치 확장을 덧붙여 만듭니다. 런타임이 실패하면 직접 만들고 XR 은 쓰지 않습니다.
+    VkResult r = VK_ERROR_INITIALIZATION_FAILED;
+    if (deviceHooks_ && xrCompatible_) {
+        r = deviceHooks_->createVulkanDevice(physDevice, ci, device);
+        if (r != VK_SUCCESS) {
+            HLOG(LogRenderer, Warning) << "The OpenXR runtime could not create the Vulkan device (VkResult "
+                                       << (int)r << "); XR is disabled for this run";
+            xrCompatible_ = false;
+        }
+    }
+    if (!xrCompatible_) r = vkCreateDevice(physDevice, &ci, nullptr, &device);
+    if (r != VK_SUCCESS)
         throw std::runtime_error("Failed to create logical device!");
     vkGetDeviceQueue(device, idx.graphics.value(), 0, &graphicsQueue);
     vkGetDeviceQueue(device, idx.present.value(),  0, &presentQueue);
@@ -739,8 +783,9 @@ void Renderer::createTimestampPool() {
     VkQueryPoolCreateInfo ci{};
     ci.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
     ci.queryType  = VK_QUERY_TYPE_TIMESTAMP;
-    // 프레임당 kTimestampsPerFrame(7) 개입니다. AO 와 Bloom 을 한 덩어리로 재던 것을 쪼개고
-    // UI 패스를 따로 볼 수 있게 늘렸습니다. 쓰지 않던 TAA 블릿 칸은 2026-10-04 에 뺐습니다.
+    // 프레임당 kTimestampsPerFrame 개입니다(시작 · 섀도 · 눈마다 4칸 · UI). AO 와 Bloom 을 한
+    // 덩어리로 재던 것을 쪼개고 UI 패스를 따로 볼 수 있게 늘렸습니다. 쓰지 않던 TAA 블릿 칸은
+    // 2026-10-04 에 뺐습니다. 두 눈을 그리면서 눈마다 칸을 둡니다(DEF-09).
     ci.queryCount = MAX_FRAMES * kTimestampsPerFrame;
     if (vkCreateQueryPool(device, &ci, nullptr, &timestampPool_) != VK_SUCCESS)
         throw std::runtime_error("Failed to create timestamp pool!");

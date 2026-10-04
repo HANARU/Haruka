@@ -3,6 +3,7 @@
 #include "haruka_shared.h"
 
 layout(set = 0, binding = 0) uniform FrameBlock { FrameUBO ubo; };
+HARUKA_VIEW_PUSH_CONSTANT;   // 눈 번호(DEF-09)
 
 layout(location = 0) in vec3 inPos;
 layout(location = 1) in vec4 inColor;
@@ -10,6 +11,6 @@ layout(location = 1) in vec4 inColor;
 layout(location = 0) out vec4 fragColor;
 
 void main() {
-    gl_Position = ubo.viewProj[0] * vec4(inPos, 1.0);
+    gl_Position = ubo.viewProj[HARUKA_VIEW_INDEX] * vec4(inPos, 1.0);
     fragColor   = inColor;
 }

@@ -8,6 +8,8 @@
 #include "../game/DefaultGameModule.hpp"
 #include "../input/HInputSystem.hpp"
 #include "../platform/IWindow.hpp"
+#include "../xr/XrSystem.hpp"
+#include "HLog.hpp"
 #include "IGameModule.hpp"
 #include "FrameTimings.hpp"
 
@@ -20,18 +22,43 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <string>
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 // 코어 서비스는 초기화 순서가 고정입니다: 창 → 렌더러(창 필요) → 에셋(렌더러 필요).
 // 그다음 동적 모듈을 등록하고, 마지막에 에디터·게임을 올립니다.
-Engine::Engine() {
+Engine::Engine(const EngineOptions& options) {
     auto win = std::make_unique<GlfwWindow>(1600, 900, "Haruka Engine");
     win->init();
     window_ = std::move(win);
 
+    // XR 은 렌더러보다 먼저입니다. OpenXR 이 헤드셋이 연결된 GPU 를 고르고 Vulkan 인스턴스 · 장치를
+    // 만들기 때문입니다(UE · Unity · Godot 같음). 런타임이나 헤드셋이 없으면 데스크톱으로 계속합니다.
+    if (options.xr) {
+        xr_ = std::make_unique<XrSystem>();
+        if (!xr_->init()) xr_.reset();
+    }
+
     renderer_ = std::make_unique<Renderer>();
-    renderer_->init(window_.get());
+    renderer_->init(window_.get(), xr_.get());
+    if (xr_) {
+        if (renderer_->xrCompatible() &&
+            xr_->createSession(renderer_->getInstance(), renderer_->getPhysDevice(), renderer_->getDevice(),
+                               renderer_->graphicsQueueFamily(), renderer_->getSwapFormat())) {
+            renderer_->attachXrSwapchain(xr_->swapchainImages(), xr_->swapchainFormat(), xr_->eyeExtent());
+            HLOG(LogEngine, Log) << "XR ready; the session starts when the runtime reports READY";
+        } else {
+            // 인스턴스는 남겨 둡니다. 렌더러의 Vulkan 인스턴스 · 장치를 그것으로 만들었을 수 있어서,
+            // 엔진이 끝날 때 렌더러 다음에 지웁니다.
+            HLOG(LogEngine, Warning) << "XR session could not be created; continuing in desktop mode";
+            xr_->destroySession();
+        }
+    }
+    if (options.emulateStereo) {
+        if (xr_ && xr_->hasSession()) HLOG(LogEngine, Warning) << "--emulate-stereo is ignored while XR is active";
+        else                          renderer_->setStereoEmulation(true);
+    }
 
     assets_ = std::make_unique<AssetManager>(renderer_.get());
 
@@ -40,6 +67,7 @@ Engine::Engine() {
     audio->setWorld(&world_);
     auto* physics = modules_.registerModule(std::make_unique<PhysicsSystem>());
     physics->setWorld(&world_);
+    physics_ = physics;
 
     // 에디터 레이어.
     editor_ = std::make_unique<EditorApp>();
@@ -61,7 +89,20 @@ Engine::~Engine() {
     modules_.shutdownAll();
     if (assets_)   assets_->clear();
     if (editor_)   editor_->cleanup();
+    // XR 세션은 그것이 쓰는 Vulkan 장치보다 먼저 지웁니다.
+    if (xr_ && renderer_) renderer_->detachXrSwapchain(false);
+    if (xr_)       xr_->destroySession();
     if (renderer_) renderer_->cleanup();
+    if (xr_)       xr_->shutdown();
+}
+
+void Engine::endXr() {
+    if (!xr_ || !xr_->hasSession()) return;
+    renderer_->detachXrSwapchain();   // 장치가 쉬기를 기다린 뒤 이미지 뷰를 지움
+    xr_->destroySession();
+    HInputSystem::get().setXrInput({});
+    if (physics_) physics_->setStepRate(60.f);
+    HLOG(LogEngine, Log) << "XR ended; continuing in desktop mode";
 }
 
 // ── 입력 바인딩 (프로젝트 설정 레이어, 게임 코드와 분리) ────────────────────────
@@ -95,6 +136,31 @@ void Engine::run() {
         {
             ScopedCpuTimer t(gFrameTimings().pollEvents);
             win.pollEvents();
+        }
+
+        // ── XR 프레임 시작 ─────────────────────────────────────────────────
+        // 세션이 돌면 xrWaitFrame 이 헤드셋 주사율에 맞춰 기다리므로 루프 속도를 헤드셋이 정합니다.
+        // 입력은 이 프레임이 보일 예상 시각의 자세로 읽어 틱에 넘깁니다.
+        XrSystem::FrameInfo xrFrame;
+        bool xrBegun = false;
+        if (xr_ && xr_->hasSession()) {
+            xr_->pollEvents();
+            // 입력은 매 프레임 새로 넣습니다. 세션이 멈추면(헤드셋을 벗음 등) 빈 상태가 들어가, 마지막
+            // 버튼 · 스틱 값이 눌린 채 남지 않습니다.
+            HXrInputState xin;
+            if (xr_->sessionLost()) {
+                endXr();
+            } else if (xr_->sessionRunning()) {
+                xrBegun = xr_->beginFrame(xrFrame);
+                if (xrBegun) xr_->syncInput(xrFrame.displayTime, xin);
+                // 물리 스텝을 헤드셋 주사율에 맞춥니다(1/60 이면 72 · 90Hz 에서 물체가 떨려 보임).
+                const float hz = xr_->displayRefreshRate();
+                if (physics_ && hz > 1.f && std::abs(physics_->stepRate() - hz) > 0.5f) {
+                    physics_->setStepRate(hz);
+                    HLOG(LogEngine, Log) << "Physics step matched to the headset: " << hz << " Hz";
+                }
+            }
+            HInputSystem::get().setXrInput(xin);
         }
 
         auto  now = Clock::now();
@@ -160,7 +226,19 @@ void Engine::run() {
         }
 
         // ── Render ─────────────────────────────────────────────────────────
-        renderer.drawFrame(world);
+        // XR: 눈 자세를 이 프레임에 한 번 받아 컬링 · 렌더 · 제출에 함께 씁니다(DEF-32). 헤드셋이 화면을
+        // 보여 주지 않거나(벗음 등) 추적을 잃으면 그 프레임은 데스크톱만 그리고 빈 프레임을 제출합니다.
+        if (xrBegun) {
+            XrFrameTarget target;
+            bool acquired = false;
+            if (xrFrame.shouldRender && xr_->locateViews(xrFrame.displayTime, target.eyes))
+                acquired = xr_->acquireImage(target.imageIndex);
+            const bool rendered = renderer.drawFrame(world, acquired ? &target : nullptr);
+            if (acquired) xr_->releaseImage();
+            xr_->endFrame(xrFrame.displayTime, acquired && rendered);
+        } else {
+            renderer.drawFrame(world);
+        }
 
         // FPS title (every 0.5 s)
         ++fpsFrames;

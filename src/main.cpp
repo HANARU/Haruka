@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <cstdlib>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 #ifdef _WIN32
 // NOMINMAX 가 없으면 windows.h 의 min/max 매크로가 다른 곳의 std::min/std::max 를
@@ -50,7 +52,21 @@ static bool redirectStdioIfHeadless() {
 // 진입점은 프로세스 수준의 stdio 처리만 맡고, 엔진의 부팅·루프·teardown 은 전부
 // Engine 이 소유합니다(core/Engine.hpp). 예전에는 이 함수가 200줄로 그 전부를
 // 떠안고 있었습니다.
-int main() {
+// 실행 옵션. 모르는 인자는 경고만 남기고 무시합니다(로그 체계가 준비된 뒤에 알립니다).
+//   --xr             OpenXR 런타임(Quest Link 등)으로 헤드셋에 그립니다. 없으면 데스크톱으로 계속합니다.
+//   --emulate-stereo 헤드셋 없이 두 눈 경로를 확인합니다(뷰포트를 좌우로 나눠 두 눈을 그림).
+static EngineOptions parseOptions(int argc, char** argv, std::vector<std::string>& unknown) {
+    EngineOptions o;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if      (a == "--xr")             o.xr            = true;
+        else if (a == "--emulate-stereo") o.emulateStereo = true;
+        else                              unknown.push_back(a);
+    }
+    return o;
+}
+
+int main(int argc, char** argv) {
     const bool headless = redirectStdioIfHeadless();   // setvbuf 보다 먼저. 새 스트림에 적용되어야 한다.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
@@ -71,8 +87,13 @@ int main() {
         }
     } logGuard;
 
+    std::vector<std::string> unknownArgs;
+    const EngineOptions options = parseOptions(argc, argv, unknownArgs);
+    for (const auto& a : unknownArgs)
+        HLOG(LogEngine, Warning) << "Unknown command line option ignored: " << a;
+
     try {
-        Engine engine;   // 부팅(생성자) → 실행 → 소멸자에서 역순 teardown.
+        Engine engine(options);   // 부팅(생성자) → 실행 → 소멸자에서 역순 teardown.
         engine.run();
     } catch (const std::exception& e) {
         HLOG(LogEngine, Error) << "FATAL: " << e.what();

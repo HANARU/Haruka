@@ -443,9 +443,12 @@ void GeometryPass::createPipelines() {
         ds.depthTestEnable = VK_FALSE; ds.depthWriteEnable = VK_FALSE;
 
         if (!linePipelineLayout_) {
+            // 라인 · 기즈모도 눈 번호로 행렬을 고릅니다(line.vert, DEF-09).
+            VkPushConstantRange viewRange{ VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuViewPush) };
             VkPipelineLayoutCreateInfo pli{};
             pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
             pli.setLayoutCount = 1; pli.pSetLayouts = &frameSetLayout_;
+            pli.pushConstantRangeCount = 1; pli.pPushConstantRanges = &viewRange;
             if (vkCreatePipelineLayout(rc_->device, &pli, nullptr, &linePipelineLayout_) != VK_SUCCESS)
                 throw std::runtime_error("Failed to create line pipeline layout!");
         }
@@ -519,8 +522,9 @@ void GeometryPass::destroy() {
 }
 
 // ── record ─────────────────────────────────────────────────────────────────────
-void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& in,
-                          VkQueryPool tsPool, uint32_t tsQueryAfterMain) {
+void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
+                          const Inputs& in, VkQueryPool tsPool, uint32_t tsQueryAfterMain) {
+    const GpuViewPush viewPush{ (int32_t)viewIndex };
     VkClearValue clearVals[3];
     clearVals[0].color        = {{0.18f, 0.20f, 0.25f, 1.0f}};
     clearVals[1].depthStencil = {1.0f, 0};
@@ -550,6 +554,10 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& 
         pbrLayout_, 0, 1, &in.frameSet, 0, nullptr);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pbrLayout_, 2, 1, &in.transformSet, 0, nullptr);
+    // 눈 번호. 같은 레이아웃(pbrLayout_)의 파이프라인끼리는 바꿔 끼워도 푸시 상수가 남으므로
+    // 세 서브패스에 한 번이면 됩니다.
+    vkCmdPushConstants(cmd, pbrLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(viewPush), &viewPush);
 
     {
         VkDeviceSize offV = 0;
@@ -624,13 +632,17 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& 
 
     // 기즈모 삼각형 오버레이 (subpass 2). 라인보다 먼저 그려서, 와이어 박스와
     // 회전 원호 같은 라인 핸들이 솔리드 화살표 위에 겹쳐 보이게 합니다.
+    // 정점은 첫 눈에서만 복사합니다. 두 눈이 같은 프레임 슬롯의 같은 버퍼를 읽습니다.
     if (triVertPtr_[frameIdx] && !pendingTris_.empty()) {
         uint32_t count = std::min((uint32_t)pendingTris_.size(), kMaxTriVerts);
-        memcpy(triVertPtr_[frameIdx], pendingTris_.data(), count * sizeof(LineVertex));
+        if (viewIndex == 0)
+            memcpy(triVertPtr_[frameIdx], pendingTris_.data(), count * sizeof(LineVertex));
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, triPipeline_);
         vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &sc);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             linePipelineLayout_, 0, 1, &in.frameSet, 0, nullptr);
+        vkCmdPushConstants(cmd, linePipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT,
+                           0, sizeof(viewPush), &viewPush);
         VkDeviceSize offT = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &triVertBuf_[frameIdx], &offT);
         vkCmdDraw(cmd, count, 1, 0, 0);
@@ -639,11 +651,14 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& 
     // Line overlay (in subpass 2)
     if (lineVertPtr_[frameIdx] && !pendingLines_.empty()) {
         uint32_t count = std::min((uint32_t)pendingLines_.size(), kMaxLineVerts);
-        memcpy(lineVertPtr_[frameIdx], pendingLines_.data(), count * sizeof(LineVertex));
+        if (viewIndex == 0)
+            memcpy(lineVertPtr_[frameIdx], pendingLines_.data(), count * sizeof(LineVertex));
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, linePipeline_);
         vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &sc);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             linePipelineLayout_, 0, 1, &in.frameSet, 0, nullptr);
+        vkCmdPushConstants(cmd, linePipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT,
+                           0, sizeof(viewPush), &viewPush);
         VkDeviceSize offV = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &lineVertBuf_[frameIdx], &offV);
         vkCmdDraw(cmd, count, 1, 0, 0);

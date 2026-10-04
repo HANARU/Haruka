@@ -202,6 +202,15 @@ HarukaAllocation HarukaAllocator::allocC(VkDeviceSize size, VkDeviceSize alignme
 
 void HarukaAllocator::freeB(const HarukaAllocation& alloc) {
     if (!alloc.isValid()) return;
+    // Zone B 가 아닌 할당을 받으면 빈 목록에 엉뚱한 범위가 들어가, 다음 allocB 가 Zone C 위에
+    // 이미지를 놓을 수 있습니다(DEF-100: AOPass 가 Zone C 버퍼를 여기로 돌려줬음). Zone A · C 는
+    // 하나씩 돌려받지 않습니다(A 는 resetZoneA, C 는 링).
+    if (alloc.zone != AllocZone::B) {
+        HLOG(LogMemory, Warning) << "freeB ignored an allocation from zone "
+                                 << (alloc.zone == AllocZone::A ? "A" : "C")
+                                 << " (offset " << alloc.offset << ", size " << alloc.size << ")";
+        return;
+    }
     if (alloc.auxMem != VK_NULL_HANDLE) {
         vkFreeMemory(device, alloc.auxMem, nullptr);
     }

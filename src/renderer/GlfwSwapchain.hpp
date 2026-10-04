@@ -13,6 +13,10 @@ public:
                   uint32_t graphicsFamily, uint32_t presentFamily);
     ~GlfwSwapchain() override { destroy(); }
 
+    // 참이면 표시가 모니터 주사율을 기다리지 않게 MAILBOX → IMMEDIATE → FIFO 순으로 고릅니다(XR 중에는
+    // 헤드셋이 루프 속도를 정하므로). 거짓이면 MAILBOX → FIFO. create() 전에 정합니다.
+    void setPreferNonBlocking(bool on) { preferNonBlocking_ = on; }
+
     void create()   override;
     void destroy()  override;
     void recreate() override;
@@ -41,6 +45,7 @@ private:
     VkFormat                 format_     = VK_FORMAT_UNDEFINED;
     VkExtent2D               extent_     = {};
     bool                     dirty_      = false;
+    bool                     preferNonBlocking_ = false;
 
     VkSurfaceFormatKHR chooseFormat(const std::vector<VkSurfaceFormatKHR>&) const;
     VkPresentModeKHR   choosePresentMode(const std::vector<VkPresentModeKHR>&) const;

@@ -87,6 +87,12 @@ public:
     glm::quat worldRotation() const;
     glm::vec3 worldScale()    const;
 
+    // 월드 기준으로 위치 · 회전을 정합니다. 부모가 있으면 부모의 지금 월드 트랜스폼으로 로컬을 구해
+    // 씁니다(부모가 없으면 로컬 세터와 같음). 물리가 시뮬레이션한 월드 자세를 되쓸 때 씁니다(DEF-53).
+    // 부모가 비균등 크기 + 회전이면 월드 회전이 순수 회전으로 나뉘지 않아 근사입니다(worldScale 과 같음).
+    void setWorldPosition(const glm::vec3& p);
+    void setWorldRotation(const glm::quat& q);
+
     // ── Scene hierarchy ───────────────────────────────────────────────────────
     // attachTo/detach 는 조상 체인을 바꾸므로, 재부착 뒤 이 서브트리의 컴포넌트
     // 실효 활성(onEnable/onDisable)을 다시 맞춥니다.

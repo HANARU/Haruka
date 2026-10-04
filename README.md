@@ -2,9 +2,9 @@
 
 Vulkan 1.4 기반 C++20 게임 엔진. 렌더러, GPU 메모리 할당자, UI 위젯 시스템, 에디터를 외부 프레임워크 없이 직접 구현하는 1인 개발 프로젝트입니다. 현재 빌드·실행되는 형태는 에디터가 함께 도는 **Windows 데스크톱 애플리케이션 하나**입니다.
 
-장기 목표는 VR이지만 OpenXR 연동 코드는 아직 저장소에 없습니다. 자세한 내용은 [알려진 한계](#알려진-한계)를 보십시오.
+장기 목표는 VR입니다. PC OpenXR 연결(`--xr`, Quest Link 등 PC VR 런타임)이 들어 있지만 아직 헤드셋에서 확인하지 않았습니다. 자세한 내용은 [알려진 한계](#알려진-한계)를 보십시오.
 
-소스는 `src/` 기준 `.cpp`/`.hpp` 123 파일 17,954 줄, 셰이더는 GLSL 21 파일 774 줄입니다. 릴리스·태그 없음, CI 없음, 자동 테스트 2건.
+소스는 `src/` 기준 `.cpp`/`.hpp` 123 파일 17,954 줄, 셰이더는 GLSL 21 파일 774 줄입니다. 릴리스·태그 없음, CI 없음, 자동 테스트 9건.
 
 ## 지금 동작하는 것
 
@@ -26,12 +26,13 @@ GLFW 창(1600x900) 하나를 띄우고 그 안에서 엔진과 에디터가 함�
 |---|---|
 | OS | Windows x64. 빌드·실행 스크립트가 배치 파일이며 다른 OS에서 검증된 적 없음 |
 | 컴파일러 | MSVC. `build.bat`은 `Visual Studio 18 2026`을 기본 생성기로 쓰고, 해당 설치 경로가 없고 2022가 있으면 `Visual Studio 17 2022`로 내려갑니다(`-A x64` 고정) |
-| CMake | 3.20 이상 |
+| CMake | 3.21 이상(셰이더 include 의존성 추적에 depfile 을 씀) |
 | Vulkan SDK | **1.4.x** — 코드가 `VK_API_VERSION_1_4`와 `VkPhysicalDeviceVulkan14Features.pushDescriptor`를 사용 |
-| GPU 드라이버 | Vulkan 1.4. 그 밖에 요구하는 기능: `synchronization2`, `multiview`, `samplerAnisotropy` |
+| GPU 드라이버 | Vulkan 1.4. 그 밖에 요구하는 기능: `synchronization2`, `samplerAnisotropy` |
+| VR(선택) | `--xr` 로 띄울 때만. PC VR OpenXR 런타임(Meta Quest Link 등)과 헤드셋. 없으면 경고를 남기고 데스크톱으로 계속합니다 |
 | 네트워크 | 첫 CMake 구성 시 필요(의존성을 FetchContent로 내려받음) |
 
-미리 설치할 것은 Vulkan SDK 하나입니다. glm 1.0.1, GLFW 3.4, tinygltf v2.9.3, stb, miniaudio 0.11.21, JoltPhysics v5.1.0은 CMake FetchContent가 구성 시점에 내려받으며 저장소에는 포함되어 있지 않습니다. 셰이더는 런타임이 아니라 빌드 시점에 `glslc`로 SPIR-V(그래픽스 18 + 컴퓨트 1)로 컴파일되므로, `glslc`를 찾지 못하면 구성 단계에서 실패합니다.
+미리 설치할 것은 Vulkan SDK 하나입니다. glm 1.0.1, GLFW 3.4, tinygltf v2.9.3, stb, miniaudio 0.11.21, JoltPhysics v5.1.0, OpenXR-SDK release-1.1.63(로더 정적 링크)은 CMake FetchContent가 구성 시점에 내려받으며 저장소에는 포함되어 있지 않습니다. 셰이더는 런타임이 아니라 빌드 시점에 `glslc`로 SPIR-V(그래픽스 18 + 컴퓨트 1)로 컴파일되므로, `glslc`를 찾지 못하면 구성 단계에서 실패합니다.
 
 ### 명령
 
@@ -42,6 +43,8 @@ build.bat Release clean   :: CMake 캐시를 지우고 재구성
 
 run.bat                   :: build\Release\HarukaEngine.exe 실행
 run.bat Debug
+run.bat Release --xr              :: OpenXR 런타임으로 헤드셋에 그림(에디터 뷰포트에 왼쪽 눈)
+run.bat Release --emulate-stereo  :: 헤드셋 없이 두 눈 경로 확인(뷰포트를 좌우로 나눔)
 ```
 
 `build.bat`은 `build\CMakeCache.txt`가 없을 때만 CMake를 구성합니다. 생성기나 옵션을 바꾸려면 `clean` 인자가 필요합니다. 전체 빌드 로그는 `Logs\build_log.txt`, error/fatal만 걸러낸 요약은 `Logs\build_error.txt`에 남습니다.
@@ -62,7 +65,7 @@ cd build
 ctest -C Release
 ```
 
-`geometry_conventions`(절차 도형 규약)와 `actor_lifecycle`(Actor 활성·컴포넌트 생명주기) 2건입니다. 외부 테스트 프레임워크 없이 자체 `check()`로 만든 콘솔 실행 파일이고, Vulkan·창을 링크하지 않아 그래픽 디바이스 없이 돕니다.
+9건입니다: `geometry_conventions`(절차 도형 규약), `actor_lifecycle`(Actor 활성 · 컴포넌트 생명주기 · 카메라 자세), `command_stack_purge`, `log_category`, `audio_system`, `slate_input`(UI 입력 · 숫자 칸), `physics_lifecycle`(물리 바디 생명주기 · 물리 API), `stereo_views`(눈별 투영 · 두 눈 컬링), `xr_input`(VR 입력). 외부 테스트 프레임워크 없이 자체 `check()`로 만든 콘솔 실행 파일이고, 창을 띄우지 않아 그래픽 디바이스 없이 돕니다.
 
 ## 저장소 구조
 
@@ -99,8 +102,8 @@ Docs/          설계 · 결함 · 결정 기록 (색인: Docs/README.md)
 **플랫폼 · VR**
 - Windows 전용입니다. CI가 없어 Linux/macOS에서 빌드된 적이 없습니다. macOS는 MoltenVK에 필요한 `VK_KHR_portability_enumeration` 처리가 없고 요구 API가 Vulkan 1.4라 실행 자체가 불가능합니다.
 - Vulkan 1.4 드라이버가 필요합니다. 1.0~1.3 환경에서는 시작하지 않습니다.
-- **VR은 목표이지 기능이 아닙니다.** OpenXR 호출·헤더·CMake 의존성이 저장소에 0건이고, 존재하는 것은 주석과 `Docs/VR_Transition_Masterplan.md`의 계획뿐입니다.
-- 스테레오는 자리만 잡혀 있습니다. `FrameUBO`의 `viewProj[2]`는 두 슬롯에 같은 행렬이 들어가고 모든 셰이더가 `viewProj[0]`만 인덱싱하며 `gl_ViewIndex` 사용처가 없습니다(단안 렌더). multiview는 디바이스 기능만 켜져 있고 이를 쓰는 렌더패스가 없습니다.
+- **VR은 첫걸음 단계입니다.** PC OpenXR 연결(`--xr`)이 있지만 헤드셋에서 확인하지 않았습니다(개발 PC 에 런타임이 없음). 원점은 활성 카메라의 위치와 요이고(LOCAL 공간), 두 눈은 눈마다 따로 그립니다(멀티뷰는 Quest 이식 때). 입력은 기본 액션 세트 하나입니다.
+- Quest 단독 실행(Android)은 아직 없습니다. 아래 Android 항목을 보십시오.
 - Android/Quest 경로는 스텁입니다. `AndroidWindow::createSurface()`가 예외를 던지고, `Engine` 생성자가 `GlfwWindow`를 조건 없이 만들기 때문에 CMake의 ANDROID 분기는 컴파일되지 않습니다. gradle 등 안드로이드 빌드 파일도 없습니다.
 
 **렌더러**
@@ -128,7 +131,7 @@ Docs/          설계 · 결함 · 결정 기록 (색인: Docs/README.md)
 - 셰이더 핫 리로드는 GLSL이 아니라 실행 파일 옆 `shaders` 디렉터리의 `.spv` 변경을 감시합니다(재빌드로 `.spv`가 갱신될 때 동작). 감시 구현은 `ReadDirectoryChangesW` 기반 Windows 전용입니다.
 
 **품질 관리**
-- 자동 테스트는 위 2건뿐이고 렌더러·메모리·물리·에디터에는 없습니다. CI 설정도 없습니다.
+- 자동 테스트는 위 9건이고 렌더러의 GPU 경로 · 메모리 할당자에는 없습니다(렌더러는 픽셀 비교 캡처로 확인). CI 설정도 없습니다.
 - 결함 대장(`Docs/Core_Defects_Task_Spec.md`) 요약 매트릭스 기준 41건 중 14건 해결, 27건 미해결이며 HIGH 다수가 남아 있습니다. 다만 이 수치는 **문서 기준**이며 매트릭스가 코드보다 뒤처진 사례가 실재합니다(DEF-07은 미해결로 표기되어 있으나 실제로는 구독 코드가 있습니다). 이 저장소에서는 체크박스보다 코드 확인이 우선입니다.
 - 추적되는 에셋은 `assets/models/model.glb` 하나뿐이고, 의존성 중 stb만 `GIT_TAG master`로 고정되지 않아 구성 시점에 따라 내려받는 소스가 달라질 수 있습니다.
 

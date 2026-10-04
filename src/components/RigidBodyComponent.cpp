@@ -22,6 +22,34 @@ void RigidBodyComponent::onDisable() {
     releaseBody();
 }
 
+void RigidBodyComponent::addForce(const glm::vec3& f) {
+    if (hasBody()) physSys_->addForce(bodyId_, f);
+}
+void RigidBodyComponent::addForceAtPosition(const glm::vec3& f, const glm::vec3& p) {
+    if (hasBody()) physSys_->addForceAtPosition(bodyId_, f, p);
+}
+void RigidBodyComponent::addTorque(const glm::vec3& t) {
+    if (hasBody()) physSys_->addTorque(bodyId_, t);
+}
+void RigidBodyComponent::addImpulse(const glm::vec3& j) {
+    if (hasBody()) physSys_->addImpulse(bodyId_, j);
+}
+void RigidBodyComponent::addImpulseAtPosition(const glm::vec3& j, const glm::vec3& p) {
+    if (hasBody()) physSys_->addImpulseAtPosition(bodyId_, j, p);
+}
+void RigidBodyComponent::setLinearVelocity(const glm::vec3& v) {
+    if (hasBody()) physSys_->setLinearVelocity(bodyId_, v);
+}
+glm::vec3 RigidBodyComponent::linearVelocity() const {
+    return hasBody() ? physSys_->linearVelocity(bodyId_) : glm::vec3(0.f);
+}
+void RigidBodyComponent::setAngularVelocity(const glm::vec3& w) {
+    if (hasBody()) physSys_->setAngularVelocity(bodyId_, w);
+}
+glm::vec3 RigidBodyComponent::angularVelocity() const {
+    return hasBody() ? physSys_->angularVelocity(bodyId_) : glm::vec3(0.f);
+}
+
 void RigidBodyComponent::rebuildBody() {
     releaseBody();
     createFailed_ = false;

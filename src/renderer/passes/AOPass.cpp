@@ -166,8 +166,9 @@ void AOPass::createDataBuffers() {
     ssaoData.bias   = 0.025f;
     ssaoData.power  = 1.5f;
 
-    // Per-frame UBOs (invProj and noiseScale will be updated in record)
-    for (int i = 0; i < kFramesInFlight; i++) {
+    // 프레임 슬롯 × 눈마다 UBO 하나(invProj · noiseScale 은 record 가 갱신). 두 눈을 한 프레임에
+    // 그리므로 눈마다 따로 둡니다. 하나를 같이 쓰면 오른쪽 눈 값이 왼쪽 눈의 SSAO 까지 덮습니다(DEF-09).
+    for (int i = 0; i < kDataBufs; i++) {
         VkBufferCreateInfo bi{};
         bi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bi.size  = sizeof(SSAOData); bi.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
@@ -280,9 +281,11 @@ void AOPass::destroy() {
     };
     freeSlot(noiseTex_, noiseView_, noiseAlloc_);
     if (noiseSampler_) { vkDestroySampler(rc_->device, noiseSampler_, nullptr); noiseSampler_ = VK_NULL_HANDLE; }
-    for (int i = 0; i < kFramesInFlight; i++) {
+    // 데이터 UBO 는 Zone C(링)에 있어 하나씩 돌려주지 않습니다. 예전에는 Zone B 해제 함수로
+    // 돌려줘 Zone B 빈 목록에 Zone C 범위가 들어갔습니다(DEF-100).
+    for (int i = 0; i < kDataBufs; i++) {
         if (dataBufs_[i]) { vkDestroyBuffer(rc_->device, dataBufs_[i], nullptr); dataBufs_[i] = VK_NULL_HANDLE; }
-        if (dataAllocs_[i].isValid()) { rc_->allocator->freeB(dataAllocs_[i]); dataAllocs_[i] = {}; }
+        dataAllocs_[i] = {};
     }
 
     if (linDepthPipeLayout_) { vkDestroyPipelineLayout(rc_->device, linDepthPipeLayout_, nullptr); linDepthPipeLayout_ = VK_NULL_HANDLE; }
@@ -294,9 +297,10 @@ void AOPass::destroy() {
 }
 
 // ── record ─────────────────────────────────────────────────────────────────────
-void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx,
+void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
                     VkImageView msaaDepthView, VkSampler clampSampler,
                     const CameraParams& cam) {
+    const uint32_t dataIdx = frameIdx * kMaxViews + viewIndex;
     uint32_t hw = std::max(1u, rc_->renderExtent.width  / 2);
     uint32_t hh = std::max(1u, rc_->renderExtent.height / 2);
 
@@ -334,7 +338,7 @@ void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx,
     {
         // invProj/noiseScale 프레임 갱신
         if (cam.valid) {
-            SSAOData* ubo = static_cast<SSAOData*>(dataAllocs_[frameIdx].mappedPtr);
+            SSAOData* ubo = static_cast<SSAOData*>(dataAllocs_[dataIdx].mappedPtr);
             ubo->invProj    = cam.invProj;
             ubo->zFar       = cam.zFar;
             // half-res SSAO 타깃 기준으로 스케일합니다(hw=renderExtent/2). 4x4 노이즈가
@@ -354,7 +358,7 @@ void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx,
 
         VkDescriptorImageInfo  ldI { clampSampler, linDepthView_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo  noI { noiseSampler_, noiseView_,   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        VkDescriptorBufferInfo ubI { dataBufs_[frameIdx], 0, sizeof(SSAOData) };
+        VkDescriptorBufferInfo ubI { dataBufs_[dataIdx], 0, sizeof(SSAOData) };
         VkWriteDescriptorSet ws[3] = {};
         ws[0].sType = ws[1].sType = ws[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         ws[0].dstBinding=0; ws[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; ws[0].descriptorCount=1; ws[0].pImageInfo=&ldI;

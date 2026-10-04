@@ -214,8 +214,21 @@ else()
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(glfw)
 
+    # ── OpenXR (desktop only: PC VR, Quest Link) ──────────────────────────────
+    # Khronos 공식 로더와 헤더입니다. 로더는 정적 라이브러리로 링크해 DLL 을 따로 옮기지 않습니다.
+    # 런타임(Meta Quest Link · SteamVR 등)은 사용자 PC 에 설치된 것을 로더가 찾습니다. `--xr` 로 켜고,
+    # 런타임이나 헤드셋이 없으면 엔진은 데스크톱으로 계속합니다. Quest 단독 실행은 Android 이식 때 붙입니다.
+    FetchContent_Declare(
+        openxr
+        GIT_REPOSITORY https://github.com/KhronosGroup/OpenXR-SDK.git
+        GIT_TAG        release-1.1.63
+    )
+    set(DYNAMIC_LOADER OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(openxr)
+
     list(APPEND CORE_SOURCES
         src/platform/glfw/GlfwWindow.cpp
+        src/xr/XrSystem.cpp
     )
 
     # ── Windows 실행 파일·창 아이콘 ────────────────────────────────────────────
@@ -229,7 +242,7 @@ else()
     endif()
 
     add_executable(HarukaEngine ${CORE_SOURCES})
-    target_link_libraries(HarukaEngine PRIVATE Vulkan::Vulkan glfw glm::glm tinygltf Jolt)
+    target_link_libraries(HarukaEngine PRIVATE Vulkan::Vulkan glfw glm::glm tinygltf Jolt openxr_loader)
     target_include_directories(HarukaEngine PRIVATE ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
 endif()
 
@@ -309,12 +322,43 @@ if(NOT ANDROID)
         src/core/Component.cpp
         src/core/HLog.cpp
         src/components/LightComponent.cpp
+        src/components/CameraComponent.cpp
     )
     target_link_libraries(HarukaActorTest PRIVATE glm::glm)
     target_include_directories(HarukaActorTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaActorTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaActorTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
+    # -- 두 눈 렌더링 수학 테스트 --------------------------------------------
+    # 눈별 비대칭 투영(OpenXR 시야각)과 두 눈 컬링을 화면 없이 검산합니다(DEF-09 · 21 · 31).
+    add_executable(HarukaStereoTest
+        tests/StereoViewTest.cpp
+        src/components/CameraComponent.cpp
+        src/core/Actor.cpp
+        src/core/Component.cpp
+        src/core/HLog.cpp
+    )
+    target_link_libraries(HarukaStereoTest PRIVATE glm::glm)
+    target_include_directories(HarukaStereoTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaStereoTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaStereoTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
+    # -- VR 입력 테스트 -------------------------------------------------------
+    # XR 모듈이 넣는 컨트롤러 상태가 축 · 디지털 액션으로 나오는지 검산합니다(DEF-20).
+    add_executable(HarukaInputTest
+        tests/InputTest.cpp
+        src/input/HInputSystem.cpp
+    )
+    target_link_libraries(HarukaInputTest PRIVATE glm::glm)
+    # IWindow.hpp 가 Vulkan 형(VkSurfaceKHR)을 쓰므로 헤더 경로만 둡니다(링크는 필요 없음).
+    target_include_directories(HarukaInputTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    if(MSVC)
+        target_compile_options(HarukaInputTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaInputTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
     # -- 커맨드 스택 purge 테스트 --------------------------------------------
@@ -407,4 +451,6 @@ if(NOT ANDROID)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
+    add_test(NAME stereo_views         COMMAND HarukaStereoTest)
+    add_test(NAME xr_input             COMMAND HarukaInputTest)
 endif()

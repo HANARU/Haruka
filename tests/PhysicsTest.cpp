@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -208,6 +209,181 @@ int main() {
               "범위 밖 순번 7 은 거부하고 값을 건드리지 않음");
         check(!RigidBodyComponent::shapeFromText("-1", sh) && !RigidBodyComponent::shapeFromText("", sh) &&
               !RigidBodyComponent::shapeFromText("Box", sh), "음수·빈 값·대문자 이름은 거부");
+    }
+
+    // ── DEF-19: 물리 API ──────────────────────────────────────────────────────
+    // 무중력에서 질량 2kg 공 하나로 힘 · 충격량 · 속도 · 순간 이동을 확인합니다.
+    auto makeBall = [](World& w, const glm::vec3& pos) {
+        Actor* a = w.spawnActor("Ball");
+        a->setLocalPosition(pos);
+        auto* rb = a->addComponent<RigidBodyComponent>();
+        rb->motionType = EMotionType::Dynamic;
+        rb->shape      = EPhysicsShape::Sphere;
+        rb->halfExtent = { 0.25f, 0.25f, 0.25f };
+        rb->mass       = 2.f;
+        return rb;
+    };
+
+    {
+        std::printf("\n-- DEF-19: 중력 세터 --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        RigidBodyComponent* rb = makeBall(w, { 0.f, 10.f, 0.f });
+        ps.setGravity({ 0.f, 0.f, 0.f });
+        run(ps, 60);
+        check(std::fabs(rb->owner->worldPosition().y - 10.f) < 1e-4f, "중력 0 이면 1초 뒤에도 제자리");
+        check(ps.gravity() == glm::vec3(0.f), "gravity() 가 설정한 값을 돌려줌");
+        ps.setGravity({ 0.f, -9.81f, 0.f });
+        run(ps, 30);
+        check(rb->owner->worldPosition().y < 9.f, "중력을 되돌리면 떨어짐(그사이 잠든 바디도 깨움)");
+        ps.shutdown();
+    }
+
+    {
+        std::printf("\n-- DEF-19: 힘은 스텝 수와 상관없이 힘 x 프레임 시간 --\n");
+        // 2N 을 한 프레임(0.02초)만 걸면 충격량 0.04 N·s, 2kg 이므로 속도 0.02 m/s 입니다. 물리 스텝이
+        // 그 프레임에 한 번(60Hz) · 두 번(120Hz) · 0번(30Hz, 다음 프레임으로 넘어감)이어도 같아야 합니다.
+        // 힘을 Jolt 에 그대로 넘기면 120Hz 에서 절반만 들어갑니다(Jolt 는 스텝 한 번 뒤에 힘을 지움).
+        for (float hz : { 60.f, 120.f, 30.f }) {
+            World w;
+            PhysicsSystem ps;
+            ps.startup();
+            ps.setWorld(&w);
+            ps.setGravity({ 0.f, 0.f, 0.f });
+            ps.setStepRate(hz);
+            RigidBodyComponent* rb = makeBall(w, { 0.f, 0.f, 0.f });
+            ps.tick(0.02f);                       // 바디 생성
+            rb->addForce({ 2.f, 0.f, 0.f });
+            ps.tick(0.02f);
+            for (int i = 0; i < 3 && rb->linearVelocity().x == 0.f; ++i) ps.tick(0.02f);   // 스텝 없던 프레임
+            const float v = rb->linearVelocity().x;
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "스텝 %.0fHz: 한 프레임 힘의 속도 변화 %.5f (기대 0.02000)", hz, v);
+            check(std::fabs(v - 0.02f) < 1e-4f, buf);
+            ps.shutdown();
+        }
+    }
+
+    {
+        std::printf("\n-- DEF-19: 충격량 · 속도 --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        ps.setGravity({ 0.f, 0.f, 0.f });
+        RigidBodyComponent* rb = makeBall(w, { 0.f, 0.f, 0.f });
+        check(!rb->hasBody(), "물리 틱 전에는 바디가 없음(API 는 아무 일도 안 함)");
+        rb->addImpulse({ 100.f, 0.f, 0.f });   // 바디가 없으니 무시
+        ps.tick(kDt);
+        check(rb->linearVelocity().x == 0.f, "바디가 생기기 전의 충격량은 버려짐");
+        rb->addImpulse({ 2.f, 0.f, 0.f });
+        check(std::fabs(rb->linearVelocity().x - 1.f) < 1e-5f, "충격량 2 N·s / 2kg = 1 m/s 가 바로 들어감");
+        rb->setLinearVelocity({ 0.f, 0.f, 3.f });
+        check(rb->linearVelocity() == glm::vec3(0.f, 0.f, 3.f), "setLinearVelocity · linearVelocity 왕복");
+        rb->setAngularVelocity({ 0.f, 2.f, 0.f });
+        check(std::fabs(rb->angularVelocity().y - 2.f) < 1e-5f, "setAngularVelocity · angularVelocity 왕복");
+        ps.shutdown();
+    }
+
+    {
+        std::printf("\n-- DEF-19: 게임 코드가 옮기면 순간 이동, 속도 유지 --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        ps.setGravity({ 0.f, 0.f, 0.f });
+        RigidBodyComponent* rb = makeBall(w, { 0.f, 0.f, 0.f });
+        ps.tick(kDt);
+        rb->setLinearVelocity({ 1.f, 0.f, 0.f });
+        run(ps, 5);
+        const float vBefore = rb->linearVelocity().x;   // Jolt 기본 감쇠(0.05/s)로 1 보다 조금 작음
+        rb->owner->setLocalPosition({ 10.f, 0.f, 0.f });   // 게임 코드
+        ps.tick(kDt);
+        const float x = rb->owner->worldPosition().x;
+        check(x > 10.f && x < 10.1f, "액터를 옮긴 자리에서 계속 움직임(예전에는 물리가 덮어써 옮긴 값이 사라짐)");
+        check(vBefore > 0.9f && std::fabs(rb->linearVelocity().x - vBefore) < 1e-3f, "순간 이동 뒤에도 속도 유지");
+        ps.shutdown();
+    }
+
+    {
+        std::printf("\n-- DEF-99: Kinematic 은 같은 프레임에 목표에 닿고 지나치지 않음 --\n");
+        // 스텝 120Hz · 프레임 0.02초면 한 프레임에 스텝이 두 번입니다. 예전에는 스텝 루프 뒤에 옮겨
+        // 한 프레임 늦었고, 다음 프레임에는 두 스텝 모두 그 속도로 움직여 목표를 지나쳤습니다.
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        ps.setStepRate(120.f);
+        Actor* a = w.spawnActor("Hand");
+        auto* rb = a->addComponent<RigidBodyComponent>();
+        rb->motionType = EMotionType::Kinematic;
+        ps.tick(0.02f);   // 바디 생성
+        a->setLocalPosition({ 1.f, 0.f, 0.f });
+        ps.tick(0.02f);
+        PhysicsSystem::BodyInfo info;
+        ps.queryBody(rb->bodyId_, info);
+        check(std::fabs(info.position.x - 1.f) < 1e-4f, "액터를 옮긴 그 프레임에 바디가 목표에 닿음");
+        ps.tick(0.02f);
+        ps.tick(0.02f);
+        ps.queryBody(rb->bodyId_, info);
+        check(std::fabs(info.position.x - 1.f) < 1e-4f, "목표가 그대로면 지나치지 않고 멈춤");
+        ps.shutdown();
+    }
+
+    {
+        std::printf("\n-- DEF-53: 부모 아래 Dynamic 바디는 월드 자세를 유지 --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        ps.setGravity({ 0.f, 0.f, 0.f });
+        Actor* parent = w.spawnActor("Parent");
+        parent->setLocalPosition({ 5.f, 0.f, 0.f });
+        parent->setLocalRotation(glm::angleAxis(glm::radians(90.f), glm::vec3(0.f, 1.f, 0.f)));
+        RigidBodyComponent* rb = makeBall(w, { 0.f, 0.f, 2.f });
+        rb->owner->attachTo(parent);   // 월드 (7, 0, 0)
+        ps.tick(kDt);
+        rb->setLinearVelocity({ 0.f, 1.f, 0.f });
+        run(ps, 30);
+        PhysicsSystem::BodyInfo info;
+        ps.queryBody(rb->bodyId_, info);
+        const glm::vec3 wp = rb->owner->worldPosition();
+        check(glm::length(wp - info.position) < 1e-4f, "회전한 부모 아래 액터의 월드 위치 = 바디 위치(예전에는 로컬에 월드를 씀)");
+        check(std::fabs(wp.x - 7.f) < 1e-3f && wp.y > 0.4f, "바디는 월드 (7, y, 0) 에서 위로 움직임");
+        parent->setLocalPosition({ 5.f, 0.f, 10.f });   // 부모를 옮겨도
+        ps.tick(kDt);
+        ps.queryBody(rb->bodyId_, info);
+        check(std::fabs(info.position.z) < 1e-3f, "부모가 움직여도 바디는 끌려가지 않음(UE 같음)");
+        check(glm::length(rb->owner->worldPosition() - info.position) < 1e-4f, "액터는 바디 자리에 남음");
+        ps.shutdown();
+    }
+
+    {
+        std::printf("\n-- DEF-19: 레이캐스트 · 구 겹침 --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        Actor* floor = w.spawnActor("Floor");
+        auto* frb = floor->addComponent<RigidBodyComponent>();
+        frb->motionType = EMotionType::Static;
+        frb->halfExtent = { 5.f, 0.5f, 5.f };   // 윗면 y = 0.5
+        ps.tick(kDt);
+        PhysicsSystem::RaycastHit hit;
+        const bool got = ps.raycast({ 1.f, 5.f, 1.f }, { 0.f, -2.f, 0.f }, 10.f, hit);
+        check(got && hit.actor == floor, "아래로 쏜 레이가 바닥 액터에 맞음");
+        check(got && std::fabs(hit.distance - 4.5f) < 1e-3f && std::fabs(hit.point.y - 0.5f) < 1e-3f,
+              "맞은 거리 4.5 · 지점 y 0.5");
+        check(got && glm::length(hit.normal - glm::vec3(0.f, 1.f, 0.f)) < 1e-3f, "법선이 위(+Y)");
+        check(!ps.raycast({ 1.f, 5.f, 1.f }, { 0.f, -1.f, 0.f }, 3.f, hit), "최대 거리 안에 없으면 맞지 않음");
+        std::vector<Actor*> found;
+        ps.overlapSphere({ 0.f, 0.5f, 0.f }, 0.1f, found);
+        check(found.size() == 1 && found[0] == floor, "바닥 윗면에 걸친 구는 바닥과 겹침");
+        ps.overlapSphere({ 0.f, 3.f, 0.f }, 0.1f, found);
+        check(found.empty(), "공중의 구는 아무것과도 겹치지 않음");
+        ps.shutdown();
     }
 
     if (g_failed) {

@@ -8,11 +8,12 @@ layout(location = 2) in vec2 inUV;
 layout(location = 3) in vec4 inTangent;
 
 layout(set = 0, binding = 0) uniform FrameBlock { FrameUBO ubo; };
+HARUKA_VIEW_PUSH_CONSTANT;   // 눈 번호(DEF-09)
 
 layout(set = 2, binding = 0) readonly buffer TransformBuffer {
     GpuTransform transforms[];
 };
 
 void main() {
-    gl_Position = ubo.viewProj[0] * transforms[gl_InstanceIndex].model * vec4(inPosition, 1.0);
+    gl_Position = ubo.viewProj[HARUKA_VIEW_INDEX] * transforms[gl_InstanceIndex].model * vec4(inPosition, 1.0);
 }

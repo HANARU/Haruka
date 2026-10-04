@@ -139,9 +139,11 @@ int main() {
     sys.startup();
 
     Actor* camActor = world.spawnActor("Camera");
-    auto*  cam      = camActor->addComponent<CameraComponent>();
-    cam->yaw   = 0.f;   // 정면 -Z, 오른쪽 +X
-    cam->pitch = 0.f;
+    camActor->addComponent<CameraComponent>();   // 회전이 없으면 정면 -Z, 오른쪽 +X
+    // 카메라 방향은 액터 회전이 정합니다(DEF-21). yaw 는 Y 축 회전입니다.
+    auto faceYaw = [camActor](float yaw) {
+        camActor->setLocalRotation(CameraComponent::yawPitchRotation(yaw, 0.f));
+    };
     sys.onBeginPlay();
 
     // 1. 장치 없는 엔진
@@ -159,15 +161,25 @@ int main() {
         check(ac->sound_ != nullptr, "사운드가 만들어진다");
         check(front.R > 2.0 * front.L, "정면이 -Z 일 때 +X 음원은 오른쪽 채널이 크다");
 
-        cam->yaw = kPi;   // +Z 를 봅니다
+        faceYaw(kPi);   // +Z 를 봅니다
         Level back = measure(sys);
         check(back.L > 2.0 * back.R, "뒤로 돌면(+Z) 같은 음원이 왼쪽 채널에서 크다");
 
-        cam->yaw = 0.5f * kPi;   // +X 를 봅니다(음원이 정면)
+        faceYaw(0.5f * kPi);   // +X 를 봅니다(음원이 정면)
         Level ahead = measure(sys);
         check(std::fabs(ahead.L - ahead.R) < 0.05 * (ahead.L + ahead.R), "음원 쪽(+X)을 보면 좌우가 같다");
 
-        cam->yaw = 0.f;
+        // 롤: 머리를 오른쪽으로 90° 기울이면 +Y 음원이 왼쪽 귀 쪽입니다. 예전에는 청취자 위 벡터를
+        // 늘 월드 +Y 로 넘겨 기울기가 소리에 반영되지 않았습니다(DEF-21 과 함께 고침).
+        world.destroyActor(ac->owner);
+        AudioComponent* up = spawnSound(world, "Up", toneFile, {0.f, 3.f, 0.f}, true, true);
+        // Z 축으로 -90° 돌리면 위 벡터가 +X 로 갑니다(정면은 그대로 -Z, 오른쪽 귀는 -Y).
+        camActor->setLocalRotation(glm::angleAxis(-0.5f * kPi, glm::vec3(0.f, 0.f, 1.f)));
+        Level tilted = measure(sys);
+        check(tilted.L > 2.0 * tilted.R, "머리를 오른쪽으로 기울이면 위쪽 음원이 왼쪽 채널에서 크다");
+        ac = up;
+
+        faceYaw(0.f);
         world.destroyActor(ac->owner);
     }
 

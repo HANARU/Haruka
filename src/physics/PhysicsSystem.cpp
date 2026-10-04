@@ -18,12 +18,18 @@
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
+#include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollideShape.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Body/BodyLock.h>
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <thread>
 #include "../core/HLog.hpp"
 
@@ -142,10 +148,18 @@ void PhysicsSystem::onBeginPlay() {
     }
 }
 
+void PhysicsSystem::setStepRate(float hz) {
+    // 너무 느리거나 빠른 값은 막습니다(30 ~ 240 Hz).
+    step_        = 1.f / std::clamp(hz, 30.f, 240.f);
+    accumulator_ = std::min(accumulator_, step_);
+}
+
 void PhysicsSystem::removeBody(uint32_t id) {
     if (!impl_) return;
     JPH::BodyID jid(id);
     auto& bi = impl_->physics->GetBodyInterface();
+    frameForces_.erase(id);
+    impulseBudget_.erase(id);
     if (!bi.IsAdded(jid)) return;
     // 지우기 전에 차지하던 영역을 기억했다가, 지운 뒤 그 영역에 닿는 바디를 깨웁니다.
     // 그러지 않으면 바닥을 끈 뒤에도 그 위에서 잠든 상자가 공중에 그대로 남습니다(DEF-80).
@@ -173,8 +187,130 @@ bool PhysicsSystem::queryBody(uint32_t id, BodyInfo& out) const {
     out.active      = bi.IsActive(jid);
     out.friction    = bi.GetFriction(jid);
     out.restitution = bi.GetRestitution(jid);
-    out.posY        = (float)bi.GetPosition(jid).GetY();
+    const JPH::RVec3 p = bi.GetPosition(jid);
+    out.posY        = (float)p.GetY();
+    out.position    = { (float)p.GetX(), (float)p.GetY(), (float)p.GetZ() };
     return true;
+}
+
+// ── 물리 API (DEF-19) ─────────────────────────────────────────────────────────
+namespace {
+JPH::Vec3  toJ(const glm::vec3& v)  { return JPH::Vec3(v.x, v.y, v.z); }
+JPH::RVec3 toJR(const glm::vec3& v) { return JPH::RVec3(v.x, v.y, v.z); }
+glm::vec3  toG(JPH::Vec3Arg v)      { return { v.GetX(), v.GetY(), v.GetZ() }; }
+}
+
+bool PhysicsSystem::isDynamic(uint32_t id) const {
+    if (!impl_ || id == 0xFFFFFFFFu) return false;
+    const auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::BodyID jid(id);
+    return bi.IsAdded(jid) && bi.GetMotionType(jid) == JPH::EMotionType::Dynamic;
+}
+
+void PhysicsSystem::setGravity(const glm::vec3& g) {
+    if (!impl_) return;
+    impl_->physics->SetGravity(toJ(g));
+    // 잠든 바디는 중력이 바뀌어도 스스로 깨지 않습니다. 모두 깨워 새 중력을 받게 합니다.
+    JPH::BodyIDVector ids;
+    impl_->physics->GetBodies(ids);
+    if (!ids.empty())
+        impl_->physics->GetBodyInterface().ActivateBodies(ids.data(), (int)ids.size());
+}
+
+glm::vec3 PhysicsSystem::gravity() const {
+    return impl_ ? toG(impl_->physics->GetGravity()) : glm::vec3(0.f, -9.81f, 0.f);
+}
+
+void PhysicsSystem::addForce(uint32_t body, const glm::vec3& force) {
+    if (!isDynamic(body)) return;
+    frameForces_[body].force += force;
+}
+
+void PhysicsSystem::addForceAtPosition(uint32_t body, const glm::vec3& force, const glm::vec3& worldPoint) {
+    if (!isDynamic(body)) return;
+    // 질량 중심에 거는 힘 + 그 점에서 생기는 토크로 나눠 둡니다(부른 순간의 질량 중심 기준).
+    const auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::RVec3 com = bi.GetCenterOfMassPosition(JPH::BodyID(body));
+    const glm::vec3 r = worldPoint - glm::vec3((float)com.GetX(), (float)com.GetY(), (float)com.GetZ());
+    ForceTorque& ft = frameForces_[body];
+    ft.force  += force;
+    ft.torque += glm::cross(r, force);
+}
+
+void PhysicsSystem::addTorque(uint32_t body, const glm::vec3& torque) {
+    if (!isDynamic(body)) return;
+    frameForces_[body].torque += torque;
+}
+
+void PhysicsSystem::addImpulse(uint32_t body, const glm::vec3& impulse) {
+    if (!isDynamic(body)) return;
+    impl_->physics->GetBodyInterface().AddImpulse(JPH::BodyID(body), toJ(impulse));
+}
+
+void PhysicsSystem::addImpulseAtPosition(uint32_t body, const glm::vec3& impulse, const glm::vec3& worldPoint) {
+    if (!isDynamic(body)) return;
+    impl_->physics->GetBodyInterface().AddImpulse(JPH::BodyID(body), toJ(impulse), toJR(worldPoint));
+}
+
+void PhysicsSystem::setLinearVelocity(uint32_t body, const glm::vec3& v) {
+    if (!isDynamic(body)) return;
+    impl_->physics->GetBodyInterface().SetLinearVelocity(JPH::BodyID(body), toJ(v));
+}
+
+glm::vec3 PhysicsSystem::linearVelocity(uint32_t body) const {
+    if (!impl_ || body == 0xFFFFFFFFu) return glm::vec3(0.f);
+    const auto& bi = impl_->physics->GetBodyInterface();
+    return bi.IsAdded(JPH::BodyID(body)) ? toG(bi.GetLinearVelocity(JPH::BodyID(body))) : glm::vec3(0.f);
+}
+
+void PhysicsSystem::setAngularVelocity(uint32_t body, const glm::vec3& w) {
+    if (!isDynamic(body)) return;
+    impl_->physics->GetBodyInterface().SetAngularVelocity(JPH::BodyID(body), toJ(w));
+}
+
+glm::vec3 PhysicsSystem::angularVelocity(uint32_t body) const {
+    if (!impl_ || body == 0xFFFFFFFFu) return glm::vec3(0.f);
+    const auto& bi = impl_->physics->GetBodyInterface();
+    return bi.IsAdded(JPH::BodyID(body)) ? toG(bi.GetAngularVelocity(JPH::BodyID(body))) : glm::vec3(0.f);
+}
+
+bool PhysicsSystem::raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDistance,
+                            RaycastHit& out) const {
+    out = {};
+    if (!impl_ || !world_ || maxDistance <= 0.f) return false;
+    const float len = glm::length(dir);
+    if (len < 1e-8f) return false;
+    const glm::vec3 d = dir / len;
+    const JPH::RRayCast ray{ toJR(origin), toJ(d * maxDistance) };
+    JPH::RayCastResult hit;
+    if (!impl_->physics->GetNarrowPhaseQuery().CastRay(ray, hit)) return false;
+
+    out.distance = hit.mFraction * maxDistance;
+    out.point    = origin + d * out.distance;
+    JPH::BodyLockRead lock(impl_->physics->GetBodyLockInterface(), hit.mBodyID);
+    if (lock.Succeeded()) {
+        const JPH::Body& body = lock.GetBody();
+        out.normal = toG(body.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, ray.GetPointOnRay(hit.mFraction)));
+        out.actor  = world_->findById(body.GetUserData());
+    }
+    return true;
+}
+
+void PhysicsSystem::overlapSphere(const glm::vec3& center, float radius, std::vector<Actor*>& out) const {
+    out.clear();
+    if (!impl_ || !world_ || radius <= 0.f) return;
+    JPH::SphereShape sphere(radius);
+    sphere.SetEmbedded();   // 스택에 둔 셰이프라 참조 수로 지우지 않게 합니다
+    JPH::CollideShapeSettings settings;
+    JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> hits;
+    impl_->physics->GetNarrowPhaseQuery().CollideShape(&sphere, JPH::Vec3::sReplicate(1.f),
+        JPH::RMat44::sTranslation(toJR(center)), settings, JPH::RVec3::sZero(), hits);
+    for (const auto& h : hits.mHits) {
+        JPH::BodyLockRead lock(impl_->physics->GetBodyLockInterface(), h.mBodyID2);
+        if (!lock.Succeeded()) continue;
+        Actor* a = world_->findById(lock.GetBody().GetUserData());
+        if (a && std::find(out.begin(), out.end(), a) == out.end()) out.push_back(a);
+    }
 }
 
 void PhysicsSystem::teleport(uint32_t id, const Actor& a) {
@@ -282,6 +418,7 @@ void PhysicsSystem::tick(float dt) {
 
         bcs.mFriction    = rb->friction;
         bcs.mRestitution = rb->restitution;
+        bcs.mUserData    = a->id;   // 레이캐스트 · 겹침 질의에서 액터를 찾을 때 씁니다
         if (mt == JPH::EMotionType::Dynamic) {
             bcs.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
             bcs.mMassPropertiesOverride.mMass = rb->mass;
@@ -310,13 +447,67 @@ void PhysicsSystem::tick(float dt) {
         rb->createdMotion_ = rb->motionType;
         rb->createdHalf_   = rb->halfExtent;
         rb->createdMass_   = rb->mass;
+        rb->synced_        = false;   // 아직 물리가 액터에 쓴 적 없음
     }
 
-    // Fixed-step simulation
+    // ── 게임 코드가 옮긴 Dynamic 바디: 그 자리로 순간 이동, 속도 유지(DEF-19) ──────
+    // 물리가 마지막으로 쓴 로컬 자세와 다르면 게임 코드(또는 에디터)가 옮긴 것입니다. 로컬로 비교하므로
+    // 부모가 움직인 것은 순간 이동으로 치지 않습니다(부모 아래 Dynamic 바디는 월드 자세 유지).
+    // Kinematic 바디는 목표 자세(액터의 월드 자세)를 아래 스텝 루프에서 나눠 따라갑니다(DEF-99).
+    struct KinematicMove { JPH::BodyID id; glm::vec3 p0, p1; glm::quat q0, q1; };
+    std::vector<KinematicMove> kinematic;
+    for (auto& ap : world_->getActors()) {
+        Actor* a  = ap.get();
+        auto*  rb = a->getComponent<RigidBodyComponent>();
+        if (!rb || rb->bodyId_ == 0xFFFFFFFFu) continue;
+        const JPH::BodyID id(rb->bodyId_);
+        if (rb->motionType == EMotionType::Dynamic) {
+            const Transform& t = a->transform();
+            // teleport 는 속도를 건드리지 않고, 옮기기 전후 자리의 잠든 바디도 깨웁니다.
+            if (rb->synced_ && (t.position() != rb->syncedLocalPos_ || t.rotation() != rb->syncedLocalRot_))
+                teleport(rb->bodyId_, *a);
+        } else if (rb->motionType == EMotionType::Kinematic) {
+            const JPH::RVec3 bp = bi.GetPosition(id);
+            const JPH::Quat  bq = bi.GetRotation(id);
+            kinematic.push_back({ id,
+                glm::vec3((float)bp.GetX(), (float)bp.GetY(), (float)bp.GetZ()), a->worldPosition(),
+                glm::quat(bq.GetW(), bq.GetX(), bq.GetY(), bq.GetZ()), a->worldRotation() });
+        }
+    }
+
+    // ── 힘 · 토크: 이번 틱의 충격량을 예산에 더합니다 ───────────────────────────
+    for (const auto& [id, ft] : frameForces_) {
+        ForceTorque& b = impulseBudget_[id];
+        b.force  += ft.force  * dt;
+        b.torque += ft.torque * dt;
+    }
+    frameForces_.clear();
+
+    // ── Fixed-step simulation ─────────────────────────────────────────────────
     accumulator_ += dt;
-    while (accumulator_ >= kStep) {
+    const int steps = (int)std::floor(accumulator_ / step_);
+    for (int i = 0; i < steps; ++i) {
+        // Kinematic: 틱 시작 자세에서 목표까지 스텝마다 나눠 옮깁니다. 마지막 스텝에 정확히 목표에 닿고,
+        // 그 속도로 부딪힌 Dynamic 바디를 밉니다.
+        const float alpha = float(i + 1) / float(steps);
+        for (const auto& k : kinematic) {
+            const glm::vec3 p = glm::mix(k.p0, k.p1, alpha);
+            const glm::quat q = glm::slerp(k.q0, k.q1, alpha);
+            bi.MoveKinematic(k.id, JPH::RVec3(p.x, p.y, p.z), JPH::Quat(q.x, q.y, q.z, q.w), step_);
+        }
+        // 힘 · 토크: 남은 충격량을 남은 스텝에 고르게 나눕니다. Jolt 는 건 힘을 이 스텝 한 번에만 씁니다.
+        const float share = 1.f / float(steps - i);
+        for (auto& [id, b] : impulseBudget_) {
+            const glm::vec3 j = b.force * share, l = b.torque * share;
+            b.force  -= j;
+            b.torque -= l;
+            const JPH::BodyID jid(id);
+            if (!bi.IsAdded(jid)) continue;
+            bi.AddForceAndTorque(jid, JPH::Vec3(j.x, j.y, j.z) / step_, JPH::Vec3(l.x, l.y, l.z) / step_);
+        }
+
         const JPH::EPhysicsUpdateError err =
-            impl_->physics->Update(kStep, 1, impl_->tempAllocator.get(), impl_->jobSystem.get());
+            impl_->physics->Update(step_, 1, impl_->tempAllocator.get(), impl_->jobSystem.get());
         // 접촉·바디 쌍 버퍼가 넘치면 일부 충돌을 건너뛴 것입니다. 예전에는 반환값을 버렸습니다(DEF-10).
         if (err != JPH::EPhysicsUpdateError::None && !updateErrorWarned_) {
             updateErrorWarned_ = true;
@@ -327,33 +518,26 @@ void PhysicsSystem::tick(float dt) {
                 << (has(JPH::EPhysicsUpdateError::ContactConstraintsFull) ? " contact-constraints" : "")
                 << " full; some contacts were ignored this step (warned once)";
         }
-        accumulator_ -= kStep;
+        accumulator_ -= step_;
     }
+    // 스텝이 없던 틱의 충격량은 다음 틱의 스텝에 넣습니다.
+    if (steps > 0) impulseBudget_.clear();
 
-    // Sync transforms
+    // ── Sync transforms: Dynamic 바디의 월드 자세를 액터에 씁니다 ────────────────
+    // 월드 세터로 씁니다. 부모가 있으면 부모의 지금 월드 트랜스폼으로 로컬을 구합니다(DEF-53). 잠든
+    // 바디도 씁니다. 그래야 부모가 움직여도 자식 바디가 월드 자리에 남습니다. 쓴 로컬 값을 기억해 두었다가
+    // 다음 틱에 게임 코드가 바꿨는지 비교합니다.
     for (auto& ap : world_->getActors()) {
         Actor* a  = ap.get();
         auto*  rb = a->getComponent<RigidBodyComponent>();
-        if (!rb || rb->bodyId_ == 0xFFFFFFFFu) continue;
-
-        JPH::BodyID id(rb->bodyId_);
-
-        if (rb->motionType == EMotionType::Kinematic) {
-            glm::vec3 pos = a->worldPosition();
-            glm::quat q   = a->worldRotation();   // DEF-53: 로컬 아님
-            bi.MoveKinematic(id,
-                JPH::RVec3(pos.x, pos.y, pos.z),
-                JPH::Quat(q.x, q.y, q.z, q.w),
-                kStep);
-        } else if (rb->motionType == EMotionType::Dynamic) {
-            if (!bi.IsActive(id)) continue;
-            auto p = bi.GetPosition(id);
-            auto r = bi.GetRotation(id);
-            // Jolt 는 월드 포즈를 주는데 세터는 로컬에 씁니다. 부모가 없으면
-            // 로컬=월드라 정확하고, **부모가 있는 다이내믹 바디**만 어긋납니다.
-            // 그 경우 월드→로컬 변환이 필요하며(별도 항목), 현재 씬엔 없습니다.
-            a->setPosition(glm::vec3(p.GetX(), p.GetY(), p.GetZ()));
-            a->setRotation(glm::quat(r.GetW(), r.GetX(), r.GetY(), r.GetZ()));
-        }
+        if (!rb || rb->bodyId_ == 0xFFFFFFFFu || rb->motionType != EMotionType::Dynamic) continue;
+        const JPH::BodyID id(rb->bodyId_);
+        const JPH::RVec3 p = bi.GetPosition(id);
+        const JPH::Quat  r = bi.GetRotation(id);
+        a->setWorldPosition(glm::vec3((float)p.GetX(), (float)p.GetY(), (float)p.GetZ()));
+        a->setWorldRotation(glm::quat(r.GetW(), r.GetX(), r.GetY(), r.GetZ()));
+        rb->syncedLocalPos_ = a->transform().position();
+        rb->syncedLocalRot_ = a->transform().rotation();
+        rb->synced_         = true;
     }
 }

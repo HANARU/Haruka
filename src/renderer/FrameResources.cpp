@@ -67,9 +67,14 @@ void FrameResources::createLayouts(RenderContext& rc) {
     {
         VkDescriptorSetLayout setLayouts[] = { frameLayout_, sceneLayout_,
                                                transformLayout_, materialLayout_ };
+        // 눈 번호 푸시 상수(DEF-09). pbr.vert · pbr.frag · depth.vert 가 같은 선언을 씁니다
+        // (haruka_shared.h 의 HARUKA_VIEW_PUSH_CONSTANT). 섀도 셰이더는 선언하지 않아도 됩니다.
+        VkPushConstantRange viewRange{ VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                       0, sizeof(GpuViewPush) };
         VkPipelineLayoutCreateInfo pli{};
         pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pli.setLayoutCount = 4; pli.pSetLayouts = setLayouts;
+        pli.pushConstantRangeCount = 1; pli.pPushConstantRanges = &viewRange;
         if (vkCreatePipelineLayout(rc.device, &pli, nullptr, &pbrPipelineLayout_) != VK_SUCCESS)
             throw std::runtime_error("Failed to create main pipeline layout!");
     }

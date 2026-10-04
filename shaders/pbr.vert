@@ -15,6 +15,7 @@ layout(location = 4) out vec3 fragN;
 layout(location = 5) out vec4 fragShadowCoord;
 
 layout(set = 0, binding = 0) uniform FrameBlock { FrameUBO ubo; };
+HARUKA_VIEW_PUSH_CONSTANT;   // 눈 번호(DEF-09). pbr.frag 와 같은 선언
 
 layout(set = 2, binding = 0) readonly buffer TransformBuffer {
     GpuTransform transforms[];
@@ -36,5 +37,5 @@ void main() {
     // Shadow clip-space coordinate (perspective divide done in frag)
     fragShadowCoord = ubo.lightViewProj * worldPos;
 
-    gl_Position = ubo.viewProj[0] * worldPos;
+    gl_Position = ubo.viewProj[HARUKA_VIEW_INDEX] * worldPos;
 }

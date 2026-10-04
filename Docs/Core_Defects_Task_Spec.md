@@ -66,6 +66,13 @@ DEF-98(셰이더 핫 리로드 종료)은 같은 묶음에서 고쳤습니다. Q
 틀린 전제도 바로잡았습니다. 수정 전후 뷰포트가 픽셀까지 같음을 확인했습니다. 항목별 내용은 문서 끝 "1단계 정리 묶음
 수정 결과와 신규 결함" 절에 있습니다.
 
+**[갱신 · 2026-10-04 · 3단계 VR 첫걸음]** 권장 순서 ③ 을 진행했습니다. DEF-21(카메라 자세) · DEF-09(두 눈 렌더, 첫 단계는
+눈마다 두 번 그리기) · DEF-31(두 눈 컬링) · DEF-20(VR 입력) · DEF-19(물리 API) · DEF-99(Kinematic 동기화)가 해결이고, DEF-102 ·
+DEF-53 의 남은 부분 · DEF-100 도 같은 작업에서 고쳤습니다. DEF-32 는 "한 프레임에 자세 하나" 규칙을 지키는 동안 필요 없어 보류했고,
+고치는 중에 찾은 DEF-104(프레임 사이 공유 중간 타깃의 동기화)도 고쳤습니다. PC OpenXR 연결(`--xr`, Quest Link 등)을 넣었지만 이
+PC 에 런타임이 없어, 헤드셋 확인은 사용자가 Quest Link 를 준비한 뒤에 합니다(사용자 결정). 사용자 결정으로 물리 규칙은 UE 식,
+물리 스텝은 XR 세션 동안 헤드셋 주사율에 맞춥니다. 항목별 내용은 문서 끝 "3단계 VR 첫걸음 수정 결과" 절에 있습니다.
+
 | ID | 결함명 | 심각도 | 대상 파일 | 관련 라인 |
 |---|---|---|---|---|
 | **DEF-01** | Transform SSBO 인덱스 동기화 붕괴 | **해결됨** (2026-08-25, 원래 CRITICAL) | `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L215, L296, L313~326 |
@@ -76,7 +83,7 @@ DEF-98(셰이더 핫 리로드 종료)은 같은 묶음에서 고쳤습니다. Q
 | **DEF-06** | MSAA `LAZILY_ALLOCATED` 메모리 속성 누락 | **HIGH** | `src/renderer/passes/GeometryPass.cpp` | L239 |
 | **DEF-07** | `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터 | **해결됨 · 2026-08-26** (원래 MEDIUM, A-1: EditorApp 구독 + 컴포넌트 `notifyDestroy`) | `src/core/World.hpp`, `src/core/World.cpp` | L27, L27 |
 | **DEF-08** | 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성) | **HIGH** | `src/main.cpp`, `CMakeLists.txt` | L38, L186~191 |
-| **DEF-09** | 멀티뷰 절반 구현 (피처만 켜지고 경로 없음) | **HIGH** | `src/renderer/Renderer.cpp`, `Renderer_render.cpp`, `Renderer.hpp` | L577~583, L169, L167~170 |
+| **DEF-09** | 멀티뷰 절반 구현 (피처만 켜지고 경로 없음) | **해결됨 · 2026-10-04** (원래 HIGH, 첫 단계는 눈마다 두 번 그리기. 셰이더 · UBO 는 두 눈 기준이라 멀티뷰는 Quest 이식 때 뷰 번호만 바꿔 켬) | `src/renderer/Renderer_render.cpp`, `shaders/include/haruka_shared.h` | `drawFrame` 의 눈 루프 |
 | **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **MEDIUM** (2026-10-04 초과 진단만 추가, 상한 설정화는 남음) | `src/renderer/RenderTypes.hpp`, `src/physics/PhysicsSystem.cpp` | L12, L81 |
 | **DEF-11** | 셰이더 빌드 파이프라인 결함 (DEPENDS 누락·하드코딩·고아·죽은 파일) | **해결됨 · 2026-10-04** (원래 MEDIUM) | `CMakeLists.txt`, `shaders/include/` | L94~108 |
 | **DEF-12** | `World::tick`이 에디터 Play 상태에서만 실행 | **MEDIUM** | `src/main.cpp` | L115~119 |
@@ -94,8 +101,8 @@ DEF-98(셰이더 핫 리로드 종료)은 같은 묶음에서 고쳤습니다. Q
 | **DEF-28** | 머티리얼 null 항목의 드로우 강행 | **해결됨 · 2026-10-04** (원래 MEDIUM, 자홍색 오류 머티리얼) | `src/renderer/passes/GeometryPass.cpp` | L526, L552 |
 | **DEF-29** | `VkDeviceCreateInfo`의 검증 레이어 설정 | **해결됨 · 2026-10-04** (원래 LOW) | `src/renderer/Renderer.cpp` | L603~604 |
 | **DEF-30** | 투명 정렬 comparator의 매핑 메모리 읽기 | **해결됨 · 2026-10-04** (원래 LOW) | `src/renderer/Renderer_render.cpp` | 투명 정렬 comparator |
-| **DEF-31** | 두 눈 합집합 절두체 부재 (단안 절두체로 스테레오를 컬링) | **HIGH** (착수: OpenXR 세션 도입 시) | `src/renderer/Renderer_render.cpp`, `src/renderer/passes/CullPass.cpp` | `extractRenderView`의 `cullViewProj`, L179~181 |
-| **DEF-32** | 재투영 여유분만큼의 절두체 부풀리기 부재 | **MEDIUM** (착수: OpenXR 세션 도입 시) | `src/renderer/Renderer_render.cpp` | `extractFrustumPlanes` |
+| **DEF-31** | 두 눈 합집합 절두체 부재 (단안 절두체로 스테레오를 컬링) | **해결됨 · 2026-10-04** (원래 HIGH, 눈마다 판정해 하나라도 통과하면 그림) | `src/renderer/FrustumCull.hpp`, `src/renderer/Renderer_render.cpp` | `sphereInAnyView`, `buildDrawCommands` |
+| **DEF-32** | 재투영 여유분만큼의 절두체 부풀리기 부재 | **보류 · 2026-10-04** (원래 MEDIUM. 컬링 · 렌더 · 제출이 한 프레임의 같은 자세를 쓰는 동안 필요 없음. 늦은 자세 갱신 · 과주사를 넣을 때 재개) | `src/renderer/Renderer_render.cpp` | `buildDrawCommands` 주석 |
 | **DEF-36** | 섀도 샘플러 비교 규약 반전 (모든 라이트 기여가 0이 됨) | **해결됨 · 2026-08-25** (원래 CRITICAL) | `src/renderer/passes/ShadowPass.cpp` | L37 (증상은 `shaders/pbr.frag` L165), 11-1절 |
 | **DEF-37** | IBL 조도 추정기의 코사인 중복 적용 (저장값 약 2.09배 과다) | **해결됨 · 2026-08-25** (원래 HIGH) | `src/renderer/Renderer.cpp` | IBL 조도 큐브맵 생성 루프, 11-2절 |
 | **DEF-38** | 라이트 종류와 방향이 직렬화되지 않음 | **해결됨 · 2026-08-27** (원래 HIGH, 라이팅 Phase 0) | `src/assets/SceneSerializer.cpp` | `LIGHT:` 기록 및 복원 경로 |
@@ -526,6 +533,9 @@ DEF-25를 수정하면서 CPU와 GPU의 컬링 판정을 하나로 통일했습�
 
 ### 9-1. [DEF-31] [HIGH] 두 눈 합집합 절두체 부재
 
+> **해결 · 2026-10-04.** 눈마다 절두체를 뽑아 하나라도 통과하면 그립니다(`FrustumCull.hpp` 의 `sphereInAnyView`).
+> GPU 컬링 코드는 이미 지워 `cull.comp` 를 함께 고칠 일이 없습니다. 검산은 `stereo_views` 테스트.
+
 #### 대상 파일 및 위치
 * [`src/renderer/Renderer_render.cpp`](file:///e:/Haruka/src/renderer/Renderer_render.cpp): `extractRenderView`가 `RenderView::cullViewProj`를 채우는 지점
 * [`CullPass.cpp:L179-L181`](file:///e:/Haruka/src/renderer/passes/CullPass.cpp#L179-L181): `CullPass::record`가 받는 `CullPush`
@@ -548,6 +558,10 @@ DEF-25를 수정하면서 CPU와 GPU의 컬링 판정을 하나로 통일했습�
 ---
 
 ### 9-2. [DEF-32] [MEDIUM] 재투영 여유분만큼의 절두체 부풀리기 부재
+
+> **보류 · 2026-10-04.** 엔진은 한 프레임에 눈 자세를 한 번만 받아(`xrLocateViews`) 컬링 · 렌더 · 제출에 함께 씁니다.
+> 그동안은 런타임이 재투영해도 렌더한 자세 기준이라 여유분이 필요 없습니다(Godot 도 같음). 늦은 자세 갱신이나 과주사를
+> 넣으면 그때 평면의 `d` 만이 아니라 법선도 바깥으로 돌려 부풀립니다.
 
 #### 대상 파일 및 위치
 * [`src/renderer/Renderer_render.cpp`](file:///e:/Haruka/src/renderer/Renderer_render.cpp): `extractFrustumPlanes`가 만드는 평면 집합
@@ -1414,10 +1428,10 @@ Verbose 로 옮깁니다.
 | DEF-96 | MEDIUM · **해결 2026-10-04** | 감마가 두 번 적용됩니다. `post.frag` 가 `pow(1/2.2)` 를 한 값을 sRGB 스왑체인에 써서 GPU 가 한 번 더 변환합니다. 화면이 의도보다 밝고 흐리며, 노출은 이 상태에 맞춰져 있습니다. UI 도 같은 스왑체인에 그리므로 고치는 방법에 따라 UI 색도 바뀝니다 | `post.frag`, `GlfwSwapchain::chooseFormat` |
 | DEF-97 | HIGH · 열림 (Quest 이식) | 엔진이 Vulkan 1.4 장치를 전제합니다. 1.3 · 1.4 기능 구조체를 조건 없이 연결하고, 1.4 코어 이름 `vkCmdPushDescriptorSet` 를 6곳에서 직접 부릅니다. Quest 2 · Pro 는 1.1, Quest 3 은 1.3 입니다(push descriptor · synchronization2 는 확장으로 있음). DEF-04 와 함께 처리합니다 | `Renderer::createLogicalDevice`, 6개 호출부 |
 | DEF-98 | LOW · **해결 2026-10-04** | 셰이더 핫 리로드가 덜 복사된 .spv 로 파이프라인을 만들다 예외를 잡지 못해 에디터가 종료될 수 있었습니다(옛 파이프라인을 먼저 지움) | `HotReloader`, `Renderer::reloadPipelines`, 각 패스 `rebuildPipelines` |
-| DEF-99 | MEDIUM · 열림 (VR) | Kinematic 바디 동기화가 스텝 루프 뒤에 한 번 돌아 한 프레임 늦고, 한 프레임에 스텝이 여럿이면 목표를 지나칩니다. VR 손과 잡은 물체에서 드러납니다 | `PhysicsSystem::tick` |
-| DEF-100 | LOW · 잠재 | `AOPass::destroy` 가 Zone C 할당을 `freeB` 로 돌려줘, Zone B 빈 목록에 960MB 이상 범위가 들어갑니다. 지금은 종료할 때만 일어납니다 | `AOPass.cpp`, `HarukaAllocator::freeB`(구역 확인 없음) |
+| DEF-99 | MEDIUM · **해결 2026-10-04** (VR) | Kinematic 바디 동기화가 스텝 루프 뒤에 한 번 돌아 한 프레임 늦고, 한 프레임에 스텝이 여럿이면 목표를 지나칩니다. VR 손과 잡은 물체에서 드러납니다 | `PhysicsSystem::tick` |
+| DEF-100 | LOW · **해결 2026-10-04** | `AOPass::destroy` 가 Zone C 할당을 `freeB` 로 돌려줘, Zone B 빈 목록에 960MB 이상 범위가 들어갑니다. 지금은 종료할 때만 일어납니다 | `AOPass.cpp`, `HarukaAllocator::freeB`(구역 확인 없음) |
 | DEF-101 | LOW · 열림 | `StaticMeshComponent::transparent` 는 디테일에서 바꿀 수 있지만 저장되지 않고, 불러올 때 에셋 값으로 다시 정해집니다 | `SceneSerializer`, DEF-22 와 함께 |
-| DEF-102 | LOW · 열림 | 씬 카메라의 yaw · pitch 가 디테일에 없고 저장되지 않아, 씬 카메라는 방향을 정할 수 없고 저장하면 방향을 잃습니다 | `CameraComponent`, DEF-21 과 함께 |
+| DEF-102 | LOW · **해결 2026-10-04** (DEF-21) | 씬 카메라의 yaw · pitch 가 디테일에 없고 저장되지 않아, 씬 카메라는 방향을 정할 수 없고 저장하면 방향을 잃습니다 | `CameraComponent`, DEF-21 과 함께 |
 | DEF-103 | LOW · 열림 (Quest 이식) | `AndroidWindow` 가 `IWindow` 의 순수 가상 클립보드 함수 두 개를 구현하지 않아 추상 클래스입니다 | `AndroidWindow.hpp`, DEF-08 과 함께 |
 
 **문서 정정**
@@ -1472,3 +1486,51 @@ Shift 가 빠르게 4배). 해법은 [Primitive_And_Lighting_Design.md](Primitiv
 검증: `slate_input` 79 → 97개 검사(표시 규칙이 바뀐 기존 3개의 기대값도 새 규칙으로 고침). 네 가지 핵심(수정 키 · 이동마다
 누적 · 크기 비례 감도 · undo 기준)을 하나씩 옛 식으로 되돌리면 새 검사가 실패함을 확인했습니다(2 · 6 · 2 · 1개). 빌드 경고 0,
 테스트 7개 통과, 실기 검증 메시지 0 · `Clean exit`. 실제 키보드의 Shift · Ctrl 끌기 감각은 사람이 확인할 항목입니다.
+
+## 3단계 VR 첫걸음 수정 결과 (2026-10-04)
+
+**사용자 결정.** 검증 런타임은 Quest Link + 헤드셋(코드를 다 쓴 뒤 사용자가 준비), 물리 규칙은 UE 식, 물리 스텝은 XR 세션
+동안 헤드셋 주사율. 조사 보고의 권장안(두 층 배열 스왑체인, 기본 액션 세트, 부모 아래 바디 UE 식, DEF-32 보류, FFR 멤버
+삭제)은 그대로 따랐습니다. 이 PC 에는 OpenXR 런타임(Meta Quest Link · SteamVR)이 없습니다. Meta XR Simulator 는 Vulkan
+지원이 "제한적"이라고 공식 문서에 적혀 있어 쓰지 않았습니다. 작업 도중 사용자 지시("창 띄우지마")로 에디터 창을 띄우는 확인은
+멈췄고, 그 뒤 변경은 단위 테스트와 빌드로 확인했습니다.
+
+| 항목 | 다른 엔진의 방법 | 수정 | 확인 |
+|---|---|---|---|
+| DEF-21 카메라 자세 | UE 는 카메라가 HMD 자세를 따르고, Unity · Godot 은 원점 액터 아래에 카메라를 둡니다. 셋 다 뷰는 컴포넌트의 월드 트랜스폼에서 만듭니다 | `CameraComponent::viewMatrix` 를 액터의 월드 회전(쿼터니언) · 월드 위치의 역행렬로 바꿨습니다(크기는 넣지 않음). yaw · pitch 필드는 지우고 에디터(`EditorApp`)만 갖습니다. 눈별 비대칭 투영(`projFromFov`)과 XR 원점(`xrOrigin`: 카메라 위치 + 요만)을 두었습니다. 오디오 청취자도 카메라의 위 벡터를 넘겨 롤이 소리에 반영됩니다 | `actor_lifecycle` 7개(옛 yaw/pitch 와 같은 뷰 · 부모 합성 · 롤 · 크기 무시, 옛 식에서 2개 실패), `audio_system` 1개(롤, 옛 식에서 실패) |
+| DEF-102 | | 씬 카메라의 방향이 액터 회전이 되어 디테일의 Rotation 으로 정하고 `ROT:` 로 저장됩니다(DEF-21 로 해결). 옛 씬 파일의 카메라는 늘 pitch 0.15 였으나 저장소의 씬에는 카메라 액터가 없습니다 | 코드 확인 |
+| DEF-09 두 눈 렌더 | Khronos 예제는 눈마다 따로 그리고, Unity 도 PC 에서 두 번 그리는 방식을 둡니다. Godot 은 배열 스왑체인에 멀티뷰로 그립니다 | 첫 단계는 눈마다 두 번 그립니다. `FrameUBO` 에 눈별 `viewProj[2]` · `eyePos[2]` 를 두고 셰이더는 푸시 상수 눈 번호(`HARUKA_VIEW_INDEX`)로 고릅니다. 멀티뷰로 갈 때는 그 번호만 `gl_ViewIndex` 로 바꿉니다. 섀도는 한 번, 깊이 · AO · Bloom 중간 타깃은 두 눈이 번갈아 쓰고 눈 사이에 배리어를 둡니다. AO 데이터 UBO 는 눈마다 따로 둡니다. 쓰지 않던 멀티뷰 기능 요청은 지웠습니다 | 단안 화면: 1단계 기준과 차이 0 픽셀(100% 배율 모니터). 스테레오 흉내 모드 화면 확인. 아래 "화면 확인" |
+| DEF-31 두 눈 컬링 | Godot 은 두 눈을 감싸는 절두체를 만들고, UE 는 한쪽 눈만 써서 물체가 사라지는 버그가 보고된 적이 있습니다 | 눈마다 판정해 하나라도 통과하면 그립니다(`FrustumCull.hpp`). LOD 와 투명 정렬은 두 눈의 가운데를 기준으로 합니다 | `stereo_views` 10개(오른쪽 눈에만 보이는 물체를 살림, 옛 단안 판정에서 실패) |
+| DEF-32 | Godot 은 한 프레임의 자세 하나로 컬링과 렌더를 해서 여유를 두지 않습니다 | 보류. 규칙("한 프레임에 자세 하나로 컬링 · 렌더 · 제출")을 코드 주석과 9-2절에 적었습니다 | |
+| VR 첫걸음(OpenXR) | UE · Unity · Godot 모두 XR 모듈이 렌더러보다 먼저 Vulkan 장치를 정합니다(XR_KHR_vulkan_enable2) | `src/xr/XrSystem`: OpenXR 1.0 인스턴스, 헤드셋 확인, 런타임이 고른 GPU 로 Vulkan 인스턴스 · 장치 생성(`IVulkanDeviceHooks`), 세션, LOCAL 원점 공간, 두 층 배열 스왑체인 하나, 프레임 루프(대기 · 시작 · 자세 · 이미지 · 제출), 세션 상태 처리. 원점은 활성 카메라의 위치 + 요라 헤드셋을 쓰면 에디터 카메라 자리에서 봅니다. 렌더러는 오른쪽 눈 → 왼쪽 눈 순으로 그리고 왼쪽 눈을 에디터 뷰포트에 다시 톤매핑해 비춥니다(가운데 자르기, UE 기본 관전 화면과 같음). 세션 동안 헤드셋이 루프 속도를 정하고, 데스크톱 표시는 기다리지 않는 방식을 고릅니다. 로더는 Khronos OpenXR-SDK release-1.1.63 을 FetchContent 로 받아 정적 링크합니다 | 런타임이 없을 때 `--xr`: "No OpenXR runtime is available ... Continuing in desktop mode" 경고 뒤 데스크톱 화면이 일반 실행과 같음(제목 · 통계 숫자 제외 0 픽셀). 헤드셋 확인은 남음 |
+| DEF-20 입력 | UE · Unity · Godot 모두 XR 입력을 창과 분리된 XR 모듈에서 다룹니다 | 예전 사양(창에 넣기)을 고쳐 XR 모듈이 기본 액션 세트(Touch 컨트롤러 · Khronos 단순 컨트롤러 바인딩)로 입력을 만들고, `HInputSystem` 이 보관합니다. 아날로그 축(`bindAxis` · `axis`), 컨트롤러 버튼을 디지털 액션에 묶기(`bindXrButton`), 머리 · 손 자세와 손 속도(`xr()`). 세션이 멈추면 빈 입력이 들어갑니다. 헤드셋에서는 손에 축 세 개와 가리키는 선이 보입니다(트리거로 색, 그립으로 길이가 바뀜) | `xr_input` 9개 |
+| DEF-19 물리 API | Unity · UE · Godot 모두 힘 · 충격량 · 속도 · 레이캐스트를 둡니다 | 중력 세터(잠든 바디도 깨움), 힘 · 위치에 거는 힘 · 토크(그 프레임의 충격량을 그 프레임의 스텝들에 나눠 넣고, 스텝이 없으면 다음으로 넘김), 충격량, 선속도 · 각속도, 레이캐스트(액터 · 지점 · 법선 · 거리), 구 겹침(잡기용). `RigidBodyComponent` 에서도 부릅니다. 게임 코드가 Dynamic 액터를 옮기면 순간 이동하고 속도를 유지합니다 | `physics_lifecycle` 25개 추가(스텝 60 · 120 · 30Hz 에서 같은 속도 변화, 옛 방식에서 3개 실패) |
+| DEF-99 Kinematic | | 스텝 루프 안에서 틱 시작 자세부터 목표까지 스텝마다 나눠 옮깁니다. 그 프레임에 목표에 닿고 지나치지 않습니다 | `physics_lifecycle`(옛 식에서 2개 실패) |
+| DEF-53 남은 부분 | UE 는 시뮬레이션하는 바디를 부모에서 떼고, Godot 은 월드를 로컬로 바꿔 씁니다 | `Actor::setWorldPosition` · `setWorldRotation` 을 두고 물리가 월드 자세로 되씁니다. 쓴 로컬 값을 기억해 게임 코드의 이동만 순간 이동으로 칩니다. 그래서 부모가 움직여도 Dynamic 자식은 끌려가지 않습니다(UE 같음) | `physics_lifecycle`(옛 식에서 3개 실패) |
+| 물리 스텝 주기 | Godot 의 XR 문서는 물리 주기를 헤드셋 주사율에 맞추라고 권합니다 | `PhysicsSystem::setStepRate`(30 ~ 240Hz). XR 세션 동안 엔진이 헤드셋 주사율(XR_FB_display_refresh_rate, 없으면 예상 표시 주기)로 맞추고 끝나면 60Hz 로 돌립니다 | 헤드셋 확인 남음 |
+| FFR 멤버 | OpenXR 에서는 런타임이 밀도 맵 이미지를 줍니다 | 선언만 있던 멤버를 지웠습니다 | 빌드 |
+| DEF-100 | | AOPass 가 Zone C 버퍼를 하나씩 돌려주지 않게 했고, `freeB` 가 Zone B 가 아닌 할당을 받으면 경고하고 무시합니다 | 빌드 |
+| DEF-104 (신규) | | 아래 신규 결함. 프레임 시작에 그래픽 단계 전체를 묶는 배리어 하나를 두었습니다 | 실기 검증 메시지 0, 단안 화면 배리어 전과 0 픽셀 |
+| 스테레오 흉내 모드 | UE 의 `-emulatestereo` | `--emulate-stereo`: 헤드셋 없이 뷰포트를 좌우로 나눠 두 눈(64mm, 평행, 코 쪽 45% · 바깥 55% 비대칭 시야)을 그립니다. 이 모드에서 피킹 · 기즈모는 단안 기준이라 맞지 않습니다. `run.bat` 은 설정 다음 인자를 엔진에 넘깁니다(`run.bat Release --xr`) | 화면 확인(두 눈 화면이 좌우에 나란히, 같은 물체가 비대칭 시야만큼 다른 자리) |
+
+**신규 결함**
+
+| ID | 심각도 · 상태 | 내용 | 위치 |
+|---|---|---|---|
+| DEF-104 | LOW · **해결 2026-10-04** | 깊이 · MSAA · AO · Bloom 중간 타깃은 프레임 슬롯끼리 같이 쓰는데, 렌더 패스 외부 의존성이 조각 셰이더 읽기를 포함하지 않아 앞 프레임의 읽기(AO 가 깊이를, 톤매핑이 AO · Bloom 을 읽음)와 다음 프레임의 쓰기가 겹칠 수 있었습니다. 동기화 검증을 켜야 보이는 잠재 결함입니다. 톤매핑 패스의 외부 의존성도 스왑체인 획득 단계(컬러 출력)와 이어지도록 보강했습니다 | `Renderer::drawFrame`, `PostPass` |
+
+**화면 확인.** 단안 화면은 1단계 기준과 차이 0 픽셀이었습니다(100% 배율 모니터, 두 눈 렌더 개편 직후). 그 뒤 주 모니터가 150%
+배율로 바뀌어 예전 기준과 비교할 수 없게 되어, 커밋 `cbae320` 을 별도 작업 트리로 빌드해 같은 조건에서 새 기준을 찍었습니다.
+통계 숫자 줄을 빼면 161픽셀이 코드값 1(한 곳은 2) 다릅니다. 카메라 뷰 행렬을 `lookAt` 대신 쿼터니언으로 만든 데서 오는
+부동소수점 반올림 차이입니다(행렬 차이 1e-5 미만, 단위 테스트로 확인). 그 캡처 뒤의 변경(멀티뷰 기능 요청 삭제, 컨트롤러
+선, XR 실패 시 데스크톱 대체, DEF-104 배리어, 물리)은 단안 화면에 그리는 것이 없거나 Play 때만 돕니다.
+
+**헤드셋으로 확인할 것(남음).** Quest Link 앱 설치 · 헤드셋 연결 뒤 `run.bat Release --xr` 로 띄워: 런타임 · 헤드셋 이름 로그,
+세션 상태가 FOCUSED 까지 가는지, 두 눈이 맞게 보이는지(원근 · 깊이감 · 크기), 에디터 뷰포트에 왼쪽 눈이 비치는지, 머리를 돌릴 때
+물체가 한쪽 눈에서 사라지지 않는지, 컨트롤러 축 · 선이 손을 따라가는지(트리거 · 그립 반응), 물리 스텝 로그(72 · 90Hz),
+헤드셋을 벗었다 쓸 때 세션이 이어지는지, 검증 메시지 0.
+
+**검증.** 빌드 경고 0. 단위 테스트 7 → 9개 통과(`stereo_views` 10개 · `xr_input` 9개 신설, `actor_lifecycle` 31 → 38,
+`audio_system` 47 → 48, `physics_lifecycle` 29 → 54). 새 검사는 고친 곳을 하나씩 예전 식으로 되돌리면 실패함을 확인했습니다
+(카메라 2 · 롤 1 · 두 눈 판정과 Vulkan 투영 3 · 물리 8). 에디터 실기에서는 실행 폴더의 씬 사본에 정적 바닥과 동적 구를 넣고
+Play 해, 구가 바닥 윗면에 정확히 내려앉고 Stop 하면 되돌아오는 것을 확인했습니다(검증 메시지 0).

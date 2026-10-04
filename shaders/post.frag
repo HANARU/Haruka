@@ -9,8 +9,7 @@ layout(set = 0, binding = 0) uniform sampler2D hdrImage;
 layout(set = 0, binding = 1) uniform sampler2D ssaoImage;
 layout(set = 0, binding = 2) uniform sampler2D bloomImage;
 
-// Push constant layout matches C++ PostPC struct:
-//   aoStr, bloomStr, exposure, enableAO, enableBloom, encodeSrgb, pad x2
+// Push constant layout matches C++ PostPC struct (PostPass.cpp)
 layout(push_constant) uniform Params {
     float aoStrength;
     float bloomStrength;
@@ -18,6 +17,10 @@ layout(push_constant) uniform Params {
     float aoEnabled;
     float bloomEnabled;
     float encodeSrgb;   // 1 = 스왑체인이 UNORM 이라 여기서 sRGB 곡선을 적용, 0 = GPU 가 저장할 때 적용
+    // 씬 이미지에서 읽을 부분. 보통 전체(1,1 · 0,0)이고, XR 왼쪽 눈을 에디터 뷰포트에 비출 때
+    // 뷰포트 비율에 맞춰 가운데를 잘라 읽습니다.
+    vec2  uvScale;
+    vec2  uvOffset;
 };
 
 // 선형 → sRGB (IEC 61966-2-1 곡선).
@@ -34,17 +37,18 @@ vec3 ACESFilm(vec3 x) {
 }
 
 void main() {
-    vec3 hdr = texture(hdrImage, inUV).rgb * exposure;
+    vec2 uv  = inUV * uvScale + uvOffset;
+    vec3 hdr = texture(hdrImage, uv).rgb * exposure;
 
     // SSAO — multiplicative on whole output (approximation for forward rendering)
     if (aoEnabled > 0.5) {
-        float ao = texture(ssaoImage, inUV).r;
+        float ao = texture(ssaoImage, uv).r;
         hdr *= mix(1.0, ao, aoStrength);
     }
 
     // Bloom additive
     if (bloomEnabled > 0.5) {
-        vec3 bloom = texture(bloomImage, inUV).rgb;
+        vec3 bloom = texture(bloomImage, uv).rgb;
         hdr += bloom * bloomStrength;
     }
 

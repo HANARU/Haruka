@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 #include "HPass.hpp"
 #include "../RenderContext.hpp"
+#include "../RenderTypes.hpp"
 
 // ── AOPass ────────────────────────────────────────────────────────────────────
 // 2-스테이지 앰비언트 오클루전:
@@ -27,7 +28,8 @@ public:
     void acquireSizeDependent() override;
     void rebuildPipelines() override;
 
-    void record(VkCommandBuffer cmd, uint32_t frameIdx,
+    // viewIndex 는 눈 번호입니다. 눈마다 투영이 달라(비대칭 시야) invProj 를 눈별 UBO 에 둡니다.
+    void record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
                 VkImageView msaaDepthView, VkSampler clampSampler,
                 const CameraParams& cam);
 
@@ -60,8 +62,9 @@ private:
     VkPipelineLayout ssaoPipeLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout ssaoSetLayout_ = VK_NULL_HANDLE;
 
-    VkBuffer         dataBufs_[kFramesInFlight]   = {};
-    HarukaAllocation dataAllocs_[kFramesInFlight] = {};
+    static constexpr int kDataBufs = kFramesInFlight * (int)kMaxViews;   // 프레임 슬롯 × 눈
+    VkBuffer         dataBufs_[kDataBufs]   = {};
+    HarukaAllocation dataAllocs_[kDataBufs] = {};
     VkImage          noiseTex_     = VK_NULL_HANDLE;
     VkImageView      noiseView_    = VK_NULL_HANDLE;
     // 4x4 노이즈를 화면에 타일링하는 REPEAT+NEAREST 전용 샘플러(D-3). clampSampler 로 읽으면

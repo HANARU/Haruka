@@ -14,6 +14,7 @@
 #include "../assets/PrefabManager.hpp"
 #include "../assets/SceneSerializer.hpp"
 #include "../platform/IWindow.hpp"
+#include "../input/HInputSystem.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -30,6 +31,41 @@
 // ── Helpers ────────────────────────────────────────────────────────────────────
 static glm::vec3 quatToEulerDeg(const glm::quat& q) {
     return glm::degrees(glm::vec3(glm::pitch(q), glm::yaw(q), glm::roll(q)));
+}
+
+// VR 컨트롤러 표시(DEF-20). 손 자세(grip)에 10cm 축 세 개(X 빨강 · Y 초록 · Z 파랑)를, 가리키는 방향(aim)에
+// 선 하나를 그립니다. 선은 트리거를 당길수록 노래지고 그립을 쥘수록 길어집니다. 헤드셋을 쓰고 입력과 자세가
+// 들어오는지 눈으로 확인하는 용도입니다. 자세는 XR 원점 기준이라 활성 카메라의 XR 원점을 곱합니다.
+static void appendXrControllerLines(World& world, std::vector<LineVertex>& lines) {
+    const HXrInputState& xr = HInputSystem::get().xr();
+    if (!xr.focused) return;
+    CameraComponent* cam = world.getActiveCamera();
+    const glm::mat4 origin = cam ? cam->xrOrigin() : glm::mat4(1.f);
+    auto worldOf = [&](const HPose& p) {
+        return origin * glm::translate(glm::mat4(1.f), p.position) * glm::mat4_cast(p.orientation);
+    };
+    for (const HHandInput& h : xr.hands) {
+        if (!h.active) continue;
+        if (h.grip.valid) {
+            const glm::mat4 m = worldOf(h.grip);
+            const glm::vec3 o(m[3]);
+            const glm::vec4 axisColor[3] = { { 1.f, 0.25f, 0.25f, 1.f }, { 0.25f, 1.f, 0.25f, 1.f },
+                                             { 0.3f, 0.5f, 1.f, 1.f } };
+            for (int k = 0; k < 3; ++k) {
+                lines.push_back({ o, axisColor[k] });
+                lines.push_back({ o + glm::vec3(m[k]) * 0.1f, axisColor[k] });
+            }
+        }
+        if (h.aim.valid) {
+            const glm::mat4 m = worldOf(h.aim);
+            const glm::vec3 o(m[3]);
+            const glm::vec3 fwd = -glm::vec3(m[2]);   // OpenXR aim 은 -Z 가 앞
+            const float     t   = std::clamp(h.trigger, 0.f, 1.f);
+            const glm::vec4 c(1.f, 1.f, 1.f - 0.8f * t, 1.f);
+            lines.push_back({ o, c });
+            lines.push_back({ o + fwd * (0.5f + 1.5f * std::clamp(h.squeeze, 0.f, 1.f)), c });
+        }
+    }
 }
 
 // 속성의 단위 종류(core)를 숫자 칸의 단위 종류(UI)로 옮깁니다(DEF-46). 두 계층이 서로를 모르게 둡니다.
@@ -144,6 +180,7 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
 
     editorCamActor_ = world.spawnActor("Camera");
     editorCamActor_->setLocalPosition({ 0.f, 0.3f, 2.5f });
+    editorCamActor_->setLocalRotation(CameraComponent::yawPitchRotation(editorYaw_, editorPitch_));
     editorCam_ = editorCamActor_->addComponent<CameraComponent>();
 
     auto beginCmd = [&renderer]() { return renderer.beginOneTimeCmd(); };
@@ -313,6 +350,7 @@ void EditorApp::tick(float dt) {
         gizmo_.tick(gizmoTarget, *ctx_.world, wvp, s(18.f),
                     gizmoMode_, worldSpace_, inView, lines, tris);
         buildEditorIcons(*ctx_.world, wvp, lines, tris);
+        appendXrControllerLines(*ctx_.world, lines);
         ctx_.renderer->setEditorLines(std::move(lines));
         ctx_.renderer->setGizmoTris(std::move(tris));
     }
@@ -3926,8 +3964,10 @@ void EditorApp::tickEditorCamera(float dt, float scroll) {
     float rx, ry;
     win.getRightMouseDelta(rx, ry);
     if (rx != 0 || ry != 0) {
-        editorCam_->yaw   += rx * 0.003f;
-        editorCam_->pitch  = std::clamp(editorCam_->pitch + ry * 0.003f, -1.5f, 1.5f);
+        editorYaw_   += rx * 0.003f;
+        editorPitch_  = std::clamp(editorPitch_ + ry * 0.003f, -1.5f, 1.5f);
+        // 카메라 방향은 액터 회전이 정합니다(DEF-21). 에디터는 yaw/pitch 를 들고 있다가 옮깁니다.
+        editorCamActor_->setLocalRotation(CameraComponent::yawPitchRotation(editorYaw_, editorPitch_));
     }
 
     // LMB orbit pan. 이동량은 좌버튼을 누른 채 움직이면 어디서든 쌓이므로, 오빗이 아닐 때도

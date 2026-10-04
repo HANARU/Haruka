@@ -29,6 +29,7 @@
 #include "passes/GeometryPass.hpp"
 #include "../platform/IWindow.hpp"
 #include "../memory/HarukaAllocator.hpp"
+#include "VulkanDeviceHooks.hpp"
 
 class World;
 class HSlateRenderer;
@@ -75,9 +76,25 @@ public:
     // 셉니다. 예전에는 조용히 잘린 메시가 culled 에 섞여 보였습니다(DEF-10).
     struct FrameStats  { uint32_t drawCalls=0, culled=0, transparentDraws=0, dropped=0; };
 
-    void init(IWindow* window);
+    // deviceHooks 가 있으면 Vulkan 인스턴스 · 장치를 그쪽(OpenXR)에 맡깁니다. 헤드셋이 고른 GPU 가
+    // 창에 그릴 수 없으면 직접 고르고 xrCompatible() 이 false 가 됩니다.
+    void init(IWindow* window, IVulkanDeviceHooks* deviceHooks = nullptr);
     void cleanup();
-    void drawFrame(World& world);
+    // xr 이 있으면 두 눈을 XR 스왑체인의 두 층에 그리고, 에디터 뷰포트에는 왼쪽 눈을 비춥니다.
+    // 그 프레임에 XR 이미지에 실제로 그렸으면 true(엔진이 투영 레이어를 제출할지 정함).
+    bool drawFrame(World& world, const XrFrameTarget* xr = nullptr);
+
+    // ── XR 연결 ───────────────────────────────────────────────────────────────
+    bool             xrCompatible() const     { return xrCompatible_; }
+    VkInstance       getInstance() const      { return instance; }
+    uint32_t         graphicsQueueFamily()    { return findQueueFamilies(physDevice).graphics.value(); }
+    // XR 스왑체인(두 층 배열)의 이미지를 렌더 대상으로 붙입니다. 세션을 만든 뒤 한 번. 씬 타깃을
+    // 눈 크기로 다시 만듭니다.
+    void attachXrSwapchain(const std::vector<VkImage>& images, VkFormat format, VkExtent2D eyeExtent);
+    // 떼고 씬 타깃을 뷰포트 크기로 되돌립니다. 장치가 쉬기를 기다린 뒤 이미지 뷰를 지우므로, 그 뒤에
+    // XR 스왑체인을 지워도 됩니다.
+    void detachXrSwapchain(bool restoreTargets = true);
+    bool xrAttached() const { return xrActive_; }
 
     // Hot-reload shaders
     void reloadPipelines();
@@ -109,6 +126,13 @@ public:
     // 값이 바뀔 때만 renderExtent 타깃을 재생성합니다(Viewport_Render_Design.md). 지정하지
     // 않으면 창 전체로 렌더합니다(게임 빌드). drawFrame 이전(에디터 tick)에서 호출해야 합니다.
     void setViewportRect(int x, int y, int w, int h);
+
+    // 스테레오 흉내 모드(헤드셋 없이 두 눈 경로를 확인하는 용도, UE 의 -emulatestereo 와 같음).
+    // 켜면 뷰포트를 좌우로 나눠 왼쪽 눈 · 오른쪽 눈을 그립니다. 두 눈은 카메라 좌우로 64mm 떨어진
+    // 평행한 눈이고 시야는 비대칭입니다. 에디터의 피킹 · 기즈모는 단안 기준이라 이 모드에서는
+    // 맞지 않습니다. drawFrame 이전(에디터 tick)에서 바꿔야 합니다.
+    void setStereoEmulation(bool on);
+    bool stereoEmulation() const { return emulateStereo_; }
 
     void setEditorLines(std::vector<LineVertex> lines) { geometry_.setLines(std::move(lines)); }
     void setGizmoTris  (std::vector<LineVertex> tris)  { geometry_.setGizmoTris(std::move(tris)); }
@@ -181,11 +205,28 @@ private:
     std::unordered_set<uint64_t> noMaterialWarned_;
     bool                         dropWarned_    = false;   // kMaxDraws 초과 경고(한 번)
 
-    // ── FFR (Fixed Foveated Rendering) ────────────────────────────────────────
-    bool             ffrEnabled_    = false;
-    VkImage          ffrRateImage_  = VK_NULL_HANDLE;
-    VkImageView      ffrRateView_   = VK_NULL_HANDLE;
-    HarukaAllocation ffrRateAlloc_;
+    // FFR(고정 포비티드 렌더링) 멤버는 지웠습니다. 선언만 있고 쓰이지 않았고, OpenXR 에서는
+    // 런타임이 밀도 맵 이미지를 주는 구조라 모양이 맞지 않습니다(DEF-09 조사). Quest 이식 때 새로 둡니다.
+
+    // ── 이번 프레임에 그릴 뷰(눈) ─────────────────────────────────────────────
+    // gatherViews 가 extractRenderView 첫머리에서 채웁니다. 단안 1개, 스테레오 2개(0=왼쪽).
+    // 컬링 · UBO · 패스 기록이 모두 이 한 벌을 씁니다. 그래서 한 프레임 안에서 컬링 · 렌더 · 제출이
+    // 같은 자세를 쓰고, 재투영 여유분(DEF-32)이 필요 없습니다.
+    std::array<EyeView, kMaxViews> views_{};
+    uint32_t viewCount_     = 1;
+    bool     hasCamera_     = false;
+    bool     emulateStereo_ = false;
+    void       gatherViews(World& world, const XrFrameTarget* xr);
+    VkExtent2D desiredRenderExtent() const;   // 뷰포트와 모드로 정한 눈 하나의 렌더 크기
+
+    // ── XR 출력 ────────────────────────────────────────────────────────────────
+    // XR 스왑체인 이미지 i 의 눈 e 층을 가리키는 뷰 · 프레임버퍼는 [i * kMaxViews + e] 에 있습니다.
+    bool                       xrCompatible_ = false;   // 장치를 XR 런타임이 정했음
+    bool                       xrActive_     = false;   // XR 스왑체인이 붙어 있음
+    VkFormat                   xrFormat_     = VK_FORMAT_UNDEFINED;
+    VkExtent2D                 xrEyeExtent_{};
+    std::vector<VkImageView>   xrViews_;
+    std::vector<VkFramebuffer> xrFramebufs_;
 
     // ── 프레임별 GPU 상태 (레이아웃/버퍼/디스크립터/커맨드/동기화) ────────────
     FrameResources frames_;
@@ -193,9 +234,10 @@ private:
     // ── Pipeline cache + timestamp ────────────────────────────────────────────
     VkPipelineCache pipelineCache_   = VK_NULL_HANDLE;
     // 프레임당 타임스탬프 슬롯 수입니다. 배치는 Renderer_render.cpp 의 drawFrame 참조.
-    //   0 frame start / 1 shadow / 2 main(3서브패스+resolve) / 3 AO / 4 Bloom
-    //   5 tonemap / 6 UI
-    static constexpr uint32_t kTimestampsPerFrame = 7;
+    //   0 frame start / 1 shadow / 눈 v 마다 2+4v main · 3+4v AO · 4+4v Bloom · 5+4v tonemap /
+    //   마지막 UI. 그리지 않은 눈의 칸은 같은 시점에 연달아 찍어 0ms 가 됩니다.
+    static constexpr uint32_t kTsPerView         = 4;
+    static constexpr uint32_t kTimestampsPerFrame = 2 + kTsPerView * kMaxViews + 1;
     VkQueryPool     timestampPool_   = VK_NULL_HANDLE;
     float           timestampPeriod_ = 1.f;
     GpuTimings      timings_;
@@ -223,6 +265,7 @@ private:
     HSlateRenderer* uiRenderer_ = nullptr;
 
     // ── Init helpers ──────────────────────────────────────────────────────────
+    IVulkanDeviceHooks* deviceHooks_ = nullptr;   // init 중에만 씁니다
     void createInstance();
     void setupDebugMessenger();
     void createSurface();
@@ -266,9 +309,9 @@ private:
         // 드로우 커맨드에서 O(1)로 머티리얼을 역참조할 수 있다. buildDrawCommands가
         // 행을 할당하는 바로 그 지점에서 채우므로 두 목록이 어긋날 수 없다.
         std::vector<const MaterialHandle*>  materialRows;
-        AOPass::CameraParams                aoCam;
+        std::array<AOPass::CameraParams, kMaxViews> aoCam;   // 눈별(투영이 눈마다 다름)
     };
-    RenderView extractRenderView(World& world);
+    RenderView extractRenderView(World& world, const XrFrameTarget* xr);
 
     // Per-frame logic (extractRenderView 내부에서만 호출)
     // 라이트 개수는 updateLightSSBO가 실제로 채운 값을 반환하고 updateUBO가 그것을 받는다.

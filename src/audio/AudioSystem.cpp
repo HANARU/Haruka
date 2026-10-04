@@ -85,13 +85,13 @@ void AudioSystem::updateListener() {
     if (!cam || !cam->owner) return;
     const glm::vec3 pos = cam->owner->worldPosition();
     const glm::vec3 fwd = cam->forward();
+    const glm::vec3 up  = cam->up();
     ma_engine_listener_set_position(asEngine(engine_), 0, pos.x, pos.y, pos.z);
     // 예전에는 위치만 넘겨서 청취자가 늘 -Z 를 보고 있었고, 카메라를 돌려도 소리의 좌우가
-    // 바뀌지 않았습니다. miniaudio 는 방향 × 위 벡터로 오른쪽을 정합니다. 에디터 카메라에는
-    // 롤이 없어 월드 위(+Y)를 그대로 넘기지만, VR 에서는 머리가 기울므로 HMD 의 위 벡터를
-    // 넘겨야 합니다.
+    // 바뀌지 않았습니다. miniaudio 는 방향 × 위 벡터로 오른쪽을 정합니다. 카메라 자세가 액터
+    // 회전이 된 뒤로(DEF-21) 롤이 있을 수 있으므로 월드 +Y 가 아니라 카메라의 위 벡터를 넘깁니다.
     ma_engine_listener_set_direction(asEngine(engine_), 0, fwd.x, fwd.y, fwd.z);
-    ma_engine_listener_set_world_up(asEngine(engine_), 0, 0.f, 1.f, 0.f);
+    ma_engine_listener_set_world_up(asEngine(engine_), 0, up.x, up.y, up.z);
 }
 
 void AudioSystem::applySettings(void* maSound, const AudioComponent& ac) {

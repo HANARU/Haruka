@@ -288,7 +288,11 @@ graph TD
 
 ---
 
-### ⚠️ [DEF-09] [HIGH] 멀티뷰 절반 구현 (피처만 켜지고 경로 없음)
+### ✅ [DEF-09] [해결됨 · 2026-10-04, 원래 HIGH] 멀티뷰 절반 구현 (피처만 켜지고 경로 없음)
+
+* **[해결 · 2026-10-04 · 3단계]** 첫 단계는 눈마다 두 번 그립니다(조사 권장, 위험을 나누기 위함). `FrameUBO` 에 눈별 `viewProj[2]` · `eyePos[2]` 를 두고
+  셰이더는 푸시 상수 눈 번호로 고르므로, 멀티뷰로 갈 때는 그 번호만 `gl_ViewIndex` 로 바꾸고 viewMask · 배열 층을 켭니다.
+  쓰지 않던 멀티뷰 기능 요청과 FFR 멤버는 지웠습니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 "3단계 VR 첫걸음 수정 결과".
 
 * **위치**: [`Renderer.cpp:L599-L605`](file:///e:/Haruka/src/renderer/Renderer.cpp#L599-L605), [`Renderer_render.cpp:L169`](file:///e:/Haruka/src/renderer/Renderer_render.cpp#L169), [`Renderer.hpp:L167-L170`](file:///e:/Haruka/src/renderer/Renderer.hpp#L167-L170)
 * **문제점**: 멀티뷰 피처는 `Renderer.cpp:599-605`에서 켜지지만, `Renderer_render.cpp:169`가 `viewProj[1] = viewProj[0]`으로 두고, 어떤 렌더패스도 `viewMask`를 설정하지 않으며, 모든 셰이더가 `viewProj[0]`만 인덱싱합니다. `Renderer.hpp:167-170`의 FFR 멤버는 선언만 되고 쓰이지 않습니다.
@@ -371,19 +375,30 @@ graph TD
 * **문제점**: `EngineContext`에 렌더러 참조가 없어 게임 모듈이 렌더러에 닿을 수 없습니다. DEF-17을 고쳐 패스를 등록할 수 있게 만들어도, 게임 모듈에서 등록할 통로가 없습니다.
 * **해결 사양**: DEF-17과 **같은 작업 단위로 묶어서** 처리하십시오. 한쪽만 고치면 어느 쪽도 쓸 수 없습니다.
 
-### 🚨 [DEF-19] [HIGH · 경계] 물리 힘·임펄스·속도·레이캐스트 API 부재
+### ✅ [DEF-19] [해결됨 · 2026-10-04, 원래 HIGH · 경계] 물리 힘·임펄스·속도·레이캐스트 API 부재
+
+* **[해결 · 2026-10-04 · 3단계]** 중력 세터, 힘 · 토크(프레임 충격량을 그 프레임의 스텝들에 나눠 넣음), 충격량, 속도, 레이캐스트, 구 겹침을
+  `PhysicsSystem` 과 `RigidBodyComponent` 에 두었습니다(UE 식 규칙, 사용자 결정). 게임 코드가 Dynamic 액터를 옮기면 순간 이동하고
+  속도를 유지합니다. Kinematic 동기화(DEF-99)와 부모 아래 바디(DEF-53 남은 부분)도 함께 고쳤습니다. `JPH_DOUBLE_PRECISION` 은 그대로입니다.
 
 * **위치**: [`PhysicsSystem.cpp:L103`](file:///e:/Haruka/src/physics/PhysicsSystem.cpp#L103) (중력 하드코딩), [`PhysicsSystem.cpp:L232-L238`](file:///e:/Haruka/src/physics/PhysicsSystem.cpp#L232-L238) (동기화 루프)
 * **문제점**: 중력이 `JPH::Vec3(0.f, -9.81f, 0.f)`로 하드코딩되어 있고 세터가 없습니다. **힘, 임펄스, 속도, 레이캐스트 API가 하나도 없습니다.** 게다가 동기화 루프가 매 프레임 Dynamic 바디의 Actor 트랜스폼을 덮어씁니다. Jolt의 `JPH_DOUBLE_PRECISION`은 `CMakeLists.txt:56-68`에서 켜져 있지 않습니다.
 * **해결 사양**: 중력 세터와 힘/임펄스/속도/레이캐스트 API를 코어에 추가하십시오. 이것 없이는 무중력 컨트롤러든 일반 VR 상호작용이든 바디를 밀 방법이 없습니다.
 
-### 🚨 [DEF-20] [HIGH · 경계] 디지털 전용 입력 (아날로그 축·VR 포즈 부재)
+### ✅ [DEF-20] [해결됨 · 2026-10-04, 원래 HIGH · 경계] 디지털 전용 입력 (아날로그 축·VR 포즈 부재)
+
+* **[해결 · 2026-10-04 · 3단계]** 아래 해결 사양(`IWindow` 에 넣기)을 고쳤습니다. UE · Unity · Godot 모두 XR 입력을 창과 분리된 XR 모듈에서 다룹니다.
+  `src/xr/XrSystem` 이 OpenXR 기본 액션 세트로 입력을 만들고 `HInputSystem` 이 보관합니다(아날로그 축 · 컨트롤러 버튼 바인딩 ·
+  머리와 손 자세). 창은 키보드 · 마우스만 맡습니다.
 
 * **위치**: [`HInputSystem.cpp:L22-L42`](file:///e:/Haruka/src/input/HInputSystem.cpp#L22-L42), [`IWindow.hpp:L51-L62`](file:///e:/Haruka/src/platform/IWindow.hpp#L51-L62)
 * **문제점**: `HInputSystem`이 `win.isKeyDown`만 호출하는 디지털 전용입니다. `IWindow`에 아날로그 축도 VR 포즈도 없습니다. VR 컨트롤러의 스틱, 트리거, 6DOF 포즈를 받을 수 없습니다.
 * **해결 사양**: `IWindow`에 아날로그 축과 포즈 질의를 추가하고 `HInputSystem`이 이를 소비하도록 하십시오. [Layer_Architecture.md](Layer_Architecture.md) 6절 1단계 항목입니다.
 
-### 🚨 [DEF-21] [HIGH · 경계] 오일러각 카메라 (6DOF 자세 불가)
+### ✅ [DEF-21] [해결됨 · 2026-10-04, 원래 HIGH · 경계] 오일러각 카메라 (6DOF 자세 불가)
+
+* **[해결 · 2026-10-04 · 3단계]** 뷰 행렬을 액터의 월드 회전(쿼터니언) · 월드 위치에서 만듭니다. yaw · pitch 는 에디터만 갖습니다. 눈별 투영은 OpenXR
+  시야각으로 직접 만들고(`projFromFov`), 헤드셋 자세는 카메라의 XR 원점(위치 + 요)에 올립니다.
 
 * **위치**: [`CameraComponent.cpp:L6-L14`](file:///e:/Haruka/src/components/CameraComponent.cpp#L6-L14)
 * **문제점**: `CameraComponent::viewMatrix`가 yaw/pitch 오일러각으로 뷰를 만들고 `owner->transform.rotation`을 무시하며, `worldPosition()`이 아니라 `owner->transform.position`을 씁니다. 6DOF 자유 자세도, 롤도, 머리와 몸체의 분리도 불가능합니다.
@@ -597,7 +612,9 @@ DEF-25를 수정하면서 CPU와 GPU의 컬링 판정을 하나로 통일했습�
 
 ---
 
-### ⚠️ [DEF-31] [HIGH] 두 눈 합집합 절두체 부재 (단안 절두체로 스테레오를 컬링함)
+### ✅ [DEF-31] [해결됨 · 2026-10-04, 원래 HIGH] 두 눈 합집합 절두체 부재 (단안 절두체로 스테레오를 컬링함)
+
+* **[해결 · 2026-10-04 · 3단계]** 눈마다 판정해 하나라도 통과하면 그립니다(`FrustumCull.hpp`). GPU 컬링 코드는 이미 지웠습니다.
 
 * **위치**: [`Renderer_render.cpp`](file:///e:/Haruka/src/renderer/Renderer_render.cpp)의 `extractRenderView`가 채우는 `RenderView::cullViewProj`, [`CullPass.cpp:L179-L181`](file:///e:/Haruka/src/renderer/passes/CullPass.cpp#L179-L181)의 `CullPush`
 * **착수 시점**: **OpenXR 세션 도입 시 필수입니다.**
@@ -615,7 +632,10 @@ DEF-25를 수정하면서 CPU와 GPU의 컬링 판정을 하나로 통일했습�
 
 ---
 
-### ⚠️ [DEF-32] [MEDIUM] 재투영 여유분만큼의 절두체 부풀리기 부재
+### ⏸ [DEF-32] [보류 · 2026-10-04, 원래 MEDIUM] 재투영 여유분만큼의 절두체 부풀리기 부재
+
+* **[보류 · 2026-10-04 · 3단계]** 한 프레임에 눈 자세를 한 번 받아 컬링 · 렌더 · 제출에 함께 쓰는 동안 필요 없습니다. 늦은 자세
+  갱신이나 과주사를 넣을 때 다시 엽니다(그때는 평면 법선도 바깥으로 돌림).
 
 * **위치**: [`Renderer_render.cpp`](file:///e:/Haruka/src/renderer/Renderer_render.cpp)의 `extractFrustumPlanes`가 만드는 평면 집합
 * **착수 시점**: **OpenXR 세션 도입 시**입니다. 다만 값을 확정하려면 실기 측정이 선행되어야 합니다.
@@ -1229,20 +1249,19 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
 [1단계: VR 엔진으로서의 코어 완성 — 엔진의 정의에 해당합니다]
  ├── [ ] DEF-08. [HIGH]     Quest 런타임 진입점 (IWindow 팩토리, AndroidWindow 인스턴스화)
  ├── [ ] DEF-12. [MEDIUM]   런타임 게임 루프 (World::tick을 에디터 Play 상태에서 분리)
- ├── [ ] DEF-09. [HIGH]     멀티뷰 완성 (viewMask, gl_ViewIndex, arrayLayers)
- ├── [ ] DEF-31. [HIGH]     두 눈 합집합 절두체 (착수: OpenXR 세션 도입 시)
- │                          (Quest 2·Pro·3 의 두 눈 시야는 평행·비대칭. 두 절두체를 각각 판정)
- │                          (대상: RenderView.cullViewProj, CullPass.cpp:179-181의 CullPush)
- ├── [ ] DEF-32. [MEDIUM]   재투영 여유분만큼 절두체 부풀리기 (착수: OpenXR 세션 도입 시)
- │                          (여유분 크기는 실기 재투영 폭 측정 후에만 확정 가능)
- ├── [ ] DEF-20. [HIGH]     VR 입력 (아날로그 축, 6DOF 포즈)
- └── [ ] DEF-21. [HIGH]     6DOF 카메라 자세 (쿼터니언 기반 뷰 행렬)
+ ├── [x] DEF-09. [해결됨]   두 눈 렌더 첫 단계(눈마다 두 번 그리기)  ✅ 2026-10-04
+ │                          (멀티뷰 viewMask · gl_ViewIndex · arrayLayers 는 Quest 이식 때)
+ ├── [x] DEF-31. [해결됨]   두 눈 절두체를 각각 판정  ✅ 2026-10-04
+ ├── [-] DEF-32. [보류]     재투영 여유분(한 프레임 한 자세 규칙 동안 불필요)  2026-10-04
+ ├── [x] DEF-20. [해결됨]   VR 입력(XR 모듈 · 아날로그 축 · 버튼 · 자세)  ✅ 2026-10-04
+ └── [x] DEF-21. [해결됨]   카메라 자세 = 액터 월드 쿼터니언 · 위치  ✅ 2026-10-04
+                            (PC OpenXR 연결은 넣었고, 헤드셋 확인은 Quest Link 준비 뒤)
 
 [2단계: Layer 2를 가능하게 하는 확장 지점]
  ├── [ ] DEF-17. [CRITICAL] 패스 레지스트리와 record(RenderView&) 진입점
  ├── [ ] DEF-18. [CRITICAL] EngineContext에 렌더러 참조 추가 (DEF-17과 동일 작업 단위)
  ├── [ ] DEF-16. [CRITICAL] 인스턴싱 경로 (DrawItem.instanceCount, 리터럴 다섯 곳 제거)
- ├── [ ] DEF-19. [HIGH]     물리 힘·임펄스·속도·레이캐스트 API 및 중력 세터
+ ├── [x] DEF-19. [해결됨]   물리 힘·임펄스·속도·레이캐스트 API 및 중력 세터  ✅ 2026-10-04
  ├── [x] DEF-11. [해결됨]   depfile 로 include 추적, 목록 밖 셰이더 경고  ✅ 2026-10-04
  ├── [ ] DEF-22. [HIGH]     SceneSerializer 타입 등록 기반 직렬화
  ├── [ ] DEF-10. [MEDIUM]   kMaxDraws / kMaxBodies 이중 상한 설정화 (초과 진단은 2026-10-04 완료)

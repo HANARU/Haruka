@@ -9,6 +9,17 @@ setlocal
 set ROOT=%~dp0
 set CONFIG=%~1
 if "%CONFIG%"=="" set CONFIG=Release
+
+:: Everything after the configuration is passed to the engine as is,
+:: for example "run.bat Release --xr" or "run.bat Release --emulate-stereo".
+set ENGINE_ARGS=
+shift
+:collect_args
+if "%~1"=="" goto args_done
+set ENGINE_ARGS=%ENGINE_ARGS% %1
+shift
+goto collect_args
+:args_done
 set EXE_DIR=%ROOT%build\%CONFIG%
 set EXE=%EXE_DIR%\HarukaEngine.exe
 set LOGS_DIR=%ROOT%Logs
@@ -38,14 +49,14 @@ if not exist "%LOGS_DIR%" mkdir "%LOGS_DIR%"
 :: Tee-Object fail, so remove it first and ignore any error.
 if exist "%LOG%" del /f /q "%LOG%" 2>nul
 
-echo [run] Launching HarukaEngine [%CONFIG%]...
+echo [run] Launching HarukaEngine [%CONFIG%]%ENGINE_ARGS%...
 pushd "%EXE_DIR%"
 
 :: Tee-Object shows output on the console and writes it to the log at the same
 :: time.  The pipeline's exit code belongs to PowerShell, not to the exe, so
 :: "exit $LASTEXITCODE" is required to forward the real exit code.  Without it
 :: a crashing exe still reports success.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& '.\HarukaEngine.exe' 2>&1 | Tee-Object -FilePath '%LOG%'; exit $LASTEXITCODE"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& '.\HarukaEngine.exe'%ENGINE_ARGS% 2>&1 | Tee-Object -FilePath '%LOG%'; exit $LASTEXITCODE"
 set EXIT_CODE=%errorlevel%
 popd
 

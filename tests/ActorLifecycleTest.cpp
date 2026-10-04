@@ -9,7 +9,9 @@
 
 #include "../src/core/Actor.hpp"
 #include "../src/components/LightComponent.hpp"
+#include "../src/components/CameraComponent.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -171,6 +173,65 @@ int main() {
             radius->setF(3.f);
             check(lc->attenuationRadius == 3.f, "정상 값은 그대로");
         }
+    }
+
+    // 10. 카메라 자세(DEF-21). 예전 viewMatrix 는 컴포넌트의 yaw/pitch 와 액터의 **로컬** 위치를 써서
+    //     액터 회전 · 롤 · 부모를 무시했습니다. 이제 액터의 월드 회전과 월드 위치에서 만듭니다.
+    std::printf("\n== 10. 카메라 자세 ==\n");
+    {
+        auto near3 = [](const glm::vec3& a, const glm::vec3& b) { return glm::length(a - b) < 1e-5f; };
+
+        // 에디터의 yaw/pitch 규약이 예전 forward 공식과 같아야 에디터 화면이 그대로입니다.
+        bool sameDir = true, sameView = true;
+        const float cases[][2] = { {0.f, 0.15f}, {0.7f, 0.3f}, {-2.5f, -1.2f}, {3.f, 1.5f} };
+        for (const auto& c : cases) {
+            const float yaw = c[0], pitch = c[1];
+            const glm::vec3 oldFwd(std::cos(pitch) * std::sin(yaw), -std::sin(pitch),
+                                   -std::cos(pitch) * std::cos(yaw));
+            Actor a;
+            a.setLocalPosition({1.f, 2.f, 3.f});
+            a.setLocalRotation(CameraComponent::yawPitchRotation(yaw, pitch));
+            auto* cam = a.addComponent<CameraComponent>();
+            sameDir = sameDir && near3(cam->forward(), oldFwd);
+            const glm::mat4 oldView = glm::lookAt(glm::vec3(1, 2, 3), glm::vec3(1, 2, 3) + oldFwd,
+                                                  glm::vec3(0, 1, 0));
+            for (int col = 0; col < 4; ++col)
+                sameView = sameView && glm::length(cam->viewMatrix()[col] - oldView[col]) < 1e-5f;
+        }
+        check(sameDir,  "yawPitchRotation 의 정면이 예전 yaw/pitch 공식과 같음");
+        check(sameView, "yawPitchRotation 의 뷰 행렬이 예전 lookAt 과 같음(에디터 화면 불변)");
+
+        // 액터 회전이 방향을 정합니다: Y 축 +90° 면 -X 를 봅니다.
+        Actor turned;
+        turned.setLocalRotation(glm::angleAxis(glm::radians(90.f), glm::vec3(0, 1, 0)));
+        auto* cam = turned.addComponent<CameraComponent>();
+        check(near3(cam->forward(), {-1.f, 0.f, 0.f}), "액터를 Y 축으로 90° 돌리면 카메라가 -X 를 봄");
+
+        // 롤: Z 축 -90° 면 위가 +X 입니다(예전에는 위가 늘 +Y 였음).
+        Actor rolled;
+        rolled.setLocalRotation(glm::angleAxis(glm::radians(-90.f), glm::vec3(0, 0, 1)));
+        auto* rc = rolled.addComponent<CameraComponent>();
+        check(near3(rc->up(), {1.f, 0.f, 0.f}) && near3(rc->forward(), {0.f, 0.f, -1.f}),
+              "롤을 주면 위 벡터가 함께 돎");
+
+        // 부모: 부모 (10,0,0) · Y 축 90°, 자식 카메라 로컬 (0,0,5) → 월드 (15,0,0) 에서 -X 를 봄.
+        Actor parent, child;
+        parent.setLocalPosition({10.f, 0.f, 0.f});
+        parent.setLocalRotation(glm::angleAxis(glm::radians(90.f), glm::vec3(0, 1, 0)));
+        child.setLocalPosition({0.f, 0.f, 5.f});
+        child.attachTo(&parent);
+        auto* cc = child.addComponent<CameraComponent>();
+        const glm::vec4 eyeInView = cc->viewMatrix() * glm::vec4(15.f, 0.f, 0.f, 1.f);
+        check(near3(glm::vec3(eyeInView), glm::vec3(0.f)), "부모 아래 카메라는 월드 위치가 뷰 원점");
+        check(near3(cc->forward(), {-1.f, 0.f, 0.f}), "부모 회전이 카메라 방향에 합성됨");
+
+        // 크기는 뷰에 들어가지 않습니다(회전 부분이 직교 정규).
+        Actor scaled;
+        scaled.setLocalScale({2.f, 3.f, 4.f});
+        auto* sc = scaled.addComponent<CameraComponent>();
+        const glm::mat4 v = sc->viewMatrix();
+        check(std::fabs(glm::length(glm::vec3(v[0])) - 1.f) < 1e-6f &&
+              std::fabs(glm::length(glm::vec3(v[2])) - 1.f) < 1e-6f, "액터 크기는 뷰 행렬에 들어가지 않음");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

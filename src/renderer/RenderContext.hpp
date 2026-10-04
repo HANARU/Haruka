@@ -33,12 +33,13 @@ public:
     VkFormat   depthFormat = VK_FORMAT_UNDEFINED;
     VkExtent2D extent{};   // 스왑체인(창) 크기 — UI·post 최종 합성 대상
 
-    // 씬을 그리는 3D 뷰포트 크기와 스왑체인 내 오프셋입니다(Viewport_Render_Design.md).
-    // 씬 타깃(HDR·깊이·AO·Bloom)과 세 투영은 renderExtent 를 기준으로 삼고,
-    // post 는 renderExtent HDR 을 스왑체인의 viewportOffset+renderExtent 서브렉트에 합성합니다.
-    // 기본값은 extent 와 같아(오프셋 0), 에디터가 setViewportRect 로 바꾸기 전까지 전체 렌더입니다.
-    VkExtent2D renderExtent{};
+    // 씬을 합성할 3D 뷰포트의 스왑체인 내 위치와 크기입니다(Viewport_Render_Design.md).
+    // 기본값은 창 전체(오프셋 0)이고, 에디터가 setViewportRect 로 바꿉니다.
     VkOffset2D viewportOffset{ 0, 0 };
+    VkExtent2D viewportExtent{};
+    // 눈 하나의 씬 타깃(HDR·깊이·AO·Bloom) 크기이자 투영 비율의 기준입니다. 단안이면 뷰포트와
+    // 같고, 스테레오 흉내 모드는 뷰포트의 좌우 절반, XR 은 런타임이 권하는 눈 크기입니다(DEF-09).
+    VkExtent2D renderExtent{};
 
     // ── 생성 헬퍼 ─────────────────────────────────────────────────────────────
     VkShaderModule createShaderModule(const std::vector<char>& code) const;

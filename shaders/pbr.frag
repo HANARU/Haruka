@@ -15,6 +15,7 @@ const float PI = 3.14159265359;
 
 // Set 0: FrameUBO (haruka_shared.h)
 layout(set = 0, binding = 0) uniform FrameBlock { FrameUBO ubo; };
+HARUKA_VIEW_PUSH_CONSTANT;   // 눈 번호(DEF-09). 반사 방향은 그 눈의 위치로 구합니다
 
 // Set 1: Scene resources
 layout(set = 1, binding = 0) uniform sampler2DShadow shadowMap;
@@ -155,7 +156,7 @@ void main() {
     float ao        = texture(aoMap,       fragUV).r;
     vec3  emissive  = texture(emissiveMap, fragUV).rgb;   // SRGB 포맷이라 이미 선형이다
 
-    vec3  V   = normalize(ubo.cameraPos.xyz - fragWorldPos);
+    vec3  V   = normalize(ubo.eyePos[HARUKA_VIEW_INDEX].xyz - fragWorldPos);
     vec3  F0  = mix(vec3(0.04), albedo, metallic);
 
     // ── Direct lighting ───────────────────────────────────────────────────────

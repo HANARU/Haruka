@@ -28,6 +28,8 @@ VkPresentModeKHR GlfwSwapchain::choosePresentMode(
     const std::vector<VkPresentModeKHR>& modes) const
 {
     for (auto m : modes) if (m == VK_PRESENT_MODE_MAILBOX_KHR) return m;
+    if (preferNonBlocking_)
+        for (auto m : modes) if (m == VK_PRESENT_MODE_IMMEDIATE_KHR) return m;
     return VK_PRESENT_MODE_FIFO_KHR;
 }
 

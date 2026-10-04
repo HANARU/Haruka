@@ -44,7 +44,9 @@ public:
 
     // tsPool 이 유효하면 렌더패스 전체가 끝난 뒤 tsQueryAfterMain 에 타임스탬프를 기록합니다.
     // resolve 까지 포함해야 "Main" 이라는 이름이 사실이 됩니다.
-    void record(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& in,
+    // viewIndex 는 눈 번호입니다(단안 0, 스테레오 0=왼쪽 · 1=오른쪽). 눈마다 한 번씩 부르고,
+    // 셰이더가 FrameUBO 의 그 눈 행렬과 위치를 씁니다(DEF-09).
+    void record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex, const Inputs& in,
                 VkQueryPool tsPool, uint32_t tsQueryAfterMain);
 
     // 에디터 라인 오버레이 (다음 record에서 그려짐)

@@ -75,6 +75,9 @@ private:
     Actor*           editorCamActor_ = nullptr;
     CameraComponent* editorCam_      = nullptr;
     bool             lmbOrbit_       = false;
+    // 비행 카메라의 방향(라디안). 에디터만 갖는 값이고, 매 틱 액터 회전으로 옮깁니다(DEF-21).
+    float            editorYaw_      = 0.f;
+    float            editorPitch_    = 0.15f;
 
     // 휠은 tick 이 한 번만 읽어(getScrollDelta 는 consume-on-read) 위젯과 카메라 중 한쪽으로
     // 라우팅합니다. 여기서는 위젯이 받지 않고 남은 값만 받습니다.

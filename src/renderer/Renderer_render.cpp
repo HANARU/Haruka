@@ -16,6 +16,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <cassert>
 #include <random>
 
@@ -67,45 +68,6 @@ void Renderer::createSamplers() {
          false, VK_BORDER_COLOR_INT_OPAQUE_BLACK,     0.f);
 }
 
-// ── Frustum culling helpers ───────────────────────────────────────────────────
-
-// Gribb-Hartmann plane extraction (Vulkan NDC z=[0,1])
-static std::array<FrustumPlane, 6> extractFrustumPlanes(const glm::mat4& vp) {
-    auto row = [&](int r) {
-        return glm::vec4(vp[0][r], vp[1][r], vp[2][r], vp[3][r]);
-    };
-    auto makePlane = [](glm::vec4 v) -> FrustumPlane {
-        float len = glm::length(glm::vec3(v));
-        return { glm::vec3(v) / len, v.w / len };
-    };
-    auto r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3);
-    return {
-        makePlane(r3 + r0),   // Left
-        makePlane(r3 - r0),   // Right
-        makePlane(r3 + r1),   // Bottom
-        makePlane(r3 - r1),   // Top
-        makePlane(r2),         // Near (Vulkan z=0)
-        makePlane(r3 - r2),   // Far  (Vulkan z=1)
-    };
-}
-
-// 월드 공간 바운딩 구 대 절두체 판정. 깊이 프리패스와 컬러 패스가 이 한 판정으로 만든 같은
-// 목록을 그립니다(GPU 컬링은 A-4 에서 없앴고 2026-10-04 에 코드도 지웠습니다).
-//
-//   예전에는 CPU가 AABB를, GPU가 구를 써서 두 판정이 갈렸다. 회전한 메시에서 여덟 꼭짓점을
-//   변환해 다시 축 정렬 상자로 감싸면 그 상자가 구보다 커질 수 있기 때문이다. 구는 회전에
-//   불변이므로 이 흔들림이 없다. GPU 컬링을 되살린다면 GPU 쪽도 같은 구 판정을 써야 한다.
-//
-// ★ VR 확장 지점: 스테레오에서는 두 눈의 절두체를 각각 판정해 하나라도 통과하면 그린다.
-//   Quest 2·Pro·3 의 두 눈 시야는 평행하고 비대칭이다(기울어진 canted 화면이 아님).
-//   컬링·렌더·제출이 한 프레임의 같은 자세를 쓰는 동안에는 재투영 여유분이 필요 없다(DEF-32).
-static bool sphereInFrustum(const std::array<FrustumPlane, 6>& planes,
-                            const glm::vec3& center, float radius) {
-    for (const auto& p : planes)
-        if (glm::dot(p.normal, center) + p.d < -radius) return false;
-    return true;
-}
-
 // ── updateLightSSBO ───────────────────────────────────────────────────────────
 
 uint32_t Renderer::updateLightSSBO(World& world) {
@@ -152,24 +114,18 @@ uint32_t Renderer::updateLightSSBO(World& world) {
 
 // ── updateUBO ─────────────────────────────────────────────────────────────────
 
-void Renderer::updateUBO(World& world, uint32_t lightCount) {
-    CameraComponent* cam = world.getActiveCamera();
+void Renderer::updateUBO(World& /*world*/, uint32_t lightCount) {
     FrameUBO ubo{};
 
-    glm::mat4 curVP{1.f};
-    if (cam) {
-        float aspect = (float)rc_.renderExtent.width / (float)rc_.renderExtent.height;
-        curVP = cam->projMatrix(aspect) * cam->viewMatrix();
-        glm::vec3 camPos = glm::vec3(glm::inverse(cam->viewMatrix())[3]);
-        ubo.cameraPos   = glm::vec4(camPos, cam->zNear);
-        ubo.screenParams= glm::vec4((float)rc_.renderExtent.width, (float)rc_.renderExtent.height,
-                                     cam->zFar, 0.8f);
-    } else {
-        ubo.cameraPos   = glm::vec4(0.f, 0.f, 0.f, 0.1f);
-        ubo.screenParams= glm::vec4((float)rc_.renderExtent.width, (float)rc_.renderExtent.height, 100.f, 0.8f);
+    // 눈별 행렬과 위치(DEF-09). 단안이면 [1] 에 [0] 을 그대로 둡니다. 카메라가 없으면 views_ 가
+    // 단위 행렬 · 원점이라 예전과 같습니다.
+    for (uint32_t i = 0; i < kMaxViews; ++i) {
+        const EyeView& v = views_[std::min(i, viewCount_ - 1)];
+        ubo.viewProj[i] = hasCamera_ ? v.proj * v.view : glm::mat4(1.f);
+        ubo.eyePos[i]   = glm::vec4(v.pos, v.zNear);
     }
-    ubo.viewProj[0] = curVP;
-    ubo.viewProj[1] = curVP;
+    ubo.screenParams = glm::vec4((float)rc_.renderExtent.width, (float)rc_.renderExtent.height,
+                                 views_[0].zFar, 0.8f);
 
     // Directional light shadow camera (fixed 40m×40m orthographic).
     // 캐스터 선택은 updateLightSSBO 가 이미 끝냈습니다(shadowCasterSlot_/Dir_). 여기서 다시
@@ -201,13 +157,16 @@ void Renderer::buildDrawCommands(World& world,
                                   std::vector<GpuDrawCmd>& transpOut,
                                   std::vector<const MaterialHandle*>& materialRowsOut,
                                   std::vector<GpuDrawCmd>& shadowOut) {
-    CameraComponent* cam = world.getActiveCamera();
-    std::array<FrustumPlane, 6> planes{};
-    bool hasCam = (cam != nullptr);
-    if (hasCam) {
-        float aspect = (float)rc_.renderExtent.width / (float)rc_.renderExtent.height;
-        planes = extractFrustumPlanes(cam->projMatrix(aspect) * cam->viewMatrix());
-    }
+    // 눈마다 절두체를 뽑아, 하나라도 통과하면 그립니다(DEF-31). 예전에는 단안 절두체 하나로
+    // 걸러 스테레오에서는 한쪽 눈에만 보이는 물체가 사라질 수 있었습니다. 같은 목록을 두 눈이
+    // 함께 그리고, 각 눈의 절두체 밖 부분은 GPU 가 잘라 냅니다.
+    // 컬링과 렌더와 제출이 이 프레임의 같은 views_ 를 쓰므로 재투영 여유분(DEF-32)은 필요 없습니다.
+    // 늦은 자세 갱신(late latching)이나 과주사(overscan)를 넣으면 그때 평면을 바깥으로 돌려야 합니다.
+    std::array<std::array<FrustumPlane, 6>, kMaxViews> planes{};
+    const bool hasCam = hasCamera_;
+    if (hasCam)
+        for (uint32_t i = 0; i < viewCount_; ++i)
+            planes[i] = extractFrustumPlanes(views_[i].proj * views_[i].view);
 
     // 섀도(라이트) 프러스텀 — 캐스터가 있을 때만. sCurLightViewProj 는 updateUBO 가 이미
     // 채웠다(호출 순서: updateLightSSBO→updateUBO→buildDrawCommands). 이 ortho 박스로 캐스터를
@@ -223,7 +182,13 @@ void Renderer::buildDrawCommands(World& world,
     const auto& allMeshes   = world.getVisibleMeshes();
     uint32_t totalCnt = (uint32_t)allMeshes.size();
 
-    glm::vec3 camPos = hasCam ? glm::vec3(glm::inverse(cam->viewMatrix())[3]) : glm::vec3(0.f);
+    // LOD 와 투명 정렬의 기준점은 두 눈의 가운데입니다. 눈마다 다르게 고르면 두 눈이 다른 LOD 나
+    // 다른 그리기 순서를 보게 됩니다. 단안이면 카메라 위치 그대로입니다.
+    glm::vec3 camPos(0.f);
+    if (hasCam) {
+        for (uint32_t i = 0; i < viewCount_; ++i) camPos += views_[i].pos;
+        camPos /= (float)viewCount_;
+    }
 
     opaqueOut.clear();
     transpOut.clear();
@@ -281,7 +246,7 @@ void Renderer::buildDrawCommands(World& world,
         const float     wRadius = mesh->boundRadius * maxScale;
 
         // 카메라 가시성과 라이트(섀도) 가시성을 따로 판정한다.
-        const bool inCam   = !hasCam   || sphereInFrustum(planes,      wCenter, wRadius);
+        const bool inCam   = !hasCam   || sphereInAnyView(planes.data(), viewCount_, wCenter, wRadius);
         const bool inLight = hasShadow && sphereInFrustum(lightPlanes, wCenter, wRadius);
 
         // 카메라에 안 보이면 여기서 행을 배정하지 않는다. 라이트 안이면 뒤(2단계)로 미뤄,
@@ -360,13 +325,93 @@ void Renderer::buildDrawCommands(World& world,
     }
 }
 
+// ── gatherViews ────────────────────────────────────────────────────────────────
+// 이번 프레임에 그릴 눈을 정합니다. 단안은 활성 카메라 하나, 스테레오 흉내 모드는 카메라 좌우의
+// 두 눈입니다(DEF-09). 눈 위치는 뷰 행렬의 역에서 읽습니다(예전 cameraPos 와 같은 식).
+void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
+    CameraComponent* cam = world.getActiveCamera();
+
+    // XR: 런타임이 준 두 눈 자세(원점 공간)를 활성 카메라의 XR 원점(위치 · 요)에 올립니다. 시야는
+    // 런타임의 네 방향 각도로 눈마다 따로 만듭니다(DEF-21). 카메라가 없으면 월드 원점에 둡니다.
+    if (xr && xrActive_) {
+        const glm::mat4 origin = cam ? cam->xrOrigin() : glm::mat4(1.f);
+        const float     zNear  = cam ? cam->zNear : 0.1f;
+        const float     zFar   = cam ? cam->zFar  : 100.f;
+        hasCamera_ = true;
+        viewCount_ = kMaxViews;
+        for (uint32_t e = 0; e < kMaxViews; ++e) {
+            const XrEyePose& p = xr->eyes[e];
+            const glm::mat4 eyeWorld = origin * glm::translate(glm::mat4(1.f), p.position)
+                                     * glm::mat4_cast(glm::quat(p.qw, p.qx, p.qy, p.qz));
+            EyeView& v = views_[e];
+            v.view  = glm::inverse(eyeWorld);
+            v.pos   = glm::vec3(eyeWorld[3]);
+            v.zNear = zNear;
+            v.zFar  = zFar;
+            v.proj  = CameraComponent::projFromFov(p.angleLeft, p.angleRight, p.angleUp, p.angleDown,
+                                                   zNear, zFar);
+        }
+        return;
+    }
+
+    hasCamera_ = (cam != nullptr);
+    if (!cam) {
+        viewCount_ = 1;
+        views_[0]  = EyeView{};   // 단위 행렬 · 원점 · near 0.1 · far 100 (예전 기본값)
+        return;
+    }
+    const glm::mat4 camView = cam->viewMatrix();
+
+    // 단안. 투영 비율은 합성할 뷰포트의 비율입니다. 평소에는 씬 타깃과 같은 크기이고, XR 이 붙어 있는데
+    // 이번 프레임 헤드셋에 그리지 않을 때(헤드셋을 벗음 등)는 씬 타깃이 눈 크기라 비율이 다릅니다.
+    if (!emulateStereo_ || xrActive_) {
+        const float aspect = (float)rc_.viewportExtent.width / (float)rc_.viewportExtent.height;
+        viewCount_ = 1;
+        EyeView& v = views_[0];
+        v.view  = camView;
+        v.proj  = cam->projMatrix(aspect);
+        v.pos   = glm::vec3(glm::inverse(camView)[3]);
+        v.zNear = cam->zNear;
+        v.zFar  = cam->zFar;
+        return;
+    }
+
+    // 스테레오 흉내: 카메라 좌우로 눈 사이 거리(64mm)의 절반씩 옮긴 평행한 두 눈입니다(Quest 처럼
+    // 기울어지지 않음). 세로 시야는 카메라 FovY 를 그대로 쓰고, 가로는 눈 하나의 화면 비율로 정한 뒤
+    // 코 쪽 45% · 바깥쪽 55% 로 나눠 실제 헤드셋처럼 비대칭 투영을 씁니다.
+    const float     aspect  = (float)rc_.renderExtent.width / (float)rc_.renderExtent.height;
+    constexpr float kIpd    = 0.064f;
+    const float tanUp       = std::tan(glm::radians(cam->fovY) * 0.5f);
+    const float tanWidth    = 2.f * tanUp * aspect;
+    const float tanOuter    = 0.55f * tanWidth;
+    const float tanInner    = 0.45f * tanWidth;
+    viewCount_ = 2;
+    for (uint32_t e = 0; e < 2; ++e) {
+        const float side = (e == 0) ? -1.f : 1.f;   // 왼쪽 눈은 카메라의 -X 쪽
+        EyeView& v = views_[e];
+        // 카메라 공간에서 X 로 옮긴 눈: 월드 → 눈 = T(-offset) · 월드 → 카메라.
+        v.view  = glm::translate(glm::mat4(1.f), glm::vec3(-side * kIpd * 0.5f, 0.f, 0.f)) * camView;
+        v.pos   = glm::vec3(glm::inverse(v.view)[3]);
+        v.zNear = cam->zNear;
+        v.zFar  = cam->zFar;
+        const float tanLeft  = (e == 0) ? -tanOuter : -tanInner;
+        const float tanRight = (e == 0) ?  tanInner :  tanOuter;
+        v.proj = CameraComponent::projFromFov(std::atan(tanLeft), std::atan(tanRight),
+                                              std::atan(tanUp), -std::atan(tanUp),
+                                              cam->zNear, cam->zFar);
+    }
+}
+
 // ── extractRenderView ──────────────────────────────────────────────────────────
 // World를 읽는 유일한 지점 (docs/RendererRefactor.md §4). 이후 패스 기록에서는
 // World/Actor/Component 참조 금지 — 시뮬레이션/렌더 스레드 분리의 경계가 된다.
 // v1: 프레임별 mapped 버퍼(UBO/라이트/트랜스폼) 업로드를 추출 단계에서 수행.
 
-Renderer::RenderView Renderer::extractRenderView(World& world) {
+Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarget* xr) {
     RenderView v;
+
+    // 이번 프레임의 눈을 먼저 정합니다. 아래 UBO · 컬링 · AO 가 모두 이 한 벌을 씁니다.
+    gatherViews(world, xr);
 
     // 순서 주의: 라이트 SSBO를 먼저 채워 실제 개수를 확정한 뒤 UBO에 싣는다.
     const uint32_t lightCount = updateLightSSBO(world);
@@ -374,12 +419,13 @@ Renderer::RenderView Renderer::extractRenderView(World& world) {
     buildDrawCommands(world, v.opaqueDraws, v.transpDraws, v.materialRows, v.shadowDraws);
     frameStats_.drawCalls = (uint32_t)v.opaqueDraws.size();
 
-    if (auto* cam = world.getActiveCamera()) {
-        v.aoCam.zNear = cam->zNear;
-        v.aoCam.zFar  = cam->zFar;
-        float aspect = (float)rc_.renderExtent.width / (float)rc_.renderExtent.height;
-        v.aoCam.invProj = glm::inverse(cam->projMatrix(aspect));
-        v.aoCam.valid   = true;
+    if (hasCamera_) {
+        for (uint32_t i = 0; i < viewCount_; ++i) {
+            v.aoCam[i].zNear   = views_[i].zNear;
+            v.aoCam[i].zFar    = views_[i].zFar;
+            v.aoCam[i].invProj = glm::inverse(views_[i].proj);
+            v.aoCam[i].valid   = true;
+        }
     }
 
     // CPU 드로우 항목 — buildDrawCommands가 만든 드로우 커맨드에서 그대로 파생시킨다.
@@ -410,7 +456,8 @@ Renderer::RenderView Renderer::extractRenderView(World& world) {
 
 // ── drawFrame ─────────────────────────────────────────────────────────────────
 
-void Renderer::drawFrame(World& world) {
+bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
+    const bool xrFrame = (xr != nullptr) && xrActive_;
     auto& ft = gFrameTimings();
     ScopedCpuTimer timerWhole(ft.drawFrame);
     const uint32_t fi = frameIdx;
@@ -429,25 +476,36 @@ void Renderer::drawFrame(World& world) {
         if (vkGetQueryPoolResults(device, timestampPool_, fi * TS, TS,
                 sizeof(ts), ts, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
             float ns2ms = timestampPeriod_ * 1e-6f;
-            // 슬롯 배치: 0 시작 / 1 섀도 / 2 메인(3서브패스+resolve) / 3 AO /
-            //           4 Bloom / 5 톤매핑 / 6 UI
+            // 슬롯 배치: 0 시작 / 1 섀도 / 눈 v 마다 2+4v 메인(3서브패스+resolve) · 3+4v AO ·
+            //           4+4v Bloom · 5+4v 톤매핑 / 마지막 UI
+            // 패스별 시간은 두 눈의 합입니다. 눈 사이의 배리어는 다음 눈의 메인에 들어갑니다.
             // 예전에는 6 개를 기록하고 5 개만 읽어 UI 패스가 총합에서 빠져 있었고,
             // ts2 가 불투명 서브패스 직후에 찍혀 있어 라벨이 전부 어긋나 있었습니다.
             // 가짜 TAA 블릿 슬롯(빈 구간이라 늘 0ms)은 2026-10-04 에 지웠습니다(DEF-15).
-            timings_.shadowMs  = float(ts[1] - ts[0]) * ns2ms;
-            timings_.mainMs    = float(ts[2] - ts[1]) * ns2ms;   // 3 서브패스 + resolve
-            timings_.aoMs      = float(ts[3] - ts[2]) * ns2ms;
-            timings_.bloomMs   = float(ts[4] - ts[3]) * ns2ms;
-            timings_.tonemapMs = float(ts[5] - ts[4]) * ns2ms;
-            timings_.uiMs      = float(ts[6] - ts[5]) * ns2ms;
-            timings_.totalMs   = float(ts[6] - ts[0]) * ns2ms;
+            timings_.shadowMs = float(ts[1] - ts[0]) * ns2ms;
+            float mainMs = 0.f, aoMs = 0.f, bloomMs = 0.f, toneMs = 0.f;
+            uint64_t prev = ts[1];
+            for (uint32_t v = 0; v < kMaxViews; ++v) {
+                const uint32_t b = 2 + kTsPerView * v;
+                mainMs  += float(ts[b]     - prev)      * ns2ms;   // 3 서브패스 + resolve
+                aoMs    += float(ts[b + 1] - ts[b])     * ns2ms;
+                bloomMs += float(ts[b + 2] - ts[b + 1]) * ns2ms;
+                toneMs  += float(ts[b + 3] - ts[b + 2]) * ns2ms;
+                prev = ts[b + 3];
+            }
+            timings_.mainMs    = mainMs;
+            timings_.aoMs      = aoMs;
+            timings_.bloomMs   = bloomMs;
+            timings_.tonemapMs = toneMs;
+            timings_.uiMs      = float(ts[TS - 1] - prev)  * ns2ms;
+            timings_.totalMs   = float(ts[TS - 1] - ts[0]) * ns2ms;
         }
     }
 
     // ── Acquire swapchain image ───────────────────────────────────────────────
     // Pre-check: avoid acquiring into a stale swapchain, which would leave
     // semImageAvail_ signaled with no corresponding submit to consume it.
-    if (swapchain_->needsRecreation()) { recreateSwapChain(); return; }
+    if (swapchain_->needsRecreation()) { recreateSwapChain(); return false; }
 
     uint32_t imgIdx;
     VkResult res;
@@ -457,7 +515,7 @@ void Renderer::drawFrame(World& world) {
     }
     // VK_ERROR_OUT_OF_DATE_KHR: acquire failed, semaphore NOT signaled — safe to recreate now.
     // VK_SUBOPTIMAL_KHR: image acquired, semaphore IS signaled — finish the frame, recreate after present.
-    if (res == VK_ERROR_OUT_OF_DATE_KHR) { recreateSwapChain(); return; }
+    if (res == VK_ERROR_OUT_OF_DATE_KHR) { recreateSwapChain(); return false; }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
         throw std::runtime_error("Failed to acquire swapchain image!");
 
@@ -474,7 +532,7 @@ void Renderer::drawFrame(World& world) {
     RenderView view;
     {
         ScopedCpuTimer t(ft.extract);
-        view      = extractRenderView(world);
+        view      = extractRenderView(world, xrFrame ? xr : nullptr);
         // A-4: GPU 컬 입력 업로드 제거. 깊이 프리패스가 CPU opaqueItems 를 직접 그립니다.
     }
 
@@ -490,6 +548,26 @@ void Renderer::drawFrame(World& world) {
     if (timestampPool_) {
         vkCmdResetQueryPool(cmd, timestampPool_, fi * TS, TS);
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampPool_, fi*TS+0);
+    }
+
+    // 깊이 · MSAA · AO · Bloom 중간 타깃은 프레임 슬롯끼리 같이 씁니다. 앞 프레임의 읽기(AO 가 깊이를,
+    // 톤매핑이 AO · Bloom 을 읽음)가 끝난 뒤에 이번 프레임이 쓰도록 한 번 묶습니다. 렌더 패스의 외부 의존성은
+    // 조각 셰이더의 읽기를 포함하지 않아, 예전에는 앞 프레임의 읽기와 이번 프레임의 쓰기가 겹칠 수 있었습니다
+    // (DEF-104). 배리어의 앞쪽 범위는 같은 큐에 먼저 제출된 명령 전체라 앞 프레임까지 닿습니다.
+    {
+        VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+        mb.srcStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+        mb.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        mb.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+        mb.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+        VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        di.memoryBarrierCount = 1; di.pMemoryBarriers = &mb;
+        vkCmdPipelineBarrier2(cmd, &di);
     }
 
     // ── Shadow pass ───────────────────────────────────────────────────────────
@@ -509,7 +587,10 @@ void Renderer::drawFrame(World& world) {
     // A-4: GPU 컬링 dispatch 제거(순수 오버헤드였음). 깊이 프리패스·컬러 모두 CPU opaqueItems 를
     // 그립니다. GPU 구동 경로가 필요해지면 스테레오·인스턴스 기준으로 새로 설계합니다.
 
-    // ── Main render pass (3 subpasses) ────────────────────────────────────────
+    // ── 눈마다: 메인(3 서브패스) → AO → Bloom → 톤매핑 ─────────────────────────
+    // 첫 단계는 눈마다 두 번 그립니다(DEF-09). 위험을 나누려는 선택이고, 셰이더와 UBO 는 처음부터
+    // 두 눈 기준이라 멀티뷰로 옮길 때 뷰 번호만 gl_ViewIndex 로 바꾸면 됩니다. 섀도맵은 위에서 한 번
+    // 그린 것을 두 눈이 함께 씁니다. 중간 타깃(깊이 · HDR · AO · Bloom)은 두 눈이 번갈아 씁니다.
     GeometryPass::Inputs gin{};
     gin.frameSet         = frames_.frameSet(fi);
     gin.sceneSet         = frames_.sceneSet(fi);
@@ -520,32 +601,111 @@ void Renderer::drawFrame(World& world) {
     gin.clampSampler     = clampSampler_;
     gin.opaqueItems      = &view.opaqueItems;
     gin.transparentItems = &view.transparentItems;
-    geometry_.record(cmd, fi, gin, timestampPool_, fi*TS+2);
 
-    // ── AO (linDepth + SSAO, half-res) ───────────────────────────────────────
-    ao_.record(cmd, fi, geometry_.depthView(), clampSampler_, view.aoCam);
+    // 단안은 뷰포트 전체, 스테레오 흉내는 뷰포트의 왼쪽 · 오른쪽 절반, XR 은 스왑체인의 그 눈 층에
+    // 합성합니다.
+    auto outputFor = [&](uint32_t v) {
+        PostPass::Output out;
+        if (xrFrame) {
+            out.fb       = xrFramebufs_[xr->imageIndex * kMaxViews + v];
+            out.format   = xrFormat_;
+            out.extent   = xrEyeExtent_;
+            out.rect     = { { 0, 0 }, xrEyeExtent_ };
+            out.clearAll = true;   // 눈마다 다른 층이라 둘 다 처음 쓰는 것
+            return out;
+        }
+        out.fb       = post_.swapFramebuffer(imgIdx);
+        out.format   = rc_.swapFormat;
+        out.extent   = rc_.extent;
+        out.clearAll = (v == 0);
+        out.rect     = { rc_.viewportOffset, rc_.viewportExtent };
+        if (viewCount_ > 1) {
+            out.rect.offset.x    += (int32_t)(v * rc_.renderExtent.width);
+            out.rect.extent.width = rc_.renderExtent.width;
+        }
+        return out;
+    };
 
-    // Timestamp 3: after AO
+    // XR 은 오른쪽 눈을 먼저 그립니다. 중간 타깃에 왼쪽 눈이 남아 있어야 아래에서 그것을 에디터
+    // 뷰포트에 비출 수 있습니다.
+    for (uint32_t k = 0; k < viewCount_; ++k) {
+        const uint32_t v      = xrFrame ? viewCount_ - 1 - k : k;
+        const uint32_t tsBase = fi * TS + 2 + kTsPerView * k;
+        // 앞 눈이 쓰던 중간 타깃을 다음 눈이 다시 씁니다. 앞 눈의 읽기(AO 의 깊이, 톤매핑의 HDR ·
+        // AO · Bloom)가 끝나고 쓰기가 보이도록 그래픽 단계 전체를 한 번 묶습니다. 눈이 둘뿐이라
+        // 비용은 무시할 수준입니다.
+        if (k > 0) {
+            VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+            mb.srcStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+            mb.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            mb.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+            mb.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+            di.memoryBarrierCount = 1; di.pMemoryBarriers = &mb;
+            vkCmdPipelineBarrier2(cmd, &di);
+        }
+
+        // ── Main render pass (3 subpasses) ────────────────────────────────────
+        geometry_.record(cmd, fi, v, gin, timestampPool_, tsBase + 0);
+
+        // ── AO (linDepth + SSAO, half-res) ───────────────────────────────────
+        ao_.record(cmd, fi, v, geometry_.depthView(), clampSampler_, view.aoCam[v]);
+        if (timestampPool_)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 1);
+
+        // ── Bloom passes (threshold → down ×4 → up ×4) ───────────────────────
+        bloom_.record(cmd, geometry_.hdrView(fi), clampSampler_);
+        if (timestampPool_)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 2);
+
+        // ── Post-process pass (ACES + bloom composite → swapchain) ───────────
+        // T-c: 가짜 TAA 비활성. 지터·모션벡터·이웃클램프 없는 mix(hdr,history,0.1)는 AA 효과가
+        // 0이면서 이동 시 고스팅과 노출 미적용(D-5) 밝기 오류만 냈습니다. AA 는 4x MSAA 가
+        // 맡습니다. 진짜 TAA 는 OpenXR 이후 별도 트랙(Transparency_Temporal_Design.md 4절).
+        post_.recordTonemap(cmd, outputFor(v), geometry_.hdrView(fi), ao_.ssaoView(),
+                            bloom_.resultView(), clampSampler_);
+        if (timestampPool_)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 3);
+    }
+    // XR: 왼쪽 눈(중간 타깃에 남아 있음)을 에디터 뷰포트에 한 번 더 톤매핑해 비춥니다. 뷰포트 비율에
+    // 맞춰 가운데를 잘라 읽습니다(UE 의 기본 관전 화면과 같은 방식). 이 시간은 UI 칸에 들어갑니다.
+    if (xrFrame) {
+        PostPass::Output mirror;
+        mirror.fb       = post_.swapFramebuffer(imgIdx);
+        mirror.format   = rc_.swapFormat;
+        mirror.extent   = rc_.extent;
+        mirror.rect     = { rc_.viewportOffset, rc_.viewportExtent };
+        mirror.clearAll = true;
+        const float eyeAspect = (float)xrEyeExtent_.width / (float)xrEyeExtent_.height;
+        const float vpAspect  = (float)rc_.viewportExtent.width / (float)rc_.viewportExtent.height;
+        if (vpAspect > eyeAspect) {   // 뷰포트가 더 넓음 → 위아래를 자름
+            mirror.uvScale[1]  = eyeAspect / vpAspect;
+            mirror.uvOffset[1] = 0.5f * (1.f - mirror.uvScale[1]);
+        } else {                      // 뷰포트가 더 좁음 → 좌우를 자름
+            mirror.uvScale[0]  = vpAspect / eyeAspect;
+            mirror.uvOffset[0] = 0.5f * (1.f - mirror.uvScale[0]);
+        }
+        VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+        mb.srcStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+        mb.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        mb.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+        mb.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        di.memoryBarrierCount = 1; di.pMemoryBarriers = &mb;
+        vkCmdPipelineBarrier2(cmd, &di);
+        post_.recordTonemap(cmd, mirror, geometry_.hdrView(fi), ao_.ssaoView(),
+                            bloom_.resultView(), clampSampler_);
+    }
+
+    // 그리지 않은 눈의 칸도 찍어 둡니다. 비워 두면 결과 읽기가 통째로 VK_NOT_READY 가 됩니다.
     if (timestampPool_)
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+3);
-
-    // ── Bloom passes (threshold → down ×4 → up ×4) ───────────────────────────
-    bloom_.record(cmd, geometry_.hdrView(fi), clampSampler_);
-
-    // Timestamp 4: after Bloom
-    if (timestampPool_)
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+4);
-
-    // ── Post-process pass (ACES + bloom composite → swapchain) ───────────────
-    // T-c: 가짜 TAA 비활성. 지터·모션벡터·이웃클램프 없는 mix(hdr,history,0.1)는 AA 효과가
-    // 0이면서 이동 시 고스팅과 노출 미적용(D-5) 밝기 오류만 냈습니다. AA 는 4x MSAA 가
-    // 맡습니다. 진짜 TAA 는 OpenXR 이후 별도 트랙(Transparency_Temporal_Design.md 4절).
-    post_.recordTonemap(cmd, imgIdx, geometry_.hdrView(fi), ao_.ssaoView(),
-                        bloom_.resultView(), clampSampler_);
-
-    // Timestamp 5: after tonemap
-    if (timestampPool_)
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+5);
+        for (uint32_t q = 2 + kTsPerView * viewCount_; q < TS - 1; ++q)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi * TS + q);
 
     // ── UI overlay ────────────────────────────────────────────────────────────
     // UI 정점 버퍼는 fi 슬롯별입니다. 슬롯 수가 어긋나면 두 프레임이 한 버퍼를 같이 씁니다(DEF-93).
@@ -556,9 +716,9 @@ void Renderer::drawFrame(World& world) {
         uiRenderer_->record(cmd, imgIdx, swapchain_->extent(), fi);
     }
 
-    // Timestamp 6: after UI
+    // 마지막 칸: after UI
     if (timestampPool_)
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS+6);
+        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, fi*TS + TS - 1);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS)
         throw std::runtime_error("Failed to record command buffer!");
@@ -592,4 +752,5 @@ void Renderer::drawFrame(World& world) {
     frameIdx  = (frameIdx + 1) % MAX_FRAMES;
     frameNum_++;
     time_     = (float)frameNum_ / 60.f;
+    return xrFrame;
 }
