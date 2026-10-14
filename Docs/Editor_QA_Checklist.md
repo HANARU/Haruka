@@ -122,7 +122,7 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 | DEF-88 | 회전 없는 액터를 선택 | ROTATION Y 가 `-0.000` | `0.000` |
 | DEF-89 | — | 빌드 경고 C4505(`uploadCubemapMip` 미사용) | 경고 0 |
 | DEF-90 | 디테일 TRANSFORM 을 접은 뒤 다른 액터를 선택 | 다시 펼쳐짐(리빌드마다 `expanded(true)`) | 접힘 상태 유지 |
-| DEF-91 | — | 창 좌표와 프레임버퍼 좌표를 섞어 씀. 100% 배율에서는 같아서 드러나지 않음(잠재) | 코드 검토로 확인 |
+| DEF-91 | — | 창 좌표와 프레임버퍼 좌표를 섞어 씀. Windows 에서는 배율과 상관없이 두 좌표가 같아(GLFW Win32 에서 창 크기 = 프레임버퍼 크기) 드러나지 않고, macOS Retina · Wayland 에서만 드러남(잠재) | 코드 검토로 확인 |
 
 ### 2-D. 코드로 성립을 확인한 기존 "미검증" 항목
 

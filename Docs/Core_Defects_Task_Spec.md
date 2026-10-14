@@ -1294,7 +1294,7 @@ Vulkan·창·World 를 링크하지 않는 헤더 전용 테스트입니다.
 | DEF-88 | **해결 2026-10-02** · 원래 LOW | 회전 없는 액터의 ROTATION Y 가 `-0.000` 으로 보입니다. 같은 정리 묶음: `addOutlinerRow` 의 낡은 주석 | `syncEulerCache` · `SNumberField` 표시 | 재현 |
 | DEF-89 | **해결 2026-10-02** · 원래 LOW | 빌드 경고 C4505: `uploadCubemapMip` 는 쓰이지 않는 함수입니다(업로드는 영역 배열로 직접 함) | `Renderer.cpp:306` | 전체 재빌드에서 경고는 이것 하나 |
 | DEF-90 | **해결 2026-10-02** · 원래 LOW | 디테일 TRANSFORM 을 접어도 선택을 바꾸면 다시 펼쳐집니다(`expanded(true)` 고정) | `EditorApp::rebuildDetails` | 재현 |
-| DEF-91 | LOW · 잠재 | Slate·휠 우회는 창 좌표를, `inViewport` 는 프레임버퍼로 바꾼 좌표를 씁니다. 100% 배율에서는 같아 드러나지 않습니다 | `handleInput`, `tick` 휠 판정, `mouseToFb` | 코드 확인 |
+| DEF-91 | LOW · 잠재 | Slate·휠 우회는 창 좌표를, `inViewport` 는 프레임버퍼로 바꾼 좌표를 씁니다. Windows 에서는 배율과 상관없이 두 좌표가 같아 드러나지 않고(GLFW Win32 에서 창 크기 = 프레임버퍼 크기), macOS Retina · Wayland 에서만 드러납니다 | `handleInput`, `tick` 휠 판정, `mouseToFb` | 코드 확인 |
 | DEF-92 | **해결 2026-10-02** · 원래 HIGH | 디테일 패널이 대상 액터가 파괴된 뒤에도 한 프레임 더 그 액터와 컴포넌트를 읽습니다(UAF 읽기). 값 접근자가 raw 포인터를 붙잡는데, 패널 리빌드는 다음 tick 의 선택 변경 감지에서야 일어나고 그사이 페인트·디스패치가 돕니다. Stop · Load · 아웃라이너 x 로 선택 액터를 지우거나 게임 코드가 지우면 도달합니다. DEF-76 을 고치다 찾았습니다 | `EditorApp` 의 `onActorDestroyed` 구독(디테일 리빌드 요청 없음), `rebuildDetails` 의 접근자 | 코드 확인(실기에서 Stop · Load · 삭제 뒤 크래시 없음은 확인) |
 | DEF-93 | **해결 2026-10-02** · 원래 MEDIUM | UI 패스의 정점 버퍼가 하나라, 렌더 루프가 지금 슬롯의 펜스만 기다리는 동안 직전 프레임의 UI 패스가 아직 읽는 정점을 덮어씁니다(DEF-40 과 같은 유형). 수정 뒤 독립 검토에서 찾았습니다 | `HSlateRenderer` 의 `vertexBuf_` · `vertexPtr_`, `record` 가 `frameIdx` 를 버림 | 코드 확인 |
 | DEF-94 | **해결 2026-10-03** · 원래 LOW | 탭 하나를 다른 리프로 끌어내면, 그 탭이 활성 탭보다 앞에 있었을 때 활성 탭이 다른 패널로 바뀝니다. 재도킹이 탭을 뺀 뒤 활성 인덱스를 범위로만 맞췄기 때문입니다. 기반 공사(DEF-69)에서 탭 빼기를 공용으로 만들다가 찾았습니다 | `EditorApp::performRedock` 1단계 | 코드 확인 |
