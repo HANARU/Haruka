@@ -282,8 +282,8 @@ graph TD
 
 ### ⚠️ [DEF-08] [HIGH] 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성)
 
-* **위치**: [`main.cpp:L38`](file:///e:/Haruka/src/main.cpp#L38), [`CMakeLists.txt:L186-L191`](file:///e:/Haruka/CMakeLists.txt#L186-L191)
-* **문제점**: `main.cpp:38`이 `GlfwWindow`를 조건 없이 생성합니다. `AndroidWindow`는 `CMakeLists.txt:186-191`에서 컴파일되지만 어디서도 인스턴스화되지 않습니다. 즉 Quest 런타임 진입점이 존재하지 않습니다.
+* **위치**: [`Engine.cpp`](file:///e:/Haruka/src/core/Engine.cpp)의 `Engine::Engine`, [`CMakeLists.txt`](file:///e:/Haruka/CMakeLists.txt)의 `if(ANDROID)` 분기 (2026-10-14 갱신: 부팅 코드가 예전 `main.cpp:38` 에서 `Engine` 클래스로 옮겨졌습니다)
+* **문제점**: `Engine::Engine` 이 `GlfwWindow`를 조건 없이 생성합니다. 헤더 포함만 `#ifndef ANDROID` 로 막혀 있어 안드로이드에서는 컴파일되지 않습니다. `AndroidWindow`는 CMake 의 `if(ANDROID)` 분기에 들어 있지만 어디서도 인스턴스화되지 않고, `IWindow` 의 순수 가상 클립보드 함수 두 개를 구현하지 않아 추상 클래스이기도 합니다(DEF-103). 즉 Quest 런타임 진입점이 존재하지 않습니다.
 * **해결 사양**: `IWindow` 생성을 플랫폼 팩토리 뒤로 옮기고, 안드로이드용 별도 진입점을 두십시오. 이것은 [Layer_Architecture.md](Layer_Architecture.md) 6절 1단계의 첫 항목입니다.
 
 ---
@@ -322,7 +322,7 @@ graph TD
 
 ### ⚠️ [DEF-12] [MEDIUM] `World::tick`이 에디터 Play 상태에서만 실행
 
-* **위치**: [`main.cpp:L115-L119`](file:///e:/Haruka/src/main.cpp#L115-L119)
+* **위치**: [`Engine.cpp`](file:///e:/Haruka/src/core/Engine.cpp)의 `Engine::run` Tick 블록 (2026-10-14 갱신: 예전 `main.cpp:115-119` 에서 옮겨졌습니다)
 * **문제점**: `World::tick`과 `ModuleManager::tickAll`이 에디터가 Play 상태일 때만 돕니다. 따라서 에디터를 걷어낸 런타임 빌드에는 게임 루프가 없습니다.
 * **해결 사양**: 틱 구동 책임을 에디터 상태에서 분리하여 런타임 진입점(DEF-08)이 자체적으로 틱을 돌릴 수 있게 하십시오.
 
