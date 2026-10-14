@@ -6,7 +6,7 @@
 >
 > **[갱신 · 2026-10-04]** §3 판정표와 §4 · §6 의 상태를 2026-10-04 의 두 작업(남은 결함 정리, VR 첫걸음)에 맞췄습니다. 바뀐 항목은 OpenXR 연결 · 두 눈 렌더 · 두 눈 컬링 · 카메라 자세 · VR 입력 · 물리 API · 숫자 칸 단위 · 셰이더 빌드입니다.
 >
-> **[갱신 · 2026-10-14]** §4 의 지점 표기를 줄 번호 대신 파일 · 함수 · 기호 이름으로 바꾸고, 각 줄을 지금 코드와 다시 대조했습니다. §6 0단계의 라이팅 확인 씬을 완료로 고치고, §3 의 Android 행을 `DEF-103` 에 맞췄습니다. 같은 날 자동 인스턴싱(`DEF-16`)과 행 예산 16384, 패스 확장 지점(`DEF-17` · `DEF-18`), 컴포넌트 직렬화(`DEF-22`)를 반영했습니다.
+> **[갱신 · 2026-10-14]** §4 의 지점 표기를 줄 번호 대신 파일 · 함수 · 기호 이름으로 바꾸고, 각 줄을 지금 코드와 다시 대조했습니다. §6 0단계의 라이팅 확인 씬을 완료로 고치고, §3 의 Android 행을 `DEF-103` 에 맞췄습니다. 같은 날 자동 인스턴싱(`DEF-16`)과 행 예산 16384, 패스 확장 지점(`DEF-17` · `DEF-18`), 컴포넌트 직렬화(`DEF-22`), 라이트 선택(`DEF-33`), 상한 설정(`DEF-10`)을 반영했습니다.
 
 ---
 
@@ -129,7 +129,7 @@
 | `HPass`, `Renderer` | **해결 · 2026-10-14 (`DEF-17`).** `IRenderExtension` 이 `HPass` 수명주기에 `create` · `record` 를 더하고, `RenderExtensionRegistry` 가 기본 패스와 확장을 한 목록으로 돌립니다. 예전에는 `HPass`가 의도적으로 `create()`와 `record()`를 제외한 수명주기 전용 인터페이스입니다. 패스 레지스트리가 없고, 다섯 패스(`GeometryPass` · `ShadowPass` · `AOPass` · `BloomPass` · `PostPass`)가 `Renderer`의 구체 멤버로서 생성 · 파괴 · 핫 리로드 · 크기 변경 경로마다 손으로 열거됩니다(2026-10-04 에 `CullPass` 를 지워 여섯에서 다섯이 됨, `DEF-03`). **새 렌더 패스를 Layer 2에서 추가할 수 없었습니다** |
 | `EngineContext` (`IGameModule.hpp`) | **해결 · 2026-10-14 (`DEF-18`).** `EngineContext::render` 로 렌더 확장을 등록 · 해제합니다(렌더러 전체가 아닌 좁은 인터페이스). 예전에는 렌더러 참조가 없어(월드 · 에셋 · 창 · 모듈만) 게임 모듈이 렌더러에 닿을 수 없었습니다 |
 | `CMakeLists.txt` 의 `GLSL_SHADERS` | 셰이더 목록이 파일명으로 하드코딩되어 있습니다. 도메인 셰이더를 드롭인할 수 없습니다. 2026-10-04 사용자 결정으로 목록은 글롭 대신 명시로 두고, 목록 밖 셰이더 파일은 구성 단계에서 경고합니다(`DEF-11`). 그래서 Layer 2 셰이더도 이 목록에 넣어야 합니다 |
-| `kMaxDraws` (`RenderTypes.hpp`), `kMaxBodies` (`PhysicsSystem.cpp`) | `kMaxDraws = 16384`(2026-10-14 에 1024 에서 올림), `kMaxBodies = 4096` 이중 상한. "수천 개 파편"이 물리 쪽 상한에 걸립니다. 2026-10-04 에 상한을 넘긴 메시를 Dropped 통계와 경고로 알리는 진단만 넣었고(`DEF-10`), 상한 설정화는 남았습니다 |
+| `Config/engine.ini` (`EngineSettings.hpp`) | **해결 · 2026-10-14 (`DEF-10`).** 그리기 행(기본 16384) · 라이트(256) · 물리 바디(4096) 상한을 한 설정 파일에서 정하고, 시작할 때 버퍼와 Jolt 를 그 크기로 만듭니다. 예전에는 `kMaxDraws` · `kMaxBodies` 가 렌더러와 물리에 상수로 따로 있어 "수천 개 파편"이 양쪽에 걸렸고, 한쪽만 올리면 다른 쪽에서 잘렸습니다 |
 
 ### 심각 (배관이 없어 기능이 성립하지 않음)
 
@@ -139,17 +139,17 @@
 | `HInputSystem`, `src/xr` | **해결 · 2026-10-04 (`DEF-20`, 헤드셋 확인 전).** XR 모듈이 OpenXR 액션으로 입력을 만들고, `HInputSystem` 이 아날로그 축(`bindAxis` · `axis`) · 컨트롤러 버튼(`bindXrButton`) · 머리와 손 자세(`xr()`)를 내줍니다. 창(`IWindow`)은 키보드 · 마우스만 맡습니다. 예전에는 디지털 입력 전용이라 아날로그 축도 VR 포즈도 없어 RCS 추력 입력을 받을 수 없었습니다 |
 | `CameraComponent` | **해결 · 2026-10-04 (`DEF-21`).** 뷰를 액터의 월드 회전(쿼터니언)과 월드 위치로 만들고, 헤드셋 자세는 카메라의 XR 원점(위치 + 요) 위에 올립니다. 예전에는 yaw/pitch 오일러각으로 뷰를 만들고 `owner->transform.rotation` 을 무시해, 6DOF 자유 자세도 롤도 머리와 몸체의 분리도 불가능했습니다 |
 | `Engine::Engine`, `Engine::run` (`src/core/Engine.cpp`) | `GlfwWindow`를 조건 없이 생성하며 안드로이드에서는 컴파일되지 않습니다(헤더 포함만 `#ifndef ANDROID` 로 막혀 있음). `World::tick`은 에디터 Play 상태에서만 돌아 런타임 빌드에 게임 루프가 없습니다. 예전에는 이 코드가 `main.cpp` 에 있었고, 그 뒤 `Engine` 클래스로 옮겨졌습니다 |
-| `SceneSerializer`, `ComponentRegistry` | **해결 · 2026-10-14 (`DEF-22`).** 컴포넌트를 타입 이름으로 등록하고(`EngineContext::components`), 각 컴포넌트가 자기 값을 이름 붙은 값으로 씁니다(씬 v4 의 COMPONENT 블록). Layer 2 컴포넌트도 등록만 하면 `.hscene` · `.hprefab` 왕복과 에디터 추가가 됩니다. 예전에는 컴포넌트 5종이 `ActorData` 의 구조체 필드로 하드코딩되어 새 컴포넌트가 `.hscene` 왕복을 하지 못했습니다 |
+| `SceneSerializer`, `ComponentRegistry` | **해결 · 2026-10-14 (`DEF-22`).** 컴포넌트를 타입 이름으로 등록하고(`EngineContext::components`), 각 컴포넌트가 자기 값을 이름 붙은 값으로 씁니다(씬 v4 의 COMPONENT 블록). Layer 2 컴포넌트도 등록만 하면 `.hscene` · `.hprefab` 왕복과 에디터 추가가 됩니다. 예전에는 컴포넌트 5종이 `ActorData` 의 구조체 필드로 하드코딩되어 새 컴포넌트가 `.hscene` 왕복을 하지 못했습니다. 액터 회전은 `ROT:`(오일러 각) 옆에 정확한 `QUAT:` 를 함께 써 왕복해도 바뀌지 않습니다(DEF-108) |
 
 ### 보통 (기능은 되나 확장이 막힘)
 
 | 지점 | 문제 |
 |---|---|
-| `FrameUBO` (`shaders/include/haruka_shared.h`) | `FrameUBO`에 `invViewProj`가 없습니다. 레이마칭 배경이나 화면 공간 굴절에 필요합니다. `FrameUBO` 는 2026-10-04 에 `RenderTypes.hpp` 에서 C++ 와 GLSL 이 함께 쓰는 이 헤더로 옮겼습니다(`DEF-14`) |
+| `FrameUBO` (`shaders/include/haruka_shared.h`) | `FrameUBO`에 `invViewProj`가 없습니다. 레이마칭 배경이나 화면 공간 굴절에 필요합니다. 2026-10-14 사용자 결정으로 첫 사용처가 생길 때 넣습니다(`DEF-13` 보류). 그전에는 렌더 확장이 CPU 쪽 눈별 view · proj 를 받아 직접 넘길 수 있습니다. `FrameUBO` 는 2026-10-04 에 `RenderTypes.hpp` 에서 C++ 와 GLSL 이 함께 쓰는 이 헤더로 옮겼습니다(`DEF-14`) |
 | `shaders/include/noise.glsl`, `sdf.glsl` | **해결 · 2026-10-04 (`DEF-11`).** 쓰지 않던 두 파일은 지웠고, 셰이더 include 는 `glslc -MD` 의 depfile 로 추적해 include 파일이 바뀌면 다시 컴파일합니다. 예전에는 두 파일을 어떤 셰이더도 `#include` 하지 않았고, CMake `DEPENDS` 에 include 파일이 없어 쓰기 시작하면 낡은 SPIR-V 를 배포하게 되어 있었습니다 |
 | `PostPass::recordTonemap` | 포스트 푸시 상수(`PostPC`)가 이 함수 안에서 리터럴 값(AO · Bloom 강도, 노출)으로 채우는 고정 구조체입니다. 멀미 억제용 비네팅 반경을 게임 상태에서 넘길 수 없습니다 |
 | `Renderer::init` | `GlfwSwapchain` 을 직접 생성합니다. XR 스왑체인은 2026-10-04 에 `ISwapchain` 구현체 대신 `Renderer::attachXrSwapchain` 으로 이미지를 붙이는 방식으로 넣었습니다(PC OpenXR). 창이 없는 Quest 단독 실행에서 창 스왑체인을 어떻게 뺄지는 Android 이식(`DEF-08`) 때 정합니다 |
-| `Renderer::updateLightSSBO` | 라이트 개수 불일치 자체는 해결되었고(`DEF-24`, 2026-08-25) 상한도 256으로 올렸습니다. 다만 상한에 걸릴 때 **어느 라이트를 살릴지 정하는 정책이 없습니다.** 액터 생성 순서로 앞에서부터 자르므로, Layer 2가 광원을 많이 두면 가까운 조명이 꺼지고 먼 조명이 켜질 수 있습니다(`DEF-33`). 상세는 결함 문서를 참조하십시오 |
+| `Renderer::updateLightSSBO` | **해결 · 2026-10-14 (`DEF-33`).** 어느 눈에도 영향이 없는 점광원 · 스팟을 거르고, 상한(`render.maxLights`)을 넘으면 방향광을 먼저, 나머지는 가까운 순으로 고릅니다(`LightSelection.hpp`). 예전에는 액터 생성 순서로 앞에서부터 잘라, Layer 2가 광원을 많이 두면 가까운 조명이 꺼지고 먼 조명이 켜질 수 있었습니다. 타일드 · 클러스터드 라이팅(`DEF-34`)은 실측 뒤로 보류했습니다 |
 
 ---
 

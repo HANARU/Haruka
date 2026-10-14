@@ -9,13 +9,35 @@
 namespace fs = std::filesystem;
 
 static constexpr uint32_t kMagic   = 0x47415354u; // "GAST"
-static constexpr uint32_t kVersion = 1u;
+// 2: 원본의 크기 · 내용 해시를 함께 기록합니다(DEF-105). 버전 1 캐시는 다시 만듭니다.
+static constexpr uint32_t kVersion = 2u;
+// 머리: magic(4) version(4) mtime(8) size(8) hash(8) meshCount(4)
+static constexpr std::streamoff kMtimeOffset = 8;
 
 static uint64_t getMtime(const std::string& path) {
     std::error_code ec;
     auto ft = fs::last_write_time(path, ec);
     if (ec) return 0;
     return (uint64_t)ft.time_since_epoch().count();
+}
+
+static uint64_t getSize(const std::string& path) {
+    std::error_code ec;
+    const auto n = fs::file_size(path, ec);
+    return ec ? 0 : (uint64_t)n;
+}
+
+// 원본 내용의 FNV-1a 64비트 해시. 수정 시각이 바뀌었을 때만 계산합니다.
+static uint64_t hashFile(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    uint64_t h = 1469598103934665603ull;
+    char buf[1 << 16];
+    while (f) {
+        f.read(buf, sizeof(buf));
+        const std::streamsize n = f.gcount();
+        for (std::streamsize i = 0; i < n; ++i) { h ^= (uint8_t)buf[i]; h *= 1099511628211ull; }
+    }
+    return h;
 }
 
 std::string GassetCache::cachePath(const std::string& srcPath) {
@@ -25,18 +47,38 @@ std::string GassetCache::cachePath(const std::string& srcPath) {
     return oss.str();
 }
 
+// 수정 시각과 크기가 같으면 그대로 씁니다. 수정 시각만 다르면 내용 해시를 비교해, 같으면 캐시를 쓰고 기록한
+// 수정 시각을 새 값으로 고쳐 다음부터는 해시를 다시 계산하지 않습니다. 예전에는 수정 시각만 비교해, 빌드가
+// 에셋을 실행 폴더로 복사하며 시각을 바꿀 때마다 GLTF 를 다시 읽었습니다(DEF-105). Godot 의 가져오기도
+// 수정 시각이 다르면 내용 해시(md5)로 다시 확인합니다.
 bool GassetCache::isValid(const std::string& srcPath) {
     std::string cp = cachePath(srcPath);
     if (!fs::exists(cp)) return false;
-    std::ifstream f(cp, std::ios::binary);
-    if (!f) return false;
-    uint32_t magic = 0, version = 0;
-    uint64_t mtime = 0;
-    f.read(reinterpret_cast<char*>(&magic),   4);
-    f.read(reinterpret_cast<char*>(&version), 4);
-    f.read(reinterpret_cast<char*>(&mtime),   8);
-    if (!f || magic != kMagic || version != kVersion) return false;
-    return mtime == getMtime(srcPath);
+    uint64_t mtime = 0, size = 0, hash = 0;
+    {
+        std::ifstream f(cp, std::ios::binary);
+        if (!f) return false;
+        uint32_t magic = 0, version = 0;
+        f.read(reinterpret_cast<char*>(&magic),   4);
+        f.read(reinterpret_cast<char*>(&version), 4);
+        f.read(reinterpret_cast<char*>(&mtime),   8);
+        f.read(reinterpret_cast<char*>(&size),    8);
+        f.read(reinterpret_cast<char*>(&hash),    8);
+        if (!f || magic != kMagic || version != kVersion) return false;
+    }
+    const uint64_t curSize = getSize(srcPath);
+    if (size != curSize) return false;
+    const uint64_t curMtime = getMtime(srcPath);
+    if (mtime == curMtime) return true;
+    if (hash != hashFile(srcPath)) return false;
+
+    std::fstream rw(cp, std::ios::binary | std::ios::in | std::ios::out);
+    if (rw) {
+        rw.seekp(kMtimeOffset);
+        rw.write(reinterpret_cast<const char*>(&curMtime), 8);
+    }
+    HLOG(LogAsset, Verbose) << "gasset cache kept (same content, new timestamp): " << srcPath;
+    return true;
 }
 
 // ── write helpers ─────────────────────────────────────────────────────────────
@@ -71,6 +113,8 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
         wU32(f, kMagic);
         wU32(f, kVersion);
         wU64(f, getMtime(srcPath));
+        wU64(f, getSize(srcPath));
+        wU64(f, hashFile(srcPath));
         wU32(f, (uint32_t)meshes.size());
 
         for (const auto& m : meshes) {
@@ -134,7 +178,7 @@ std::vector<MeshSourceData> GassetCache::load(const std::string& srcPath) {
     std::ifstream f(cp, std::ios::binary);
     if (!f) throw std::runtime_error("GassetCache: cannot open " + cp);
 
-    rU32(f); rU32(f); rU64(f);          // skip magic, version, mtime
+    rU32(f); rU32(f); rU64(f); rU64(f); rU64(f);   // skip magic, version, mtime, size, hash
     uint32_t meshCount = rU32(f);
 
     std::vector<MeshSourceData> result;

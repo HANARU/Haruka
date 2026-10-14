@@ -8,6 +8,7 @@
 //  - DEF-43: 숫자 칸 드래그가 세터를 프레임마다 불러, 플레이 중 바디를 프레임마다 다시 만들었습니다.
 //  - DEF-81: 마찰·반발·질량을 바꿔도 이미 만든 바디에 반영되지 않았습니다.
 //  - DEF-44: 셰이프·모션을 순번으로 기록했습니다. 이름으로 쓰고 옛 숫자도 읽어야 합니다.
+//  - DEF-107: 두께 10cm 이하 상자 · 크기 0 콜라이더를 만들 때 실패를 확인하지 않아 엔진이 죽었습니다.
 //
 // 실행: build/Release/HarukaPhysicsTest.exe
 
@@ -410,6 +411,57 @@ int main() {
         check(legacy.readField("motion", "2") && legacy.motionType == EMotionType::Kinematic, "옛 순번(2)도 받음");
         check(legacy.readField("mass", "heavy") && legacy.mass == 1.f, "깨진 값은 기본값 유지");
         check(!legacy.readField("bounciness", "1"), "모르는 이름은 false");
+    }
+
+    // ── DEF-107 ───────────────────────────────────────────────────────────────
+    {
+        std::printf("\n-- DEF-107: 얇은 상자 · 크기 0 콜라이더 --\n");
+        // 예전에는 Jolt 기본 모서리 반경(5cm)보다 얇은 상자를 만들지 못했고, 실패한 결과를 그대로 써서
+        // 엔진이 죽었습니다. 이 블록이 끝까지 돌면(죽지 않으면) 실패 처리가 있는 것입니다.
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+
+        Actor* slab = w.spawnActor("Slab");               // 두께 10cm 바닥(윗면 y=0.05)
+        slab->setLocalScale({ 4.f, 0.1f, 4.f });
+        auto* slabRb = slab->addComponent<RigidBodyComponent>();
+        slabRb->motionType = EMotionType::Static;
+
+        Actor* sheet = w.spawnActor("Sheet");             // 두께 1cm 판
+        sheet->setLocalPosition({ 10.f, 0.f, 0.f });
+        sheet->setLocalScale({ 1.f, 0.02f, 1.f });
+        auto* sheetRb = sheet->addComponent<RigidBodyComponent>();
+        sheetRb->motionType = EMotionType::Static;
+
+        Actor* ball = w.spawnActor("Ball");               // 반지름 0.2 구
+        ball->setLocalPosition({ 0.f, 1.f, 0.f });
+        ball->setLocalScale({ 0.4f, 0.4f, 0.4f });
+        auto* ballRb = ball->addComponent<RigidBodyComponent>();
+        ballRb->shape      = EPhysicsShape::Sphere;
+        ballRb->motionType = EMotionType::Dynamic;
+
+        Actor* flat = w.spawnActor("Flat");               // 두께 0: 만들 수 없음
+        flat->setLocalPosition({ -10.f, 0.f, 0.f });
+        flat->setLocalScale({ 1.f, 0.f, 1.f });
+        auto* flatRb = flat->addComponent<RigidBodyComponent>();
+        flatRb->motionType = EMotionType::Static;
+
+        Actor* dot = w.spawnActor("Dot");                 // 반지름 0 구
+        dot->setLocalPosition({ 0.f, 0.f, 10.f });
+        dot->setLocalScale({ 0.f, 0.f, 0.f });
+        auto* dotRb = dot->addComponent<RigidBodyComponent>();
+        dotRb->shape      = EPhysicsShape::Sphere;
+        dotRb->motionType = EMotionType::Dynamic;
+
+        run(ps, 240);   // 4 초
+        check(slabRb->bodyId_ != kNoBody && !slabRb->createFailed_, "두께 10cm 상자에 바디가 생김");
+        check(sheetRb->bodyId_ != kNoBody && !sheetRb->createFailed_, "두께 1cm 상자에 바디가 생김");
+        const float y = ball->transform().position().y;
+        check(std::fabs(y - 0.25f) < 0.02f, "구가 얇은 바닥 위(y=0.25)에 놓임 (y=" + std::to_string(y) + ")");
+        check(flatRb->bodyId_ == kNoBody && flatRb->createFailed_, "두께 0 상자는 바디 없이 실패로 표시");
+        check(dotRb->bodyId_ == kNoBody && dotRb->createFailed_, "반지름 0 구는 바디 없이 실패로 표시");
+        ps.shutdown();
     }
 
     if (g_failed) {

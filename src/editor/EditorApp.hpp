@@ -259,6 +259,8 @@ private:
     bool menuPopupDirty_ = false;
     bool toolbarDirty_   = false;
     bool detailsDirty_   = false;
+    // 컴포넌트 추가 버튼의 줄을 나눌 때 쓴 디테일 폭(4px 양자화, DEF-109). 폭이 바뀌면 다시 나눕니다.
+    int  addCompWidthSig_ = -1;
     void flushChromeRebuilds();
     // 디테일 패널이 지금 보여 주는 액터입니다. 패널의 값 접근자는 이 액터와 그 컴포넌트를
     // raw 포인터로 붙잡으므로, 이 액터가 파괴되면 onActorDestroyed 구독이 리빌드를 요청하고
@@ -384,7 +386,7 @@ private:
 
     // Viewport overlay stats
     struct VpTimings {
-        int fps=0, drawCalls=0, instances=0, culled=0, transparentDraws=0, dropped=0;
+        int fps=0, drawCalls=0, instances=0, culled=0, transparentDraws=0, dropped=0, lights=0, lightsTotal=0;
         float shadowMs=0.f, mainMs=0.f, aoMs=0.f, bloomMs=0.f,
               tonemapMs=0.f, uiMs=0.f, totalMs=0.f;
         // 초당 스왑체인 재생성 횟수입니다. 0 이 아니면 그 자체가 결함입니다.

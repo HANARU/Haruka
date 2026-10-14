@@ -376,6 +376,29 @@ if(NOT ANDROID)
         set_target_properties(HarukaSceneTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 라이트 선택 · 상한 설정 테스트 ---------------------------------------
+    # 화면 밖 라이트 거르기 · 상한에서 고르기(DEF-33)와 Config/engine.ini 읽기(DEF-10)를 화면 없이 검산합니다.
+    add_executable(HarukaLightTest tests/LightSelectionTest.cpp)
+    target_link_libraries(HarukaLightTest PRIVATE glm::glm)
+    target_include_directories(HarukaLightTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaLightTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaLightTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
+    # -- GLTF 캐시 유효성 테스트 ---------------------------------------------
+    # 수정 시각만 바뀐 원본(빌드의 에셋 복사)에는 캐시를 쓰고, 내용이 바뀌면 다시 읽는지(DEF-105) 검산합니다.
+    add_executable(HarukaAssetCacheTest
+        tests/AssetCacheTest.cpp
+        src/assets/GassetCache.cpp
+        src/core/HLog.cpp
+    )
+    target_include_directories(HarukaAssetCacheTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaAssetCacheTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaAssetCacheTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 렌더 확장 지점 테스트 -----------------------------------------------
     # 패스 레지스트리의 수명주기 순서와 지점별 호출을 화면 없이 검산합니다(DEF-17 · 18).
     add_executable(HarukaRenderExtTest tests/RenderExtensionTest.cpp)
@@ -496,4 +519,6 @@ if(NOT ANDROID)
     add_test(NAME draw_batching        COMMAND HarukaBatchTest)
     add_test(NAME render_extensions    COMMAND HarukaRenderExtTest)
     add_test(NAME scene_components     COMMAND HarukaSceneTest)
+    add_test(NAME light_selection      COMMAND HarukaLightTest)
+    add_test(NAME asset_cache          COMMAND HarukaAssetCacheTest)
 endif()

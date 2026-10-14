@@ -14,21 +14,21 @@
 // Renderer/패스/FrameResources가 공유하는 셰이더 계약 타입들.
 
 constexpr int      MAX_FRAMES = 2;
-// 프레임당 transform SSBO 행 수. 카메라에 보이는 불투명·투명 메시와 라이트에만 보이는 그림자
-// 캐스터가 이 예산을 함께 씁니다(카메라 쪽이 먼저). 넘친 메시는 Dropped 통계로 셉니다(DEF-10).
-// 인스턴싱(DEF-16)으로 드로우 수는 줄지만 행은 인스턴스마다 하나라서, 이 값이 곧 한 프레임에 그릴
-// 수 있는 메시 수의 상한입니다. 2026-10-14 에 1024 에서 16384 로 올렸습니다(행 64B, 프레임당 1MB,
-// Zone C). 상한을 설정으로 바꾸는 일은 DEF-10 에 남아 있습니다.
-constexpr uint32_t kMaxDraws  = 16384;
+// 프레임당 transform SSBO 행 수와 라이트 수는 2026-10-14 부터 상수가 아니라 설정입니다(DEF-10).
+// Config/engine.ini 의 render.maxDrawRows(기본 16384) · render.maxLights(기본 256)이고, 렌더러가
+// init 전에 받아(Renderer::setLimits) 버퍼를 그 크기로 만듭니다. 기본값과 범위는 core/EngineSettings.hpp.
+//  - 행: 카메라에 보이는 불투명·투명 메시와 라이트에만 보이는 그림자 캐스터가 함께 씁니다(카메라 쪽이
+//    먼저). 인스턴싱(DEF-16)으로 드로우 수는 줄지만 행은 인스턴스마다 하나라서, 행 수가 곧 한 프레임에
+//    그릴 수 있는 메시 수의 상한입니다. 넘친 메시는 Dropped 통계로 셉니다.
 
-// 라이트 SSBO 슬롯 수.
+// 라이트 SSBO 슬롯 수(위의 render.maxLights)에 대한 예전 설명입니다.
 // 하드웨어 제약이 아니라 **메모리 예산 상한**일 뿐이다. pbr.frag의 lights[]는 크기 없는
 // SSBO이고 디스크립터도 VK_WHOLE_SIZE로 바인딩하므로 셰이더 쪽에는 상한이 없다.
-// 비용은 kMaxLights * sizeof(GpuLight)(64B) * MAX_FRAMES 이므로 256개에 32KB이고,
+// 비용은 render.maxLights * sizeof(GpuLight)(64B) * MAX_FRAMES 이므로 256개에 32KB이고,
 // Zone C(64MB, 실사용 약 0.2MB) 기준으로 무시할 수준이다.
 // 실제 병목은 개수가 아니라 pbr.frag의 픽셀당 루프다. 기기별 실용 상한은 Quest 실기에서
 // 프레임 타임을 측정한 뒤 런타임 설정으로 낮추는 것이 맞고, 이 상수를 조이는 것은 아니다.
-constexpr uint32_t kMaxLights = 256;
+// (예전 constexpr kMaxLights = 256. 지금은 render.maxLights.)
 
 using hgpu::FrameUBO;
 using hgpu::GpuTransform;

@@ -25,6 +25,11 @@ public:
     VkResult present(VkQueue queue, uint32_t imageIndex, VkSemaphore wait) override;
 
     bool needsRecreation() const override { return dirty_ || window_->wasResized(); }
+    bool hasArea() const override {
+        int w = 0, h = 0;
+        window_->getFramebufferSize(w, h);
+        return w > 0 && h > 0;
+    }
 
     const std::vector<VkImage>&     images()     const override { return images_;     }
     const std::vector<VkImageView>& imageViews() const override { return imageViews_; }

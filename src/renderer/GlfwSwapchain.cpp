@@ -148,13 +148,9 @@ void GlfwSwapchain::destroy() {
 }
 
 void GlfwSwapchain::recreate() {
-    // Wait until the window has a non-zero framebuffer (e.g. un-minimized)
-    int w = 0, h = 0;
-    window_->getFramebufferSize(w, h);
-    while (w == 0 || h == 0) {
-        window_->waitEvents();
-        window_->getFramebufferSize(w, h);
-    }
+    // 예전에는 창이 최소화돼 크기가 0 이면 여기서 복원될 때까지 이벤트를 기다렸습니다. 그동안 메인 루프가
+    // 멈춰 최소화한 채 창을 닫으면 엔진이 끝나지 않았습니다(DEF-106). 지금은 Renderer 가 hasArea() 가
+    // 참일 때만 부릅니다.
     destroy();
     create();
     window_->resetResizedFlag();

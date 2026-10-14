@@ -7,6 +7,7 @@
 #include "../core/FrameTimings.hpp"
 #include "RendererLog.hpp"
 #include "DrawBatching.hpp"
+#include "LightSelection.hpp"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
 #define GLM_FORCE_RADIANS
@@ -76,8 +77,42 @@ uint32_t Renderer::updateLightSSBO(World& world) {
     auto* gpuLights = static_cast<GpuLight*>(frames_.lightPtr(frameIdx));
     uint32_t count  = 0;
     shadowCasterSlot_ = -1;                     // 이 프레임의 섀도 캐스터를 재선정
-    for (auto* lc : world.getLights()) {
-        if (count >= kMaxLights) break;
+
+    // 올릴 라이트를 고릅니다(DEF-33, LightSelection.hpp). 어느 눈에도 영향이 없는 점광원 · 스팟은 거르고,
+    // 상한(render.maxLights)을 넘으면 방향광을 먼저, 나머지는 가까운 순으로 고릅니다. 상한 안이면 순서를
+    // 바꾸지 않아 픽셀 합산 순서가 그대로입니다. 예전에는 생성 순서대로 앞에서부터 올리고 상한에서 잘랐습니다.
+    const std::vector<LightComponent*> lights = world.getLights();
+    std::vector<hlight::Candidate> lightCands;
+    lightCands.reserve(lights.size());
+    for (auto* lc : lights) {
+        hlight::Candidate c;
+        c.directional = (lc->lightType == LightType::Directional);
+        c.position    = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
+        c.radius      = std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius);
+        const glm::vec3 col = lc->effectiveColor() * lc->intensity;
+        c.brightness  = std::max({ col.r, col.g, col.b });
+        lightCands.push_back(c);
+    }
+    std::array<std::array<FrustumPlane, 6>, kMaxViews> lightViewPlanes{};
+    glm::vec3 eyeCenter(0.f);
+    if (hasCamera_) {
+        for (uint32_t i = 0; i < viewCount_; ++i) {
+            lightViewPlanes[i] = extractFrustumPlanes(views_[i].proj * views_[i].view);
+            eyeCenter += views_[i].pos;
+        }
+        eyeCenter /= (float)viewCount_;
+    }
+    const hlight::Result chosen = hlight::select(lightCands, hasCamera_ ? lightViewPlanes.data() : nullptr,
+                                                 hasCamera_ ? viewCount_ : 0, eyeCenter, maxLights_);
+    if (chosen.overBudget && !lightBudgetWarned_) {
+        lightBudgetWarned_ = true;
+        HLOG(LogRenderer, Warning) << "Light budget render.maxLights=" << maxLights_ << " exceeded: "
+            << chosen.overBudget << " visible light(s) were dropped, keeping directional lights and the nearest ones"
+            << " (warned once; raise render.maxLights in Config/engine.ini)";
+    }
+
+    for (uint32_t li : chosen.selected) {
+        LightComponent* lc = lights[li];
         const uint32_t slot = count;
         GpuLight& gl = gpuLights[count++];
         glm::vec3 col = lc->effectiveColor() * lc->intensity;   // 색온도 틴트 포함
@@ -111,6 +146,8 @@ uint32_t Renderer::updateLightSSBO(World& world) {
                 0.f, 0.f);
         }
     }
+    frameStats_.lights      = count;
+    frameStats_.lightsTotal = (uint32_t)lights.size();
     return count;   // 실제로 업로드한 수. updateUBO가 이 값을 그대로 쓴다.
 }
 
@@ -260,7 +297,7 @@ void Renderer::buildDrawCommands(World& world,
     // 같은 지오메트리 · 머티리얼의 불투명 메시는 연속된 행을 받아 드로우 하나(instanceCount = N)가
     // 됩니다. 카메라 쪽이 예산을 먼저 쓰고, 라이트에만 보이는 캐스터는 남은 행만 씁니다(불변식: 라이트
     // 전용 행은 섀도맵에만 영향). 넘친 메시는 Dropped 로 셉니다(DEF-10).
-    const hbatch::Result batch = hbatch::build(cands, kMaxDraws, hasCam);
+    const hbatch::Result batch = hbatch::build(cands, maxDrawRows_, hasCam);
 
     // 3) 행마다 트랜스폼과 머티리얼을 기록합니다. 행 번호와 push 순서가 1:1이므로 materialRowsOut[row]
     // 가 곧 그 행의 머티리얼입니다. 섀도 전용 행에도 기록해 materialForRow 의 범위 계약을 지킵니다.
@@ -286,9 +323,9 @@ void Renderer::buildDrawCommands(World& world,
     frameStats_.transparentDraws = (uint32_t)transpOut.size();
     if ((batch.droppedCam || batch.droppedShadow) && !dropWarned_) {
         dropWarned_ = true;
-        HLOG(LogRenderer, Warning) << "Draw row budget kMaxDraws=" << kMaxDraws << " exceeded: "
+        HLOG(LogRenderer, Warning) << "Draw row budget render.maxDrawRows=" << maxDrawRows_ << " exceeded: "
             << batch.droppedCam << " visible mesh(es) and " << batch.droppedShadow
-            << " shadow-only caster(s) were not drawn (warned once; see the Dropped stat)";
+            << " shadow-only caster(s) were not drawn (warned once; see the Dropped stat, raise render.maxDrawRows in Config/engine.ini)";
     }
 }
 
@@ -426,6 +463,11 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
 
 bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     const bool xrFrame = (xr != nullptr) && xrActive_;
+    // 데스크톱 창이 최소화되면(표면 크기 0) 스왑체인 이미지를 받을 수 없습니다. 데스크톱 화면은 건너뛰고,
+    // XR 프레임이면 두 눈만 그려 헤드셋은 계속 보이게 합니다(DEF-106). UE · Godot 도 최소화한 창은 그리지
+    // 않고 루프는 계속 돌립니다.
+    const bool desktop = swapchain_->hasArea();
+    if (!desktop && !xrFrame) return false;
     auto& ft = gFrameTimings();
     ScopedCpuTimer timerWhole(ft.drawFrame);
     const uint32_t fi = frameIdx;
@@ -473,27 +515,29 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     // ── Acquire swapchain image ───────────────────────────────────────────────
     // Pre-check: avoid acquiring into a stale swapchain, which would leave
     // semImageAvail_ signaled with no corresponding submit to consume it.
-    if (swapchain_->needsRecreation()) { recreateSwapChain(); return false; }
+    uint32_t imgIdx = 0;
+    VkResult res    = VK_SUCCESS;
+    if (desktop) {
+        if (swapchain_->needsRecreation()) { recreateSwapChain(); return false; }
 
-    uint32_t imgIdx;
-    VkResult res;
-    {
-        ScopedCpuTimer t(ft.acquire);
-        res = swapchain_->acquireNextImage(frames_.imageAvailSem(fi), imgIdx);
-    }
-    // VK_ERROR_OUT_OF_DATE_KHR: acquire failed, semaphore NOT signaled — safe to recreate now.
-    // VK_SUBOPTIMAL_KHR: image acquired, semaphore IS signaled — finish the frame, recreate after present.
-    if (res == VK_ERROR_OUT_OF_DATE_KHR) { recreateSwapChain(); return false; }
-    if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
-        throw std::runtime_error("Failed to acquire swapchain image!");
+        {
+            ScopedCpuTimer t(ft.acquire);
+            res = swapchain_->acquireNextImage(frames_.imageAvailSem(fi), imgIdx);
+        }
+        // VK_ERROR_OUT_OF_DATE_KHR: acquire failed, semaphore NOT signaled — safe to recreate now.
+        // VK_SUBOPTIMAL_KHR: image acquired, semaphore IS signaled — finish the frame, recreate after present.
+        if (res == VK_ERROR_OUT_OF_DATE_KHR) { recreateSwapChain(); return false; }
+        if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR)
+            throw std::runtime_error("Failed to acquire swapchain image!");
 
-    auto& imagesInFlight = frames_.imagesInFlight();
-    {
-        ScopedCpuTimer t(ft.imgFence);
-        if (imagesInFlight[imgIdx] != VK_NULL_HANDLE)
-            vkWaitForFences(device, 1, &imagesInFlight[imgIdx], VK_TRUE, UINT64_MAX);
+        auto& imagesInFlight = frames_.imagesInFlight();
+        {
+            ScopedCpuTimer t(ft.imgFence);
+            if (imagesInFlight[imgIdx] != VK_NULL_HANDLE)
+                vkWaitForFences(device, 1, &imagesInFlight[imgIdx], VK_TRUE, UINT64_MAX);
+        }
+        imagesInFlight[imgIdx] = frameFence;
     }
-    imagesInFlight[imgIdx] = frameFence;
     vkResetFences(device, 1, &frameFence);
 
     // ── Extract: World를 읽는 유일한 구간 — 이후 기록은 view만 소비 ──────────
@@ -709,7 +753,8 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     }
     // XR: 왼쪽 눈(중간 타깃에 남아 있음)을 에디터 뷰포트에 한 번 더 톤매핑해 비춥니다. 뷰포트 비율에
     // 맞춰 가운데를 잘라 읽습니다(UE 의 기본 관전 화면과 같은 방식). 이 시간은 UI 칸에 들어갑니다.
-    if (xrFrame) {
+    // 데스크톱 창이 최소화돼 있으면 비출 곳이 없습니다.
+    if (xrFrame && desktop) {
         PostPass::Output mirror;
         mirror.fb       = post_.swapFramebuffer(imgIdx);
         mirror.format   = rc_.swapFormat;
@@ -757,7 +802,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     // UI 정점 버퍼는 fi 슬롯별입니다. 슬롯 수가 어긋나면 두 프레임이 한 버퍼를 같이 씁니다(DEF-93).
     static_assert(HSlateRenderer::kFramesInFlight == MAX_FRAMES,
                   "HSlateRenderer vertex buffers must match MAX_FRAMES");
-    if (uiRenderer_) {
+    if (uiRenderer_ && desktop) {
         ScopedCpuTimer t(ft.uiRecord);
         uiRenderer_->record(cmd, imgIdx, swapchain_->extent(), fi);
     }
@@ -775,12 +820,13 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSemaphore waitSem   = frames_.imageAvailSem(fi);
     VkSemaphore signalSem = frames_.renderDoneSem(imgIdx);
+    // 데스크톱을 건너뛴 XR 프레임은 받은 스왑체인 이미지가 없어 기다릴 것도 알릴 것도 없습니다.
     VkSubmitInfo si{};
     si.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    si.waitSemaphoreCount   = 1; si.pWaitSemaphores   = &waitSem;
+    si.waitSemaphoreCount   = desktop ? 1u : 0u; si.pWaitSemaphores   = &waitSem;
     si.pWaitDstStageMask    = &waitStage;
     si.commandBufferCount   = 1; si.pCommandBuffers   = &cmd;
-    si.signalSemaphoreCount = 1; si.pSignalSemaphores = &signalSem;
+    si.signalSemaphoreCount = desktop ? 1u : 0u; si.pSignalSemaphores = &signalSem;
     {
         ScopedCpuTimer t(ft.submit);
         if (vkQueueSubmit(graphicsQueue, 1, &si, frameFence) != VK_SUCCESS)
@@ -788,7 +834,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     }
 
     // ── Present ───────────────────────────────────────────────────────────────
-    {
+    if (desktop) {
         ScopedCpuTimer t(ft.present);
         res = swapchain_->present(presentQueue, imgIdx, signalSem);
         if (swapchain_->needsRecreation()) recreateSwapChain();

@@ -17,6 +17,8 @@ public:
     void createLayouts(RenderContext& rc);
 
     // 버퍼 + 디스크립터 풀/세트 + 커맨드 버퍼 + 동기화 객체
+    // 프레임별 transform · 라이트 버퍼의 슬롯 수(DEF-10). createPerFrame 전에 정합니다.
+    void setCapacities(uint32_t drawRows, uint32_t lights) { drawRows_ = drawRows; lights_ = lights; }
     void createPerFrame(RenderContext& rc, uint32_t swapImageCount);
 
     // 씬 세트(set 1) 할당 + 섀도/IBL 뷰 와이어링 — 해당 뷰 생성 후 1회 호출
@@ -54,6 +56,8 @@ public:
 
 private:
     RenderContext* rc_ = nullptr;
+    uint32_t drawRows_ = 16384;   // setCapacities
+    uint32_t lights_   = 256;
 
     VkDescriptorSetLayout frameLayout_       = VK_NULL_HANDLE;  // set 0: FrameUBO
     VkDescriptorSetLayout sceneLayout_       = VK_NULL_HANDLE;  // set 1: shadow+IBL+lights

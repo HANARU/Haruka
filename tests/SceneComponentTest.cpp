@@ -3,10 +3,12 @@
 // 이 테스트가 존재하는 이유: 씬 파일은 사용자 데이터라, 저장 · 불러오기에서 값 하나가 조용히 바뀌거나
 // 컴포넌트가 사라지면 화면에서 알아채기 어렵고 되돌릴 수도 없습니다. 이름 붙은 값의 왕복, 순서 무관,
 // 모르는 이름 · 깨진 값 처리, 등록되지 않은 타입의 원문 보존, 옛 이름(별칭)을 직접 확인합니다.
+// 회전은 ROT(오일러 각)만으로는 왕복할 때마다 마지막 자리가 흔들려, 정확한 QUAT 를 함께 씁니다(DEF-108).
 //
 // 실행: build/Release/HarukaSceneTest.exe
 
 #include "../src/assets/ComponentSerializer.hpp"
+#include "../src/assets/TransformText.hpp"
 #include "../src/components/CameraComponent.hpp"
 #include "../src/components/LightComponent.hpp"
 #include "../src/core/Actor.hpp"
@@ -194,6 +196,68 @@ int main() {
               "벡터는 정확히 세 값");
         check(fieldparse::toBool("true", b) && b && !fieldparse::toBool("2", b), "참거짓은 0 · 1 · true · false 만");
         check(!fieldparse::toInt("", i) && i == 9, "빈 값은 실패");
+    }
+
+    std::printf("\n== 8. 회전 왕복(DEF-108) ==\n");
+    {
+        // 씬 저장과 같은 순서로 글자를 만들고 다시 읽습니다: ROT 는 floatToText, QUAT 는 quatText.
+        struct Text { std::string rot, quat; };
+        auto write = [](const glm::quat& q) {
+            const glm::vec3 e = transform_text::quatToEulerDeg(q);
+            return Text{ floatToText(e.x) + " " + floatToText(e.y) + " " + floatToText(e.z),
+                         transform_text::quatText(q) };
+        };
+        auto read = [](const Text& t, bool useQuat) {
+            std::istringstream ss(t.rot);
+            glm::vec3 e{};
+            ss >> e.x >> e.y >> e.z;
+            glm::quat q{ 1.f, 0.f, 0.f, 0.f };
+            const bool has = useQuat && transform_text::parseQuat(t.quat, q);
+            return transform_text::resolve(e, has, q);
+        };
+        auto same = [](const glm::quat& a, const glm::quat& b) {
+            return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w &&
+                   std::signbit(a.x) == std::signbit(b.x) && std::signbit(a.w) == std::signbit(b.w);
+        };
+
+        // 무작위 회전 2000개(고정 씨앗). QUAT 를 쓰면 다섯 번 왕복해도 비트까지 같아야 합니다.
+        uint32_t seed = 12345u;
+        auto rnd = [&seed]() { seed = seed * 1664525u + 1013904223u; return (float)(seed >> 8) / 16777216.f * 2.f - 1.f; };
+        int exact = 0, legacyDrift = 0;
+        const int kCount = 2000;
+        for (int n = 0; n < kCount; ++n) {
+            const glm::quat q0 = glm::normalize(glm::quat(rnd(), rnd(), rnd(), rnd()));
+            glm::quat q = q0;
+            for (int k = 0; k < 5; ++k) q = read(write(q), true);
+            if (same(q, q0)) ++exact;
+            if (!same(read(write(q0), false), q0)) ++legacyDrift;
+        }
+        check(exact == kCount, "QUAT 가 있으면 다섯 번 왕복해도 그대로 (" + std::to_string(exact) + "/2000)");
+        check(legacyDrift > 0, "ROT 만으로는 값이 바뀌는 회전이 있음(이 검사의 전제, " +
+                               std::to_string(legacyDrift) + "/2000)");
+
+        // 이번 점검에서 본 예: X 축 -10°. 예전에는 Play → Stop 마다 -9.999999 → -9.999998.
+        const glm::quat cam = glm::quat(glm::radians(glm::vec3(-10.f, 0.f, 0.f)));
+        Text t1 = write(cam);
+        Text t2 = write(read(t1, true));
+        Text t3 = write(read(t2, true));
+        check(t1.rot == t2.rot && t2.rot == t3.rot && t1.quat == t3.quat, "-10° 회전의 글자가 왕복마다 같음 (" + t1.rot + ")");
+
+        // 사람이 ROT 만 고치면 ROT 를 따릅니다. QUAT 가 남아 있어도 무시되지 않습니다.
+        Text edited = t1;
+        edited.rot = "0 45 0";
+        const glm::quat want = glm::quat(glm::radians(glm::vec3(0.f, 45.f, 0.f)));
+        check(same(read(edited, true), want), "ROT 를 손으로 고치면 ROT 가 이김");
+        {
+            std::istringstream ss(t1.rot);
+            glm::vec3 e{};
+            ss >> e.x >> e.y >> e.z;
+            check(same(read(t1, false), glm::quat(glm::radians(e))), "QUAT 가 없으면 ROT 로 읽음(옛 파일)");
+        }
+        glm::quat junk{ 1.f, 0.f, 0.f, 0.f };
+        check(!transform_text::parseQuat("0.1 0.2 x 1", junk) && junk.w == 1.f && !transform_text::parseQuat("0 0 0", junk),
+              "깨진 QUAT 는 읽지 않음(ROT 로 대체)");
+        check(transform_text::quatText(glm::quat(1.f, -0.f, 0.f, 0.5f)) == "-0 0 0.5 1", "-0 성분은 -0 으로 씀");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

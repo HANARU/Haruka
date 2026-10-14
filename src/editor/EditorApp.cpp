@@ -254,6 +254,8 @@ void EditorApp::tick(float dt) {
         vpTimings_.totalMs         = t.totalMs;
         vpTimings_.drawCalls       = s.drawCalls;
         vpTimings_.instances       = s.instances;
+        vpTimings_.lights          = s.lights;
+        vpTimings_.lightsTotal     = s.lightsTotal;
         vpTimings_.culled          = s.culled;
         vpTimings_.transparentDraws= s.transparentDraws;
         vpTimings_.dropped         = s.dropped;
@@ -375,6 +377,11 @@ void EditorApp::tick(float dt) {
         const glm::ivec2 sig{ (int)(lg.size.x / 4.f), (int)(lg.size.y / 4.f) };
         if (sig != outlinerLayoutSig_) outlinerDirty_ = true;
     }
+
+    // 디테일 패널 폭이 바뀌면 컴포넌트 추가 버튼의 줄 나눔을 다시 합니다(DEF-109, 4px 양자화).
+    if (detailsScroll_ && ctx_.selected && addCompWidthSig_ >= 0 &&
+        (int)(detailsScroll_->cachedGeometry().size.x / 4.f) != addCompWidthSig_)
+        detailsDirty_ = true;
 
     if (actorCount != prevActorCount_ || selChanged || renamChanged || outlinerDirty_) {
         if (outlinerPressHeld_) {
@@ -2533,15 +2540,33 @@ void EditorApp::rebuildDetails() {
     detailsList_->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(8.f));
     secHeader("ADD COMPONENT");
 
-    auto addRow = HNew(SHorizontalBox);
-    addRow->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(8.f));
-
+    // 버튼은 패널 폭에 맞춰 여러 줄로 나눕니다(DEF-109). 예전에는 한 줄에 늘어놓아, 기본 창 크기에서 컴포넌트가
+    // 없는 액터는 + Audio 가 잘리고 + RigidBody 는 보이지 않아 누를 수 없었습니다. 폭은 직전 배치의 디테일 스크롤
+    // 상자 폭에서 스크롤 막대 자리를 늘 뺀 값이라, 막대가 생기고 없어져도 줄 나눔이 바뀌지 않습니다. 패널 폭이
+    // 바뀌면 tick 이 디테일을 다시 만듭니다(addCompWidthSig_).
+    const float addLeft  = s(8.f), addGap = s(4.f);
+    const float addAvail = detailsScroll_ ? detailsScroll_->cachedGeometry().size.x - s(14.f) : 0.f;
+    addCompWidthSig_ = detailsScroll_ ? (int)(detailsScroll_->cachedGeometry().size.x / 4.f) : -1;
+    std::shared_ptr<SHorizontalBox> addRow;
+    float addX = 0.f;
+    auto flushAddRow = [&] {
+        if (addRow) detailsList_->addSlot(addRow, SVerticalBox::ESizeRule::Fixed, s(34.f));
+        addRow.reset();
+    };
     auto addCompBtn = [&](const std::string& label, std::function<void()> fn) {
+        const float w = layoutTextWidth(label, s(12.f)) + s(7.f) * 2.f;
+        if (addRow && addAvail > 0.f && addX + w > addAvail) flushAddRow();
+        if (!addRow) {
+            addRow = HNew(SHorizontalBox);
+            addRow->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, addLeft);
+            addX = addLeft;
+        }
         addRow->addSlot(
             textButton(label, 12.f, kAccent, {7.f, 4.f},
                        {0.14f, 0.14f, 0.18f, 1.f}, {0.26f, 0.26f, 0.32f, 1.f}, std::move(fn)),
             SHorizontalBox::ESizeRule::Auto);
-        addRow->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f));
+        addRow->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, addGap);
+        addX += w + addGap;
     };
 
     // 컴포넌트 추가 버튼은 ComponentRegistry 에 등록된 타입에서 만듭니다(DEF-22). 예전에는 다섯 종을 손으로
@@ -2555,8 +2580,8 @@ void EditorApp::rebuildDetails() {
             detailsDirty_ = true;
         });
     }
-
-    detailsList_->addSlot(addRow, SVerticalBox::ESizeRule::Fixed, s(34.f));
+    if (!addRow) addRow = HNew(SHorizontalBox);   // 붙일 것이 없어도 예전처럼 빈 줄 하나를 둡니다
+    flushAddRow();
 
     // ── Save as Prefab ────────────────────────────────────────────────────────
     if (sel) {
@@ -3278,9 +3303,11 @@ void EditorApp::rebuildBottomPanel() {
         // 그 드로우들이 그리는 메시 수. 같은 지오메트리 · 머티리얼은 드로우 하나로 묶입니다(DEF-16).
         addStat("Instances",  AttrStr([this]{ return std::to_string(vpTimings_.instances); }));
         addStat("Culled",     AttrStr([this]{ return std::to_string(vpTimings_.culled); }));
-        // 보이지만 행 예산(kMaxDraws)이 차서 못 그린 메시 수. 0 이 아니면 씬이 상한을 넘은 것입니다.
+        // 보이지만 행 예산(render.maxDrawRows)이 차서 못 그린 메시 수. 0 이 아니면 씬이 상한을 넘은 것입니다.
         addStat("Dropped",    AttrStr([this]{ return std::to_string(vpTimings_.dropped); }));
         addStat("Transparent",AttrStr([this]{ return std::to_string(vpTimings_.transparentDraws); }));
+        // 올린 라이트 / 켜진 라이트. 차이는 어느 눈에도 영향이 없어 거른 것과 상한을 넘어 뺀 것입니다(DEF-33).
+        addStat("Lights",     AttrStr([this]{ return std::to_string(vpTimings_.lights) + " / " + std::to_string(vpTimings_.lightsTotal); }));
         addStat("Shadow",     AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.shadowMs); return std::string(b); }));
         addStat("Main Pass",  AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.mainMs);   return std::string(b); }));
         addStat("AO",         AttrStr([this]{ char b[32]; snprintf(b,32,"%.3f ms",vpTimings_.aoMs);      return std::string(b); }));

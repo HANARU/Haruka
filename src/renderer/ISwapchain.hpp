@@ -16,8 +16,12 @@ public:
     virtual void create()   = 0;
     // Release all swapchain resources. Safe to call multiple times (idempotent).
     virtual void destroy()  = 0;
-    // destroy() + create() with optional "wait for non-zero extent" logic.
+    // destroy() + create(). Call only while hasArea() is true.
     virtual void recreate() = 0;
+
+    // False while the surface has no area (desktop window minimized). Nothing can be acquired or
+    // created then; the renderer skips the desktop frame instead of waiting (DEF-106).
+    virtual bool hasArea() const = 0;
 
     // Signal semaphore when the acquired image is ready to render into.
     // Returns VK_ERROR_OUT_OF_DATE_KHR when recreation is needed.

@@ -47,12 +47,15 @@ void Renderer::cleanupSwapChain() {
 }
 
 void Renderer::recreateSwapChain() {
+    // 최소화 중(표면 크기 0)에는 만들 수 없습니다. 다시 만들 일은 표시해 둔 채 남아, 복원된 뒤 첫
+    // 프레임이 합니다(DEF-106).
+    if (!swapchain_->hasArea()) return;
     // 이 함수가 매 프레임 도는지가 프레임 시간 조사의 1 순위 가설입니다.
     // vkDeviceWaitIdle 과 리소스 전량 재생성이라 어떤 GPU 타임스탬프에도 잡히지 않습니다.
     ++gFrameTimings().recreateCount;
     vkDeviceWaitIdle(device);
     cleanupSwapChain();   // destroys dependent renderer resources + swapchain
-    swapchain_->recreate(); // waits for non-zero extent, then rebuilds swapchain
+    swapchain_->recreate();
 
     rc_.extent     = swapchain_->extent();
     rc_.swapFormat = swapchain_->format();

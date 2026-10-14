@@ -89,8 +89,10 @@ struct JoltImpl {
     std::unique_ptr<JPH::PhysicsSystem>     physics;
 };
 
-static constexpr JPH::uint kMaxBodies      = 4096;
 static constexpr JPH::uint kBodyMutexes    = 0;     // auto-detect
+// 콜라이더 반지름 · 반변의 최솟값(스케일 적용 뒤). 이보다 작으면 바디를 만들지 않고 알립니다(DEF-107).
+// 0 크기 상자는 Jolt 가 만들어 주지만 질량 · 관성이 0 이 되어 동적 바디에서 NaN 이 납니다.
+static constexpr float     kMinColliderHalf = 1e-4f;
 static constexpr JPH::uint kMaxBodyPairs   = 65536;
 static constexpr JPH::uint kMaxConstraints = 2048;
 
@@ -109,7 +111,7 @@ void PhysicsSystem::startup() {
         (int)std::thread::hardware_concurrency() - 1);
 
     impl_->physics = std::make_unique<JPH::PhysicsSystem>();
-    impl_->physics->Init(kMaxBodies, kBodyMutexes, kMaxBodyPairs, kMaxConstraints,
+    impl_->physics->Init((JPH::uint)maxBodies_, kBodyMutexes, kMaxBodyPairs, kMaxConstraints,
         impl_->bpLayerInterface, impl_->objVsBpFilter, impl_->objLayerPairFilter);
     impl_->physics->SetGravity(JPH::Vec3(0.f, -9.81f, 0.f));
 
@@ -372,29 +374,49 @@ void PhysicsSystem::tick(float dt) {
             return maxSc;
         };
 
-        JPH::ShapeRefC shape;
+        // 셰이프를 만들지 못하면(크기 0 등) 경고하고 바디를 만들지 않습니다. Jolt 의 ShapeResult 는
+        // 오류 문자열과 결과를 같은 자리에 담아, 실패한 결과를 Get() 으로 꺼내면 쓰레기 포인터가 나옵니다.
+        // 예전에는 확인하지 않아 두께 10cm 인 상자만 있어도 Play 에서 엔진이 죽었습니다(DEF-107).
+        JPH::ShapeSettings::ShapeResult made;
+        const char* tooSmall = nullptr;
         switch (rb->shape) {
             case EPhysicsShape::Sphere: {
                 const float r = rb->halfExtent.x * uniformScale("Sphere");
-                shape = JPH::SphereShapeSettings(r).Create().Get();
+                if (!(r >= kMinColliderHalf)) { tooSmall = "radius"; break; }
+                made = JPH::SphereShapeSettings(r).Create();
                 break;
             }
             case EPhysicsShape::Capsule: {
                 // halfExtent.y 는 원통부만의 반높이이고 halfExtent.x 가 반지름입니다.
                 // 총 높이는 2*(halfExtent.y + halfExtent.x) 입니다 (규칙 P3).
                 const float s = uniformScale("Capsule");
-                shape = JPH::CapsuleShapeSettings(rb->halfExtent.y * s,
-                                                  rb->halfExtent.x * s).Create().Get();
+                if (!(rb->halfExtent.x * s >= kMinColliderHalf) || !(rb->halfExtent.y * s >= 0.f)) {
+                    tooSmall = "radius"; break;
+                }
+                made = JPH::CapsuleShapeSettings(rb->halfExtent.y * s,
+                                                 rb->halfExtent.x * s).Create();
                 break;
             }
-            default:
-                shape = JPH::BoxShapeSettings(
-                    JPH::Vec3(rb->halfExtent.x * sc.x,
-                              rb->halfExtent.y * sc.y,
-                              rb->halfExtent.z * sc.z)).Create().Get();
+            default: {
+                const JPH::Vec3 he(rb->halfExtent.x * sc.x, rb->halfExtent.y * sc.y, rb->halfExtent.z * sc.z);
+                if (!(he.ReduceMin() >= kMinColliderHalf)) { tooSmall = "half extent"; break; }
+                // 상자의 모서리 반경(convex radius)은 가장 짧은 반변보다 클 수 없습니다. Jolt 기본값 5cm 를
+                // 그대로 쓰면 두께 10cm 이하의 바닥 · 벽은 만들어지지 않았습니다. Godot 의 Jolt 모듈과 UE Chaos 처럼
+                // 얇은 쪽에 맞춰 줄입니다(반변의 절반까지). 두께 10cm 이상이면 예전과 같습니다.
+                const float cr = std::min(JPH::cDefaultConvexRadius, 0.5f * he.ReduceMin());
+                made = JPH::BoxShapeSettings(he, cr).Create();
                 break;
+            }
         }
-        if (!shape) { rb->createFailed_ = true; continue; }
+        if (tooSmall || made.HasError() || made.Get() == nullptr) {
+            rb->createFailed_ = true;
+            HLOG(LogPhysics, Warning) << "'" << a->name << "': collider could not be created ("
+                << (tooSmall ? std::string(tooSmall) + " below 0.1 mm after scale"
+                             : made.HasError() ? std::string(made.GetError().c_str()) : std::string("no shape"))
+                << "); the actor has no physics body until its size is fixed";
+            continue;
+        }
+        const JPH::ShapeRefC shape = made.Get();
 
         // Motion type mapping
         JPH::EMotionType mt = JPH::EMotionType::Static;
@@ -426,7 +448,7 @@ void PhysicsSystem::tick(float dt) {
 
         JPH::Body* body = bi.CreateBody(bcs);
         if (!body) {
-            // 바디 상한(kMaxBodies)에 닿으면 Jolt 는 아무 말 없이 null 을 돌려줍니다. 실패를
+            // 바디 상한(physics.maxBodies)에 닿으면 Jolt 는 아무 말 없이 null 을 돌려줍니다. 실패를
             // 표시해 매 틱 셰이프를 다시 만들며 재시도하지 않게 하고(Play·속성 편집 때 다시
             // 시도), 처음 한 번 알립니다(DEF-10).
             rb->createFailed_ = true;
@@ -434,7 +456,7 @@ void PhysicsSystem::tick(float dt) {
                 bodyCapWarned_ = true;
                 HLOG(LogPhysics, Warning) << "Body creation failed for '" << a->name << "' ("
                     << impl_->physics->GetNumBodies() << "/" << impl_->physics->GetMaxBodies()
-                    << " bodies). Further failures are not logged; raise kMaxBodies for larger scenes";
+                    << " bodies). Further failures are not logged; raise physics.maxBodies in Config/engine.ini";
             }
             continue;
         }

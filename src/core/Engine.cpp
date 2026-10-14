@@ -12,6 +12,10 @@
 #include "HLog.hpp"
 #include "IGameModule.hpp"
 #include "ComponentRegistry.hpp"
+#include "EngineSettings.hpp"
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include "../components/CoreComponents.hpp"
 #include "FrameTimings.hpp"
 
@@ -26,6 +30,26 @@
 #include <chrono>
 #include <cmath>
 #include <string>
+#include <thread>
+
+// 상한 설정을 읽습니다(DEF-10). 파일이 없으면 기본값으로 만들어 두어 찾아서 고칠 수 있게 합니다.
+static EngineLimits loadEngineLimits(const char* path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
+        std::ofstream out(path, std::ios::binary);
+        out << engine_settings::defaultText();
+        HLOG(LogEngine, Log) << "Created " << path << " with the default limits";
+        return EngineLimits{};
+    }
+    std::stringstream ss;
+    ss << in.rdbuf();
+    std::vector<std::string> messages;
+    const EngineLimits l = engine_settings::parse(ss.str(), messages);
+    for (const auto& m : messages) HLOG(LogEngine, Warning) << path << ": " << m;
+    return l;
+}
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 // 코어 서비스는 초기화 순서가 고정입니다: 창 → 렌더러(창 필요) → 에셋(렌더러 필요).
@@ -34,6 +58,11 @@ Engine::Engine(const EngineOptions& options) {
     // 기본 컴포넌트 타입을 씬을 읽기 전에 등록합니다(DEF-22). 씬 · 프리팹의 COMPONENT 블록과 에디터의
     // 컴포넌트 추가 버튼이 이 등록을 씁니다.
     registerCoreComponents();
+
+    // 그리기 행 · 라이트 · 물리 바디 상한(DEF-10). 렌더러 · 물리를 만들기 전에 읽습니다.
+    const EngineLimits limits = loadEngineLimits("Config/engine.ini");
+    HLOG(LogEngine, Log) << "Limits: draw rows " << limits.maxDrawRows << ", lights " << limits.maxLights
+                         << ", physics bodies " << limits.maxBodies << " (Config/engine.ini)";
 
     auto win = std::make_unique<GlfwWindow>(1600, 900, "Haruka Engine");
     win->init();
@@ -47,6 +76,7 @@ Engine::Engine(const EngineOptions& options) {
     }
 
     renderer_ = std::make_unique<Renderer>();
+    renderer_->setLimits(limits.maxDrawRows, limits.maxLights);
     renderer_->init(window_.get(), xr_.get());
     if (xr_) {
         if (renderer_->xrCompatible() &&
@@ -71,7 +101,9 @@ Engine::Engine(const EngineOptions& options) {
     // 동적 모듈: 표준 세트(Audio, Physics). 각자 월드를 참조합니다.
     auto* audio   = modules_.registerModule(std::make_unique<AudioSystem>());
     audio->setWorld(&world_);
-    auto* physics = modules_.registerModule(std::make_unique<PhysicsSystem>());
+    auto physicsModule = std::make_unique<PhysicsSystem>();
+    physicsModule->setMaxBodies(limits.maxBodies);   // startup 이 등록 안에서 일어나므로 그 전에
+    auto* physics = modules_.registerModule(std::move(physicsModule));
     physics->setWorld(&world_);
     physics_ = physics;
 
@@ -144,6 +176,12 @@ void Engine::run() {
             ScopedCpuTimer t(gFrameTimings().pollEvents);
             win.pollEvents();
         }
+        // 창이 최소화되면(프레임버퍼 0x0) 에디터 UI 는 쉬고 시뮬레이션 · 소리 · XR 은 계속 돕니다. 예전에는
+        // 스왑체인을 다시 만들며 복원될 때까지 루프 전체가 멈춰, 최소화한 채 창을 닫으면 엔진이 끝나지 않았습니다
+        // (DEF-106). 에디터의 배치 계산은 0 크기를 다루지 않으므로 부르지 않습니다.
+        int fbW = 0, fbH = 0;
+        win.getFramebufferSize(fbW, fbH);
+        const bool minimized = (fbW <= 0 || fbH <= 0);
 
         // ── XR 프레임 시작 ─────────────────────────────────────────────────
         // 세션이 돌면 xrWaitFrame 이 헤드셋 주사율에 맞춰 기다리므로 루프 속도를 헤드셋이 정합니다.
@@ -216,7 +254,7 @@ void Engine::run() {
         // ── Tick ──────────────────────────────────────────────────────────
         {
             ScopedCpuTimer t(gFrameTimings().tick);
-            editor.tick(dt);
+            if (!minimized) editor.tick(dt);
             HInputSystem::get().update(dt, win, editor.isTextInputActive());
             if (editor.isPlaying()) {
                 world.tick(dt);
@@ -226,7 +264,7 @@ void Engine::run() {
         }
 
         // ── Editor input (단축키는 EditorApp::tickShortcuts에서 처리) ──────
-        {
+        if (!minimized) {
             ScopedCpuTimer t(gFrameTimings().handleInput);
             editor.handleInput(mx, my, lmb, lmbJustUp, 0.f,
                                (float)winW, (float)winH);
@@ -262,5 +300,10 @@ void Engine::run() {
         // 크게 벌어지면 그 차이가 곧 "어느 계측기에도 잡히지 않는 시간"입니다.
         gFrameTimings().loopTotal.add(std::chrono::duration<float, std::milli>(
                                           Clock::now() - loopT0).count());
+
+        // 최소화 중에는 그리지 않아 루프가 코어 하나를 다 쓰므로 쉬어 갑니다(약 60Hz, dt 는 실제 시간이라
+        // 시뮬레이션 속도는 그대로). 헤드셋이 돌면 xrWaitFrame 이 속도를 정하므로 쉬지 않습니다.
+        if (minimized && !xrBegun)
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
     }
 }

@@ -107,9 +107,9 @@ void FrameResources::createPerFrame(RenderContext& rc, uint32_t swapImageCount) 
     for (int i = 0; i < MAX_FRAMES; i++) {
         mkBuf(uboBufs_[i], uboAllocs_[i], uboSize,
               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, "UBO buffer");
-        mkBuf(transformBufs_[i], transformAllocs_[i], kMaxDraws * sizeof(GpuTransform),
+        mkBuf(transformBufs_[i], transformAllocs_[i], drawRows_ * sizeof(GpuTransform),
               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, "transform SSBO");
-        mkBuf(lightBufs_[i], lightAllocs_[i], kMaxLights * sizeof(GpuLight),
+        mkBuf(lightBufs_[i], lightAllocs_[i], lights_ * sizeof(GpuLight),
               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, "light SSBO");
     }
 

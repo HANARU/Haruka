@@ -5,7 +5,8 @@
 
 // Binary cache for pre-processed GLTF mesh data.
 // Eliminates repeated GLTF parsing on startup.
-// Format: magic(u32) version(u32) srcMtime(u64) meshCount(u32) [mesh entries...]
+// Format: magic(u32) version(u32) srcMtime(u64) srcSize(u64) srcHash(u64) meshCount(u32) [mesh entries...]
+// Valid when size matches and either mtime or the content hash matches (DEF-105).
 // Cache files live in assets/cache/ keyed by hash of source path.
 
 namespace GassetCache {

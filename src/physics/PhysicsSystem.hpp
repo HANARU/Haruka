@@ -25,6 +25,10 @@ public:
     // 물리 스텝 주기(Hz). 기본 60 입니다. XR 세션 동안 엔진이 헤드셋 주사율에 맞춥니다(Godot 의 XR
     // 문서 권고). 스텝이 화면보다 느리면 어떤 프레임은 스텝이 없어 움직이는 물체가 떨려 보입니다.
     void  setStepRate(float hz);
+
+    // 바디 상한(DEF-10, Config/engine.ini 의 physics.maxBodies). startup 전에 부릅니다(모듈 등록 전).
+    void     setMaxBodies(uint32_t n) { maxBodies_ = n; }
+    uint32_t maxBodies() const        { return maxBodies_; }
     float stepRate() const { return 1.f / step_; }
 
     // RigidBodyComponent 가 부릅니다(파괴·비활성·재생성). 지운 자리 주변의 잠든 바디를
@@ -86,6 +90,8 @@ public:
 private:
     std::unique_ptr<JoltImpl> impl_;
     World* world_ = nullptr;
+
+    uint32_t maxBodies_ = 4096;   // setMaxBodies(DEF-10)
 
     // Fixed-step accumulator
     float accumulator_ = 0.f;

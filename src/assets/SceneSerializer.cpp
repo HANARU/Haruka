@@ -1,6 +1,7 @@
 #include "SceneSerializer.hpp"
 #include "../core/SceneLog.hpp"
 #include "../core/TextFloat.hpp"
+#include "TransformText.hpp"
 #include "AssetManager.hpp"
 #include "../core/Actor.hpp"
 #include "../core/World.hpp"
@@ -17,10 +18,6 @@
 #include <algorithm>
 #include <unordered_map>
 
-static glm::vec3 quatToEulerDeg(const glm::quat& q) {
-    return glm::degrees(glm::vec3(glm::pitch(q), glm::yaw(q), glm::roll(q)));
-}
-
 static glm::vec3 parseVec3(const std::string& s) {
     std::istringstream ss(s); glm::vec3 v{};
     ss >> v.x >> v.y >> v.z; return v;
@@ -33,10 +30,13 @@ static std::string F(float v) { return floatToText(v); }
 // ── writeActor ─────────────────────────────────────────────────────────────────
 void SceneSerializer::writeActor(std::ostream& os, const Actor* actor, int parentIndex) {
     const glm::vec3 pos   = actor->transform().position();
-    const glm::vec3 euler = quatToEulerDeg(actor->transform().rotation());
+    const glm::quat rot   = actor->transform().rotation();
+    const glm::vec3 euler = transform_text::quatToEulerDeg(rot);
     const glm::vec3 scale = actor->transform().scale();
     os << "POS:"   << F(pos.x)   << " " << F(pos.y)   << " " << F(pos.z)   << "\n";
     os << "ROT:"   << F(euler.x) << " " << F(euler.y) << " " << F(euler.z) << "\n";
+    // 회전의 정확한 값입니다. ROT 를 손으로 고치면 ROT 가 이깁니다(TransformText.hpp, DEF-108).
+    os << "QUAT:"  << transform_text::quatText(rot) << "\n";
     os << "SCALE:" << F(scale.x) << " " << F(scale.y) << " " << F(scale.z) << "\n";
     os << "ACTIVE:" << (actor->activeSelf() ? 1 : 0) << "\n";
     if (parentIndex >= 0)
@@ -59,6 +59,7 @@ void SceneSerializer::parseActorLine(const std::string& line, ActorData& d) {
 bool SceneSerializer::parseLine(const std::string& key, const std::string& val, ActorData& d) {
     if      (key == "POS")        { d.pos   = parseVec3(val); }
     else if (key == "ROT")        { d.euler = parseVec3(val); }
+    else if (key == "QUAT")       { d.hasQuat = transform_text::parseQuat(val, d.quat); }
     else if (key == "SCALE")      { d.scale = parseVec3(val); }
     else if (key == "ACTIVE")     { std::istringstream ss(val); ss >> d.active; }
     else if (key == "PARENT")     { std::istringstream ss(val); ss >> d.parentIndex; }
@@ -145,7 +146,7 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
     // (부모는 여기서 알 수 없어 호출자가 나중에 attachTo 로 배선합니다.)
     a->setActive(d.active != 0);
     a->setLocalPosition(d.pos);
-    a->setLocalRotation(glm::quat(glm::radians(d.euler)));
+    a->setLocalRotation(transform_text::resolve(d.euler, d.hasQuat, d.quat));
     a->setLocalScale(d.scale);
 
     if (d.hasPrim) {

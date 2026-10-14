@@ -31,6 +31,7 @@
 #include "../memory/HarukaAllocator.hpp"
 #include "VulkanDeviceHooks.hpp"
 #include "RenderExtensionRegistry.hpp"
+#include "../core/EngineSettings.hpp"
 
 class World;
 class HSlateRenderer;
@@ -74,14 +75,19 @@ public:
         float shadowMs=0.f, mainMs=0.f, aoMs=0.f, bloomMs=0.f,
               tonemapMs=0.f, uiMs=0.f, totalMs=0.f;
     };
-    // dropped = 카메라에 보이지만 행 예산(kMaxDraws)이 차서 그리지 못한 메시 수. culled 와 따로
+    // dropped = 카메라에 보이지만 행 예산(render.maxDrawRows)이 차서 그리지 못한 메시 수. culled 와 따로
     // 셉니다. 예전에는 조용히 잘린 메시가 culled 에 섞여 보였습니다(DEF-10).
     // drawCalls 는 눈 하나가 내는 불투명 드로우 수이고, instances 는 그 드로우들이 그리는 메시 수입니다.
     // 같은 지오메트리 · 머티리얼의 메시는 드로우 하나로 묶이므로(DEF-16) drawCalls <= instances 입니다.
-    struct FrameStats  { uint32_t drawCalls=0, instances=0, culled=0, transparentDraws=0, dropped=0; };
+    // lights 는 이번 프레임에 올린 라이트 수, lightsTotal 은 켜진 라이트 수입니다. 그 차이는 어느 눈에도 영향이
+    // 없어 거른 것과 상한을 넘어 뺀 것입니다(DEF-33).
+    struct FrameStats  { uint32_t drawCalls=0, instances=0, culled=0, transparentDraws=0, dropped=0,
+                         lights=0, lightsTotal=0; };
 
     // deviceHooks 가 있으면 Vulkan 인스턴스 · 장치를 그쪽(OpenXR)에 맡깁니다. 헤드셋이 고른 GPU 가
     // 창에 그릴 수 없으면 직접 고르고 xrCompatible() 이 false 가 됩니다.
+    // 그리기 행 · 라이트 상한(DEF-10, Config/engine.ini). init 전에 부릅니다. 부르지 않으면 기본값입니다.
+    void setLimits(uint32_t maxDrawRows, uint32_t maxLights) { maxDrawRows_ = maxDrawRows; maxLights_ = maxLights; }
     void init(IWindow* window, IVulkanDeviceHooks* deviceHooks = nullptr);
     void cleanup();
     // xr 이 있으면 두 눈을 XR 스왑체인의 두 층에 그리고, 에디터 뷰포트에는 왼쪽 눈을 비춥니다.
@@ -216,7 +222,10 @@ private:
     // 방향입니다(DEF-28). 액터마다 한 번만 경고합니다.
     MaterialHandle*              errorMaterial_ = nullptr;
     std::unordered_set<uint64_t> noMaterialWarned_;
-    bool                         dropWarned_    = false;   // kMaxDraws 초과 경고(한 번)
+    bool                         dropWarned_    = false;   // 행 예산 초과 경고(한 번)
+    bool                         lightBudgetWarned_ = false;   // 라이트 상한 초과 경고(한 번, DEF-33)
+    uint32_t                     maxDrawRows_   = EngineLimits{}.maxDrawRows;   // setLimits(DEF-10)
+    uint32_t                     maxLights_     = EngineLimits{}.maxLights;
 
     // FFR(고정 포비티드 렌더링) 멤버는 지웠습니다. 선언만 있고 쓰이지 않았고, OpenXR 에서는
     // 런타임이 밀도 맵 이미지를 주는 구조라 모양이 맞지 않습니다(DEF-09 조사). Quest 이식 때 새로 둡니다.
@@ -329,7 +338,7 @@ private:
 
     // Per-frame logic (extractRenderView 내부에서만 호출)
     // 라이트 개수는 updateLightSSBO가 실제로 채운 값을 반환하고 updateUBO가 그것을 받는다.
-    // 양쪽이 각자 세면 kMaxLights에서 잘린 실제 개수와 UBO가 알려주는 개수가 어긋나,
+    // 양쪽이 각자 세면 라이트 상한(render.maxLights)에서 잘린 실제 개수와 UBO가 알려주는 개수가 어긋나,
     // pbr.frag가 SSBO 범위 밖을 읽는다. 계산 지점을 하나로 두는 것이 이 구조의 요점이다.
     void     updateUBO(World& world, uint32_t lightCount);
     uint32_t updateLightSSBO(World& world);   // 실제로 업로드한 라이트 수를 반환

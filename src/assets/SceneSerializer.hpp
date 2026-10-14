@@ -5,6 +5,7 @@
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include "../geometry/PrimitiveDesc.hpp"
 #include "../audio/AudioAttenuation.hpp"
@@ -29,6 +30,9 @@ public:
     struct ActorData {
         std::string name;
         glm::vec3   pos{}, euler{}, scale{1.f};
+        // QUAT: 줄(회전의 정확한 값, DEF-108). 없거나 ROT 를 손으로 고쳤으면 euler 를 씁니다.
+        glm::quat   quat{ 1.f, 0.f, 0.f, 0.f };
+        bool        hasQuat     = false;
         int         active      = 1;   // 액터 activeSelf (기본 활성)
         int         parentIndex = -1;  // 직렬화 순서상 부모 인덱스, 부모 없으면 -1
         // v4 의 COMPONENT 블록들(DEF-22).

@@ -129,6 +129,7 @@ void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
     createAllPipelines();
 
     // 프레임별 버퍼/디스크립터/커맨드/동기화 (Zone C)
+    frames_.setCapacities(maxDrawRows_, maxLights_);   // DEF-10
     frames_.createPerFrame(rc_, (uint32_t)swapchain_->imageCount());
     createTimestampPool();
 
