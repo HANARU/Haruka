@@ -25,6 +25,10 @@ public:
     const char*           typeName()   const override { return "CameraComponent"; }
     std::vector<PropDesc> buildProps()       override;
 
+    // 직렬화 (DEF-22). 이름은 멤버 이름을 따릅니다.
+    void writeFields(ComponentFieldWriter& w) const override;
+    bool readField(const std::string& key, const std::string& value) override;
+
     // 카메라의 자세는 액터의 월드 회전과 월드 위치가 정합니다(DEF-21). 예전에는 컴포넌트의
     // yaw/pitch 로 방향을 만들고 액터의 회전과 부모를 무시해서, 롤을 줄 수 없었고 씬 카메라의
     // 방향을 정하거나 저장할 수 없었습니다(DEF-102). 렌더(viewMatrix), 피킹, 오디오 청취자가

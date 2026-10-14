@@ -1,5 +1,6 @@
 #include "CameraComponent.hpp"
 #include "../core/Actor.hpp"
+#include "../core/ComponentFields.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 
@@ -69,4 +70,24 @@ glm::quat CameraComponent::yawPitchRotation(float yaw, float pitch) {
 std::vector<PropDesc> CameraComponent::buildProps() {
     auto* p = this;
     return { CAMERA_PROPS(p) };
+}
+
+// ── 직렬화 (DEF-22) ─────────────────────────────────────────────────────────────
+// 방향은 액터 회전이라(DEF-21) 액터의 ROT 로 저장되고, 여기서는 투영 값만 씁니다.
+void CameraComponent::writeFields(ComponentFieldWriter& w) const {
+    w.f("fovY",    fovY);
+    w.f("zNear",   zNear);
+    w.f("zFar",    zFar);
+    w.b("primary", primary);
+}
+
+bool CameraComponent::readField(const std::string& key, const std::string& value) {
+    bool ok = true;
+    if      (key == "fovY")    ok = fieldparse::toFloat(value, fovY);
+    else if (key == "zNear")   ok = fieldparse::toFloat(value, zNear);
+    else if (key == "zFar")    ok = fieldparse::toFloat(value, zFar);
+    else if (key == "primary") ok = fieldparse::toBool (value, primary);
+    else return false;
+    if (!ok) reportBadField(key, value);
+    return true;
 }

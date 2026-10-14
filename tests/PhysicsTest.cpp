@@ -15,6 +15,7 @@
 #include "../src/core/Actor.hpp"
 #include "../src/components/RigidBodyComponent.hpp"
 #include "../src/physics/PhysicsSystem.hpp"
+#include "../src/core/ComponentFields.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -384,6 +385,31 @@ int main() {
         ps.overlapSphere({ 0.f, 3.f, 0.f }, 0.1f, found);
         check(found.empty(), "공중의 구는 아무것과도 겹치지 않음");
         ps.shutdown();
+    }
+
+    // ── 직렬화(DEF-22): 이름 붙은 값의 왕복 ─────────────────────────────────────
+    {
+        std::printf("\n-- DEF-22: RigidBody 값이 이름으로 왕복 --\n");
+        RigidBodyComponent src;
+        src.shape = EPhysicsShape::Capsule; src.motionType = EMotionType::Kinematic;
+        src.friction = 0.125f; src.restitution = 0.75f; src.mass = 12.5f; src.halfExtent = { 0.3f, 0.9f, 0.3f };
+        ComponentFieldWriter w;
+        src.writeFields(w);
+        RigidBodyComponent dst;
+        bool allKnown = true;
+        for (const auto& kv : w.fields()) allKnown = allKnown && dst.readField(kv.first, kv.second);
+        check(allKnown, "쓴 이름을 모두 다시 읽음");
+        check(dst.shape == EPhysicsShape::Capsule && dst.motionType == EMotionType::Kinematic &&
+              dst.friction == 0.125f && dst.restitution == 0.75f && dst.mass == 12.5f &&
+              dst.halfExtent.x == 0.3f && dst.halfExtent.y == 0.9f && dst.halfExtent.z == 0.3f,
+              "셰이프 · 모션 · 마찰 · 반발 · 질량 · 크기가 그대로");
+        bool named = false;
+        for (const auto& kv : w.fields()) if (kv.first == "shape") named = (kv.second == "capsule");
+        check(named, "셰이프는 이름(capsule)으로 씀");
+        RigidBodyComponent legacy;
+        check(legacy.readField("motion", "2") && legacy.motionType == EMotionType::Kinematic, "옛 순번(2)도 받음");
+        check(legacy.readField("mass", "heavy") && legacy.mass == 1.f, "깨진 값은 기본값 유지");
+        check(!legacy.readField("bounciness", "1"), "모르는 이름은 false");
     }
 
     if (g_failed) {

@@ -1,4 +1,5 @@
 #include "EditorApp.hpp"
+#include "../core/ComponentRegistry.hpp"
 #include "../core/FrameTimings.hpp"
 #include "EditorCommands.hpp"
 #include "../renderer/Renderer.hpp"
@@ -2543,31 +2544,17 @@ void EditorApp::rebuildDetails() {
         addRow->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f));
     };
 
-    if (!sel->getComponent<LightComponent>())
-        addCompBtn("+ Light", [this, sel]{
-            sel->addComponent<LightComponent>();
+    // 컴포넌트 추가 버튼은 ComponentRegistry 에 등록된 타입에서 만듭니다(DEF-22). 예전에는 다섯 종을 손으로
+    // 나열해, Layer 2 컴포넌트는 에디터에서 붙일 수 없었습니다. 순서는 등록 순서이고, 이미 붙어 있는 타입과
+    // 버튼 라벨이 없는 타입은 건너뜁니다.
+    for (const auto& entry : ComponentRegistry::get().entries()) {
+        if (entry.editorLabel.empty() || entry.find(*sel)) continue;
+        auto add = entry.add;
+        addCompBtn("+ " + entry.editorLabel, [this, sel, add]{
+            add(*sel);
             detailsDirty_ = true;
         });
-    if (!sel->getComponent<CameraComponent>())
-        addCompBtn("+ Camera", [this, sel]{
-            sel->addComponent<CameraComponent>();
-            detailsDirty_ = true;
-        });
-    if (!sel->getComponent<StaticMeshComponent>())
-        addCompBtn("+ Mesh", [this, sel]{
-            sel->addComponent<StaticMeshComponent>();
-            detailsDirty_ = true;
-        });
-    if (!sel->getComponent<AudioComponent>())
-        addCompBtn("+ Audio", [this, sel]{
-            sel->addComponent<AudioComponent>();
-            detailsDirty_ = true;
-        });
-    if (!sel->getComponent<RigidBodyComponent>())
-        addCompBtn("+ RigidBody", [this, sel]{
-            sel->addComponent<RigidBodyComponent>();
-            detailsDirty_ = true;
-        });
+    }
 
     detailsList_->addSlot(addRow, SVerticalBox::ESizeRule::Fixed, s(34.f));
 

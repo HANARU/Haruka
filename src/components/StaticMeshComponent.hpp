@@ -42,4 +42,13 @@ public:
     const char*           typeName()     const override { return "StaticMeshComponent"; }
     std::vector<PropDesc> buildProps()         override;
     std::string           readOnlyInfo() const override;
+
+    // 직렬화 (DEF-22). 메시는 절차 도형(prim · primMaterial)과 파일 메시(model · meshIndex) 중 하나로만
+    // 씁니다. transparent 도 씁니다(DEF-101: 예전에는 저장되지 않아 불러올 때 에셋 값으로 돌아감).
+    void writeFields(ComponentFieldWriter& w) const override;
+    bool readField(const std::string& key, const std::string& value) override;
+    void onFieldsLoaded(const ComponentLoadContext& ctx) override;   // 메시 · 머티리얼을 불러옴
+
+private:
+    bool transparentLoaded_ = false;   // 파일에 transparent 가 있었는지(없으면 에셋 값을 씀)
 };

@@ -14,7 +14,7 @@ void PrefabManager::save(const Actor* actor, const std::string& path) {
     std::ofstream f(path);
     if (!f) { HLOG(LogAsset, Error) << "Prefab cannot write: " << path; return; }
 
-    f << "# Haruka Prefab v1\n";
+    f << "# Haruka Prefab v2\n";   // v2: 컴포넌트를 COMPONENT 블록으로(DEF-22). v1 도 읽습니다
     f << "NAME:" << actor->name << "\n";
     SceneSerializer::writeActor(f, actor);
     HLOG(LogAsset, Log) << "Prefab saved: " << path;
@@ -31,13 +31,8 @@ Actor* PrefabManager::spawn(const std::string& path, World& world, AssetManager&
         // 남아 PRIM 값과 파일 경로가 조용히 어긋납니다.
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.empty() || line[0] == '#') continue;
-        auto colon = line.find(':');
-        if (colon == std::string::npos) continue;
-        std::string key = line.substr(0, colon);
-        std::string val = line.substr(colon + 1);
-
-        if (key == "NAME") data.name = val;
-        else               SceneSerializer::parseLine(key, val, data);
+        if (line.rfind("NAME:", 0) == 0 && !data.components.open()) data.name = line.substr(5);
+        else SceneSerializer::parseActorLine(line, data);
     }
 
     Actor* a = SceneSerializer::spawn(data, world, assets);

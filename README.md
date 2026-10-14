@@ -4,7 +4,7 @@ Vulkan 1.4 기반 C++20 게임 엔진. 렌더러, GPU 메모리 할당자, UI �
 
 장기 목표는 VR입니다. PC OpenXR 연결(`--xr`, Quest Link 등 PC VR 런타임)이 들어 있지만 아직 헤드셋에서 확인하지 않았습니다. 자세한 내용은 [알려진 한계](#알려진-한계)를 보십시오.
 
-소스는 `src/` 기준 `.cpp`/`.hpp` 123 파일 17,954 줄, 셰이더는 GLSL 21 파일 774 줄입니다. 릴리스·태그 없음, CI 없음, 자동 테스트 11건.
+소스는 `src/` 기준 `.cpp`/`.hpp` 123 파일 17,954 줄, 셰이더는 GLSL 21 파일 774 줄입니다. 릴리스·태그 없음, CI 없음, 자동 테스트 12건.
 
 ## 지금 동작하는 것
 
@@ -65,7 +65,7 @@ cd build
 ctest -C Release
 ```
 
-11건입니다: `geometry_conventions`(절차 도형 규약), `actor_lifecycle`(Actor 활성 · 컴포넌트 생명주기 · 카메라 자세), `command_stack_purge`, `log_category`, `audio_system`, `slate_input`(UI 입력 · 숫자 칸), `physics_lifecycle`(물리 바디 생명주기 · 물리 API), `stereo_views`(눈별 투영 · 두 눈 컬링), `xr_input`(VR 입력), `draw_batching`(자동 인스턴싱 묶기 · 행 배정), `render_extensions`(패스 레지스트리 · 렌더 확장 지점 순서). 외부 테스트 프레임워크 없이 자체 `check()`로 만든 콘솔 실행 파일이고, 창을 띄우지 않아 그래픽 디바이스 없이 돕니다.
+12건입니다: `geometry_conventions`(절차 도형 규약), `actor_lifecycle`(Actor 활성 · 컴포넌트 생명주기 · 카메라 자세), `command_stack_purge`, `log_category`, `audio_system`, `slate_input`(UI 입력 · 숫자 칸), `physics_lifecycle`(물리 바디 생명주기 · 물리 API), `stereo_views`(눈별 투영 · 두 눈 컬링), `xr_input`(VR 입력), `draw_batching`(자동 인스턴싱 묶기 · 행 배정), `render_extensions`(패스 레지스트리 · 렌더 확장 지점 순서), `scene_components`(컴포넌트 타입 등록 · 씬 v4 값 왕복). 외부 테스트 프레임워크 없이 자체 `check()`로 만든 콘솔 실행 파일이고, 창을 띄우지 않아 그래픽 디바이스 없이 돕니다.
 
 ## 저장소 구조
 
@@ -131,7 +131,7 @@ Docs/          설계 · 결함 · 결정 기록 (색인: Docs/README.md)
 - 셰이더 핫 리로드는 GLSL이 아니라 실행 파일 옆 `shaders` 디렉터리의 `.spv` 변경을 감시합니다(재빌드로 `.spv`가 갱신될 때 동작). 감시 구현은 `ReadDirectoryChangesW` 기반 Windows 전용입니다.
 
 **품질 관리**
-- 자동 테스트는 위 11건이고 렌더러의 GPU 경로 · 메모리 할당자에는 없습니다(렌더러는 픽셀 비교 캡처로 확인). CI 설정도 없습니다.
+- 자동 테스트는 위 12건이고 렌더러의 GPU 경로 · 메모리 할당자에는 없습니다(렌더러는 픽셀 비교 캡처로 확인). CI 설정도 없습니다.
 - 결함 대장(`Docs/Core_Defects_Task_Spec.md`) 요약 매트릭스 기준 41건 중 14건 해결, 27건 미해결이며 HIGH 다수가 남아 있습니다. 다만 이 수치는 **문서 기준**이며 매트릭스가 코드보다 뒤처진 사례가 실재합니다(DEF-07은 미해결로 표기되어 있으나 실제로는 구독 코드가 있습니다). 이 저장소에서는 체크박스보다 코드 확인이 우선입니다.
 - 추적되는 에셋은 `assets/models/model.glb` 하나뿐이고, 의존성 중 stb만 `GIT_TAG master`로 고정되지 않아 구성 시점에 따라 내려받는 소스가 달라질 수 있습니다.
 

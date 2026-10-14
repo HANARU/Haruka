@@ -1,6 +1,8 @@
 #include "LightComponent.hpp"
 #include "../core/Actor.hpp"
 #include "../core/Reflect.hpp"
+#include "../core/ComponentFields.hpp"
+#include "../core/SceneLog.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -87,4 +89,64 @@ glm::vec3 LightComponent::worldDirection() const {
 
 glm::vec3 LightComponent::effectiveColor() const {
     return useTemperature ? color * kelvinToRGB(temperatureK) : color;
+}
+
+// ── 직렬화 (DEF-22) ─────────────────────────────────────────────────────────────
+// 종류는 이름으로 씁니다(순번이면 값을 중간에 끼울 때 옛 씬이 다른 종류로 읽힘). 숫자도 받습니다.
+static const char* lightTypeName(LightType t) {
+    switch (t) {
+        case LightType::Point: return "point";
+        case LightType::Spot:  return "spot";
+        default:               return "directional";
+    }
+}
+
+static bool lightTypeFromText(const std::string& s, LightType& out) {
+    if (s == "directional") { out = LightType::Directional; return true; }
+    if (s == "point")       { out = LightType::Point;       return true; }
+    if (s == "spot")        { out = LightType::Spot;        return true; }
+    int v = -1;
+    if (fieldparse::toInt(s, v) && v >= 0 && v <= 2) { out = static_cast<LightType>(v); return true; }
+    return false;
+}
+
+void LightComponent::writeFields(ComponentFieldWriter& w) const {
+    w.s ("type",              lightTypeName(lightType));
+    w.v3("color",             color);
+    w.f ("intensity",         intensity);
+    w.f ("attenuationRadius", attenuationRadius);
+    w.f ("innerConeAngle",    innerConeAngle);
+    w.f ("outerConeAngle",    outerConeAngle);
+    w.v3("direction",         direction);
+    w.b ("useTemperature",    useTemperature);
+    w.f ("temperatureK",      temperatureK);
+    w.b ("castShadows",       castShadows);
+}
+
+bool LightComponent::readField(const std::string& key, const std::string& value) {
+    bool ok = true;
+    if      (key == "type")              ok = lightTypeFromText(value, lightType);
+    else if (key == "color")             ok = fieldparse::toVec3 (value, color);
+    else if (key == "intensity")         ok = fieldparse::toFloat(value, intensity);
+    else if (key == "attenuationRadius") ok = fieldparse::toFloat(value, attenuationRadius);
+    else if (key == "innerConeAngle")    ok = fieldparse::toFloat(value, innerConeAngle);
+    else if (key == "outerConeAngle")    ok = fieldparse::toFloat(value, outerConeAngle);
+    else if (key == "direction")         ok = fieldparse::toVec3 (value, direction);
+    else if (key == "useTemperature")    ok = fieldparse::toBool (value, useTemperature);
+    else if (key == "temperatureK")      ok = fieldparse::toFloat(value, temperatureK);
+    else if (key == "castShadows")       ok = fieldparse::toBool (value, castShadows);
+    else return false;
+    if (!ok) reportBadField(key, value);
+    return true;
+}
+
+// 반경은 0 보다 커야 합니다(DEF-35). Point · Spot 에서 0 이하(또는 NaN)가 들어오면 최솟값으로 고치고
+// 알립니다. Directional 은 반경을 쓰지 않으므로 조용히 고칩니다.
+void LightComponent::onFieldsLoaded(const ComponentLoadContext& /*ctx*/) {
+    if (attenuationRadius >= kMinAttenuationRadius) return;
+    if (lightType != LightType::Directional)
+        HLOG(LogScene, Warning) << "Light on '" << (owner ? owner->name : std::string("?"))
+            << "' has attenuation radius " << attenuationRadius << "; clamped to "
+            << kMinAttenuationRadius << " m";
+    attenuationRadius = kMinAttenuationRadius;
 }

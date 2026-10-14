@@ -30,6 +30,9 @@ public:
     void onTransformCommitted() override;   // 스케일이 바뀌었으면 재생성, 아니면 바디를 옮김
 
     const char*           typeName()     const override { return "RigidBodyComponent"; }
+    // 직렬화 (DEF-22). 이름은 멤버 이름을 따릅니다.
+    void writeFields(ComponentFieldWriter& w) const override;
+    bool readField(const std::string& key, const std::string& value) override;
     std::vector<PropDesc> buildProps()         override;
 
     // ── 물리 API (DEF-19) ─────────────────────────────────────────────────────

@@ -32,6 +32,9 @@ public:
     bool editorIcon(glm::vec4& c) const override { c = {0.3f, 0.85f, 0.4f, 1.f}; return true; }
 
     const char*           typeName()     const override { return "AudioComponent"; }
+    // 직렬화 (DEF-22). 이름은 멤버 이름을 따릅니다.
+    void writeFields(ComponentFieldWriter& w) const override;
+    bool readField(const std::string& key, const std::string& value) override;
     std::vector<PropDesc> buildProps()         override;
     std::string           readOnlyInfo() const override;
 

@@ -64,4 +64,9 @@ public:
 
     const char*           typeName()   const override { return "LightComponent"; }
     std::vector<PropDesc> buildProps()       override;
+
+    // 직렬화 (DEF-22). 이름은 멤버 이름을 따릅니다.
+    void writeFields(ComponentFieldWriter& w) const override;
+    bool readField(const std::string& key, const std::string& value) override;
+    void onFieldsLoaded(const ComponentLoadContext& ctx) override;   // 반경 최솟값(DEF-35)
 };

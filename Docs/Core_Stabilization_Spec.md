@@ -420,7 +420,14 @@ graph TD
 * **문제점**: `CameraComponent::viewMatrix`가 yaw/pitch 오일러각으로 뷰를 만들고 `owner->transform.rotation`을 무시하며, `worldPosition()`이 아니라 `owner->transform.position`을 씁니다. 6DOF 자유 자세도, 롤도, 머리와 몸체의 분리도 불가능합니다.
 * **해결 사양**: 뷰 행렬을 쿼터니언 자세와 월드 위치에서 유도하도록 바꾸십시오. HMD 포즈를 카메라에 넣으려면 선결 조건입니다.
 
-### 🚨 [DEF-22] [HIGH · 경계] `SceneSerializer` 컴포넌트 하드코딩
+### ✅ [DEF-22] [해결됨 · 2026-10-14, 원래 HIGH · 경계] `SceneSerializer` 컴포넌트 하드코딩
+
+* **[해결 · 2026-10-14]** `ComponentRegistry`(명시 등록, Bevy `register_type` · Godot `ClassDB` 방식)가 타입 이름으로
+  컴포넌트를 만들고, 각 컴포넌트가 `writeFields` · `readField` 로 자기 값을 이름 붙은 `이름=값` 줄로 씁니다(UE tagged property ·
+  Godot `.tscn` · Unity YAML 방식). 씬 v4 · 프리팹 v2 는 컴포넌트마다 `COMPONENT:타입` … `END_COMPONENT` 블록이고, 기본값도 모두
+  씁니다. 등록되지 않은 타입은 원문을 보존해 다시 저장할 때 그대로 씁니다(Unity Missing Script 방식). v3 이하 파일도 계속 읽습니다.
+  에디터의 컴포넌트 추가 버튼도 레지스트리에서 만듭니다. Layer 2 는 `EngineContext::components` 로 등록합니다(전부 사용자 결정).
+  상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 "DEF-22 직렬화 타입 등록 수정 결과".
 
 * **위치**: [`SceneSerializer.hpp:L18-L40`](file:///e:/Haruka/src/assets/SceneSerializer.hpp#L18-L40)
 * **문제점**: `ActorData`가 컴포넌트 5종을 구조체 필드로 하드코딩합니다. 새 컴포넌트는 `.hscene`과 `.hprefab` 왕복이 불가능합니다.
@@ -1279,7 +1286,7 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
  ├── [x] DEF-16. [해결됨]   자동 인스턴싱 (DrawItem.instanceCount, 같은 지오메트리 · 머티리얼 묶음)  ✅ 2026-10-14
  ├── [x] DEF-19. [해결됨]   물리 힘·임펄스·속도·레이캐스트 API 및 중력 세터  ✅ 2026-10-04
  ├── [x] DEF-11. [해결됨]   depfile 로 include 추적, 목록 밖 셰이더 경고  ✅ 2026-10-04
- ├── [ ] DEF-22. [HIGH]     SceneSerializer 타입 등록 기반 직렬화
+ ├── [x] DEF-22. [해결됨]   컴포넌트 타입 레지스트리 + 이름 붙은 값의 COMPONENT 블록(씬 v4)  ✅ 2026-10-14
  ├── [ ] DEF-10. [MEDIUM]   kMaxDraws / kMaxBodies 이중 상한 설정화 (초과 진단은 2026-10-04 완료)
  └── [ ] DEF-13. [LOW]      FrameUBO.invViewProj 추가
 

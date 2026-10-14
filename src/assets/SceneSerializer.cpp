@@ -42,60 +42,17 @@ void SceneSerializer::writeActor(std::ostream& os, const Actor* actor, int paren
     if (parentIndex >= 0)
         os << "PARENT:" << parentIndex << "\n";
 
-    // 메시는 절차 도형(PRIM)과 파일 메시(MODEL) 중 하나로만 기록합니다(설계 7-1). 예전에는
-    // MODEL 만 기록해서, 절차 도형이 Play→Stop 과 저장·불러오기에서 통째로 사라졌습니다.
-    if (auto* mc = actor->getComponent<StaticMeshComponent>()) {
-        bool wroteMesh = false;
-        if (mc->primitive) {
-            os << "PRIM:"     << mc->primitive->toKey()        << "\n";
-            os << "PRIM_MAT:" << mc->primitiveMaterial.toText() << "\n";
-            wroteMesh = true;
-        } else if (!mc->modelPath.empty()) {
-            os << "MODEL:"    << mc->modelPath << "\n";
-            os << "MESH_IDX:" << mc->meshIndex << "\n";
-            wroteMesh = true;
-        }
-        if (wroteMesh)
-            os << "MESH_STATE:" << (mc->visible ? 1 : 0)
-                                << " " << (mc->isEnabled() ? 1 : 0) << "\n";
-    }
+    // 컴포넌트는 등록된 타입마다 COMPONENT 블록으로 씁니다(v4, DEF-22). 예전에는 다섯 종을 여기서
+    // LIGHT: · CAMERA: · RIGID: 같은 줄로 손으로 썼고, 새 컴포넌트는 저장할 수 없었습니다.
+    ComponentSerializer::write(os, *actor);
+}
 
-    if (auto* lc = actor->getComponent<LightComponent>())
-        os << "LIGHT:" << F(lc->color.r) << " " << F(lc->color.g) << " " << F(lc->color.b)
-                       << " " << F(lc->intensity)
-                       << " " << 0      // 예약 슬롯(과거 ambient). 포맷 안정용으로 자리만 유지.
-                       << " " << (lc->isEnabled() ? 1 : 0)
-                       << " " << (int)lc->lightType
-                       << " " << F(lc->attenuationRadius)
-                       << " " << F(lc->innerConeAngle) << " " << F(lc->outerConeAngle)
-                       << " " << F(lc->direction.x) << " " << F(lc->direction.y) << " " << F(lc->direction.z)
-                       << " " << (lc->useTemperature ? 1 : 0) << " " << F(lc->temperatureK)
-                       << " " << (lc->castShadows ? 1 : 0)
-                       << "\n";
-
-    if (auto* cc = actor->getComponent<CameraComponent>())
-        os << "CAMERA:" << F(cc->fovY) << " " << F(cc->zNear) << " " << F(cc->zFar)
-                        << " " << (cc->primary ? 1 : 0)
-                        << " " << (cc->isEnabled() ? 1 : 0) << "\n";
-
-    // AUDIO_3D 는 줄 끝에 토큰을 덧붙이지 않고 새 키로 넣었습니다(LIGHT 줄의 위치 기반
-    // 확장이 반복되며 생긴 취약점을 되풀이하지 않기 위해서). 옛 엔진은 이 키를 건너뜁니다.
-    if (auto* ac = actor->getComponent<AudioComponent>())
-        os << "AUDIO:" << ac->filePath << "\n"
-           << "AUDIO_VOL:" << F(ac->volume) << " " << (ac->loop ? 1 : 0)
-                           << " " << (ac->autoPlay ? 1 : 0)
-                           << " " << (ac->isEnabled() ? 1 : 0) << "\n"
-           << "AUDIO_3D:" << ac->attenuation.toText() << "\n";
-
-    // 셰이프·모션은 이름으로 씁니다. 예전에는 열거형 순번을 써서, 값을 중간에 끼우면 옛 씬이
-    // 조용히 다른 도형으로 읽혔습니다(DEF-44). 옛 파일의 숫자는 parseLine 이 계속 읽습니다.
-    if (auto* rb = actor->getComponent<RigidBodyComponent>())
-        os << "RIGID:" << RigidBodyComponent::shapeName(rb->shape) << " "
-                       << RigidBodyComponent::motionName(rb->motionType) << "\n"
-           << "RIGID_PROPS:" << F(rb->friction) << " " << F(rb->restitution) << " " << F(rb->mass)
-                             << " " << F(rb->halfExtent.x) << " " << F(rb->halfExtent.y)
-                             << " " << F(rb->halfExtent.z)
-                             << " " << (rb->isEnabled() ? 1 : 0) << "\n";
+// ── parseActorLine ────────────────────────────────────────────────────────────────
+void SceneSerializer::parseActorLine(const std::string& line, ActorData& d) {
+    if (d.components.feed(line, d.name)) return;   // COMPONENT 블록(v4)
+    const auto colon = line.find(':');
+    if (colon == std::string::npos) return;
+    parseLine(line.substr(0, colon), line.substr(colon + 1), d);
 }
 
 // ── parseLine ──────────────────────────────────────────────────────────────────
@@ -281,17 +238,22 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
         rb->halfExtent  = {d.rigidHX, d.rigidHY, d.rigidHZ};
         rb->setEnabled(d.rigidEnabled != 0);
     }
+    // v4 의 COMPONENT 블록(DEF-22). 등록된 타입이면 만들어 값을 읽고, 아니면 원문을 보존합니다.
+    ComponentLoadContext ctx;
+    ctx.assets = &assets;
+    ComponentSerializer::spawn(*a, d.components.blocks(), ctx);
     return a;
 }
 
 // ── 씬 단위(.hscene) ───────────────────────────────────────────────────────────
 // 예전에는 EditorApp 에만 있어서, 게임 모듈이 시작 씬을 파일에서 읽을 수 없었습니다.
 // v3: PRIM/PRIM_MAT 추가, 실수를 정밀도를 잃지 않는 형식으로 기록. 이어서 AUDIO_3D 도 v3 에
-// 넣었습니다(값이 없으면 기본값이라 판을 올리지 않음). 옛 엔진은 모르는 키를 건너뛰므로
-// v3 파일을 읽으면 절차 도형의 메시와 3D 사운드 설정만 빠집니다.
+// 넣었습니다(값이 없으면 기본값이라 판을 올리지 않음).
+// v4(2026-10-14): 컴포넌트를 COMPONENT 블록으로 씁니다(DEF-22). v3 이하 파일도 계속 읽습니다. v4 를
+// 모르는 옛 엔진은 COMPONENT 블록의 줄을 모르는 키로 건너뛰므로 컴포넌트 없이 액터만 읽습니다.
 std::string SceneSerializer::writeScene(const World& world, const Actor* skip) {
     std::ostringstream oss;
-    oss << "# Haruka Scene v3\n";
+    oss << "# Haruka Scene v4\n";
 
     // 직렬화 세트(skip 제외)에서 각 액터에 순번을 매겨, 부모를 인덱스로 참조합니다.
     // 부모가 세트 밖(예: 에디터 카메라)이면 -1 로 기록해 링크를 남기지 않습니다.
@@ -345,20 +307,16 @@ std::vector<Actor*> SceneSerializer::readScene(const std::string& text, World& w
         // 값 끝에 남아, 경로와 PRIM 값이 조용히 어긋납니다.
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.empty() || line[0] == '#') continue;
-        // END_ACTOR 는 콜론이 없으므로 콜론 검사보다 먼저 처리해 블록을 닫습니다.
+        // END_ACTOR · ACTOR: 는 COMPONENT 블록보다 먼저 봅니다. END_COMPONENT 가 빠진 블록이 있어도
+        // 다음 액터를 그 블록의 값으로 삼키지 않습니다.
         if (line == "END_ACTOR") { closeBlock(); continue; }
-        auto colon = line.find(':');
-        if (colon == std::string::npos) continue;
-        std::string key = line.substr(0, colon);
-        std::string val = line.substr(colon + 1);
-
-        if (key == "ACTOR") {
+        if (line.rfind("ACTOR:", 0) == 0) {
             closeBlock();          // END_ACTOR 없이 다음 블록이 와도 이전 블록을 닫음
             inBlock  = true;
-            cur.name = val;
-        } else {
-            parseLine(key, val, cur);
+            cur.name = line.substr(6);
+            continue;
         }
+        parseActorLine(line, cur);
     }
     closeBlock();                  // END_ACTOR 없이 끝나는 마지막 블록
 

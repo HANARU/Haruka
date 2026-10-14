@@ -109,6 +109,7 @@ AUDIO_3D:1 inverse 1 100 1 (spatialize, 모델 이름, min, max, rolloff)
 - 옛 파일에는 이 줄이 없어 기본값이 쓰입니다. 예전 동작과의 차이는 Max Distance 가 무한에서 100 m 로
   바뀐 것뿐인데, Inverse 기본 곡선에서 100 m 의 게인이 0.01(-40 dB)이라 들리는 차이는 없습니다.
 - 씬 헤더는 v3 그대로입니다. 줄이 없으면 기본값이고, 옛 엔진은 모르는 키를 건너뛰기 때문입니다.
+- **[2026-10-14 갱신]** 씬 형식은 2026-10-14 에 v4 로 바뀌어 컴포넌트를 COMPONENT 블록의 이름 붙은 값으로 씁니다(DEF-22). v3 파일도 계속 읽습니다. `AUDIO:` · `AUDIO_VOL:` · `AUDIO_3D:` 는 오디오 블록의 `file` · `volume` · `loop` · `autoPlay` · `attenuation` 이 됐고, `attenuation` 의 텍스트 형식은 `AUDIO_3D:` 와 같습니다.
 
 ## 5. 검증
 

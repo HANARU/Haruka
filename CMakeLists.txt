@@ -161,6 +161,7 @@ set(CORE_SOURCES
     src/components/StaticMeshComponent.cpp
     src/components/AudioComponent.cpp
     src/components/RigidBodyComponent.cpp
+    src/components/CoreComponents.cpp
     src/renderer/Renderer.cpp
     src/renderer/Renderer_swap.cpp
     src/renderer/Renderer_render.cpp
@@ -181,6 +182,7 @@ set(CORE_SOURCES
     src/assets/GassetCache.cpp
     src/assets/PrefabManager.cpp
     src/assets/SceneSerializer.cpp
+    src/assets/ComponentSerializer.cpp
     src/audio/AudioSystem.cpp
     src/audio/AudioAttenuation.cpp
     src/audio/MiniaudioImpl.cpp
@@ -356,6 +358,24 @@ if(NOT ANDROID)
         set_target_properties(HarukaBatchTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 컴포넌트 직렬화 테스트 ---------------------------------------------
+    # 타입 등록 · 이름 붙은 값의 왕복 · 원문 보존 · 옛 이름을 화면 없이 검산합니다(DEF-22).
+    add_executable(HarukaSceneTest
+        tests/SceneComponentTest.cpp
+        src/assets/ComponentSerializer.cpp
+        src/core/Actor.cpp
+        src/core/Component.cpp
+        src/core/HLog.cpp
+        src/components/LightComponent.cpp
+        src/components/CameraComponent.cpp
+    )
+    target_link_libraries(HarukaSceneTest PRIVATE glm::glm)
+    target_include_directories(HarukaSceneTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaSceneTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaSceneTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 렌더 확장 지점 테스트 -----------------------------------------------
     # 패스 레지스트리의 수명주기 순서와 지점별 호출을 화면 없이 검산합니다(DEF-17 · 18).
     add_executable(HarukaRenderExtTest tests/RenderExtensionTest.cpp)
@@ -475,4 +495,5 @@ if(NOT ANDROID)
     add_test(NAME xr_input             COMMAND HarukaInputTest)
     add_test(NAME draw_batching        COMMAND HarukaBatchTest)
     add_test(NAME render_extensions    COMMAND HarukaRenderExtTest)
+    add_test(NAME scene_components     COMMAND HarukaSceneTest)
 endif()

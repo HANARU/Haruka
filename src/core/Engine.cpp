@@ -11,6 +11,8 @@
 #include "../xr/XrSystem.hpp"
 #include "HLog.hpp"
 #include "IGameModule.hpp"
+#include "ComponentRegistry.hpp"
+#include "../components/CoreComponents.hpp"
 #include "FrameTimings.hpp"
 
 #ifndef ANDROID
@@ -29,6 +31,10 @@
 // 코어 서비스는 초기화 순서가 고정입니다: 창 → 렌더러(창 필요) → 에셋(렌더러 필요).
 // 그다음 동적 모듈을 등록하고, 마지막에 에디터·게임을 올립니다.
 Engine::Engine(const EngineOptions& options) {
+    // 기본 컴포넌트 타입을 씬을 읽기 전에 등록합니다(DEF-22). 씬 · 프리팹의 COMPONENT 블록과 에디터의
+    // 컴포넌트 추가 버튼이 이 등록을 씁니다.
+    registerCoreComponents();
+
     auto win = std::make_unique<GlfwWindow>(1600, 900, "Haruka Engine");
     win->init();
     window_ = std::move(win);
@@ -76,7 +82,8 @@ Engine::Engine(const EngineOptions& options) {
     setupInputBindings();
 
     // 게임 모듈(씬 콘텐츠) + 프레임 컨텍스트.
-    ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_, *renderer_ });
+    ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_, *renderer_,
+                                  ComponentRegistry::get() });
     game_ = std::make_unique<DefaultGameModule>();
     game_->onStart(*ctx_);
 }

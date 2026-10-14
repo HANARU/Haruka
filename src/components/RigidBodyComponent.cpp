@@ -2,6 +2,7 @@
 #include "../physics/PhysicsSystem.hpp"
 #include "../core/Actor.hpp"
 #include "../core/Reflect.hpp"
+#include "../core/ComponentFields.hpp"
 #include <algorithm>
 #include <cstdlib>
 
@@ -164,5 +165,33 @@ bool RigidBodyComponent::motionFromText(const std::string& t, EMotionType& out) 
     int v = 0;
     if (!legacyOrdinal(t, 3, v)) return false;
     out = (EMotionType)v;
+    return true;
+}
+
+// ── 직렬화 (DEF-22) ─────────────────────────────────────────────────────────────
+// 셰이프 · 모션은 이름으로 씁니다(DEF-44). 옛 순번(0~2)도 shapeFromText · motionFromText 가 받습니다.
+void RigidBodyComponent::writeFields(ComponentFieldWriter& w) const {
+    w.s ("shape",       shapeName(shape));
+    w.s ("motion",      motionName(motionType));
+    w.f ("friction",    friction);
+    w.f ("restitution", restitution);
+    w.f ("mass",        mass);
+    w.v3("halfExtent",  { halfExtent.x, halfExtent.y, halfExtent.z });
+}
+
+bool RigidBodyComponent::readField(const std::string& key, const std::string& value) {
+    bool ok = true;
+    if      (key == "shape")       ok = shapeFromText (value, shape);
+    else if (key == "motion")      ok = motionFromText(value, motionType);
+    else if (key == "friction")    ok = fieldparse::toFloat(value, friction);
+    else if (key == "restitution") ok = fieldparse::toFloat(value, restitution);
+    else if (key == "mass")        ok = fieldparse::toFloat(value, mass);
+    else if (key == "halfExtent") {
+        glm::vec3 h;
+        ok = fieldparse::toVec3(value, h);
+        if (ok) halfExtent = { h.x, h.y, h.z };
+    }
+    else return false;
+    if (!ok) reportBadField(key, value);
     return true;
 }

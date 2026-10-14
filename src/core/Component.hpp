@@ -5,6 +5,8 @@
 #include <string>
 
 class Actor;
+class ComponentFieldWriter;
+struct ComponentLoadContext;
 
 class Component {
 public:
@@ -43,6 +45,19 @@ public:
     // 에디터가 소유 액터(또는 조상)의 트랜스폼 편집을 확정할 때 부릅니다(기즈모 드래그 끝,
     // 디테일 TRANSFORM 확정, 그 undo·redo). Actor::notifyTransformCommitted 가 부릅니다.
     virtual void onTransformCommitted() {}
+
+    // ── 직렬화 (DEF-22, core/ComponentFields.hpp) ─────────────────────────────
+    // 씬 · 프리팹 파일의 COMPONENT 블록에 쓸 값입니다. 이름은 멤버 이름을 따르고, 한 번 저장한 이름은
+    // 바꾸지 않습니다. enabled 는 직렬화기가 모든 컴포넌트에 공통으로 쓰므로 여기서 쓰지 않습니다.
+    // 새 컴포넌트는 이 셋을 구현하고 ComponentRegistry 에 등록하면 저장 · 불러오기 · 에디터 추가가 됩니다.
+    virtual void writeFields(ComponentFieldWriter& /*w*/) const {}
+    // 이름 하나를 읽습니다. 모르는 이름이면 false 를 돌려주고 직렬화기가 경고합니다. 값이 깨졌으면
+    // true 를 돌려주되 기본값을 두고 reportBadField 로 알립니다.
+    virtual bool readField(const std::string& /*key*/, const std::string& /*value*/) { return false; }
+    // 블록의 값을 다 읽은 뒤 한 번 부릅니다. 에셋을 불러오는 것처럼 값 여러 개가 함께 필요한 일을 합니다.
+    virtual void onFieldsLoaded(const ComponentLoadContext& /*ctx*/) {}
+    // 깨진 값을 알립니다(액터 이름 · 타입 · 이름 · 값). readField 구현이 씁니다.
+    void reportBadField(const std::string& key, const std::string& value) const;
 
     Actor* owner = nullptr;
 

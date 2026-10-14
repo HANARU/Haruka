@@ -79,7 +79,8 @@ PC 에 런타임이 없어, 헤드셋 확인은 사용자가 Quest Link 를 준�
 16384 로 올렸습니다(DEF-10 의 상한 설정화는 남음). 확인 중에 찾은 DEF-105(빌드마다 GLTF 캐시 무효화)를 등재했습니다.
 항목별 내용은 문서 끝 "DEF-16 자동 인스턴싱 수정 결과" 절에 있습니다. 이어서 DEF-17 · DEF-18(패스 확장 지점)을 고정 지점 넷의
 렌더 확장과 `EngineContext::render` 로 해결했습니다. 도중의 사용자 지시("에디터 실행은 잠시 미루자. 개선 점검은 추후 일괄로")에
-따라 화면 확인은 일괄 점검으로 미뤘습니다. 문서 끝 "DEF-17 · 18 패스 확장 지점 수정 결과" 절을 보십시오.
+따라 화면 확인은 일괄 점검으로 미뤘습니다. 문서 끝 "DEF-17 · 18 패스 확장 지점 수정 결과" 절을 보십시오. 이어서 DEF-22(직렬화 타입 등록)와 DEF-101 을 해결했습니다
+(씬 v4 · 프리팹 v2, 문서 끝 "DEF-22 직렬화 타입 등록 수정 결과" 절).
 
 | ID | 결함명 | 심각도 | 대상 파일 | 관련 라인 |
 |---|---|---|---|---|
@@ -1438,7 +1439,7 @@ Verbose 로 옮깁니다.
 | DEF-98 | LOW · **해결 2026-10-04** | 셰이더 핫 리로드가 덜 복사된 .spv 로 파이프라인을 만들다 예외를 잡지 못해 에디터가 종료될 수 있었습니다(옛 파이프라인을 먼저 지움) | `HotReloader`, `Renderer::reloadPipelines`, 각 패스 `rebuildPipelines` |
 | DEF-99 | MEDIUM · **해결 2026-10-04** (VR) | Kinematic 바디 동기화가 스텝 루프 뒤에 한 번 돌아 한 프레임 늦고, 한 프레임에 스텝이 여럿이면 목표를 지나칩니다. VR 손과 잡은 물체에서 드러납니다 | `PhysicsSystem::tick` |
 | DEF-100 | LOW · **해결 2026-10-04** | `AOPass::destroy` 가 Zone C 할당을 `freeB` 로 돌려줘, Zone B 빈 목록에 960MB 이상 범위가 들어갑니다. 지금은 종료할 때만 일어납니다 | `AOPass.cpp`, `HarukaAllocator::freeB`(구역 확인 없음) |
-| DEF-101 | LOW · 열림 | `StaticMeshComponent::transparent` 는 디테일에서 바꿀 수 있지만 저장되지 않고, 불러올 때 에셋 값으로 다시 정해집니다 | `SceneSerializer`, DEF-22 와 함께 |
+| DEF-101 | LOW · **해결 2026-10-14** (DEF-22) | `StaticMeshComponent::transparent` 는 디테일에서 바꿀 수 있지만 저장되지 않고, 불러올 때 에셋 값으로 다시 정해집니다 | `SceneSerializer`, DEF-22 와 함께 |
 | DEF-102 | LOW · **해결 2026-10-04** (DEF-21) | 씬 카메라의 yaw · pitch 가 디테일에 없고 저장되지 않아, 씬 카메라는 방향을 정할 수 없고 저장하면 방향을 잃습니다 | `CameraComponent`, DEF-21 과 함께 |
 | DEF-103 | LOW · 열림 (Quest 이식) | `AndroidWindow` 가 `IWindow` 의 순수 가상 클립보드 함수 두 개를 구현하지 않아 추상 클래스입니다 | `AndroidWindow.hpp`, DEF-08 과 함께 |
 
@@ -1585,3 +1586,30 @@ Play 해, 구가 바닥 윗면에 정확히 내려앉고 Stop 하면 되돌아�
 셰이더 핫 리로드 뒤에도. ③ 검증 메시지 0, `Clean exit`. 시험용 확장은 확인 뒤 지웁니다.
 
 **검증.** 빌드 경고 0. 단위 테스트 10 → 11개 통과(`render_extensions` 17개 신설).
+
+## DEF-22 직렬화 타입 등록 수정 결과 (2026-10-14)
+
+**사용자 결정.** 명시 등록, 기본값도 모두 기록, 등록되지 않은 타입은 경고 + 원문 보존, 범위는 DEF-22 + 에디터 컴포넌트 추가 버튼 +
+DEF-101. 에디터 실행은 사용자 지시로 미뤄 화면 확인은 아래 "일괄 점검 때 확인할 것"에 모았습니다.
+
+| 항목 | 다른 엔진의 방법 | 수정 | 확인 |
+|---|---|---|---|
+| 타입 등록 | Bevy 는 `register_type` 으로 등록한 타입만 씬에 저장 · 읽기 하고 없으면 오류(`SceneSpawnError::UnregisteredComponent`). Godot 은 `ClassDB::register_class` 로 등록한 클래스만 씬을 읽을 때 만듭니다. UE 는 클래스가 정적으로 자동 등록됩니다 | `ComponentRegistry`(`src/core/ComponentRegistry.hpp`): 타입 이름 → 생성 · 찾기 함수, 옛 이름(별칭), 에디터 버튼 라벨. 엔진이 시작할 때 기본 5종을 등록하고(`registerCoreComponents`), Layer 2 는 `EngineContext::components` 로 등록합니다. 전역 객체로 스스로 등록하는 방식은 정적 라이브러리에서 링커가 버릴 수 있어 쓰지 않았습니다 | `scene_components` 신설 |
+| 값 기록 | UE 는 값마다 이름 · 형을 붙여 쓰고(tagged property), Godot `.tscn` · Unity YAML 도 `이름 = 값` 입니다. Unity 는 이름을 바꾸면 `FormerlySerializedAs` 로 옛 이름도 받습니다. UE · Godot 은 기본값과 다른 값만 쓰고(기본값을 바꾸면 저장한 값이 "변경 없음"이 되는 문제가 UE-88414 로 보고됨), Unity 는 모두 씁니다 | `Component::writeFields` · `readField` · `onFieldsLoaded`. 씬 v4 · 프리팹 v2 의 액터 블록 안에 컴포넌트마다 `COMPONENT:타입` · `enabled=` · `이름=값` 줄 · `END_COMPONENT` 를 씁니다(`ComponentSerializer`). 순서와 상관없고, 모르는 이름은 경고하고 건너뛰며, 없는 이름은 기본값, 깨진 값은 기본값을 두고 오류를 남깁니다. 기본값도 모두 씁니다. 종류 · 셰이프 · 모션은 이름으로 쓰고 옛 숫자도 받습니다. `LIGHT:` 줄의 위치 기반 확장(예약 슬롯 포함) 문제가 사라졌습니다 | 같은 테스트, `physics_lifecycle` · `audio_system` 에 강체 · 오디오 왕복 추가 |
+| 모르는 타입 | Unity 는 스크립트를 못 찾으면 Missing Script 로 데이터를 보존하고, Bevy 는 오류를 냅니다 | 경고하고 `UnknownComponent` 에 원래 이름과 값을 담아, 다시 저장할 때 글자 그대로 씁니다. Layer 2 모듈 없이 씬을 열었다 저장해도 데이터가 사라지지 않습니다 | 같은 테스트 |
+| 옛 형식 | | v3 이하의 `LIGHT:` · `CAMERA:` · `AUDIO*:` · `RIGID*:` · `PRIM*:` · `MODEL:` 줄은 예전 경로로 계속 읽고, 쓰기는 v4 만 합니다. 저장소의 `LightingProbe.hscene` · `AudioProbe.hprefab` 은 v3 · v1 그대로 두었습니다(일괄 점검 때 에디터로 저장해 바꿈) | 빌드(예전 경로 그대로) |
+| 에디터 추가 버튼 | UE · Unity 는 등록된 컴포넌트 클래스 목록으로 추가 메뉴를 만듭니다 | 디테일 패널의 "+ 라벨" 버튼을 레지스트리에서 만듭니다. 순서 · 라벨은 예전과 같습니다(Light · Camera · Mesh · Audio · RigidBody) | 일괄 점검 |
+| DEF-101 | | 메시의 `transparent` 를 저장합니다. 파일에 있으면 그 값을, 없으면 에셋의 값을 씁니다 | 일괄 점검 |
+
+**행동 변화.** 메시도 경로도 없는 빈 메시 컴포넌트(+ Mesh 만 누른 것)는 예전에는 저장할 때 사라졌지만, 이제 `visible` ·
+`transparent` 만 가진 블록으로 남습니다. 메시 · 도형을 불러오지 못한 컴포넌트도 컴포넌트는 남고 경로 · 도형 값을 지켜 다시 저장해도
+사라지지 않습니다(예전에는 컴포넌트를 붙이지 않았음).
+
+**일괄 점검 때 확인할 것(에디터 실행).** ① 시작 씬(v3)이 예전과 같이 읽히고 화면이 `744cc69` 와 같은지. ② Play → Stop(v4 를 쓰고
+다시 읽음) 뒤 모든 액터 · 컴포넌트 값이 그대로인지(라이트 종류 · 색온도 · 그림자, 카메라, 오디오 3D, 강체, 절차 도형과 머티리얼).
+③ Save → Load(scene.hscene 이 v4 로 써지는지, 다시 읽어 같은지). ④ 프리팹 저장 · 불러오기(v2), 옛 `AudioProbe.hprefab`(v1) 읽기.
+⑤ 디테일의 컴포넌트 추가 버튼이 예전과 같은지. ⑥ `transparent` 를 바꿔 저장 · 불러오기(DEF-101). ⑦ 저장소의 시작 씬 · 프리팹을
+v4 · v2 로 저장해 바꿀지 사용자가 정함.
+
+**검증.** 빌드 경고 0. 단위 테스트 11 → 12개 통과(`scene_components` 32개 신설, `physics_lifecycle` 54 → 60, `audio_system` 48 → 52).
+새 검사는 원문 보존과 옛 이름 찾기를 끄면 7개가 실패함을 확인했습니다.

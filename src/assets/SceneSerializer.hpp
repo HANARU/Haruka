@@ -8,6 +8,7 @@
 
 #include "../geometry/PrimitiveDesc.hpp"
 #include "../audio/AudioAttenuation.hpp"
+#include "ComponentSerializer.hpp"
 
 class Actor;
 class World;
@@ -17,6 +18,11 @@ class AssetManager;
 // Actor 단위 텍스트 직렬화의 단일 구현. .hscene(EditorApp·게임 모듈)과 .hprefab(PrefabManager)
 // 양쪽에서 공용으로 사용한다. 액터 단위 함수에서는 이름 헤더(ACTOR:/NAME:)와 블록 구분이
 // 호출자 책임이고, 씬 단위 함수(writeScene/readScene)는 .hscene 의 블록 규칙까지 맡는다.
+//
+// v4(2026-10-14, DEF-22): 컴포넌트는 COMPONENT 블록으로 쓴다(ComponentSerializer). 타입은 등록된
+// 이름(ComponentRegistry), 값은 이름 붙은 `이름=값` 줄이다. 그래서 새 컴포넌트(Layer 2 포함)도 등록만
+// 하면 저장 · 불러오기가 되고, 이 파일을 고칠 필요가 없다. v3 이하의 LIGHT: · CAMERA: · RIGID: 같은 줄은
+// 옛 파일을 읽으려고 계속 받는다(아래 ActorData 의 v3 필드). 쓰기는 v4 만 한다.
 class SceneSerializer {
 public:
     // 파싱된 액터 필드를 스폰 전까지 담아두는 중간 표현
@@ -25,6 +31,10 @@ public:
         glm::vec3   pos{}, euler{}, scale{1.f};
         int         active      = 1;   // 액터 activeSelf (기본 활성)
         int         parentIndex = -1;  // 직렬화 순서상 부모 인덱스, 부모 없으면 -1
+        // v4 의 COMPONENT 블록들(DEF-22).
+        ComponentSerializer::BlockParser components;
+
+        // ── 아래는 v3 이하 파일을 읽을 때만 씁니다(컴포넌트 다섯을 필드로 받던 예전 형식) ──
         std::string model;
         int         meshIndex   = 0;
         int         meshVisible = 1, meshEnabled = 1;
@@ -67,7 +77,7 @@ public:
         int         rigidEnabled = 1;
     };
 
-    // 트랜스폼 + 부착된 모든 컴포넌트를 key:value 라인으로 기록 (이름 라인 제외).
+    // 트랜스폼(KEY:VAL 줄) + 부착된 모든 컴포넌트(COMPONENT 블록)를 기록 (이름 라인 제외).
     // parentIndex 가 0 이상이면 PARENT 라인을 기록합니다(직렬화 세트 안의 부모 인덱스).
     // 단일 액터를 저장하는 프리팹은 부모가 없으므로 기본값 -1 로 호출합니다.
     static void writeActor(std::ostream& os, const Actor* actor, int parentIndex = -1);
@@ -75,6 +85,9 @@ public:
     // key:value 한 줄을 data에 반영. 인식한 키면 true.
     // 이름 키(ACTOR/NAME)는 블록 구분 의미가 포맷마다 달라 여기서 다루지 않는다.
     static bool parseLine(const std::string& key, const std::string& val, ActorData& data);
+    // 액터 블록 안의 줄 하나(ACTOR: · NAME: · END_ACTOR 제외)를 반영합니다. COMPONENT 블록과 KEY:VAL
+    // 줄을 모두 다룹니다. readScene 과 PrefabManager 가 같은 규칙으로 읽도록 둘 다 이것을 씁니다.
+    static void parseActorLine(const std::string& line, ActorData& data);
 
     // 파싱 결과로 액터 생성 + 컴포넌트 부착. name이 비어 있으면 nullptr.
     static Actor* spawn(const ActorData& data, World& world, AssetManager& assets);

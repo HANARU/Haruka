@@ -1,5 +1,6 @@
 #include "AudioComponent.hpp"
 #include "../audio/AudioSystem.hpp"
+#include "../core/ComponentFields.hpp"
 #include <algorithm>
 #include <filesystem>
 
@@ -83,4 +84,31 @@ void AudioComponent::stop() {
 
 bool AudioComponent::isPlaying() const {
     return audioSys_ && audioSys_->isSoundPlaying(sound_);
+}
+
+// ── 직렬화 (DEF-22) ─────────────────────────────────────────────────────────────
+// 3D 설정은 AudioAttenuationSettings 의 텍스트 형식 그대로입니다(감쇠 모델은 이름).
+void AudioComponent::writeFields(ComponentFieldWriter& w) const {
+    w.s("file",        filePath);
+    w.f("volume",      volume);
+    w.b("loop",        loop);
+    w.b("autoPlay",    autoPlay);
+    w.s("attenuation", attenuation.toText());
+}
+
+bool AudioComponent::readField(const std::string& key, const std::string& value) {
+    bool ok = true;
+    if      (key == "file")     filePath = value;
+    else if (key == "volume")   ok = fieldparse::toFloat(value, volume);
+    else if (key == "loop")     ok = fieldparse::toBool (value, loop);
+    else if (key == "autoPlay") ok = fieldparse::toBool (value, autoPlay);
+    else if (key == "attenuation") {
+        // 3D 설정이 깨진 것은 소리를 버릴 이유가 아닙니다. 기본 설정으로 두고 알립니다.
+        AudioAttenuationSettings a;
+        if (AudioAttenuationSettings::fromText(value, a)) attenuation = a;
+        else ok = false;
+    }
+    else return false;
+    if (!ok) reportBadField(key, value);
+    return true;
 }
