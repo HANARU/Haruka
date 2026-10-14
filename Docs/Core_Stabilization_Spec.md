@@ -369,13 +369,23 @@ graph TD
 * **문제점**: `instanceCount = 1`이 다섯 곳에 리터럴로 박혀 있고, `GeometryPass::DrawItem`에는 `instanceCount` 멤버 자체가 없습니다. 인스턴싱이 원리상 불가능합니다.
 * **해결 사양**: `DrawItem`에 인스턴스 수를 싣고 다섯 지점을 그 값으로 대체하십시오. DEF-01의 SSBO 인덱스 배정과 직결되므로 **DEF-01을 먼저 정리한 뒤에 착수하십시오. 이 선결 조건은 2026-08-25에 충족되었습니다.** 다만 `materialRows`와 `opaqueSpheres`가 드로우 커맨드당 한 행을 전제하므로, 인스턴스 수를 늘릴 때 행 배정 규칙을 어떻게 바꿀지 함께 결정해야 합니다. 인스턴싱이 켜지면 Zone C 프레임당 사용량이 늘어 DEF-02의 잠재 리스크가 실제 리스크로 바뀔 수 있습니다.
 
-### 🚨 [DEF-17] [CRITICAL · 경계] 패스 레지스트리 부재
+### ✅ [DEF-17] [해결됨 · 2026-10-14, 원래 CRITICAL · 경계] 패스 레지스트리 부재
+
+* **[해결 · 2026-10-14]** 고정 지점 방식으로 렌더 확장을 넣었습니다(Godot CompositorEffect · Unity Renderer Feature · UE
+  SceneViewExtension 과 같은 방식, 사용자 결정). 지점은 불투명 끝 · 반투명 끝(메인 패스의 서브패스 안) · 메인 패스 뒤(AO 앞) ·
+  톤매핑 뒤(UI 앞) 넷이고 눈마다 부릅니다. `IRenderExtension`(`src/renderer/RenderExtension.hpp`)이 `HPass` 수명주기에
+  `create` · `record(HRenderStageContext&)` 를 더합니다. `RenderExtensionRegistry` 가 기본 패스 다섯과 확장을 한 목록으로 다뤄,
+  크기 변경 · 핫 리로드 · 파괴에서 손으로 열거하던 코드를 루프로 바꿨습니다(생성만 메모리 배치 순서 때문에 손으로 둠).
+  상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 "DEF-17 · 18 패스 확장 지점 수정 결과".
 
 * **위치**: [`HPass.hpp:L8-L15`](file:///e:/Haruka/src/renderer/passes/HPass.hpp#L8-L15)
 * **문제점**: `HPass`가 의도적으로 `create()`와 `record()`를 제외한 수명주기 전용 인터페이스입니다. 패스 레지스트리가 없고 여섯 패스가 `Renderer`의 구체 멤버로 여섯 곳에서 손으로 열거됩니다. **새 렌더 패스를 Layer 2에서 추가할 수 없습니다.**
 * **해결 사양**: 패스 등록 구조와 `record(RenderView&)` 진입점을 도입하십시오. [Layer_Architecture.md](Layer_Architecture.md) 6절 2단계의 첫 항목입니다.
 
-### 🚨 [DEF-18] [CRITICAL · 경계] `EngineContext`에 렌더러 참조 없음
+### ✅ [DEF-18] [해결됨 · 2026-10-14, 원래 CRITICAL · 경계] `EngineContext`에 렌더러 참조 없음
+
+* **[해결 · 2026-10-14]** `EngineContext::render` 로 렌더러 전체가 아니라 등록 · 해제만 여는 좁은 인터페이스
+  `IRenderExtensionHost` 를 넘깁니다(사용자 결정). 렌더러가 이 인터페이스를 구현합니다.
 
 * **위치**: [`IGameModule.hpp:L9-L14`](file:///e:/Haruka/src/core/IGameModule.hpp#L9-L14)
 * **문제점**: `EngineContext`에 렌더러 참조가 없어 게임 모듈이 렌더러에 닿을 수 없습니다. DEF-17을 고쳐 패스를 등록할 수 있게 만들어도, 게임 모듈에서 등록할 통로가 없습니다.
@@ -1264,8 +1274,8 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
                             (PC OpenXR 연결은 넣었고, 헤드셋 확인은 Quest Link 준비 뒤)
 
 [2단계: Layer 2를 가능하게 하는 확장 지점]
- ├── [ ] DEF-17. [CRITICAL] 패스 레지스트리와 record(RenderView&) 진입점
- ├── [ ] DEF-18. [CRITICAL] EngineContext에 렌더러 참조 추가 (DEF-17과 동일 작업 단위)
+ ├── [x] DEF-17. [해결됨]   패스 레지스트리와 고정 지점 4곳의 렌더 확장  ✅ 2026-10-14
+ ├── [x] DEF-18. [해결됨]   EngineContext::render (등록 · 해제만 여는 인터페이스)  ✅ 2026-10-14
  ├── [x] DEF-16. [해결됨]   자동 인스턴싱 (DrawItem.instanceCount, 같은 지오메트리 · 머티리얼 묶음)  ✅ 2026-10-14
  ├── [x] DEF-19. [해결됨]   물리 힘·임펄스·속도·레이캐스트 API 및 중력 세터  ✅ 2026-10-04
  ├── [x] DEF-11. [해결됨]   depfile 로 include 추적, 목록 밖 셰이더 경고  ✅ 2026-10-04

@@ -1,5 +1,6 @@
 #pragma once
 #include <vulkan/vulkan.h>
+#include <functional>
 #include <vector>
 #include "HPass.hpp"
 #include "../RenderContext.hpp"
@@ -14,6 +15,8 @@ struct MaterialHandle;
 class GeometryPass : public HPass {
 public:
     static constexpr uint32_t kMaxLineVerts = 2048;
+    // 메인 패스 색 · HDR resolve 포맷. 렌더 확장도 이 값으로 파이프라인을 만듭니다.
+    static constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     void create(RenderContext& rc, VkPipelineLayout pbrLayout,
                 VkDescriptorSetLayout frameSetLayout);
@@ -41,6 +44,9 @@ public:
         // CPU 드로우 (subpass 0/1 은 opaqueItems, subpass 2 는 transparentItems)
         const std::vector<DrawItem>* opaqueItems      = nullptr;
         const std::vector<DrawItem>* transparentItems = nullptr;
+        // 렌더 확장 지점(DEF-17). 불투명 서브패스 끝(인자 1)과 반투명 서브패스의 반투명 뒤 · 기즈모 앞
+        // (인자 2)에서 부릅니다. 확장이 바꾼 상태는 이 패스가 뒤에서 다시 설정합니다.
+        const std::function<void(uint32_t subpass)>* subpassHook = nullptr;
     };
 
     // tsPool 이 유효하면 렌더패스 전체가 끝난 뒤 tsQueryAfterMain 에 타임스탬프를 기록합니다.
@@ -58,6 +64,7 @@ public:
     // 꺼져 있어 물체에 가려지지 않고 항상 잡을 수 있습니다.
     void setGizmoTris(std::vector<LineVertex> tris) { pendingTris_ = std::move(tris); }
 
+    VkRenderPass mainPass() const          { return pass_; }   // 렌더 확장의 파이프라인 호환용
     VkImageView depthView() const          { return depthView_; }
     VkImageView hdrView(uint32_t i) const  { return hdrView_[i]; }
     VkImage     hdrImage(uint32_t i) const { return hdrImage_[i]; }

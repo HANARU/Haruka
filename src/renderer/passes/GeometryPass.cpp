@@ -119,7 +119,7 @@ void GeometryPass::create(RenderContext& rc, VkPipelineLayout pbrLayout,
     pbrLayout_      = pbrLayout;
     frameSetLayout_ = frameSetLayout;
 
-    VkFormat hdrFmt = VK_FORMAT_R16G16B16A16_SFLOAT;
+    const VkFormat hdrFmt = kHdrFormat;
 
     VkAttachmentDescription atts[3] = {};
     atts[0].format = hdrFmt; atts[0].samples = rc.msaaSamples;
@@ -232,7 +232,7 @@ void GeometryPass::createLineBuffer() {
 }
 
 void GeometryPass::acquireSizeDependent() {
-    VkFormat hdrFmt = VK_FORMAT_R16G16B16A16_SFLOAT;
+    const VkFormat hdrFmt = kHdrFormat;
     uint32_t w = rc_->renderExtent.width, h = rc_->renderExtent.height;
 
     // Depth (MSAA)
@@ -599,6 +599,19 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
         }
     }
 
+    // 렌더 확장: 불투명 끝(DEF-17). 확장은 자기 파이프라인 · 버퍼를 바인딩하므로, 반투명 서브패스가
+    // 다시 설정하지 않는 것(눈 번호 푸시 상수, 정점 · 인덱스 버퍼)을 여기서 되돌립니다.
+    if (in.subpassHook && *in.subpassHook) {
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+        vkCmdSetScissor (cmd, 0, 1, &sc);
+        (*in.subpassHook)(1);
+        vkCmdPushConstants(cmd, pbrLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(viewPush), &viewPush);
+        VkDeviceSize offV = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &in.vertexBuffer, &offV);
+        vkCmdBindIndexBuffer(cmd, in.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+    }
+
     // — Subpass 2: Transparent PBR + line overlay ———————————————————————————
     vkCmdNextSubpass(cmd, VK_SUBPASS_CONTENTS_INLINE);
     if (in.transparentItems && !in.transparentItems->empty()) {
@@ -628,6 +641,14 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
         drawAll();   // 뒷면
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparentFrontPipeline_);
         drawAll();   // 앞면
+    }
+
+    // 렌더 확장: 반투명 끝(DEF-17). 아래 기즈모 · 라인은 파이프라인 · 뷰포트 · 디스크립터 · 정점 버퍼를
+    // 모두 다시 설정하므로 되돌릴 것이 없습니다.
+    if (in.subpassHook && *in.subpassHook) {
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+        vkCmdSetScissor (cmd, 0, 1, &sc);
+        (*in.subpassHook)(2);
     }
 
     // 기즈모 삼각형 오버레이 (subpass 2). 라인보다 먼저 그려서, 와이어 박스와

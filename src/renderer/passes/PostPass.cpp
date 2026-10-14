@@ -168,7 +168,8 @@ void PostPass::destroy() {
 // ── recordTonemap ──────────────────────────────────────────────────────────────
 void PostPass::recordTonemap(VkCommandBuffer cmd, const Output& out,
                              VkImageView hdrView, VkImageView ssaoView,
-                             VkImageView bloomView, VkSampler clampSampler) {
+                             VkImageView bloomView, VkSampler clampSampler,
+                             const OverlayHook* overlay) {
     const Variant& v = variantFor(out.format);
     VkRenderPassBeginInfo rpbi{};
     rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -222,5 +223,11 @@ void PostPass::recordTonemap(VkCommandBuffer cmd, const Output& out,
     vkCmdPushConstants(cmd, pipeLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PostPC), &ppc);
 
     vkCmdDraw(cmd, 3, 1, 0, 0);
+
+    // 렌더 확장: 톤매핑 뒤(DEF-17). 같은 렌더 패스 · 서브패스 0 에서 그 사각형 위에 그립니다.
+    if (overlay && *overlay) {
+        vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &out.rect);
+        (*overlay)(rpbi.renderPass);
+    }
     vkCmdEndRenderPass(cmd);
 }

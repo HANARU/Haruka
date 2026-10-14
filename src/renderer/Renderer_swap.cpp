@@ -28,12 +28,9 @@ VkFormat Renderer::findDepthFormat() {
 
 // ── All pipelines ─────────────────────────────────────────────────────────────
 
+// 기본 패스(프레임 순서) → 렌더 확장(등록 순서). 셰이더 핫 리로드도 이 함수를 부릅니다(DEF-17).
 void Renderer::createAllPipelines() {
-    shadow_.rebuildPipelines();
-    geometry_.rebuildPipelines();
-    ao_.rebuildPipelines();
-    bloom_.rebuildPipelines();
-    post_.rebuildPipelines();
+    passRegistry_.forEachForward([](HPass& p) { p.rebuildPipelines(); });
 }
 
 
@@ -42,17 +39,9 @@ void Renderer::createAllPipelines() {
 // ── cleanupSwapChain / recreateSwapChain ──────────────────────────────────────
 
 void Renderer::cleanupSwapChain() {
-    // Bloom (size-dependent only — pass/PSO/layout은 각 패스 destroy()가 정리)
-    bloom_.releaseSizeDependent();
-
-    // AO (linDepth + SSAO)
-    ao_.releaseSizeDependent();
-
-    // Geometry (메인 프레임버퍼 + MSAA + depth + HDR)
-    geometry_.releaseSizeDependent();
-
-    // Post framebuffers
-    post_.releaseSizeDependent();
+    // 크기 의존 자원만 놓습니다(pass/PSO/layout 은 각 패스 destroy() 가 정리). 확장 → 기본 패스
+    // 역순입니다(DEF-17). shadow 는 크기와 무관해 할 일이 없습니다.
+    passRegistry_.forEachReverse([](HPass& p) { p.releaseSizeDependent(); });
 
     swapchain_->destroy();
 }
@@ -73,9 +62,8 @@ void Renderer::recreateSwapChain() {
     rc_.viewportExtent = rc_.extent;
     rc_.renderExtent   = desiredRenderExtent();
 
-    geometry_.acquireSizeDependent();
-    ao_.acquireSizeDependent();
-    bloom_.acquireSizeDependent();
+    // 기본 패스(프레임 순서) → 렌더 확장. post 는 스왑체인 이미지 뷰가 필요해 따로 붙입니다.
+    passRegistry_.forEachForward([](HPass& p) { p.acquireSizeDependent(); });
     post_.acquire(swapchain_->imageViews());
 
     frames_.onSwapchainRecreated((uint32_t)swapchain_->imageCount());
@@ -91,14 +79,8 @@ void Renderer::recreateRenderTargets() {
     ++gFrameTimings().recreateCount;
     vkDeviceWaitIdle(device);
     // 씬 타깃만 재생성합니다(스왑체인·UI 는 그대로). post 프레임버퍼는 스왑체인 뷰를 다시 가리킵니다.
-    geometry_.releaseSizeDependent();
-    ao_.releaseSizeDependent();
-    bloom_.releaseSizeDependent();
-    post_.releaseSizeDependent();
-
-    geometry_.acquireSizeDependent();
-    ao_.acquireSizeDependent();
-    bloom_.acquireSizeDependent();
+    passRegistry_.forEachReverse([](HPass& p) { p.releaseSizeDependent(); });
+    passRegistry_.forEachForward([](HPass& p) { p.acquireSizeDependent(); });
     post_.acquire(swapchain_->imageViews());
 }
 

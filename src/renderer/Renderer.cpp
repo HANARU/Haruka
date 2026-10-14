@@ -93,6 +93,9 @@ void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
     rc_.viewportExtent = rc_.extent;
     rc_.renderExtent   = desiredRenderExtent();
 
+    // 기본 패스의 수명주기 목록(DEF-17). 프레임 순서대로이고, 확장은 등록할 때 뒤에 붙습니다.
+    passRegistry_.setBuiltins({ &shadow_, &geometry_, &ao_, &bloom_, &post_ });
+
     // 셰이더 계약 (set 0~3 + PBR 파이프라인 레이아웃) — 패스 생성보다 선행
     frames_.createLayouts(rc_);
 
@@ -151,20 +154,10 @@ void Renderer::cleanup() {
     if (iblSampler_)  { vkDestroySampler(device, iblSampler_, nullptr);  iblSampler_  = VK_NULL_HANDLE; }
     if (brdfSampler_) { vkDestroySampler(device, brdfSampler_, nullptr); brdfSampler_ = VK_NULL_HANDLE; }
 
-    // Bloom
-    bloom_.destroy();
-
-    // AO (linDepth + SSAO)
-    ao_.destroy();
-
-    // Post
-    post_.destroy();
-
-    // Shadow
-    shadow_.destroy();
-
-    // Geometry (main pass + MSAA/depth/HDR + 라인)
-    geometry_.destroy();
+    // 렌더 확장을 먼저 정리합니다(기본 패스의 HDR · 깊이를 참조할 수 있으므로). 그다음 기본 패스를
+    // 프레임 역순(post → bloom → ao → geometry → shadow)으로 파괴합니다(DEF-17).
+    for (auto& ext : passRegistry_.takeExtensionsReversed()) ext->destroy();
+    passRegistry_.forEachReverse([](HPass& p) { p.destroy(); });
 
     // Error material + mega buffers
     if (errorMaterial_) { scene_.freeMaterial(errorMaterial_); errorMaterial_ = nullptr; }
@@ -816,6 +809,43 @@ static bool spirvLooksValid(const std::filesystem::path& p, std::string& why) {
         return false;
     }
     return true;
+}
+
+// ── 렌더 확장 (DEF-17 · 18) ─────────────────────────────────────────────────────
+// 등록하면 기본 패스와 같은 수명주기를 바로 밟습니다(create → 크기 의존 자원 → 파이프라인). 그 뒤로는
+// passRegistry_ 가 크기 변경 · 핫 리로드 · 파괴 때 기본 패스와 함께 부르고, drawFrame 이 지점마다 부릅니다.
+void Renderer::addRenderExtension(std::shared_ptr<IRenderExtension> ext) {
+    if (!ext) return;
+    if (passRegistry_.contains(ext.get())) {
+        HLOG(LogRenderer, Warning) << "Render extension is already registered; ignored";
+        return;
+    }
+    HRenderDeviceInfo info;
+    info.rc                 = &rc_;
+    info.frameSetLayout     = frames_.frameLayout();
+    info.mainPass           = geometry_.mainPass();
+    info.opaqueSubpass      = 1;
+    info.transparentSubpass = 2;
+    info.hdrFormat          = GeometryPass::kHdrFormat;
+    try {
+        ext->create(info);
+        ext->acquireSizeDependent();
+        ext->rebuildPipelines();
+    } catch (const std::exception& ex) {
+        HLOG(LogRenderer, Error) << "Render extension failed to initialize and was not added: " << ex.what();
+        ext->destroy();
+        return;
+    }
+    passRegistry_.add(std::move(ext));
+    HLOG(LogRenderer, Log) << "Render extension added (" << passRegistry_.extensionCount() << " registered)";
+}
+
+void Renderer::removeRenderExtension(IRenderExtension* ext) {
+    if (!ext || !passRegistry_.contains(ext)) return;
+    vkDeviceWaitIdle(device);   // 진행 중인 프레임이 확장의 자원을 다 쓰고 나서 지웁니다
+    auto owned = passRegistry_.remove(ext);
+    owned->destroy();
+    HLOG(LogRenderer, Log) << "Render extension removed (" << passRegistry_.extensionCount() << " registered)";
 }
 
 void Renderer::reloadPipelines() {

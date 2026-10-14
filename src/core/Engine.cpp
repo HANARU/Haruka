@@ -76,7 +76,7 @@ Engine::Engine(const EngineOptions& options) {
     setupInputBindings();
 
     // 게임 모듈(씬 콘텐츠) + 프레임 컨텍스트.
-    ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_ });
+    ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_, *renderer_ });
     game_ = std::make_unique<DefaultGameModule>();
     game_->onStart(*ctx_);
 }

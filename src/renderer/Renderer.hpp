@@ -30,6 +30,7 @@
 #include "../platform/IWindow.hpp"
 #include "../memory/HarukaAllocator.hpp"
 #include "VulkanDeviceHooks.hpp"
+#include "RenderExtensionRegistry.hpp"
 
 class World;
 class HSlateRenderer;
@@ -60,7 +61,8 @@ struct SwapChainSupport {
     std::vector<VkPresentModeKHR>   modes;
 };
 
-class Renderer {
+// IRenderExtensionHost: 게임 모듈이 EngineContext 로 받는 렌더 확장 등록 통로(DEF-18).
+class Renderer : public IRenderExtensionHost {
 public:
     // 정의는 RenderTypes.hpp — 기존 Renderer::LineVertex API 호환용 별칭
     using LineVertex = ::LineVertex;
@@ -146,6 +148,10 @@ public:
     GpuTimings getTimings()   const { return timings_;    }
     FrameStats getFrameStats()const { return frameStats_; }
 
+    // ── 렌더 확장 (DEF-17 · 18, RenderExtension.hpp) ─────────────────────────
+    void addRenderExtension(std::shared_ptr<IRenderExtension> ext) override;
+    void removeRenderExtension(IRenderExtension* ext) override;
+
 private:
     IWindow*        window    = nullptr;
     HarukaAllocator allocator;
@@ -183,6 +189,11 @@ private:
 
     // ── Post-process (ACES 톤매핑 + AO/블룸 합성) ─────────────────────────────
     PostPass post_;
+
+    // ── 패스 레지스트리 (DEF-17) ──────────────────────────────────────────────
+    // 기본 패스 다섯(프레임 순서: shadow → geometry → ao → bloom → post)과 등록된 확장을 한 목록으로
+    // 다룹니다. 크기 변경 · 핫 리로드 · 파괴는 이 목록을 돌며, 경로마다 패스를 손으로 열거하지 않습니다.
+    RenderExtensionRegistry passRegistry_;
 
     // ── IBL ───────────────────────────────────────────────────────────────────
     VkImage          iblIrradianceImage_ = VK_NULL_HANDLE;

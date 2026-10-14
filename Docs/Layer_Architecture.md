@@ -6,7 +6,7 @@
 >
 > **[갱신 · 2026-10-04]** §3 판정표와 §4 · §6 의 상태를 2026-10-04 의 두 작업(남은 결함 정리, VR 첫걸음)에 맞췄습니다. 바뀐 항목은 OpenXR 연결 · 두 눈 렌더 · 두 눈 컬링 · 카메라 자세 · VR 입력 · 물리 API · 숫자 칸 단위 · 셰이더 빌드입니다.
 >
-> **[갱신 · 2026-10-14]** §4 의 지점 표기를 줄 번호 대신 파일 · 함수 · 기호 이름으로 바꾸고, 각 줄을 지금 코드와 다시 대조했습니다. §6 0단계의 라이팅 확인 씬을 완료로 고치고, §3 의 Android 행을 `DEF-103` 에 맞췄습니다. 같은 날 자동 인스턴싱(`DEF-16`)과 행 예산 16384 를 반영했습니다.
+> **[갱신 · 2026-10-14]** §4 의 지점 표기를 줄 번호 대신 파일 · 함수 · 기호 이름으로 바꾸고, 각 줄을 지금 코드와 다시 대조했습니다. §6 0단계의 라이팅 확인 씬을 완료로 고치고, §3 의 Android 행을 `DEF-103` 에 맞췄습니다. 같은 날 자동 인스턴싱(`DEF-16`)과 행 예산 16384, 패스 확장 지점(`DEF-17` · `DEF-18`)을 반영했습니다.
 
 ---
 
@@ -80,7 +80,7 @@
 | **깊이 규약 정책 (Reverse-Z 포함)** | 미구현 | 전역 정책으로. 아래 §5 참조. 깊이 범위(0 ~ 1) 매크로는 2026-10-04 에 CMake 한 곳으로 모았습니다(`DEF-95`) |
 | **정점 패킹 (QTangent)** | 미구현 | 48B → 24B. Carbon `mesh`에서 도입 |
 | **인스턴싱 (instanceCount)** | **자동 인스턴싱 구현 · 2026-10-14** (`DEF-16`) | 같은 지오메트리 · 머티리얼의 불투명 메시를 드로우 하나로 묶습니다(`hbatch::build`). 명시적 인스턴싱 컴포넌트(Godot MultiMesh 같은 것)는 파편장 착수 때 둡니다. 한 프레임 메시 수의 상한은 행 예산 `kMaxDraws = 16384` 입니다 |
-| **패스 확장 지점** | **미구현** | 패스 레지스트리 없음 |
+| **패스 확장 지점** | **구현 · 2026-10-14** (`DEF-17` · `DEF-18`, 화면 확인은 일괄 점검 때) | 고정 지점 넷(불투명 끝 · 반투명 끝 · 메인 패스 뒤 · 톤매핑 뒤)에 `IRenderExtension` 을 끼워 넣습니다. 게임 모듈은 `EngineContext::render` 로 등록 · 해제합니다 |
 | **에디터 단위 표시와 적응형 스텝** | **해결 · 2026-10-04** (`DEF-46`, 원래 MEDIUM) | 숫자 칸이 단위 종류(`PropUnit` · `ENumberUnit`)에 따라 끌기 감도를 정합니다(거리 1cm/px, 크기는 시작값의 1%/px, 각도 0.5°/px). UE 식으로 Shift 는 10배, Ctrl 은 0.1배이고, 표시는 끝의 0 을 지운 고정 소수점이라 1 mm 미만도 보입니다. 예전에는 `PropDesc::step` 이 `0.01f` 로 고정되어 1 cm 미만을 편집할 수 없었습니다. 범용 에디터 기능이며 도메인과 무관합니다. 단위 규약 자체는 §2의 전역 규약이고 여기는 표시와 입력 계층입니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md)와 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 7-7절 |
 | **머티리얼 편집 (엔진 내 머티리얼 속성 조정)** | **미구현** | 사용자 요청 항목입니다. `MaterialHandle`이 `TexSlot` 다섯 개만 가지고 **스칼라 팩터를 보관하지 않으며**, 팩터는 `GltfLoader`가 로드 시점에 픽셀로 굽기 때문에 이후 조정할 수 없습니다. `StaticMeshComponent`도 `MaterialHandle*`만 들고 있어 에디터 노출이 없고 `SceneSerializer`에도 저장되지 않습니다. **`DEF-47`의 구현 방식(팩터 굽기) 재검토가 선행됩니다.** 범용 에디터 기능이며 도메인과 무관합니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 11-15절, [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) 2-F절, [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 8-11절 |
 | **배정밀도 월드 좌표 옵션** | 미구현 | 대규모 씬 일반의 문제이지 우주 전용이 아님 |
@@ -126,8 +126,8 @@
 | 지점 | 문제 |
 |---|---|
 | `Renderer::buildDrawCommands`, `GeometryPass::record`, `ShadowPass::record` | **해결 · 2026-10-14 (`DEF-16`).** `GeometryPass::DrawItem` 에 `instanceCount` 를 두고, 세 서브패스와 `ShadowPass::record` 가 그 값으로 그립니다. `hbatch::build` 가 같은 지오메트리 · 머티리얼의 불투명 메시에 연속된 행을 배정해 드로우 하나로 묶습니다. 예전에는 `instanceCount = 1`이 리터럴로 박혀 있고 `GeometryPass::DrawItem`에 해당 멤버가 없습니다. 2026-10-14 에 확인한 곳은 여섯입니다. `buildDrawCommands` 가 `GpuDrawCmd::instanceCount` 를 두 곳에서 1 로 채우지만 읽는 곳이 없고, 실제 드로우는 `GeometryPass::record` 의 세 서브패스와 `ShadowPass::record` 가 `vkCmdDrawIndexed` 에 1 을 직접 넘깁니다. 파편장 인스턴싱이 원리상 불가능했습니다 |
-| `HPass`, `Renderer` | `HPass`가 의도적으로 `create()`와 `record()`를 제외한 수명주기 전용 인터페이스입니다. 패스 레지스트리가 없고, 다섯 패스(`GeometryPass` · `ShadowPass` · `AOPass` · `BloomPass` · `PostPass`)가 `Renderer`의 구체 멤버로서 생성 · 파괴 · 핫 리로드 · 크기 변경 경로마다 손으로 열거됩니다(2026-10-04 에 `CullPass` 를 지워 여섯에서 다섯이 됨, `DEF-03`). **새 렌더 패스를 Layer 2에서 추가할 수 없습니다** |
-| `EngineContext` (`IGameModule.hpp`) | `EngineContext`에 렌더러 참조가 없습니다(월드 · 에셋 · 창 · 모듈만 있음). 게임 모듈이 렌더러에 닿을 수 없습니다 |
+| `HPass`, `Renderer` | **해결 · 2026-10-14 (`DEF-17`).** `IRenderExtension` 이 `HPass` 수명주기에 `create` · `record` 를 더하고, `RenderExtensionRegistry` 가 기본 패스와 확장을 한 목록으로 돌립니다. 예전에는 `HPass`가 의도적으로 `create()`와 `record()`를 제외한 수명주기 전용 인터페이스입니다. 패스 레지스트리가 없고, 다섯 패스(`GeometryPass` · `ShadowPass` · `AOPass` · `BloomPass` · `PostPass`)가 `Renderer`의 구체 멤버로서 생성 · 파괴 · 핫 리로드 · 크기 변경 경로마다 손으로 열거됩니다(2026-10-04 에 `CullPass` 를 지워 여섯에서 다섯이 됨, `DEF-03`). **새 렌더 패스를 Layer 2에서 추가할 수 없었습니다** |
+| `EngineContext` (`IGameModule.hpp`) | **해결 · 2026-10-14 (`DEF-18`).** `EngineContext::render` 로 렌더 확장을 등록 · 해제합니다(렌더러 전체가 아닌 좁은 인터페이스). 예전에는 렌더러 참조가 없어(월드 · 에셋 · 창 · 모듈만) 게임 모듈이 렌더러에 닿을 수 없었습니다 |
 | `CMakeLists.txt` 의 `GLSL_SHADERS` | 셰이더 목록이 파일명으로 하드코딩되어 있습니다. 도메인 셰이더를 드롭인할 수 없습니다. 2026-10-04 사용자 결정으로 목록은 글롭 대신 명시로 두고, 목록 밖 셰이더 파일은 구성 단계에서 경고합니다(`DEF-11`). 그래서 Layer 2 셰이더도 이 목록에 넣어야 합니다 |
 | `kMaxDraws` (`RenderTypes.hpp`), `kMaxBodies` (`PhysicsSystem.cpp`) | `kMaxDraws = 16384`(2026-10-14 에 1024 에서 올림), `kMaxBodies = 4096` 이중 상한. "수천 개 파편"이 물리 쪽 상한에 걸립니다. 2026-10-04 에 상한을 넘긴 메시를 Dropped 통계와 경고로 알리는 진단만 넣었고(`DEF-10`), 상한 설정화는 남았습니다 |
 
@@ -215,7 +215,7 @@ Carbon Engine 저장소를 원본으로 확인한 결과, **코어에 들어갈 
 - 6DOF 카메라 자세 (**완료 2026-10-04**, `DEF-21`)
 
 **2단계: Layer 2를 가능하게 하는 확장 지점.**
-- 패스 등록 구조와 `record(RenderView&)` 진입점
+- 패스 등록 구조와 `record(RenderView&)` 진입점 (**완료 2026-10-14**, `DEF-17` · `DEF-18`. 고정 지점 넷의 렌더 확장)
 - 인스턴싱 (`instanceCount` 경로) (**자동 인스턴싱 완료 2026-10-14**, `DEF-16`. 명시적 인스턴싱 컴포넌트는 파편장과 함께)
 - 물리 힘·임펄스 API와 중력 설정 (**완료 2026-10-04**, `DEF-19`)
 - `FrameUBO.invViewProj`. 셰이더 목록은 글롭으로 바꾸지 않고 명시 목록과 목록 밖 파일 경고로 정했습니다(사용자 결정 2026-10-04, `DEF-11`).
@@ -226,7 +226,7 @@ Carbon Engine 저장소를 원본으로 확인한 결과, **코어에 들어갈 
 **4단계: 우주 도메인 레이어.**
 - `ZeroGControllerComponent`, 파편장, 생존 규칙, 우주 비주얼
 
-우주 기능을 먼저 얹고 싶은 유혹이 있겠지만, 2단계 없이는 Layer 2 코드를 작성해도 동작시킬 방법이 없습니다. `ZeroGControllerComponent` 에 필요한 입력 축과 물리 힘 API 는 2026-10-04 에, 자동 인스턴싱은 2026-10-14 에 들어왔지만, 우주 배경은 패스 확장 지점이 없으면 넣을 자리가 없습니다.
+우주 기능을 먼저 얹고 싶은 유혹이 있겠지만, 2단계 없이는 Layer 2 코드를 작성해도 동작시킬 방법이 없습니다. 2026-10-14 기준으로 입력 축 · 물리 힘 API · 자동 인스턴싱 · 패스 확장 지점이 들어왔습니다. 2단계에서 남은 것은 `FrameUBO.invViewProj`(레이마칭 배경에 필요)이고, 컴포넌트 직렬화(`DEF-22`)가 막혀 있으면 새 도메인 컴포넌트가 `.hscene` 에 저장되지 않습니다.
 
 ---
 

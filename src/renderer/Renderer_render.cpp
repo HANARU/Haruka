@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cassert>
 #include <random>
+#include <functional>
 
 // Cross-frame state for shadow VP
 static glm::mat4 sCurLightViewProj{ 1.f };
@@ -593,6 +594,37 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
         return out;
     };
 
+    // 렌더 확장 지점(DEF-17). 그 지점에 등록된 확장이 있을 때만 부르므로, 확장이 없으면 기록하는 명령이
+    // 예전과 똑같습니다. 확장이 그리는 시간은 그 지점이 속한 타임스탬프 칸(Main · AO · Tonemap)에 들어갑니다.
+    const bool extGeo   = passRegistry_.any(HRenderStage::OpaqueEnd) ||
+                          passRegistry_.any(HRenderStage::TransparentEnd);
+    const bool extScene = passRegistry_.any(HRenderStage::AfterScene);
+    const bool extPost  = passRegistry_.any(HRenderStage::AfterTonemap);
+    auto stageCtx = [&](HRenderStage stage, uint32_t v) {
+        HRenderStageContext c;
+        c.stage      = stage;
+        c.cmd        = cmd;
+        c.frameIndex = fi;
+        c.viewIndex  = v;
+        c.view       = views_[v].view;
+        c.proj       = views_[v].proj;
+        c.eyePos     = views_[v].pos;
+        c.frameSet   = frames_.frameSet(fi);
+        return c;
+    };
+    // AfterScene 은 렌더 패스 밖이라 확장이 그래픽 · 컴퓨트 어느 쪽으로든 HDR 을 읽고 쓸 수 있습니다.
+    // 메인 패스의 resolve 결과가 보이도록 앞에, 확장의 쓰기가 AO · Bloom · 톤매핑에 보이도록 뒤에 둡니다.
+    auto fullBarrier = [&cmd]() {
+        VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+        mb.srcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        mb.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+        mb.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        mb.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        di.memoryBarrierCount = 1; di.pMemoryBarriers = &mb;
+        vkCmdPipelineBarrier2(cmd, &di);
+    };
+
     // XR 은 오른쪽 눈을 먼저 그립니다. 중간 타깃에 왼쪽 눈이 남아 있어야 아래에서 그것을 에디터
     // 뷰포트에 비출 수 있습니다.
     for (uint32_t k = 0; k < viewCount_; ++k) {
@@ -618,7 +650,33 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
         }
 
         // ── Main render pass (3 subpasses) ────────────────────────────────────
+        // 불투명 끝(서브패스 1)과 반투명 끝(서브패스 2)에서 확장을 부릅니다.
+        std::function<void(uint32_t)> geoHook;
+        if (extGeo)
+            geoHook = [&, v](uint32_t subpass) {
+                HRenderStageContext c = stageCtx(subpass == 1 ? HRenderStage::OpaqueEnd
+                                                               : HRenderStage::TransparentEnd, v);
+                c.renderPass  = geometry_.mainPass();
+                c.subpass     = subpass;
+                c.colorFormat = GeometryPass::kHdrFormat;
+                c.samples     = rc_.msaaSamples;
+                c.rect        = { { 0, 0 }, rc_.renderExtent };
+                passRegistry_.dispatch(c);
+            };
+        gin.subpassHook = extGeo ? &geoHook : nullptr;
         geometry_.record(cmd, fi, v, gin, timestampPool_, tsBase + 0);
+
+        // ── 렌더 확장: 메인 패스 뒤 · AO 앞(AfterScene) ─────────────────────────
+        if (extScene) {
+            fullBarrier();
+            HRenderStageContext c = stageCtx(HRenderStage::AfterScene, v);
+            c.hdrImage    = geometry_.hdrImage(fi);
+            c.hdrView     = geometry_.hdrView(fi);
+            c.depthView   = geometry_.depthView();
+            c.sceneExtent = rc_.renderExtent;
+            passRegistry_.dispatch(c);
+            fullBarrier();
+        }
 
         // ── AO (linDepth + SSAO, half-res) ───────────────────────────────────
         ao_.record(cmd, fi, v, geometry_.depthView(), clampSampler_, view.aoCam[v]);
@@ -634,8 +692,18 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
         // T-c: 가짜 TAA 비활성. 지터·모션벡터·이웃클램프 없는 mix(hdr,history,0.1)는 AA 효과가
         // 0이면서 이동 시 고스팅과 노출 미적용(D-5) 밝기 오류만 냈습니다. AA 는 4x MSAA 가
         // 맡습니다. 진짜 TAA 는 OpenXR 이후 별도 트랙(Transparency_Temporal_Design.md 4절).
-        post_.recordTonemap(cmd, outputFor(v), geometry_.hdrView(fi), ao_.ssaoView(),
-                            bloom_.resultView(), clampSampler_);
+        const PostPass::Output out = outputFor(v);
+        PostPass::OverlayHook postHook;
+        if (extPost)
+            postHook = [&, v, out](VkRenderPass rp) {
+                HRenderStageContext c = stageCtx(HRenderStage::AfterTonemap, v);
+                c.renderPass  = rp;
+                c.colorFormat = out.format;
+                c.rect        = out.rect;
+                passRegistry_.dispatch(c);
+            };
+        post_.recordTonemap(cmd, out, geometry_.hdrView(fi), ao_.ssaoView(),
+                            bloom_.resultView(), clampSampler_, extPost ? &postHook : nullptr);
         if (timestampPool_)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 3);
     }
@@ -665,8 +733,19 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
         VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
         di.memoryBarrierCount = 1; di.pMemoryBarriers = &mb;
         vkCmdPipelineBarrier2(cmd, &di);
+        // 거울 화면에도 톤매핑 뒤 확장을 부릅니다(헤드셋과 같은 화면 효과가 보이도록). 왼쪽 눈 기준입니다.
+        PostPass::OverlayHook mirrorHook;
+        if (extPost)
+            mirrorHook = [&, mirror](VkRenderPass rp) {
+                HRenderStageContext c = stageCtx(HRenderStage::AfterTonemap, 0);
+                c.mirror      = true;
+                c.renderPass  = rp;
+                c.colorFormat = mirror.format;
+                c.rect        = mirror.rect;
+                passRegistry_.dispatch(c);
+            };
         post_.recordTonemap(cmd, mirror, geometry_.hdrView(fi), ao_.ssaoView(),
-                            bloom_.resultView(), clampSampler_);
+                            bloom_.resultView(), clampSampler_, extPost ? &mirrorHook : nullptr);
     }
 
     // 그리지 않은 눈의 칸도 찍어 둡니다. 비워 두면 결과 읽기가 통째로 VK_NOT_READY 가 됩니다.

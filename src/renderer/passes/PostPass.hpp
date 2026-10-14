@@ -1,5 +1,6 @@
 #pragma once
 #include <vulkan/vulkan.h>
+#include <functional>
 #include <vector>
 #include "HPass.hpp"
 #include "../RenderContext.hpp"
@@ -30,9 +31,13 @@ public:
         float         uvScale[2]  = { 1.f, 1.f };   // HDR 에서 읽을 부분(거울 화면 자르기)
         float         uvOffset[2] = { 0.f, 0.f };
     };
+    // overlay 가 있으면 톤매핑을 그린 뒤 같은 렌더 패스 안에서 부릅니다(렌더 확장의 AfterTonemap, DEF-17).
+    // 인자는 지금 열린 렌더 패스입니다. 뷰포트 · 시저는 out.rect 로 설정되어 있습니다.
+    using OverlayHook = std::function<void(VkRenderPass renderPass)>;
     void recordTonemap(VkCommandBuffer cmd, const Output& out,
                        VkImageView hdrView, VkImageView ssaoView,
-                       VkImageView bloomView, VkSampler clampSampler);
+                       VkImageView bloomView, VkSampler clampSampler,
+                       const OverlayHook* overlay = nullptr);
 
     // 데스크톱 스왑체인 이미지의 프레임버퍼(acquire 가 만든 것).
     VkFramebuffer swapFramebuffer(uint32_t imgIdx) const { return framebufs_[imgIdx]; }

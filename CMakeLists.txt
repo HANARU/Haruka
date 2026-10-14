@@ -356,6 +356,17 @@ if(NOT ANDROID)
         set_target_properties(HarukaBatchTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 렌더 확장 지점 테스트 -----------------------------------------------
+    # 패스 레지스트리의 수명주기 순서와 지점별 호출을 화면 없이 검산합니다(DEF-17 · 18).
+    add_executable(HarukaRenderExtTest tests/RenderExtensionTest.cpp)
+    target_link_libraries(HarukaRenderExtTest PRIVATE glm::glm)
+    # RenderExtension.hpp 가 Vulkan 형을 쓰므로 헤더 경로만 둡니다(링크는 필요 없음).
+    target_include_directories(HarukaRenderExtTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    if(MSVC)
+        target_compile_options(HarukaRenderExtTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaRenderExtTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- VR 입력 테스트 -------------------------------------------------------
     # XR 모듈이 넣는 컨트롤러 상태가 축 · 디지털 액션으로 나오는지 검산합니다(DEF-20).
     add_executable(HarukaInputTest
@@ -463,4 +474,5 @@ if(NOT ANDROID)
     add_test(NAME stereo_views         COMMAND HarukaStereoTest)
     add_test(NAME xr_input             COMMAND HarukaInputTest)
     add_test(NAME draw_batching        COMMAND HarukaBatchTest)
+    add_test(NAME render_extensions    COMMAND HarukaRenderExtTest)
 endif()
