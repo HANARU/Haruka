@@ -5,6 +5,8 @@
 > 작성 2026-08-24 · 근거는 `src/` 코드 실측과 [Carbon_Source_Audit.md](archive/Carbon_Source_Audit.md)입니다.
 >
 > **[갱신 · 2026-10-04]** §3 판정표와 §4 · §6 의 상태를 2026-10-04 의 두 작업(남은 결함 정리, VR 첫걸음)에 맞췄습니다. 바뀐 항목은 OpenXR 연결 · 두 눈 렌더 · 두 눈 컬링 · 카메라 자세 · VR 입력 · 물리 API · 숫자 칸 단위 · 셰이더 빌드입니다.
+>
+> **[갱신 · 2026-10-14]** §4 의 지점 표기를 줄 번호 대신 파일 · 함수 · 기호 이름으로 바꾸고, 각 줄을 지금 코드와 다시 대조했습니다. §6 0단계의 라이팅 확인 씬을 완료로 고쳤습니다.
 
 ---
 
@@ -77,7 +79,7 @@
 | **감쇠 운동 적분기 (dt 독립)** | 미구현 | Carbon `destiny`에서 도입. 아래 §5 참조 |
 | **깊이 규약 정책 (Reverse-Z 포함)** | 미구현 | 전역 정책으로. 아래 §5 참조. 깊이 범위(0 ~ 1) 매크로는 2026-10-04 에 CMake 한 곳으로 모았습니다(`DEF-95`) |
 | **정점 패킹 (QTangent)** | 미구현 | 48B → 24B. Carbon `mesh`에서 도입 |
-| **인스턴싱 (instanceCount)** | **미구현** | 다섯 곳에 `1`이 리터럴로 박혀 있음 |
+| **인스턴싱 (instanceCount)** | **미구현** | 여섯 곳에 `1`이 리터럴로 박혀 있음(2026-10-14 확인, §4 참조) |
 | **패스 확장 지점** | **미구현** | 패스 레지스트리 없음 |
 | **에디터 단위 표시와 적응형 스텝** | **해결 · 2026-10-04** (`DEF-46`, 원래 MEDIUM) | 숫자 칸이 단위 종류(`PropUnit` · `ENumberUnit`)에 따라 끌기 감도를 정합니다(거리 1cm/px, 크기는 시작값의 1%/px, 각도 0.5°/px). UE 식으로 Shift 는 10배, Ctrl 은 0.1배이고, 표시는 끝의 0 을 지운 고정 소수점이라 1 mm 미만도 보입니다. 예전에는 `PropDesc::step` 이 `0.01f` 로 고정되어 1 cm 미만을 편집할 수 없었습니다. 범용 에디터 기능이며 도메인과 무관합니다. 단위 규약 자체는 §2의 전역 규약이고 여기는 표시와 입력 계층입니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md)와 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 7-7절 |
 | **머티리얼 편집 (엔진 내 머티리얼 속성 조정)** | **미구현** | 사용자 요청 항목입니다. `MaterialHandle`이 `TexSlot` 다섯 개만 가지고 **스칼라 팩터를 보관하지 않으며**, 팩터는 `GltfLoader`가 로드 시점에 픽셀로 굽기 때문에 이후 조정할 수 없습니다. `StaticMeshComponent`도 `MaterialHandle*`만 들고 있어 에디터 노출이 없고 `SceneSerializer`에도 저장되지 않습니다. **`DEF-47`의 구현 방식(팩터 굽기) 재검토가 선행됩니다.** 범용 에디터 기능이며 도메인과 무관합니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 11-15절, [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) 2-F절, [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 8-11절 |
@@ -123,11 +125,11 @@
 
 | 지점 | 문제 |
 |---|---|
-| `Renderer_render.cpp:243`, `GeometryPass.cpp:530`, `:556`, `ShadowPass.cpp:192` | `instanceCount = 1`이 리터럴로 박혀 있고 `GeometryPass::DrawItem`에 해당 멤버가 없습니다. 파편장 인스턴싱이 원리상 불가능합니다 |
-| `HPass.hpp:8-15` | `HPass`가 의도적으로 `create()`와 `record()`를 제외한 수명주기 전용 인터페이스입니다. 패스 레지스트리가 없고 여섯 패스가 `Renderer`의 구체 멤버로 여섯 곳에서 손으로 열거됩니다. **새 렌더 패스를 Layer 2에서 추가할 수 없습니다** |
-| `IGameModule.hpp:9-14` | `EngineContext`에 렌더러 참조가 없습니다. 게임 모듈이 렌더러에 닿을 수 없습니다 |
+| `Renderer::buildDrawCommands`, `GeometryPass::record`, `ShadowPass::record` | `instanceCount = 1`이 리터럴로 박혀 있고 `GeometryPass::DrawItem`에 해당 멤버가 없습니다. 2026-10-14 에 확인한 곳은 여섯입니다. `buildDrawCommands` 가 `GpuDrawCmd::instanceCount` 를 두 곳에서 1 로 채우지만 읽는 곳이 없고, 실제 드로우는 `GeometryPass::record` 의 세 서브패스와 `ShadowPass::record` 가 `vkCmdDrawIndexed` 에 1 을 직접 넘깁니다. 파편장 인스턴싱이 원리상 불가능합니다 |
+| `HPass`, `Renderer` | `HPass`가 의도적으로 `create()`와 `record()`를 제외한 수명주기 전용 인터페이스입니다. 패스 레지스트리가 없고, 다섯 패스(`GeometryPass` · `ShadowPass` · `AOPass` · `BloomPass` · `PostPass`)가 `Renderer`의 구체 멤버로서 생성 · 파괴 · 핫 리로드 · 크기 변경 경로마다 손으로 열거됩니다(2026-10-04 에 `CullPass` 를 지워 여섯에서 다섯이 됨, `DEF-03`). **새 렌더 패스를 Layer 2에서 추가할 수 없습니다** |
+| `EngineContext` (`IGameModule.hpp`) | `EngineContext`에 렌더러 참조가 없습니다(월드 · 에셋 · 창 · 모듈만 있음). 게임 모듈이 렌더러에 닿을 수 없습니다 |
 | `CMakeLists.txt` 의 `GLSL_SHADERS` | 셰이더 목록이 파일명으로 하드코딩되어 있습니다. 도메인 셰이더를 드롭인할 수 없습니다. 2026-10-04 사용자 결정으로 목록은 글롭 대신 명시로 두고, 목록 밖 셰이더 파일은 구성 단계에서 경고합니다(`DEF-11`). 그래서 Layer 2 셰이더도 이 목록에 넣어야 합니다 |
-| `RenderTypes.hpp:12`, `PhysicsSystem.cpp:81` | `kMaxDraws = 1024`, `kMaxBodies = 4096` 이중 상한. "수천 개 파편"이 양쪽에 걸립니다 |
+| `kMaxDraws` (`RenderTypes.hpp`), `kMaxBodies` (`PhysicsSystem.cpp`) | `kMaxDraws = 1024`, `kMaxBodies = 4096` 이중 상한. "수천 개 파편"이 양쪽에 걸립니다. 2026-10-04 에 상한을 넘긴 메시를 Dropped 통계와 경고로 알리는 진단만 넣었고(`DEF-10`), 상한 설정화는 남았습니다 |
 
 ### 심각 (배관이 없어 기능이 성립하지 않음)
 
@@ -136,18 +138,18 @@
 | `PhysicsSystem`, `RigidBodyComponent` | **해결 · 2026-10-04 (`DEF-19`).** 중력 세터와 힘 · 토크 · 충격량 · 속도 · 레이캐스트 · 구 겹침 API 를 두었습니다. 동기화 루프가 매 프레임 Dynamic 바디의 트랜스폼을 덮어써 게임 코드의 이동이 사라지던 문제는, 물리가 쓴 값을 기억해 게임 코드가 옮긴 경우를 순간 이동(속도 유지)으로 반영하는 방식으로 정리했습니다(UE 식). 예전에는 중력이 하드코딩되어 세터가 없고 힘 · 임펄스 · 속도 · 레이캐스트 API 가 하나도 없어, Layer 2 가 바디를 밀 방법이 없었습니다 |
 | `HInputSystem`, `src/xr` | **해결 · 2026-10-04 (`DEF-20`, 헤드셋 확인 전).** XR 모듈이 OpenXR 액션으로 입력을 만들고, `HInputSystem` 이 아날로그 축(`bindAxis` · `axis`) · 컨트롤러 버튼(`bindXrButton`) · 머리와 손 자세(`xr()`)를 내줍니다. 창(`IWindow`)은 키보드 · 마우스만 맡습니다. 예전에는 디지털 입력 전용이라 아날로그 축도 VR 포즈도 없어 RCS 추력 입력을 받을 수 없었습니다 |
 | `CameraComponent` | **해결 · 2026-10-04 (`DEF-21`).** 뷰를 액터의 월드 회전(쿼터니언)과 월드 위치로 만들고, 헤드셋 자세는 카메라의 XR 원점(위치 + 요) 위에 올립니다. 예전에는 yaw/pitch 오일러각으로 뷰를 만들고 `owner->transform.rotation` 을 무시해, 6DOF 자유 자세도 롤도 머리와 몸체의 분리도 불가능했습니다 |
-| `main.cpp:38`, `:115-119` | `GlfwWindow`를 조건 없이 생성하며 안드로이드에서는 컴파일되지 않습니다. `World::tick`은 에디터 Play 상태에서만 돌아 런타임 빌드에 게임 루프가 없습니다 |
-| `SceneSerializer.hpp:18-40` | 컴포넌트 5종이 구조체 필드로 하드코딩되어 새 컴포넌트가 `.hscene` 왕복을 하지 못합니다 |
+| `Engine::Engine`, `Engine::run` (`src/core/Engine.cpp`) | `GlfwWindow`를 조건 없이 생성하며 안드로이드에서는 컴파일되지 않습니다(헤더 포함만 `#ifndef ANDROID` 로 막혀 있음). `World::tick`은 에디터 Play 상태에서만 돌아 런타임 빌드에 게임 루프가 없습니다. 예전에는 이 코드가 `main.cpp` 에 있었고, 그 뒤 `Engine` 클래스로 옮겨졌습니다 |
+| `SceneSerializer::ActorData` | 컴포넌트 5종(메시 · 라이트 · 카메라 · 오디오 · 강체)이 구조체 필드로 하드코딩되어 새 컴포넌트가 `.hscene` 왕복을 하지 못합니다 |
 
 ### 보통 (기능은 되나 확장이 막힘)
 
 | 지점 | 문제 |
 |---|---|
-| `RenderTypes.hpp:16-24` | `FrameUBO`에 `invViewProj`가 없습니다. 레이마칭 배경이나 화면 공간 굴절에 필요합니다 |
+| `FrameUBO` (`shaders/include/haruka_shared.h`) | `FrameUBO`에 `invViewProj`가 없습니다. 레이마칭 배경이나 화면 공간 굴절에 필요합니다. `FrameUBO` 는 2026-10-04 에 `RenderTypes.hpp` 에서 C++ 와 GLSL 이 함께 쓰는 이 헤더로 옮겼습니다(`DEF-14`) |
 | `shaders/include/noise.glsl`, `sdf.glsl` | **해결 · 2026-10-04 (`DEF-11`).** 쓰지 않던 두 파일은 지웠고, 셰이더 include 는 `glslc -MD` 의 depfile 로 추적해 include 파일이 바뀌면 다시 컴파일합니다. 예전에는 두 파일을 어떤 셰이더도 `#include` 하지 않았고, CMake `DEPENDS` 에 include 파일이 없어 쓰기 시작하면 낡은 SPIR-V 를 배포하게 되어 있었습니다 |
-| `PostPass.cpp:153-155` | 포스트 푸시 상수가 리터럴로 고정된 구조체입니다. 멀미 억제용 비네팅 반경을 게임 상태에서 넘길 수 없습니다 |
+| `PostPass::recordTonemap` | 포스트 푸시 상수(`PostPC`)가 이 함수 안에서 리터럴 값(AO · Bloom 강도, 노출)으로 채우는 고정 구조체입니다. 멀미 억제용 비네팅 반경을 게임 상태에서 넘길 수 없습니다 |
 | `Renderer::init` | `GlfwSwapchain` 을 직접 생성합니다. XR 스왑체인은 2026-10-04 에 `ISwapchain` 구현체 대신 `Renderer::attachXrSwapchain` 으로 이미지를 붙이는 방식으로 넣었습니다(PC OpenXR). 창이 없는 Quest 단독 실행에서 창 스왑체인을 어떻게 뺄지는 Android 이식(`DEF-08`) 때 정합니다 |
-| `Renderer_render.cpp` (`updateLightSSBO`) | 라이트 개수 불일치 자체는 해결되었고(`DEF-24`, 2026-08-25) 상한도 256으로 올렸습니다. 다만 상한에 걸릴 때 **어느 라이트를 살릴지 정하는 정책이 없습니다.** 액터 생성 순서로 앞에서부터 자르므로, Layer 2가 광원을 많이 두면 가까운 조명이 꺼지고 먼 조명이 켜질 수 있습니다(`DEF-33`). 상세는 결함 문서를 참조하십시오 |
+| `Renderer::updateLightSSBO` | 라이트 개수 불일치 자체는 해결되었고(`DEF-24`, 2026-08-25) 상한도 256으로 올렸습니다. 다만 상한에 걸릴 때 **어느 라이트를 살릴지 정하는 정책이 없습니다.** 액터 생성 순서로 앞에서부터 자르므로, Layer 2가 광원을 많이 두면 가까운 조명이 꺼지고 먼 조명이 켜질 수 있습니다(`DEF-33`). 상세는 결함 문서를 참조하십시오 |
 
 ---
 
@@ -202,7 +204,7 @@ Carbon Engine 저장소를 원본으로 확인한 결과, **코어에 들어갈 
 - 머티리얼 팩터와 색 공간 (`DEF-47` HIGH, `DEF-48` MEDIUM, **둘 다 완료 2026-08-25**). `src/assets/GltfLoader.cpp`가 glTF 스칼라 팩터를 읽지 않아 팩터만 지정한 머티리얼이 전부 순백이 되던 문제와, `shaders/pbr.frag`가 이미 선형인 sRGB 샘플을 한 번 더 디코드하던 문제입니다. **다만 팩터를 로드 시점에 픽셀로 굽는 방식이라 §3의 "머티리얼 편집" 항목이 이 결정에 묶여 있습니다.**
 - 밝기 밸런스 (**적용됨 2026-08-25 · 결함 아님**). 방향광 기본 강도 `0.85 → 3.0`, 하늘 복사휘도에 `kSkyRadianceScale = 0.30`, 톤매핑 노출 `1.0 → 0.4`를 한 세트로 움직였습니다. `src/components/LightComponent.hpp`, `src/renderer/Renderer.cpp`, `src/renderer/passes/PostPass.cpp`입니다. **문서 기록 없이 코드에만 들어가 있던 것을 검수에서 확인해 등재했으며, 실측 기록은 확인되지 않았습니다.** 상세는 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 8-12절입니다.
 - 모바일 Vulkan 폴백. `drawIndirectCount` 요구는 GPU 컬링과 함께 지웠습니다(**2026-10-04**, `DEF-03`). 남은 것은 Vulkan 1.4 장치 전제(`DEF-97`: Quest 는 1.1 · 1.3 이고 `synchronization2` · push descriptor 는 확장으로 있음)이며, Quest 이식 때 `DEF-04` 와 함께 처리합니다.
-- 라이팅 확인 씬 (미착수, **현재 최우선**). `DEF-36` 수정으로 명암은 보이게 되었으나 **그림자가 떨어질 바닥이 없어 섀도 자체를 아직 검증하지 못했습니다.** `DEF-26`과 `DEF-27`의 검증도 이 씬이 선결 조건입니다. 상세는 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 9절
+- 라이팅 확인 씬 (**완료 2026-08-25**). 두께 0.2 m 바닥(`Ground`) 위에 확인용 도형을 둔 `Lighting_Probe` 배치를 만들어, 그림자가 떨어질 표면이 생겼습니다. 처음에는 `DefaultGameModule::onStart` 가 코드로 만들었고, 2026-10-02 에 `PRIM:` 직렬화가 붙어 `assets/scenes/LightingProbe.hscene` 파일로 옮겼습니다(`onStart` 는 이 파일을 읽기만 함). 예전에는 바닥이 없어 섀도를 검증할 수 없었고, 이 씬이 선결 조건이던 `DEF-26` 과 `DEF-27` 은 2026-08-27 에 해결했습니다. 상세는 [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) 9절과 부록 C
 
 **1단계: VR 엔진으로서의 코어 완성.** 이것이 엔진의 정의이므로 우주 기능보다 앞섭니다.
 - Quest 런타임 진입점 (`AndroidWindow` 인스턴스화, `IWindow` 팩토리, 별도 `main`)
