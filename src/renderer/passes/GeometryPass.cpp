@@ -572,7 +572,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
         for (const auto& item : *in.opaqueItems) {
             assert(item.material && "DrawItem without material");
             if (!item.material) continue;
-            vkCmdDrawIndexed(cmd, item.indexCount, 1, item.firstIndex,
+            vkCmdDrawIndexed(cmd, item.indexCount, item.instanceCount, item.firstIndex,
                              item.vertexOffset, item.firstInstance);
         }
     }
@@ -594,7 +594,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
             if (!item.material) continue;
             pushMaterialDesc(cmd, pbrLayout_, item.material,
                              in.textureSampler, in.clampSampler);
-            vkCmdDrawIndexed(cmd, item.indexCount, 1, item.firstIndex,
+            vkCmdDrawIndexed(cmd, item.indexCount, item.instanceCount, item.firstIndex,
                              item.vertexOffset, item.firstInstance);
         }
     }
@@ -620,7 +620,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
                 if (!item.material) continue;
                 pushMaterialDesc(cmd, pbrLayout_, item.material,
                                  in.textureSampler, in.clampSampler);
-                vkCmdDrawIndexed(cmd, item.indexCount, 1, item.firstIndex,
+                vkCmdDrawIndexed(cmd, item.indexCount, item.instanceCount, item.firstIndex,
                                  item.vertexOffset, item.firstInstance);
             }
         };

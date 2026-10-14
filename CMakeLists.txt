@@ -347,6 +347,15 @@ if(NOT ANDROID)
         set_target_properties(HarukaStereoTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 자동 인스턴싱 테스트 ------------------------------------------------
+    # 같은 지오메트리 · 머티리얼의 묶기와 transform 행 배정을 화면 없이 검산합니다(DEF-16).
+    add_executable(HarukaBatchTest tests/DrawBatchingTest.cpp)
+    target_include_directories(HarukaBatchTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaBatchTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaBatchTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- VR 입력 테스트 -------------------------------------------------------
     # XR 모듈이 넣는 컨트롤러 상태가 축 · 디지털 액션으로 나오는지 검산합니다(DEF-20).
     add_executable(HarukaInputTest
@@ -453,4 +462,5 @@ if(NOT ANDROID)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
     add_test(NAME stereo_views         COMMAND HarukaStereoTest)
     add_test(NAME xr_input             COMMAND HarukaInputTest)
+    add_test(NAME draw_batching        COMMAND HarukaBatchTest)
 endif()

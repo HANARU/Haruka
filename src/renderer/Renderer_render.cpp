@@ -6,6 +6,7 @@
 #include "../components/LightComponent.hpp"
 #include "../core/FrameTimings.hpp"
 #include "RendererLog.hpp"
+#include "DrawBatching.hpp"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
 #define GLM_FORCE_RADIANS
@@ -178,7 +179,6 @@ void Renderer::buildDrawCommands(World& world,
 
     auto* tfData = static_cast<GpuTransform*>(frames_.transformPtr(frameIdx));
 
-    uint32_t ssboIdx  = 0;
     const auto& allMeshes   = world.getVisibleMeshes();
     uint32_t totalCnt = (uint32_t)allMeshes.size();
 
@@ -194,25 +194,16 @@ void Renderer::buildDrawCommands(World& world,
     transpOut.clear();
     materialRowsOut.clear();
     shadowOut.clear();
-    materialRowsOut.reserve(allMeshes.size());
 
-    // 투명 정렬 키. 거리 제곱을 행을 배정할 때 한 번만 계산해 둡니다. 예전에는 정렬 비교마다
-    // 매핑된 transform SSBO(비디오 메모리)를 다시 읽었습니다(DEF-30).
-    struct TranspKeyed { float distSq; GpuDrawCmd cmd; };
-    std::vector<TranspKeyed> transpKeyed;
-    uint32_t droppedCam = 0;   // 카메라에 보이지만 행 예산이 차서 못 그린 메시(DEF-10)
-
-    // 라이트 전용 캐스터(inLight && !inCam)는 카메라 드로우가 행 예산을 먼저 가져간 뒤에
-    // 붙입니다. 그래야 카메라∪라이트 합집합이 kMaxDraws 를 넘겨도, 화면 밖 캐스터의 행이
-    // 컬러 패스의 카메라 드로우를 밀어내지 못합니다(불변식: 라이트 전용 행은 섀도맵에만 영향).
-    // 합집합이 예산 안이면 순서는 무의미하고, 넘칠 때 밀려나는 것은 안 보이는 캐스터의 그림자뿐.
-    struct PendingCaster {
-        glm::mat4             model;
-        const MaterialHandle* material;
-        uint32_t              indexCount, firstIndex;
-        int32_t               vertexOffset;
-    };
-    std::vector<PendingCaster> lightOnly;
+    // 1) 컬링과 LOD 선택: 카메라나 라이트에 보이는 메시만 후보로 모읍니다. 행은 여기서 배정하지 않습니다.
+    // 투명 정렬 키(거리 제곱)도 여기서 한 번만 계산합니다. 예전에는 정렬 비교마다 매핑된 transform
+    // SSBO(비디오 메모리)를 다시 읽었습니다(DEF-30).
+    std::vector<hbatch::Candidate>     cands;
+    std::vector<glm::mat4>             models;      // cands 와 같은 순서
+    std::vector<const MaterialHandle*> materials;   // cands 와 같은 순서
+    cands.reserve(allMeshes.size());
+    models.reserve(allMeshes.size());
+    materials.reserve(allMeshes.size());
 
     for (auto* mc : allMeshes) {
         if (!mc->visible || !mc->mesh) continue;
@@ -248,79 +239,54 @@ void Renderer::buildDrawCommands(World& world,
         // 카메라 가시성과 라이트(섀도) 가시성을 따로 판정한다.
         const bool inCam   = !hasCam   || sphereInAnyView(planes.data(), viewCount_, wCenter, wRadius);
         const bool inLight = hasShadow && sphereInFrustum(lightPlanes, wCenter, wRadius);
+        if (!inCam && !inLight) continue;
 
-        // 카메라에 안 보이면 여기서 행을 배정하지 않는다. 라이트 안이면 뒤(2단계)로 미뤄,
-        // 카메라 드로우가 예산을 먼저 확보하게 한다. 둘 다 아니면 그냥 버린다.
-        if (!inCam) {
-            if (inLight)
-                lightOnly.push_back({ model, material,
-                    mesh->indexCount, mesh->firstIndex, (int32_t)mesh->firstVertex });
-            continue;
-        }
-
-        // 여기부터 inCam. transform SSBO 행은 이 한 곳(과 2단계)에서만 배정한다(DEF-01 원칙).
-        // 카메라 행이 예산을 채우면 그 뒤의 메시는 세기만 하고 그리지 않는다. 예전에는 조용히
-        // 잘라 culled 에 섞였다(DEF-10).
-        if (ssboIdx >= kMaxDraws) { ++droppedCam; continue; }
-        uint32_t idx = ssboIdx++;
-        tfData[idx].model = model;
-        // 행 번호와 push 순서가 1:1이므로 materialRowsOut[idx]가 곧 이 행의 머티리얼이다.
-        materialRowsOut.push_back(material);
-
-        GpuDrawCmd cmd{};
-        cmd.indexCount    = mesh->indexCount;
-        cmd.instanceCount = 1;
-        cmd.firstIndex    = mesh->firstIndex;
-        cmd.vertexOffset  = (int32_t)mesh->firstVertex;
-        cmd.firstInstance = idx;  // → gl_InstanceIndex → transform SSBO row
-
-        if (mc->transparent)
-            transpKeyed.push_back({ distSq, cmd });
-        else
-            opaqueOut.push_back(cmd);
-        // 카메라에도 보이면서 라이트 안이면 그림자도 던진다(같은 행 재사용).
-        if (inLight)
-            shadowOut.push_back(cmd);
+        hbatch::Candidate c;
+        c.material     = material;
+        c.indexCount   = mesh->indexCount;
+        c.firstIndex   = mesh->firstIndex;
+        c.vertexOffset = (int32_t)mesh->firstVertex;
+        c.distSq       = distSq;
+        c.inCam        = inCam;
+        c.inLight      = inLight;
+        c.transparent  = mc->transparent;
+        cands.push_back(c);
+        models.push_back(model);
+        materials.push_back(material);
     }
 
-    // 2단계: 카메라 예산을 채운 뒤 남은 행에만 라이트 전용 캐스터를 붙인다. 행-머티리얼
-    // 1:1 불변식을 위해 여기서도 materialRow 를 함께 push 한다(섀도는 머티리얼을 안 쓰지만
-    // materialForRow 의 범위 계약을 지키기 위함). opaque 목록은 건드리지 않는다.
-    uint32_t droppedShadow = 0;
-    for (const auto& lo : lightOnly) {
-        if (ssboIdx >= kMaxDraws) { ++droppedShadow; continue; }
-        uint32_t idx = ssboIdx++;
-        tfData[idx].model = lo.model;
-        materialRowsOut.push_back(lo.material);
+    // 2) 묶기와 행 배정(DEF-16). transform SSBO 행은 hbatch::build 한 곳에서만 정해집니다(DEF-01 원칙).
+    // 같은 지오메트리 · 머티리얼의 불투명 메시는 연속된 행을 받아 드로우 하나(instanceCount = N)가
+    // 됩니다. 카메라 쪽이 예산을 먼저 쓰고, 라이트에만 보이는 캐스터는 남은 행만 씁니다(불변식: 라이트
+    // 전용 행은 섀도맵에만 영향). 넘친 메시는 Dropped 로 셉니다(DEF-10).
+    const hbatch::Result batch = hbatch::build(cands, kMaxDraws, hasCam);
 
-        GpuDrawCmd cmd{};
-        cmd.indexCount    = lo.indexCount;
-        cmd.instanceCount = 1;
-        cmd.firstIndex    = lo.firstIndex;
-        cmd.vertexOffset  = lo.vertexOffset;
-        cmd.firstInstance = idx;
-        shadowOut.push_back(cmd);
+    // 3) 행마다 트랜스폼과 머티리얼을 기록합니다. 행 번호와 push 순서가 1:1이므로 materialRowsOut[row]
+    // 가 곧 그 행의 머티리얼입니다. 섀도 전용 행에도 기록해 materialForRow 의 범위 계약을 지킵니다.
+    materialRowsOut.reserve(batch.rowSource.size());
+    for (uint32_t row = 0; row < (uint32_t)batch.rowSource.size(); ++row) {
+        const uint32_t src = batch.rowSource[row];
+        tfData[row].model = models[src];
+        materialRowsOut.push_back(materials[src]);
     }
 
-    // Sort transparent back-to-front for correct blending. 키는 위에서 LOD 선택에 쓴 것과 같은
-    // 피벗 거리 제곱이라 순서는 예전과 같고, 같은 거리면 행 번호 순으로 정해 결과가 흔들리지 않는다.
-    if (hasCam) {
-        std::sort(transpKeyed.begin(), transpKeyed.end(),
-            [](const TranspKeyed& a, const TranspKeyed& b) {
-                if (a.distSq != b.distSq) return a.distSq > b.distSq;
-                return a.cmd.firstInstance < b.cmd.firstInstance;
-            });
-    }
-    transpOut.reserve(transpKeyed.size());
-    for (const auto& t : transpKeyed) transpOut.push_back(t.cmd);
+    auto toCmds = [](const std::vector<hbatch::Run>& runs, std::vector<GpuDrawCmd>& out) {
+        out.reserve(runs.size());
+        for (const auto& r : runs)
+            out.push_back({ r.indexCount, r.instanceCount, r.firstIndex, r.vertexOffset, r.firstInstance });
+    };
+    toCmds(batch.opaque, opaqueOut);
+    toCmds(batch.transparent, transpOut);   // 뒤에서 앞으로 정렬된 순서
+    toCmds(batch.shadow, shadowOut);
 
-    frameStats_.dropped = droppedCam;
-    frameStats_.culled  = totalCnt - (uint32_t)(opaqueOut.size() + transpOut.size()) - droppedCam;
+    frameStats_.instances = batch.opaqueInstances;
+    frameStats_.dropped   = batch.droppedCam;
+    frameStats_.culled    = totalCnt - (batch.opaqueInstances + (uint32_t)transpOut.size()) - batch.droppedCam;
     frameStats_.transparentDraws = (uint32_t)transpOut.size();
-    if ((droppedCam || droppedShadow) && !dropWarned_) {
+    if ((batch.droppedCam || batch.droppedShadow) && !dropWarned_) {
         dropWarned_ = true;
         HLOG(LogRenderer, Warning) << "Draw row budget kMaxDraws=" << kMaxDraws << " exceeded: "
-            << droppedCam << " visible mesh(es) and " << droppedShadow
+            << batch.droppedCam << " visible mesh(es) and " << batch.droppedShadow
             << " shadow-only caster(s) were not drawn (warned once; see the Dropped stat)";
     }
 }
@@ -445,7 +411,8 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
         itemsOut.reserve(draws.size());
         for (const auto& dc : draws) {
             itemsOut.push_back({ materialForRow(dc.firstInstance), dc.indexCount,
-                                 dc.firstIndex, dc.vertexOffset, dc.firstInstance });
+                                 dc.firstIndex, dc.vertexOffset, dc.firstInstance,
+                                 dc.instanceCount });
         }
     };
     toItems(v.opaqueDraws, v.opaqueItems);

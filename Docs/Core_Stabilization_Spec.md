@@ -357,7 +357,13 @@ graph TD
 
 아래 항목은 [Layer_Architecture.md](Layer_Architecture.md) 4절이 정리한 경계 누출 지점을 결함으로 등재한 것입니다. **모두 지금 코드에 존재하는 구조적 결함이며, Layer 2(우주 도메인)에서 우회할 수 없습니다.** 심각도는 해당 문서의 "치명적"을 CRITICAL로, "심각"을 HIGH로 옮긴 것입니다.
 
-### 🚨 [DEF-16] [CRITICAL · 경계] 인스턴싱 `instanceCount = 1` 하드코딩
+### ✅ [DEF-16] [해결됨 · 2026-10-14, 원래 CRITICAL · 경계] 인스턴싱 `instanceCount = 1` 하드코딩
+
+* **[해결 · 2026-10-14]** 자동 인스턴싱을 넣었습니다(UE Dynamic Instancing · Bevy 자동 배칭과 같은 방식). `hbatch::build` 가 같은 지오메트리 ·
+  머티리얼의 불투명 메시에 연속된 transform 행을 배정하고 드로우 하나(`instanceCount = N`)로 그립니다. 셰이더는 `gl_InstanceIndex` 로
+  행을 읽으므로 바꾸지 않았고, 행은 인스턴스마다 하나라 `materialRows` 의 행-머티리얼 1:1 은 그대로입니다. 투명은 묶지 않습니다. 행 예산은
+  16384 로 올렸고, transform 버퍼는 시작할 때 한 번 할당하므로 DEF-02 의 위험은 달라지지 않았습니다. 명시적 인스턴싱 컴포넌트는 파편장
+  착수 때 둡니다(사용자 결정). 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 "DEF-16 자동 인스턴싱 수정 결과".
 
 * **위치**: [`Renderer_render.cpp:L243`](file:///e:/Haruka/src/renderer/Renderer_render.cpp#L243), [`GeometryPass.cpp:L530`](file:///e:/Haruka/src/renderer/passes/GeometryPass.cpp#L530), [`GeometryPass.cpp:L556`](file:///e:/Haruka/src/renderer/passes/GeometryPass.cpp#L556), [`ShadowPass.cpp:L192`](file:///e:/Haruka/src/renderer/passes/ShadowPass.cpp#L192)
 * **문제점**: `instanceCount = 1`이 다섯 곳에 리터럴로 박혀 있고, `GeometryPass::DrawItem`에는 `instanceCount` 멤버 자체가 없습니다. 인스턴싱이 원리상 불가능합니다.
@@ -1260,7 +1266,7 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
 [2단계: Layer 2를 가능하게 하는 확장 지점]
  ├── [ ] DEF-17. [CRITICAL] 패스 레지스트리와 record(RenderView&) 진입점
  ├── [ ] DEF-18. [CRITICAL] EngineContext에 렌더러 참조 추가 (DEF-17과 동일 작업 단위)
- ├── [ ] DEF-16. [CRITICAL] 인스턴싱 경로 (DrawItem.instanceCount, 리터럴 다섯 곳 제거)
+ ├── [x] DEF-16. [해결됨]   자동 인스턴싱 (DrawItem.instanceCount, 같은 지오메트리 · 머티리얼 묶음)  ✅ 2026-10-14
  ├── [x] DEF-19. [해결됨]   물리 힘·임펄스·속도·레이캐스트 API 및 중력 세터  ✅ 2026-10-04
  ├── [x] DEF-11. [해결됨]   depfile 로 include 추적, 목록 밖 셰이더 경고  ✅ 2026-10-04
  ├── [ ] DEF-22. [HIGH]     SceneSerializer 타입 등록 기반 직렬화

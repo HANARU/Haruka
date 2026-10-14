@@ -73,6 +73,12 @@ DEF-53 의 남은 부분 · DEF-100 도 같은 작업에서 고쳤습니다. DEF
 PC 에 런타임이 없어, 헤드셋 확인은 사용자가 Quest Link 를 준비한 뒤에 합니다(사용자 결정). 사용자 결정으로 물리 규칙은 UE 식,
 물리 스텝은 XR 세션 동안 헤드셋 주사율에 맞춥니다. 항목별 내용은 문서 끝 "3단계 VR 첫걸음 수정 결과" 절에 있습니다.
 
+**[갱신 · 2026-10-14 · DEF-16]** 권장 순서의 "나머지" 묶음을 시작했습니다. DEF-16(인스턴싱)을 자동 인스턴싱으로 해결했습니다.
+같은 지오메트리 · 머티리얼의 불투명 메시가 연속된 transform 행을 받아 드로우 하나(`instanceCount = N`)로 그려지고, 셰이더는
+바꾸지 않았습니다. 사용자 결정으로 명시적 인스턴싱 컴포넌트는 파편장 착수 때로 미루고, 행 예산 `kMaxDraws` 는 1024 에서
+16384 로 올렸습니다(DEF-10 의 상한 설정화는 남음). 확인 중에 찾은 DEF-105(빌드마다 GLTF 캐시 무효화)를 등재했습니다.
+항목별 내용은 문서 끝 "DEF-16 자동 인스턴싱 수정 결과" 절에 있습니다.
+
 | ID | 결함명 | 심각도 | 대상 파일 | 관련 라인 |
 |---|---|---|---|---|
 | **DEF-01** | Transform SSBO 인덱스 동기화 붕괴 | **해결됨** (2026-08-25, 원래 CRITICAL) | `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L215, L296, L313~326 |
@@ -84,7 +90,7 @@ PC 에 런타임이 없어, 헤드셋 확인은 사용자가 Quest Link 를 준�
 | **DEF-07** | `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터 | **해결됨 · 2026-08-26** (원래 MEDIUM, A-1: EditorApp 구독 + 컴포넌트 `notifyDestroy`) | `src/core/World.hpp`, `src/core/World.cpp` | L27, L27 |
 | **DEF-08** | 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성) | **HIGH** | `src/core/Engine.cpp`, `CMakeLists.txt` | `Engine::Engine`, CMake `if(ANDROID)` 분기 (예전 `main.cpp` L38) |
 | **DEF-09** | 멀티뷰 절반 구현 (피처만 켜지고 경로 없음) | **해결됨 · 2026-10-04** (원래 HIGH, 첫 단계는 눈마다 두 번 그리기. 셰이더 · UBO 는 두 눈 기준이라 멀티뷰는 Quest 이식 때 뷰 번호만 바꿔 켬) | `src/renderer/Renderer_render.cpp`, `shaders/include/haruka_shared.h` | `drawFrame` 의 눈 루프 |
-| **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **MEDIUM** (2026-10-04 초과 진단만 추가, 상한 설정화는 남음) | `src/renderer/RenderTypes.hpp`, `src/physics/PhysicsSystem.cpp` | L12, L81 |
+| **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **MEDIUM** (2026-10-04 초과 진단만 추가, 2026-10-14 행 예산 1024 → 16384, 상한 설정화는 남음) | `src/renderer/RenderTypes.hpp`, `src/physics/PhysicsSystem.cpp` | L12, L81 |
 | **DEF-11** | 셰이더 빌드 파이프라인 결함 (DEPENDS 누락·하드코딩·고아·죽은 파일) | **해결됨 · 2026-10-04** (원래 MEDIUM) | `CMakeLists.txt`, `shaders/include/` | L94~108 |
 | **DEF-12** | `World::tick`이 에디터 Play 상태에서만 실행 | **MEDIUM** | `src/core/Engine.cpp` | `Engine::run` 의 Tick 블록 (예전 `main.cpp` L115~119) |
 | **DEF-13** | `FrameUBO`에 `invViewProj` 부재 | **LOW** (쓰는 곳 없음. 필요할 때 공용 헤더에 눈별 `[2]` 로 추가) | `src/renderer/RenderTypes.hpp` | L16~24 |
@@ -168,7 +174,7 @@ PC 에 런타임이 없어, 헤드셋 확인은 사용자가 Quest Link 를 준�
 ### 1-5. 남은 관련 작업
 
 * 동일한 패턴이 GPU 컬링 경로에 하나 더 있었으며 **DEF-23**으로 등재하여 같은 날 해결했습니다. 8-1절을 보십시오.
-* 인스턴싱(DEF-16)을 도입할 때 `materialRows`가 드로우 커맨드당 한 행을 전제한다는 점을 다시 검토해야 합니다.
+* 인스턴싱(DEF-16)을 도입할 때 `materialRows`가 드로우 커맨드당 한 행을 전제한다는 점을 다시 검토해야 합니다. **[2026-10-14 반영]** 행은 인스턴스마다 하나이고 묶음의 행은 모두 같은 머티리얼이라, 묶음 드로우는 첫 행(`firstInstance`)의 머티리얼을 씁니다. 행 배정은 `hbatch::build` 한 곳에 모았습니다.
 
 ---
 
@@ -1534,3 +1540,28 @@ Shift 가 빠르게 4배). 해법은 [Primitive_And_Lighting_Design.md](Primitiv
 `audio_system` 47 → 48, `physics_lifecycle` 29 → 54). 새 검사는 고친 곳을 하나씩 예전 식으로 되돌리면 실패함을 확인했습니다
 (카메라 2 · 롤 1 · 두 눈 판정과 Vulkan 투영 3 · 물리 8). 에디터 실기에서는 실행 폴더의 씬 사본에 정적 바닥과 동적 구를 넣고
 Play 해, 구가 바닥 윗면에 정확히 내려앉고 Stop 하면 되돌아오는 것을 확인했습니다(검증 메시지 0).
+
+## DEF-16 자동 인스턴싱 수정 결과 (2026-10-14)
+
+**사용자 결정.** 자동 인스턴싱만 넣고(명시적 인스턴싱 컴포넌트는 파편장 착수 때), 행 예산은 16384 로 올리며, 패스 확장
+지점(DEF-17 · 18)은 그다음에 고정 지점 + 좁은 인터페이스로 진행합니다. 화면 확인을 위해 에디터 창을 띄우는 것은 허락받았습니다.
+
+| 항목 | 다른 엔진의 방법 | 수정 | 확인 |
+|---|---|---|---|
+| DEF-16 인스턴싱 | UE 는 상태가 같은 메시 드로우 명령을 정렬해 나란히 모은 뒤 인스턴스 드로우 하나로 합칩니다(Dynamic Instancing). Bevy 도 메시 · 머티리얼이 같으면 자동으로 묶습니다. Godot MultiMesh · UE Instanced Static Mesh · Unity `RenderMeshInstanced` 는 명시적 인스턴싱입니다. 반투명은 인스턴스 사이 정렬이 깨져 보통 묶지 않습니다 | `src/renderer/DrawBatching.hpp`(`hbatch::build`)가 컬링을 통과한 메시를 같은 지오메트리 · 머티리얼끼리 묶어 행을 연속으로 배정합니다. 셰이더는 이미 `gl_InstanceIndex` 로 행을 읽으므로 바꾸지 않았습니다. `GeometryPass::DrawItem` 에 `instanceCount` 를 두고 세 서브패스와 `ShadowPass::record` 가 그 값으로 그립니다. 투명은 묶지 않고 뒤에서 앞으로 정렬합니다. 묶음 안에서 라이트 안의 인스턴스를 앞에 모아 섀도는 그 앞부분만 그리고, 라이트에만 보이는 캐스터는 지오메트리만으로 묶습니다. 묶음 순서는 처음 나온 순서라 같은 것이 없는 씬에서는 행 번호와 드로우 순서가 예전과 똑같습니다 | `draw_batching` 26개 신설. 묶기를 끄면 8개, 섀도 앞부분 정렬을 빼면 2개가 실패함을 확인했습니다 |
+| 행 예산 | | `kMaxDraws` 1024 → 16384. 행은 64바이트라 프레임당 1MB 이고 Zone C 에 시작할 때 한 번 할당합니다(매 프레임 할당이 아니라 DEF-02 의 위험은 그대로) | 빌드 · 실기 |
+| 통계 | UE 는 드로우 수와 그리는 프리미티브 수를 따로 보입니다 | 뷰포트 통계와 GPU Stats 에 `Inst`(불투명으로 그리는 메시 수)를 더했습니다. `Draw` 는 눈 하나의 불투명 드로우 수입니다. Culled 는 인스턴스 기준으로 셉니다 | 실기 |
+
+**신규 결함**
+
+| ID | 심각도 · 상태 | 내용 | 위치 |
+|---|---|---|---|
+| DEF-105 | LOW · 열림 | 빌드가 `assets` 를 실행 폴더로 복사할 때(`copy_directory`) 파일의 수정 시각이 복사 시각으로 바뀝니다. GLTF 바이너리 캐시(`GassetCache`)가 원본 수정 시각으로 유효성을 판단하므로 빌드할 때마다 캐시가 무효화되고, 빌드 직후 첫 실행만 GLTF 를 다시 읽습니다. 그 실행에서만 `model.glb` 의 머티리얼 경고가 나와 경고 개수가 실행마다 달라 보입니다(W 1 → 다음 실행부터 W 0) | `CMakeLists.txt` 의 에셋 복사, `GassetCache::isValid` |
+
+**화면 확인.** 지금 빌드(수정 전)를 두 번 찍어 뷰포트가 픽셀까지 같음(결정적)을 확인한 뒤, 수정 후 빌드와 비교했습니다. 기본 시작
+씬은 메시 · 머티리얼이 모두 같은 쌍이 없어 묶음이 생기지 않으므로, 실행 폴더의 씬 사본에만 같은 메시 · 머티리얼의 상자 · 구와 카메라
+뒤에서 그림자만 화면에 떨어지는 상자를 더한 씬도 비교했습니다. 두 씬 모두 통계 글자를 빼면 뷰포트 차이가 0 픽셀입니다. 사본 씬의
+통계는 수정 전 `Draw: 12` 에서 수정 후 `Draw: 8 Inst: 12` 로 바뀌었습니다(Culled 7 은 같음). 검증 메시지 0, 엔진 Error 0,
+`Clean exit`. 설정 폴더와 시작 씬은 매번 원본으로 되돌렸습니다(해시 · 내용 일치).
+
+**검증.** 빌드 경고 0. 단위 테스트 9 → 10개 통과(`draw_batching` 26개 신설).

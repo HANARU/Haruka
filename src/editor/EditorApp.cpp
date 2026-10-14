@@ -252,6 +252,7 @@ void EditorApp::tick(float dt) {
         vpTimings_.uiMs            = t.uiMs;
         vpTimings_.totalMs         = t.totalMs;
         vpTimings_.drawCalls       = s.drawCalls;
+        vpTimings_.instances       = s.instances;
         vpTimings_.culled          = s.culled;
         vpTimings_.transparentDraws= s.transparentDraws;
         vpTimings_.dropped         = s.dropped;
@@ -542,11 +543,11 @@ void EditorApp::buildWidgetTree() {
             const auto& f = gFrameTimings();
             char buf[512];
             snprintf(buf, sizeof(buf),
-                "%d FPS  |  Draw: %d  Culled: %d  Dropped: %d  Transp: %d  |  Target recreate/s: %.0f\n"
+                "%d FPS  |  Draw: %d  Inst: %d  Culled: %d  Dropped: %d  Transp: %d  |  Target recreate/s: %.0f\n"
                 "GPU   Shadow %.2f  Main %.2f  AO %.2f  Bloom %.2f  Tonemap %.2f  UI %.2f  Total %.2f\n"
                 "CPU   Fence %.2f  Acquire %.2f  ImgFence %.2f  Extract %.2f  Record %.2f (UI %.2f)  Submit %.2f  Present %.2f\n"
                 "LOOP  Poll %.2f  Tick %.2f  Input %.2f  DrawFrame %.2f  |  Frame %.2f ms",
-                vpTimings_.fps, vpTimings_.drawCalls, vpTimings_.culled, vpTimings_.dropped,
+                vpTimings_.fps, vpTimings_.drawCalls, vpTimings_.instances, vpTimings_.culled, vpTimings_.dropped,
                 vpTimings_.transparentDraws, vpTimings_.recreatePerSec,
                 vpTimings_.shadowMs, vpTimings_.mainMs, vpTimings_.aoMs, vpTimings_.bloomMs,
                 vpTimings_.tonemapMs, vpTimings_.uiMs, vpTimings_.totalMs,
@@ -3287,6 +3288,8 @@ void EditorApp::rebuildBottomPanel() {
 
         addStat("FPS",        AttrStr([this]{ return std::to_string(vpTimings_.fps); }));
         addStat("Draw Calls", AttrStr([this]{ return std::to_string(vpTimings_.drawCalls); }));
+        // 그 드로우들이 그리는 메시 수. 같은 지오메트리 · 머티리얼은 드로우 하나로 묶입니다(DEF-16).
+        addStat("Instances",  AttrStr([this]{ return std::to_string(vpTimings_.instances); }));
         addStat("Culled",     AttrStr([this]{ return std::to_string(vpTimings_.culled); }));
         // 보이지만 행 예산(kMaxDraws)이 차서 못 그린 메시 수. 0 이 아니면 씬이 상한을 넘은 것입니다.
         addStat("Dropped",    AttrStr([this]{ return std::to_string(vpTimings_.dropped); }));

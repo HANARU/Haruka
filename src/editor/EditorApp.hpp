@@ -384,7 +384,7 @@ private:
 
     // Viewport overlay stats
     struct VpTimings {
-        int fps=0, drawCalls=0, culled=0, transparentDraws=0, dropped=0;
+        int fps=0, drawCalls=0, instances=0, culled=0, transparentDraws=0, dropped=0;
         float shadowMs=0.f, mainMs=0.f, aoMs=0.f, bloomMs=0.f,
               tonemapMs=0.f, uiMs=0.f, totalMs=0.f;
         // 초당 스왑체인 재생성 횟수입니다. 0 이 아니면 그 자체가 결함입니다.

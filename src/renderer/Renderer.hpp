@@ -74,7 +74,9 @@ public:
     };
     // dropped = 카메라에 보이지만 행 예산(kMaxDraws)이 차서 그리지 못한 메시 수. culled 와 따로
     // 셉니다. 예전에는 조용히 잘린 메시가 culled 에 섞여 보였습니다(DEF-10).
-    struct FrameStats  { uint32_t drawCalls=0, culled=0, transparentDraws=0, dropped=0; };
+    // drawCalls 는 눈 하나가 내는 불투명 드로우 수이고, instances 는 그 드로우들이 그리는 메시 수입니다.
+    // 같은 지오메트리 · 머티리얼의 메시는 드로우 하나로 묶이므로(DEF-16) drawCalls <= instances 입니다.
+    struct FrameStats  { uint32_t drawCalls=0, instances=0, culled=0, transparentDraws=0, dropped=0; };
 
     // deviceHooks 가 있으면 Vulkan 인스턴스 · 장치를 그쪽(OpenXR)에 맡깁니다. 헤드셋이 고른 GPU 가
     // 창에 그릴 수 없으면 직접 고르고 xrCompatible() 이 false 가 됩니다.
@@ -307,7 +309,8 @@ private:
         std::vector<GeometryPass::DrawItem> transparentItems;
         // transform SSBO 행 → 머티리얼. 인덱스가 곧 GpuDrawCmd::firstInstance이므로
         // 드로우 커맨드에서 O(1)로 머티리얼을 역참조할 수 있다. buildDrawCommands가
-        // 행을 할당하는 바로 그 지점에서 채우므로 두 목록이 어긋날 수 없다.
+        // 행을 할당하는 바로 그 지점에서 채우므로 두 목록이 어긋날 수 없다. 인스턴스 묶음의
+        // 행은 모두 같은 머티리얼이라 첫 행(firstInstance)의 머티리얼이 묶음의 머티리얼이다.
         std::vector<const MaterialHandle*>  materialRows;
         std::array<AOPass::CameraParams, kMaxViews> aoCam;   // 눈별(투영이 눈마다 다름)
     };
@@ -320,8 +323,9 @@ private:
     void     updateUBO(World& world, uint32_t lightCount);
     uint32_t updateLightSSBO(World& world);   // 실제로 업로드한 라이트 수를 반환
     // 드로우 커맨드와 transform SSBO 행의 유일한 생성 지점.
-    // opaqueOut/transpOut의 firstInstance와 materialRowsOut의 인덱스는 같은 카운터에서
-    // 나오므로 세 출력은 항상 정합한다. CPU 드로우 항목은 이 출력에서 파생시킬 것.
+    // opaqueOut/transpOut의 firstInstance와 materialRowsOut의 인덱스는 같은 배정(hbatch::build)
+    // 에서 나오므로 세 출력은 항상 정합한다. CPU 드로우 항목은 이 출력에서 파생시킬 것.
+    // 같은 지오메트리 · 머티리얼의 불투명 메시는 instanceCount = N 인 드로우 하나가 된다(DEF-16).
     void buildDrawCommands(World& world,
                           std::vector<GpuDrawCmd>& opaqueOut,
                           std::vector<GpuDrawCmd>& transpOut,

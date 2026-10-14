@@ -205,7 +205,7 @@ void ShadowPass::record(VkCommandBuffer cmd, const DrawInputs& in,
     vkCmdBindIndexBuffer(cmd, in.indexBuffer, offI, VK_INDEX_TYPE_UINT32);
 
     for (const auto& dc : draws)
-        vkCmdDrawIndexed(cmd, dc.indexCount, 1, dc.firstIndex,
+        vkCmdDrawIndexed(cmd, dc.indexCount, dc.instanceCount, dc.firstIndex,
                          dc.vertexOffset, dc.firstInstance);
 
     vkCmdEndRenderPass(cmd);

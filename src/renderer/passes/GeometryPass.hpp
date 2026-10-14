@@ -30,7 +30,8 @@ public:
         uint32_t indexCount;
         uint32_t firstIndex;
         int32_t  vertexOffset;
-        uint32_t firstInstance;             // transform SSBO row
+        uint32_t firstInstance;             // transform SSBO row (묶음이면 첫 행)
+        uint32_t instanceCount = 1;         // 같은 지오메트리 · 머티리얼 묶음의 크기(DEF-16)
     };
 
     struct Inputs {
