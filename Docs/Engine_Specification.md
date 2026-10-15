@@ -23,7 +23,7 @@
 |---|---|
 | 최종 목표 기기 | Meta Quest Pro(Snapdragon XR2+ Gen 1) 단독 실행 VR |
 | 현재 실행 형태 | Windows 데스크톱 애플리케이션 하나. 엔진과 에디터가 같은 창에서 함께 돕니다 |
-| VR 상태 | PC OpenXR 연결(`--xr`, Quest Link 등)과 두 눈 렌더가 들어 있으나 **헤드셋에서 한 번도 확인하지 않았습니다** |
+| VR 상태 | PC OpenXR 연결(`--xr`, Quest Link 등)과 두 눈 렌더. 2026-10-15 Meta Quest Pro(Quest Link)에서 두 눈 · 머리 추적 · 컨트롤러 · 72Hz 를 확인했습니다. 헤드셋에는 Play 동안만 그립니다. Quest 단독 실행은 아직 없습니다 |
 | 언어 · API | C++20, Vulkan 1.4, GLSL(빌드 시 SPIR-V 로 컴파일) |
 | 개발 형태 | 1인 개발. 외부 엔진 프레임워크 없이 렌더러 · GPU 메모리 할당자 · UI 위젯 시스템 · 에디터를 직접 구현 |
 | 저장소 | `github.com/HANARU/Haruka`(공개). 라이선스 파일 없음 |
@@ -46,7 +46,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 소스 | `src/` 의 `.cpp` · `.hpp` 153 파일, 24,981 줄 |
+| 소스 | `src/` 의 `.cpp` · `.hpp` 153 파일, 25,036 줄 |
 | 셰이더 | GLSL 19 파일(셰이더 18 + 공용 헤더 1), 705 줄. 컴퓨트 셰이더 없음 |
 | 자동 테스트 | 15개 실행 파일, 검사 540개(`ctest -C Release`) |
 | 문서 | `Docs/` 활성 문서 25개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
@@ -97,6 +97,7 @@
 | 자동 인스턴싱만 | 2026-10-14 | 명시적 인스턴싱 컴포넌트는 파편장 착수 때 만듭니다 | 같은 문서 "DEF-16" |
 | 3D UI 는 render-to-texture | 2026-08-26 (2026-10-15 재확인) | `UIPanelComponent` 와 기존 `HWidget` 트리, HSlate 오프스크린 렌더. 미구현 | [Spatial_Representation_Design.md](Spatial_Representation_Design.md) 10절 |
 | 라이트 방향은 회전에서만 | 2026-10-15 | `direction` 필드를 없애고 액터 회전의 -Z 를 씁니다. 다음 라이팅 작업 때 구현 | [Lighting_UE_Design.md](Lighting_UE_Design.md) 6절 4번 |
+| VR 은 Play 동안만 | 2026-10-15 | `--xr` 은 OpenXR 를 준비만 하고, 세션은 Play 때 만들고 Stop 때 끝냅니다(UE VR Preview · Unity 와 같음) | [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) "헤드셋 확인 결과" |
 | 할당자 · 런타임 분리는 이식 때 조사 | 2026-10-15 | VMA 대 자체 할당자, 런타임 · 에디터 분리 방식은 Quest 이식 착수 때 다른 엔진을 조사한 뒤 정합니다 | [Roadmap.md](Roadmap.md) |
 
 ---
@@ -124,8 +125,8 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | 디렉터리 | 파일 · 줄 | 내용 |
 |---|---|---|
 | `src/`(루트) | 1 · 105 | `main.cpp`(진입점: 콘솔 없이 직접 실행할 때 C stdio 출력을 `Logs/stdout.txt` 로 돌린 뒤 `Engine` 을 만들고 돌림) |
-| `src/core/` | 25 · 2,334 | `Engine`, `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 에셋 루트(`ProjectPaths.hpp`), 리플렉션(`Reflect.hpp`) |
-| `src/renderer/` | 24 · 4,204 | `Renderer`(프레임 구성), `RenderContext`, `GpuScene`, `FrameResources`, 스왑체인, 인스턴싱 묶기 · 라이트 선택 · 절두체 컬링 헤더, 렌더 확장 |
+| `src/core/` | 25 · 2,364 | `Engine`, `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 에셋 루트(`ProjectPaths.hpp`), 리플렉션(`Reflect.hpp`) |
+| `src/renderer/` | 24 · 4,212 | `Renderer`(프레임 구성), `RenderContext`, `GpuScene`, `FrameResources`, 스왑체인, 인스턴싱 묶기 · 라이트 선택 · 절두체 컬링 헤더, 렌더 확장 |
 | `src/renderer/passes/` | 11 · 2,106 | Shadow · Geometry · AO · Bloom · Post 패스(`HPass` 수명주기) |
 | `src/memory/` | 2 · 388 | `HarukaAllocator`(1GB 단일 힙, 세 구역) |
 | `src/assets/` | 15 · 1,838 | `AssetManager`, glTF 로더, `.gasset` 캐시, 씬 · 프리팹 직렬화, 컴포넌트 블록 직렬화, 회전 글자 표현 |
@@ -134,7 +135,7 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | `src/physics/` | 2 · 674 | `PhysicsSystem`(Jolt) |
 | `src/audio/` | 5 · 453 | `AudioSystem`(miniaudio), 3D 감쇠 설정 |
 | `src/input/` | 3 · 236 | `HInputSystem`(액션 · 축 바인딩), XR 입력 상태 |
-| `src/xr/` | 2 · 746 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력) |
+| `src/xr/` | 2 · 763 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력) |
 | `src/platform/` | 5 · 591 | `IWindow`, GLFW 구현, Android 스텁 |
 | `src/ui/slate/` | 26 · 3,157 | HSlate: 위젯 14종, 배치 · 페인트 · 폰트 아틀라스 · 렌더러 |
 | `src/editor/` | 13 · 5,761 | `EditorApp`, 기즈모, 커맨드 스택, 액터 생성 · 삭제 Undo 스냅샷, 도킹, 셰이더 핫 리로드 |
@@ -144,11 +145,11 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 
 **부팅 순서**(`Engine::Engine`):
 1. 기본 컴포넌트 5종 등록 → `Config/engine.ini` 읽기(없으면 기본값으로 생성).
-2. GLFW 창(1600x900) → `--xr` 이면 OpenXR 초기화(렌더러보다 먼저, OpenXR 이 GPU 를 고름) → 렌더러 → XR 세션 · 스왑체인 연결 →
+2. GLFW 창(1600x900) → `--xr` 이면 OpenXR 초기화(렌더러보다 먼저, OpenXR 이 GPU 를 고름) → 렌더러(XR 세션은 Play 때 만듦) →
    `--emulate-stereo` 처리 → 에셋 관리자.
 3. 동적 모듈(Audio, Physics) 등록 → 에디터 초기화 → 입력 바인딩(현재 비어 있음) → 게임 모듈 `onStart`(시작 씬 불러오기).
 
-**메인 루프**(`Engine::run`, 프레임마다): 창 이벤트 → 최소화 확인 → XR 프레임 시작(세션이 돌면 헤드셋이 루프 속도를 정함) →
+**메인 루프**(`Engine::run`, 프레임마다): 창 이벤트 → 최소화 확인 → Play 상태에 맞춰 XR 세션 열기 · 닫기 → XR 프레임 시작(세션이 돌면 헤드셋이 루프 속도를 정함) →
 Play 상태 전이(BeginPlay · EndPlay · 일시정지 통지) → 에디터 tick · 입력 시스템 갱신 → **Play 중에만** 월드 · 게임 모듈 · 동적 모듈
 tick → 에디터 입력 처리 → 렌더(XR 이면 두 눈 + 거울 화면) → 제목 표시줄 FPS. 최소화 중에는 에디터 UI 를 건너뛰고 약 60Hz 로 쉽니다.
 
@@ -254,11 +255,12 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 | 기능 | 사양 |
 |---|---|
-| 런타임 연결 | `--xr` 로 켬. `XR_KHR_vulkan_enable2` 필수, `XR_FB_display_refresh_rate` 있으면 사용. 런타임 · 헤드셋이 없으면 경고 하나 남기고 데스크톱으로 계속 |
+| 런타임 연결 | `--xr` 로 켬. `XR_KHR_vulkan_enable2` 필수, `XR_FB_display_refresh_rate` 있으면 사용. 런타임 · 헤드셋이 없으면 경고 하나 남기고 데스크톱으로 계속. Quest Link(Oculus 1.208, Meta Quest Pro)에서 확인(2026-10-15) |
+| 세션 수명 | Play 에 들어가면 세션을 만들고 Stop 하면 `xrRequestExitSession` 으로 끝냄. 편집 중에는 헤드셋에 그리지 않음(UE VR Preview · Unity 와 같음, 2026-10-15 사용자 결정, DEF-111). 일시정지 중에는 유지. 런타임이 Play 중에 끝내면 Play 는 데스크톱으로 계속하고 다음 Play 에서 다시 엶. 헤드셋을 쓰지 않는 동안 런타임은 세션을 IDLE 로 둠 |
 | 공간 · 원점 | LOCAL 기준 공간, 원점 = 활성 카메라의 위치 + 요(yaw) |
 | 프레임 | `xrWaitFrame` 이 루프 속도를 정함. 한 프레임에 자세 하나로 컬링 · 렌더 · 제출. 헤드셋이 화면을 보이지 않으면 빈 프레임 제출 |
 | 스왑체인 | 두 층 배열 스왑체인 하나(눈마다 한 층). 오른쪽 눈을 먼저 그리고 왼쪽 눈을 에디터 뷰포트에 거울 화면으로 비춤 |
-| 입력 | 기본 액션 세트 하나. Touch 컨트롤러 · simple 컨트롤러 프로필. 머리 · 양손 자세, 트리거 · 그립 · 스틱 · 버튼 → `HInputSystem` 의 XR 버튼 · 축 |
+| 입력 | 기본 액션 세트 하나. Touch 컨트롤러 · simple 컨트롤러 프로필(Quest Pro 컨트롤러도 Touch 프로필로 연결됨). 머리 · 양손 자세, 트리거 · 그립 · 스틱 · 버튼 → `HInputSystem` 의 XR 버튼 · 축 |
 | 물리 | XR 세션 동안 물리 스텝을 헤드셋 주사율에 맞춤(30 ~ 240Hz 범위) |
 | 시각화 | 씬의 라인 오버레이로 그려 헤드셋 두 눈과 거울 화면에 모두 보입니다. 손 자세에 10cm 축 세 개, 가리키는 방향에 선 하나(트리거 → 색, 그립 → 길이) |
 
@@ -494,8 +496,8 @@ Floating Origin 은 Layer 1 옵션 후보입니다.
 
 정본은 [Roadmap.md](Roadmap.md) 입니다. 2026-10-15 기준으로 합의한 순서는 다음과 같습니다.
 
-1. **헤드셋 확인**: 사용자가 Quest Link 를 준비하면 `run.bat Release --xr` 로 확인 목록([Editor_QA_Checklist.md](Editor_QA_Checklist.md)
-   의 헤드셋 항목)을 봅니다.
+1. **헤드셋 확인**: 2026-10-15 기본 확인을 마쳤습니다(두 눈 · 추적 · 컨트롤러 · 72Hz). 남은 것은 최소화(DEF-106) · 소리 확인과, DEF-110 수정(2026-10-15)이
+   헤드셋에서 검증 메시지를 없애는지 보는 일이고([Editor_QA_Checklist.md](Editor_QA_Checklist.md) 의 헤드셋 항목), 사용자 결정에 따라 이어서 잡기 · 던지기 데모를 만듭니다.
 2. **Quest 이식**: DEF-08 · 12 · 42 · 04 · 97 · 06 · 103, 멀티뷰, Android 빌드, 그리고 Quest 에서 DEF-34(라이트 비용) 실측.
 3. **에디터 Phase 4 · 렌더링 기능**: Light Channels, CSM, 노출 배선, 반사 프로브, 에디터 시각화 등.
 4. **Layer 2**: 우주 · 무중력 도메인과 파편장, 정적 기지 건설([Static_Base_Building_Design.md](Static_Base_Building_Design.md)).

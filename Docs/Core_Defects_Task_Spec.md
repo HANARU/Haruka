@@ -93,6 +93,11 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 **[갱신 · 2026-10-15 · 정본 동기화]** 빠져 있던 DEF-16 ~ DEF-22 행을 아래 표에 넣었습니다(심층 분석과 해결 사양은
 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) 2절). 같은 날 그 문서 1절의 진단 맵도 결함 절의 현재 상태에 맞췄습니다.
 
+**[갱신 · 2026-10-15 · 헤드셋 확인]** 사용자가 Quest Link(Meta Quest Pro)를 준비해 3단계 VR 첫걸음을 헤드셋에서 확인했습니다.
+두 눈 · 머리 추적 · 컨트롤러 · 물리 스텝(72Hz) · 벗었다 쓰기가 통과했습니다. 확인 중에 찾은 DEF-110(XR 세션마다 검증 메시지 1건,
+런타임 셰이더로 판단)은 사용자 결정으로 그 기능을 켜서 고쳤고(헤드셋 확인 남음), DEF-111(편집 중에도 헤드셋에 그려 Stop 으로 VR 이 끝나지 않음)은 사용자 결정("Play 동안만 VR")으로
+고쳤습니다. 문서 끝 "헤드셋 확인 결과" 절을 보십시오.
+
 | ID | 결함명 | 심각도 | 대상 파일 | 관련 라인 |
 |---|---|---|---|---|
 | **DEF-01** | Transform SSBO 인덱스 동기화 붕괴 | **해결됨** (2026-08-25, 원래 CRITICAL) | `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L215, L296, L313~326 |
@@ -1539,12 +1544,12 @@ Shift 가 빠르게 4배). 해법은 [Primitive_And_Lighting_Design.md](Primitiv
 | DEF-09 두 눈 렌더 | Khronos 예제는 눈마다 따로 그리고, Unity 도 PC 에서 두 번 그리는 방식을 둡니다. Godot 은 배열 스왑체인에 멀티뷰로 그립니다 | 첫 단계는 눈마다 두 번 그립니다. `FrameUBO` 에 눈별 `viewProj[2]` · `eyePos[2]` 를 두고 셰이더는 푸시 상수 눈 번호(`HARUKA_VIEW_INDEX`)로 고릅니다. 멀티뷰로 갈 때는 그 번호만 `gl_ViewIndex` 로 바꿉니다. 섀도는 한 번, 깊이 · AO · Bloom 중간 타깃은 두 눈이 번갈아 쓰고 눈 사이에 배리어를 둡니다. AO 데이터 UBO 는 눈마다 따로 둡니다. 쓰지 않던 멀티뷰 기능 요청은 지웠습니다 | 단안 화면: 1단계 기준과 차이 0 픽셀(100% 배율 모니터). 스테레오 흉내 모드 화면 확인. 아래 "화면 확인" |
 | DEF-31 두 눈 컬링 | Godot 은 두 눈을 감싸는 절두체를 만들고, UE 는 한쪽 눈만 써서 물체가 사라지는 버그가 보고된 적이 있습니다 | 눈마다 판정해 하나라도 통과하면 그립니다(`FrustumCull.hpp`). LOD 와 투명 정렬은 두 눈의 가운데를 기준으로 합니다 | `stereo_views` 10개(오른쪽 눈에만 보이는 물체를 살림, 옛 단안 판정에서 실패) |
 | DEF-32 | Godot 은 한 프레임의 자세 하나로 컬링과 렌더를 해서 여유를 두지 않습니다 | 보류. 규칙("한 프레임에 자세 하나로 컬링 · 렌더 · 제출")을 코드 주석과 9-2절에 적었습니다 | |
-| VR 첫걸음(OpenXR) | UE · Unity · Godot 모두 XR 모듈이 렌더러보다 먼저 Vulkan 장치를 정합니다(XR_KHR_vulkan_enable2) | `src/xr/XrSystem`: OpenXR 1.0 인스턴스, 헤드셋 확인, 런타임이 고른 GPU 로 Vulkan 인스턴스 · 장치 생성(`IVulkanDeviceHooks`), 세션, LOCAL 원점 공간, 두 층 배열 스왑체인 하나, 프레임 루프(대기 · 시작 · 자세 · 이미지 · 제출), 세션 상태 처리. 원점은 활성 카메라의 위치 + 요라 헤드셋을 쓰면 에디터 카메라 자리에서 봅니다. 렌더러는 오른쪽 눈 → 왼쪽 눈 순으로 그리고 왼쪽 눈을 에디터 뷰포트에 다시 톤매핑해 비춥니다(가운데 자르기, UE 기본 관전 화면과 같음). 세션 동안 헤드셋이 루프 속도를 정하고, 데스크톱 표시는 기다리지 않는 방식을 고릅니다. 로더는 Khronos OpenXR-SDK release-1.1.63 을 FetchContent 로 받아 정적 링크합니다 | 런타임이 없을 때 `--xr`: "No OpenXR runtime is available ... Continuing in desktop mode" 경고 뒤 데스크톱 화면이 일반 실행과 같음(제목 · 통계 숫자 제외 0 픽셀). 헤드셋 확인은 남음 |
+| VR 첫걸음(OpenXR) | UE · Unity · Godot 모두 XR 모듈이 렌더러보다 먼저 Vulkan 장치를 정합니다(XR_KHR_vulkan_enable2) | `src/xr/XrSystem`: OpenXR 1.0 인스턴스, 헤드셋 확인, 런타임이 고른 GPU 로 Vulkan 인스턴스 · 장치 생성(`IVulkanDeviceHooks`), 세션, LOCAL 원점 공간, 두 층 배열 스왑체인 하나, 프레임 루프(대기 · 시작 · 자세 · 이미지 · 제출), 세션 상태 처리. 원점은 활성 카메라의 위치 + 요라 헤드셋을 쓰면 에디터 카메라 자리에서 봅니다. 렌더러는 오른쪽 눈 → 왼쪽 눈 순으로 그리고 왼쪽 눈을 에디터 뷰포트에 다시 톤매핑해 비춥니다(가운데 자르기, UE 기본 관전 화면과 같음). 세션 동안 헤드셋이 루프 속도를 정하고, 데스크톱 표시는 기다리지 않는 방식을 고릅니다. 로더는 Khronos OpenXR-SDK release-1.1.63 을 FetchContent 로 받아 정적 링크합니다 | 런타임이 없을 때 `--xr`: "No OpenXR runtime is available ... Continuing in desktop mode" 경고 뒤 데스크톱 화면이 일반 실행과 같음(제목 · 통계 숫자 제외 0 픽셀). 헤드셋 확인 2026-10-15(문서 끝 "헤드셋 확인 결과") |
 | DEF-20 입력 | UE · Unity · Godot 모두 XR 입력을 창과 분리된 XR 모듈에서 다룹니다 | 예전 사양(창에 넣기)을 고쳐 XR 모듈이 기본 액션 세트(Touch 컨트롤러 · Khronos 단순 컨트롤러 바인딩)로 입력을 만들고, `HInputSystem` 이 보관합니다. 아날로그 축(`bindAxis` · `axis`), 컨트롤러 버튼을 디지털 액션에 묶기(`bindXrButton`), 머리 · 손 자세와 손 속도(`xr()`). 세션이 멈추면 빈 입력이 들어갑니다. 헤드셋에서는 손에 축 세 개와 가리키는 선이 보입니다(트리거로 색, 그립으로 길이가 바뀜) | `xr_input` 9개 |
 | DEF-19 물리 API | Unity · UE · Godot 모두 힘 · 충격량 · 속도 · 레이캐스트를 둡니다 | 중력 세터(잠든 바디도 깨움), 힘 · 위치에 거는 힘 · 토크(그 프레임의 충격량을 그 프레임의 스텝들에 나눠 넣고, 스텝이 없으면 다음으로 넘김), 충격량, 선속도 · 각속도, 레이캐스트(액터 · 지점 · 법선 · 거리), 구 겹침(잡기용). `RigidBodyComponent` 에서도 부릅니다. 게임 코드가 Dynamic 액터를 옮기면 순간 이동하고 속도를 유지합니다 | `physics_lifecycle` 25개 추가(스텝 60 · 120 · 30Hz 에서 같은 속도 변화, 옛 방식에서 3개 실패) |
 | DEF-99 Kinematic | | 스텝 루프 안에서 틱 시작 자세부터 목표까지 스텝마다 나눠 옮깁니다. 그 프레임에 목표에 닿고 지나치지 않습니다 | `physics_lifecycle`(옛 식에서 2개 실패) |
 | DEF-53 남은 부분 | UE 는 시뮬레이션하는 바디를 부모에서 떼고, Godot 은 월드를 로컬로 바꿔 씁니다 | `Actor::setWorldPosition` · `setWorldRotation` 을 두고 물리가 월드 자세로 되씁니다. 쓴 로컬 값을 기억해 게임 코드의 이동만 순간 이동으로 칩니다. 그래서 부모가 움직여도 Dynamic 자식은 끌려가지 않습니다(UE 같음) | `physics_lifecycle`(옛 식에서 3개 실패) |
-| 물리 스텝 주기 | Godot 의 XR 문서는 물리 주기를 헤드셋 주사율에 맞추라고 권합니다 | `PhysicsSystem::setStepRate`(30 ~ 240Hz). XR 세션 동안 엔진이 헤드셋 주사율(XR_FB_display_refresh_rate, 없으면 예상 표시 주기)로 맞추고 끝나면 60Hz 로 돌립니다 | 헤드셋 확인 남음 |
+| 물리 스텝 주기 | Godot 의 XR 문서는 물리 주기를 헤드셋 주사율에 맞추라고 권합니다 | `PhysicsSystem::setStepRate`(30 ~ 240Hz). XR 세션 동안 엔진이 헤드셋 주사율(XR_FB_display_refresh_rate, 없으면 예상 표시 주기)로 맞추고 끝나면 60Hz 로 돌립니다 | 헤드셋에서 72Hz 로그 확인(2026-10-15) |
 | FFR 멤버 | OpenXR 에서는 런타임이 밀도 맵 이미지를 줍니다 | 선언만 있던 멤버를 지웠습니다 | 빌드 |
 | DEF-100 | | AOPass 가 Zone C 버퍼를 하나씩 돌려주지 않게 했고, `freeB` 가 Zone B 가 아닌 할당을 받으면 경고하고 무시합니다 | 빌드 |
 | DEF-104 (신규) | | 아래 신규 결함. 프레임 시작에 그래픽 단계 전체를 묶는 배리어 하나를 두었습니다 | 실기 검증 메시지 0, 단안 화면 배리어 전과 0 픽셀 |
@@ -1562,10 +1567,7 @@ Shift 가 빠르게 4배). 해법은 [Primitive_And_Lighting_Design.md](Primitiv
 부동소수점 반올림 차이입니다(행렬 차이 1e-5 미만, 단위 테스트로 확인). 그 캡처 뒤의 변경(멀티뷰 기능 요청 삭제, 컨트롤러
 선, XR 실패 시 데스크톱 대체, DEF-104 배리어, 물리)은 단안 화면에 그리는 것이 없거나 Play 때만 돕니다.
 
-**헤드셋으로 확인할 것(남음).** Quest Link 앱 설치 · 헤드셋 연결 뒤 `run.bat Release --xr` 로 띄워: 런타임 · 헤드셋 이름 로그,
-세션 상태가 FOCUSED 까지 가는지, 두 눈이 맞게 보이는지(원근 · 깊이감 · 크기), 에디터 뷰포트에 왼쪽 눈이 비치는지, 머리를 돌릴 때
-물체가 한쪽 눈에서 사라지지 않는지, 컨트롤러 축 · 선이 손을 따라가는지(트리거 · 그립 반응), 물리 스텝 로그(72 · 90Hz),
-헤드셋을 벗었다 쓸 때 세션이 이어지는지, 검증 메시지 0.
+**헤드셋 확인.** 2026-10-15 에 Quest Link(Meta Quest Pro)로 했습니다. 결과는 문서 끝 "헤드셋 확인 결과" 절에 있습니다.
 
 **검증.** 빌드 경고 0. 단위 테스트 7 → 9개 통과(`stereo_views` 10개 · `xr_input` 9개 신설, `actor_lifecycle` 31 → 38,
 `audio_system` 47 → 48, `physics_lifecycle` 29 → 54). 새 검사는 고친 곳을 하나씩 예전 식으로 되돌리면 실패함을 확인했습니다
@@ -1721,3 +1723,45 @@ DEF-34 측정을 더했습니다.
 
 **검증.** 빌드 경고 0. 단위 테스트 13 → 14개 통과(`asset_cache` 8개 신설, `physics_lifecycle` 60 → 65, `scene_components` 32 → 39).
 점검에 쓴 진단 코드(충돌 스택 기록, 라이트 거르기 끄기, 시험 렌더 확장, 물리 로그)는 모두 지웠습니다.
+
+## 헤드셋 확인 결과 (Quest Link, 2026-10-15)
+
+사용자가 Quest Link 를 준비해 3단계 VR 첫걸음을 헤드셋에서 처음 확인했습니다. 검증 레이어를 켠 Release 빌드를 `--xr` 로 띄웠습니다.
+
+**환경.** Meta Quest Pro, USB Link. Meta Horizon Link 가 활성 OpenXR 런타임(Oculus 1.208.0)입니다. 이 PC 에는 RTX 3080 이 두 개
+있는데, 런타임이 고른 GPU 는 모니터가 연결된 쪽이라 창 출력과 같은 장치입니다. 런타임이 밝힌 Vulkan 범위는 1.0 ~ 1.2 지만 이는
+런타임이 시험한 상한이고, 엔진의 Vulkan 1.4 인스턴스 · 장치(synchronization2 · push descriptor)는 런타임을 거쳐 그대로 만들어졌습니다.
+헤드셋을 쓰기 전에 세션을 만들지 않는 점검 프로그램으로 런타임 확장 목록과 장치 생성을 먼저 확인했습니다.
+
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| 런타임 · 헤드셋 로그 | 통과 | `OpenXR runtime: Oculus 1.208.0`, `Headset: Meta Quest Pro`, `Runtime Vulkan API range: 1.0 to 1.2` |
+| 세션 진행 | 통과 | IDLE → READY → SYNCHRONIZED → VISIBLE → FOCUSED |
+| 스왑체인 | 통과 | 눈마다 2160x2224(런타임 권장, Link 앱의 해상도 설정을 따름), 이미지 3장, `B8G8R8A8_SRGB`(데스크톱과 같아 톤매핑 파이프라인을 함께 씀) |
+| 두 눈 원근 · 깊이감, 머리를 돌릴 때 한쪽 눈 소실 없음 | 통과 | 사용자가 헤드셋으로 확인 |
+| 뷰포트의 왼쪽 눈 | 통과 | 에디터 뷰포트에 왼쪽 눈과 컨트롤러 선이 보임 |
+| 컨트롤러 | 통과 | 양손 모두 `/interaction_profiles/oculus/touch_controller`(Quest Pro 컨트롤러도 이 프로파일로 연결됨). 축과 선이 손을 따라감(사용자 확인) |
+| 물리 스텝 | 통과 | `Physics step matched to the headset: 72 Hz` |
+| 프레임 | 통과 | 71 FPS, 프레임 13.95ms 로 72Hz 를 유지 |
+| 벗었다 쓰기 | 통과 | 벗으면 STOPPING → IDLE, 다시 쓰면 READY → FOCUSED 로 이어짐. Oculus 서버 로그에서 READY 가 착용 센서가 켜진 직후에 오는 것을 확인했습니다. 헤드셋을 쓰지 않은 동안 세션이 IDLE 에 머무는 것은 런타임의 정상 동작입니다 |
+| Play · Stop 과 세션 | 통과(DEF-111 수정 뒤) | 아래 신규 결함 표 |
+| 검증 메시지 | 세션마다 1건 → 수정(헤드셋 확인 남음) | DEF-110 |
+| 최소화(DEF-106) · 소리 | 남음 | 아래 "남은 것" |
+
+**신규 결함**
+
+| ID | 심각도 · 상태 | 내용 | 다른 엔진의 방법 | 수정 | 확인 |
+|---|---|---|---|---|---|
+| DEF-110 | LOW · **해결 2026-10-15(헤드셋 확인 남음)** | XR 세션을 만들 때마다 검증 오류 `VUID-VkShaderModuleCreateInfo-pCode-08740` 이 한 건 나옵니다. SPIR-V 가 `StorageImageMultisample` 을 선언했는데 장치에서 `shaderStorageImageMultisample` 기능을 켜지 않았다는 내용입니다. 엔진 셰이더에는 다중 샘플 저장 이미지가 없고, 메시지 수가 실행마다 만든 세션 수와 같았습니다(1 · 1 · 3). 그래서 Oculus 런타임이 엔진의 Vulkan 장치에 자기 셰이더를 만들면서 생긴 것으로 판단합니다. 런타임은 장치를 만들 때 확장만 덧붙이고 이 기능은 켜지 않습니다. 화면에는 영향이 보이지 않습니다 | 짧은 검색으로는 다른 엔진의 사례를 찾지 못했습니다 | 사용자 결정. 런타임이 고른 장치로 XR 장치를 만들 때(`Renderer::createLogicalDevice`) GPU 가 지원하면 `shaderStorageImageMultisample` 을 켭니다. 데스크톱 경로는 그대로입니다 | 빌드 경고 0, 테스트 15개. 헤드셋 없이 `--xr`: "No headset found" 경고 뒤 데스크톱으로 계속, Play · Stop 정상, 검증 메시지 0, `Clean exit`. 메시지가 사라졌는지는 다음 헤드셋 연결 때 확인 |
+| DEF-111 | MEDIUM · **해결 2026-10-15** | `--xr` 이면 실행 내내 세션을 유지해 편집 중에도 헤드셋에 에디터 월드를 그렸습니다. 사용자는 헤드셋 화면을 보고 실행 중이라고 여겨 Stop 을 눌렀지만, 에디터가 Play 상태가 아니어서 아무 일도 일어나지 않았습니다(그 실행의 로그에 Play 기록이 없음). Stop 버튼은 Play 중이 아닐 때도 같은 모양이라 알아챌 수 없었습니다 | UE 의 VR Preview 는 Play 모드의 한 종류라 Stop 하면 VR 세션이 끝나고 헤드셋은 런타임 홈으로 돌아갑니다. Unity 도 에디터에서는 Play 모드에 들어갈 때 XR 을 켜고 나올 때 끕니다 | 사용자 결정("Play 동안만 VR"). 시작할 때는 OpenXR 인스턴스와 Vulkan 장치만 준비합니다. 엔진이 프레임을 시작하기 전에 Play 상태를 보고(`Engine::syncXrWithPlay`) Play 에 들어가면 세션을 만들고, Stop 하면 `xrRequestExitSession` 으로 정상 종료를 요청합니다(`XrSystem::requestExit`). 런타임이 STOPPING → IDLE → EXITING 을 보내면 스왑체인을 떼고 세션을 지웁니다. 세션이 돌고 있지 않으면(헤드셋을 쓰지 않아 IDLE) 바로 지웁니다. 일시정지 동안에는 세션을 유지합니다. 런타임이 Play 중에 세션을 끝내면 Play 는 데스크톱으로 계속하고 다음 Play 에서 다시 엽니다 | 실기: 편집 중에는 세션 없음. Play → 세션 생성 → FOCUSED. Stop(FOCUSED) → STOPPING → IDLE → EXITING → 세션 지움. Stop(IDLE) → 바로 지움. 다시 Play → 새 세션. Pause · Resume 동안 세션 유지 |
+
+**남은 것.**
+- **최소화(DEF-106):** 데스크톱 창을 최소화해도 헤드셋 두 눈이 계속 그려지는지는 헤드셋을 쓰고 봐야 합니다.
+- **소리:** 엔진은 Windows 기본 재생 장치로 소리를 냅니다. 이 PC 의 기본 장치는 PC 에 연결된 다른 헤드셋이라, 지금은 소리가 Quest
+  Pro 로 나가지 않습니다. 런타임은 `XR_OCULUS_audio_device_guid` 로 헤드셋 장치(Oculus Virtual Audio Device)를 알려 줍니다. 처리
+  방법과 "고개를 돌리면 소리의 좌우가 바뀜" 확인은 사용자 지시에 따라 뒤로 미뤘습니다.
+- **Stop 직후 곧바로 Play:** 끝나는 중인 세션이 다 끝난 뒤 다시 여는 경로는 재현하지 못했습니다. 런타임이 종료 요청을 받은 그
+  프레임 안에 EXITING 까지 보내서, 다음 Play 때는 이미 세션이 없었습니다.
+
+**검증.** 빌드 경고 0. 단위 테스트 15개 통과. DEF-111 수정은 OpenXR 런타임이 있어야 도는 경로라 단위 테스트를 더하지 않고 위 실기로
+확인했습니다. 모든 실행이 `Clean exit` 으로 끝났습니다.

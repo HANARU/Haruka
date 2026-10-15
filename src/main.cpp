@@ -53,7 +53,7 @@ static bool redirectStdioIfHeadless() {
 // Engine 이 소유합니다(core/Engine.hpp). 예전에는 이 함수가 200줄로 그 전부를
 // 떠안고 있었습니다.
 // 실행 옵션. 모르는 인자는 경고만 남기고 무시합니다(로그 체계가 준비된 뒤에 알립니다).
-//   --xr             OpenXR 런타임(Quest Link 등)으로 헤드셋에 그립니다. 없으면 데스크톱으로 계속합니다.
+//   --xr             OpenXR 런타임(Quest Link 등)을 준비하고 Play 동안 헤드셋에 그립니다. 없으면 데스크톱으로 계속합니다.
 //   --emulate-stereo 헤드셋 없이 두 눈 경로를 확인합니다(뷰포트를 좌우로 나눠 두 눈을 그림).
 static EngineOptions parseOptions(int argc, char** argv, std::vector<std::string>& unknown) {
     EngineOptions o;

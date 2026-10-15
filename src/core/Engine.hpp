@@ -16,7 +16,7 @@ struct EngineContext;
 
 // 실행 옵션(명령줄). main() 이 채워 Engine 에 넘깁니다.
 struct EngineOptions {
-    bool xr            = false;   // --xr : OpenXR 세션으로 헤드셋에 그림(런타임이 없으면 데스크톱)
+    bool xr            = false;   // --xr : OpenXR 를 준비하고 Play 동안 헤드셋에 그림(런타임이 없으면 데스크톱)
     bool emulateStereo = false;   // --emulate-stereo : 헤드셋 없이 두 눈 경로 확인(DEF-09)
 };
 
@@ -38,15 +38,22 @@ public:
 
 private:
     void setupInputBindings();   // 프로젝트 설정 레이어(키 바인딩). 게임 코드와 분리.
+    // VR 세션을 Play 에 맞춥니다(2026-10-15 사용자 결정). Play 에 들어가면 세션을 만들고, Stop 하면 런타임에
+    // 정상 종료를 요청합니다. UE VR Preview · Unity 처럼 편집 중에는 헤드셋에 그리지 않습니다. 프레임을
+    // 시작하기 전에 불러, 진행 중인 XR 프레임이 있을 때 세션을 지우는 일이 없게 합니다.
+    void syncXrWithPlay(bool inGame);
+    bool startXrSession();   // 세션 + 스왑체인을 렌더러에 연결. 실패하면 이번 Play 는 데스크톱만
     // XR 세션을 끝냅니다(렌더러에서 스왑체인을 떼고 세션을 지움). OpenXR 인스턴스는 그것으로 만든 Vulkan
     // 장치가 살아 있는 동안 남겨 두고 엔진이 끝날 때 지웁니다. 물리 스텝을 60Hz 로 되돌립니다.
-    void endXr();
+    void endXr(const char* reason);
 
     // ── 코어 서비스 (초기화 순서대로 선언 = 역순으로 파괴) ──────────────────────
     std::unique_ptr<IWindow>       window_;
     // XR(--xr). 렌더러보다 먼저 만듭니다(OpenXR 이 Vulkan 장치를 고름). 세션은 렌더러보다 먼저
     // 지워야 하므로 소멸자가 순서를 직접 정합니다. 런타임 · 헤드셋이 없으면 null(데스크톱).
     std::unique_ptr<XrSystem>      xr_;
+    bool                           xrUsable_     = false;   // 렌더러가 OpenXR 이 고른 장치로 만들어져 세션을 열 수 있음
+    bool                           xrPlayWanted_ = false;   // Play(일시정지 포함) 중이라 세션이 있어야 함
     std::unique_ptr<Renderer>      renderer_;
     World                          world_;
     std::unique_ptr<AssetManager>  assets_;

@@ -97,21 +97,15 @@ Engine::Engine(const EngineOptions& options) {
     renderer_->setLimits(limits.maxDrawRows, limits.maxLights);
     renderer_->init(window_.get(), xr_.get());
     if (xr_) {
-        if (renderer_->xrCompatible() &&
-            xr_->createSession(renderer_->getInstance(), renderer_->getPhysDevice(), renderer_->getDevice(),
-                               renderer_->graphicsQueueFamily(), renderer_->getSwapFormat())) {
-            renderer_->attachXrSwapchain(xr_->swapchainImages(), xr_->swapchainFormat(), xr_->eyeExtent());
-            HLOG(LogEngine, Log) << "XR ready; the session starts when the runtime reports READY";
-        } else {
-            // 인스턴스는 남겨 둡니다. 렌더러의 Vulkan 인스턴스 · 장치를 그것으로 만들었을 수 있어서,
-            // 엔진이 끝날 때 렌더러 다음에 지웁니다.
-            HLOG(LogEngine, Warning) << "XR session could not be created; continuing in desktop mode";
-            xr_->destroySession();
-        }
+        // 세션은 Play 때 만듭니다(syncXrWithPlay). 인스턴스는 쓸 수 없어도 남겨 둡니다. 렌더러의 Vulkan
+        // 인스턴스 · 장치를 그것으로 만들었을 수 있어서, 엔진이 끝날 때 렌더러 다음에 지웁니다.
+        xrUsable_ = renderer_->xrCompatible();
+        if (xrUsable_) HLOG(LogEngine, Log) << "XR ready; the headset session starts with Play";
+        else           HLOG(LogEngine, Warning) << "XR is disabled for this run; continuing in desktop mode";
     }
     if (options.emulateStereo) {
-        if (xr_ && xr_->hasSession()) HLOG(LogEngine, Warning) << "--emulate-stereo is ignored while XR is active";
-        else                          renderer_->setStereoEmulation(true);
+        if (xrUsable_) HLOG(LogEngine, Warning) << "--emulate-stereo is ignored while XR is enabled";
+        else           renderer_->setStereoEmulation(true);
     }
 
     assets_ = std::make_unique<AssetManager>(renderer_.get());
@@ -154,13 +148,36 @@ Engine::~Engine() {
     if (xr_)       xr_->shutdown();
 }
 
-void Engine::endXr() {
+void Engine::syncXrWithPlay(bool inGame) {
+    if (!xrUsable_ || inGame == xrPlayWanted_) return;
+    xrPlayWanted_ = inGame;
+    if (inGame) {
+        // 앞 Play 의 세션이 아직 끝나는 중이면(Stop 직후 곧바로 Play) 다 끝난 뒤 루프가 다시 엽니다.
+        if (!xr_->hasSession()) startXrSession();
+    } else if (xr_->hasSession() && !xr_->requestExit()) {
+        endXr("Play stopped");   // 돌고 있지 않으면(헤드셋을 벗음 등) 요청할 것이 없어 바로 지웁니다
+    }
+}
+
+bool Engine::startXrSession() {
+    if (!xr_->createSession(renderer_->getInstance(), renderer_->getPhysDevice(), renderer_->getDevice(),
+                            renderer_->graphicsQueueFamily(), renderer_->getSwapFormat())) {
+        xr_->destroySession();
+        HLOG(LogEngine, Warning) << "XR session could not be created; this Play runs on the desktop only";
+        return false;
+    }
+    renderer_->attachXrSwapchain(xr_->swapchainImages(), xr_->swapchainFormat(), xr_->eyeExtent());
+    HLOG(LogEngine, Log) << "XR session created for Play; drawing starts when the runtime reports READY";
+    return true;
+}
+
+void Engine::endXr(const char* reason) {
     if (!xr_ || !xr_->hasSession()) return;
     renderer_->detachXrSwapchain();   // 장치가 쉬기를 기다린 뒤 이미지 뷰를 지움
     xr_->destroySession();
     HInputSystem::get().setXrInput({});
     if (physics_) physics_->setStepRate(60.f);
-    HLOG(LogEngine, Log) << "XR ended; continuing in desktop mode";
+    HLOG(LogEngine, Log) << "XR session ended (" << reason << ")";
 }
 
 // ── 입력 바인딩 (프로젝트 설정 레이어, 게임 코드와 분리) ────────────────────────
@@ -205,6 +222,8 @@ void Engine::run() {
         // ── XR 프레임 시작 ─────────────────────────────────────────────────
         // 세션이 돌면 xrWaitFrame 이 헤드셋 주사율에 맞춰 기다리므로 루프 속도를 헤드셋이 정합니다.
         // 입력은 이 프레임이 보일 예상 시각의 자세로 읽어 틱에 넘깁니다.
+        // Play 상태는 앞 프레임의 에디터 입력이 바꿉니다. 여기서 세션을 맞추면 진행 중인 XR 프레임이 없습니다.
+        syncXrWithPlay(editor.isPlaying() || editor.isPaused());
         XrSystem::FrameInfo xrFrame;
         bool xrBegun = false;
         if (xr_ && xr_->hasSession()) {
@@ -213,7 +232,11 @@ void Engine::run() {
             // 버튼 · 스틱 값이 눌린 채 남지 않습니다.
             HXrInputState xin;
             if (xr_->sessionLost()) {
-                endXr();
+                const bool requested = xr_->exitRequested();
+                // 런타임이 Play 중에 끝냈으면(대시보드에서 종료 등) Play 는 데스크톱으로 계속하고, 다음 Play 에서
+                // 다시 엽니다. 끝내는 중에 다시 Play 를 눌렀으면 곧바로 엽니다.
+                endXr(requested ? "Play stopped" : "ended by the runtime; Play continues on the desktop");
+                if (requested && xrPlayWanted_) startXrSession();
             } else if (xr_->sessionRunning()) {
                 xrBegun = xr_->beginFrame(xrFrame);
                 if (xrBegun) xr_->syncInput(xrFrame.displayTime, xin);

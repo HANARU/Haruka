@@ -68,12 +68,12 @@
 | 1GB Core Heap 할당기 (Zone A/B/C) | 구현됨 | Zone C 펜스 추적 미비 |
 | World / Actor / Component | 구현됨 | |
 | HSlate UI + 에디터 | 구현됨 | |
-| **OpenXR 세션 + 스테레오 스왑체인** | **구현 · 2026-10-04**(PC, 헤드셋 확인 전) | VR 엔진의 핵심입니다. `src/xr/XrSystem` 이 렌더러보다 먼저 OpenXR 인스턴스를 만들고, 런타임이 고른 GPU 로 Vulkan 장치를 만듭니다(XR_KHR_vulkan_enable2). 세션, LOCAL 원점 공간(원점 = 활성 카메라의 위치 + 요), 두 층 배열 스왑체인 하나를 두고, 렌더러에는 `Renderer::attachXrSwapchain` 으로 이미지를 붙입니다. `--xr` 로 켜며 런타임이 없으면 데스크톱으로 계속합니다. Quest 단독 실행은 Android 진입점과 함께 합니다 |
+| **OpenXR 세션 + 스테레오 스왑체인** | **구현 · 2026-10-04**(PC, 헤드셋 확인 2026-10-15) | VR 엔진의 핵심입니다. `src/xr/XrSystem` 이 렌더러보다 먼저 OpenXR 인스턴스를 만들고, 런타임이 고른 GPU 로 Vulkan 장치를 만듭니다(XR_KHR_vulkan_enable2). 세션, LOCAL 원점 공간(원점 = 활성 카메라의 위치 + 요), 두 층 배열 스왑체인 하나를 두고, 렌더러에는 `Renderer::attachXrSwapchain` 으로 이미지를 붙입니다. `--xr` 로 켜며 런타임이 없으면 데스크톱으로 계속합니다. 세션은 Play 동안만 엽니다(2026-10-15, DEF-111). Quest 단독 실행은 Android 진입점과 함께 합니다 |
 | **Multiview 스테레오 렌더링** | **첫 단계 구현 · 2026-10-04** (`DEF-09`) | 지금은 눈마다 두 번 그립니다. 셰이더는 `FrameUBO` 의 눈별 `viewProj[2]` · `eyePos[2]` 를 눈 번호(`HARUKA_VIEW_INDEX`, 푸시 상수)로 고르므로, 멀티뷰로 갈 때는 그 번호를 `gl_ViewIndex` 로 바꾸고 `viewMask` · 배열 층을 켭니다(Quest 이식 때). 쓰지 않던 멀티뷰 기능 요청은 지웠습니다 |
 | **스테레오 대응 컬링 (두 눈 절두체)** | **해결 · 2026-10-04** (`DEF-31`, 원래 HIGH) | 눈마다 절두체를 판정해 하나라도 통과하면 그립니다(`FrustumCull.hpp` 의 `sphereInAnyView`). 한쪽 눈에서만 물체가 사라지면 양안 경합이 되므로 VR 엔진의 필수 요소이며 도메인과 무관합니다. Quest 2·Pro·3 의 두 눈 시야는 평행하고 비대칭입니다(기울어진 canted 화면이 아님, 2026-10-04 정정). 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-1절 |
 | **재투영 여유분만큼의 절두체 부풀리기** | 보류 · 2026-10-04 (`DEF-32`, 원래 MEDIUM) | 한 프레임에 눈 자세를 한 번 받아 컬링 · 렌더 · 제출에 함께 쓰는 동안에는, 런타임이 재투영해도 렌더한 자세가 기준이라 여유분이 필요 없습니다. 늦은 자세 갱신이나 과주사를 넣을 때 다시 엽니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-2절 |
 | **Foveated Rendering (FFR)** | **미구현** | 선언만 있던 `Renderer.hpp` 의 멤버는 2026-10-04 에 지웠습니다. OpenXR 에서는 런타임이 밀도 맵 이미지를 주는 구조라 그 멤버와 모양이 맞지 않았습니다. Quest 이식 때 새로 둡니다 |
-| **VR 입력 (아날로그 축 + 6DOF 포즈)** | **구현 · 2026-10-04**(헤드셋 확인 전) | XR 모듈(`src/xr`)이 OpenXR 액션으로 만들고 `HInputSystem` 이 아날로그 축 · 버튼 · 자세로 내줌(DEF-20). 창(`IWindow`)은 키보드 · 마우스만 |
+| **VR 입력 (아날로그 축 + 6DOF 포즈)** | **구현 · 2026-10-04**(헤드셋 확인 2026-10-15) | XR 모듈(`src/xr`)이 OpenXR 액션으로 만들고 `HInputSystem` 이 아날로그 축 · 버튼 · 자세로 내줌(DEF-20). 창(`IWindow`)은 키보드 · 마우스만 |
 | **6DOF 카메라 자세 (쿼터니언)** | **구현 · 2026-10-04** (`DEF-21`) | `CameraComponent::viewMatrix` 가 액터의 월드 회전(쿼터니언)과 월드 위치로 뷰를 만듭니다. yaw · pitch 는 에디터 카메라만 갖습니다. 눈별 투영은 OpenXR 시야각으로 만들고(`projFromFov`), 헤드셋 자세는 카메라의 XR 원점(`xrOrigin`: 위치 + 요) 위에 올립니다 |
 | **물리 힘·임펄스·속도·레이캐스트 API** | **구현 · 2026-10-04** (`DEF-19`) | 중력 세터, 힘 · 토크 · 충격량 · 선속도 · 각속도, 레이캐스트, 구 겹침을 `PhysicsSystem` 과 `RigidBodyComponent` 에 두었습니다. 규칙은 UE 식입니다(힘은 프레임 충격량을 그 프레임의 스텝들에 나눠 넣고, 게임 코드가 Dynamic 액터를 옮기면 순간 이동하며 속도를 유지) |
 | **감쇠 운동 적분기 (dt 독립)** | 미구현 | Carbon `destiny`에서 도입. 아래 §5 참조 |
@@ -137,7 +137,7 @@
 | 지점 | 문제 |
 |---|---|
 | `PhysicsSystem`, `RigidBodyComponent` | **해결 · 2026-10-04 (`DEF-19`).** 중력 세터와 힘 · 토크 · 충격량 · 속도 · 레이캐스트 · 구 겹침 API 를 두었습니다. 동기화 루프가 매 프레임 Dynamic 바디의 트랜스폼을 덮어써 게임 코드의 이동이 사라지던 문제는, 물리가 쓴 값을 기억해 게임 코드가 옮긴 경우를 순간 이동(속도 유지)으로 반영하는 방식으로 정리했습니다(UE 식). 예전에는 중력이 하드코딩되어 세터가 없고 힘 · 임펄스 · 속도 · 레이캐스트 API 가 하나도 없어, Layer 2 가 바디를 밀 방법이 없었습니다 |
-| `HInputSystem`, `src/xr` | **해결 · 2026-10-04 (`DEF-20`, 헤드셋 확인 전).** XR 모듈이 OpenXR 액션으로 입력을 만들고, `HInputSystem` 이 아날로그 축(`bindAxis` · `axis`) · 컨트롤러 버튼(`bindXrButton`) · 머리와 손 자세(`xr()`)를 내줍니다. 창(`IWindow`)은 키보드 · 마우스만 맡습니다. 예전에는 디지털 입력 전용이라 아날로그 축도 VR 포즈도 없어 RCS 추력 입력을 받을 수 없었습니다 |
+| `HInputSystem`, `src/xr` | **해결 · 2026-10-04 (`DEF-20`, 헤드셋 확인 2026-10-15).** XR 모듈이 OpenXR 액션으로 입력을 만들고, `HInputSystem` 이 아날로그 축(`bindAxis` · `axis`) · 컨트롤러 버튼(`bindXrButton`) · 머리와 손 자세(`xr()`)를 내줍니다. 창(`IWindow`)은 키보드 · 마우스만 맡습니다. 예전에는 디지털 입력 전용이라 아날로그 축도 VR 포즈도 없어 RCS 추력 입력을 받을 수 없었습니다 |
 | `CameraComponent` | **해결 · 2026-10-04 (`DEF-21`).** 뷰를 액터의 월드 회전(쿼터니언)과 월드 위치로 만들고, 헤드셋 자세는 카메라의 XR 원점(위치 + 요) 위에 올립니다. 예전에는 yaw/pitch 오일러각으로 뷰를 만들고 `owner->transform.rotation` 을 무시해, 6DOF 자유 자세도 롤도 머리와 몸체의 분리도 불가능했습니다 |
 | `Engine::Engine`, `Engine::run` (`src/core/Engine.cpp`) | `GlfwWindow`를 조건 없이 생성하며 안드로이드에서는 컴파일되지 않습니다(헤더 포함만 `#ifndef ANDROID` 로 막혀 있음). `World::tick`은 에디터 Play 상태에서만 돌아 런타임 빌드에 게임 루프가 없습니다. 예전에는 이 코드가 `main.cpp` 에 있었고, 그 뒤 `Engine` 클래스로 옮겨졌습니다 |
 | `SceneSerializer`, `ComponentRegistry` | **해결 · 2026-10-14 (`DEF-22`).** 컴포넌트를 타입 이름으로 등록하고(`EngineContext::components`), 각 컴포넌트가 자기 값을 이름 붙은 값으로 씁니다(씬 v4 의 COMPONENT 블록). Layer 2 컴포넌트도 등록만 하면 `.hscene` · `.hprefab` 왕복과 에디터 추가가 됩니다. 예전에는 컴포넌트 5종이 `ActorData` 의 구조체 필드로 하드코딩되어 새 컴포넌트가 `.hscene` 왕복을 하지 못했습니다. 액터 회전은 `ROT:`(오일러 각) 옆에 정확한 `QUAT:` 를 함께 써 왕복해도 바뀌지 않습니다(DEF-108) |
@@ -209,10 +209,10 @@ Carbon Engine 저장소를 원본으로 확인한 결과, **코어에 들어갈 
 
 **1단계: VR 엔진으로서의 코어 완성.** 이것이 엔진의 정의이므로 우주 기능보다 앞섭니다.
 - Quest 런타임 진입점 (`AndroidWindow` 인스턴스화, `IWindow` 팩토리, 별도 `main`)
-- OpenXR 세션과 XR 스왑체인, 스왑체인 주입 지점 (**PC OpenXR 완료 2026-10-04**, 헤드셋 확인 전). `src/xr/XrSystem` 이 세션 · LOCAL 원점 공간 · 두 층 배열 스왑체인을 만들고, 렌더러에는 `Renderer::attachXrSwapchain` 으로 이미지를 붙입니다. Quest 단독 실행은 위 진입점과 함께 합니다.
+- OpenXR 세션과 XR 스왑체인, 스왑체인 주입 지점 (**PC OpenXR 완료 2026-10-04**, 헤드셋 확인 2026-10-15). `src/xr/XrSystem` 이 세션 · LOCAL 원점 공간 · 두 층 배열 스왑체인을 만들고, 렌더러에는 `Renderer::attachXrSwapchain` 으로 이미지를 붙입니다. Quest 단독 실행은 위 진입점과 함께 합니다.
 - Multiview 완성 (`viewMask`, 셰이더의 `gl_ViewIndex`, 이미지 `arrayLayers`). 첫 단계인 눈마다 두 번 그리기는 **완료 2026-10-04**(`DEF-09`)입니다. 셰이더 · UBO 가 두 눈 기준이라, 멀티뷰는 Quest 이식 때 뷰 번호만 바꿔 켭니다.
 - 컬링의 스테레오 대응. `DEF-31` 은 **완료 2026-10-04**(두 눈 절두체를 각각 판정해 하나라도 통과하면 그림)이고, `DEF-32` 재투영 여유분은 한 프레임에 자세 하나로 컬링 · 렌더 · 제출하는 동안 필요 없어 **보류**했습니다. 상세는 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md)와 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md)를 보십시오.
-- VR 입력 (아날로그 축, 6DOF 포즈) (**완료 2026-10-04**, `DEF-20`, 헤드셋 확인 전)
+- VR 입력 (아날로그 축, 6DOF 포즈) (**완료 2026-10-04**, `DEF-20`, 헤드셋 확인 2026-10-15)
 - 6DOF 카메라 자세 (**완료 2026-10-04**, `DEF-21`)
 
 **2단계: Layer 2를 가능하게 하는 확장 지점.**

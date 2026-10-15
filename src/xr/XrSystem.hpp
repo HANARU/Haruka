@@ -14,7 +14,8 @@
 // 순서(UE · Unity · Godot 과 같음):
 //   1. init()          인스턴스 + 헤드셋(시스템) 확인. 런타임이나 헤드셋이 없으면 false, 데스크톱으로 계속.
 //   2. 렌더러 init      이 객체를 IVulkanDeviceHooks 로 받아 OpenXR 이 고른 GPU 로 인스턴스 · 장치를 만듦.
-//   3. createSession()  세션 · 원점 공간 · 두 층 배열 스왑체인 · 입력 액션.
+//   3. createSession()  세션 · 원점 공간 · 두 층 배열 스왑체인 · 입력 액션. 엔진이 Play 때 부르고 Stop 때
+//                      requestExit() 로 끝냅니다(UE VR Preview · Unity 처럼 Play 동안만 헤드셋에 그림).
 //   4. 매 프레임        pollEvents → waitFrame(속도를 헤드셋이 정함) → syncInput → locateViews →
 //                      acquireImage → (렌더) → releaseImage → endFrame.
 //
@@ -53,9 +54,14 @@ public:
     void pollEvents();
     bool hasSession() const;       // 세션이 있음(시작 전 · 실행 중 · 멈춤 모두)
     bool sessionRunning() const;   // xrBeginSession 과 xrEndSession 사이
-    // 런타임이 세션을 끝냈거나 잃었습니다(EXITING · LOSS_PENDING). 엔진이 렌더러에서 스왑체인을 떼고
+    // 세션이 끝났거나 잃었습니다(EXITING · LOSS_PENDING). 엔진이 렌더러에서 스왑체인을 떼고
     // destroySession() 을 부른 뒤 데스크톱으로 계속합니다.
     bool sessionLost() const;
+    // 세션을 정상 순서로 끝내 달라고 런타임에 요청합니다(xrRequestExitSession). 런타임이 STOPPING 을
+    // 보내면 pollEvents 가 xrEndSession 을 부르고, EXITING 이 오면 sessionLost() 가 참이 됩니다.
+    // 세션이 돌고 있지 않으면(헤드셋을 벗어 IDLE 등) 요청할 것이 없어 false 이고, 그때는 바로 지웁니다.
+    bool requestExit();
+    bool exitRequested() const;    // 이 세션의 끝을 requestExit 로 요청했음(런타임이 끝낸 것과 구별)
 
     struct FrameInfo {
         bool    shouldRender = false;   // 헤드셋이 화면을 보여 주는 중(VISIBLE · FOCUSED)

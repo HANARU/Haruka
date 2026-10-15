@@ -644,6 +644,14 @@ void Renderer::createLogicalDevice() {
     vk14Feat.pNext          = &vk13Feat;
     VkPhysicalDeviceFeatures feat{};
     feat.samplerAnisotropy = VK_TRUE;
+    // XR 장치에는 런타임이 자기 셰이더도 만듭니다. Oculus 런타임의 셰이더는 다중 샘플 저장 이미지를 쓰는데, 런타임은
+    // 장치를 만들 때 확장만 덧붙이고 기능은 켜지 않아 세션마다 검증 오류가 났습니다(DEF-110). GPU 가 지원하면 켜 둡니다.
+    // 데스크톱 경로는 바꾸지 않습니다.
+    if (deviceHooks_ && xrCompatible_) {
+        VkPhysicalDeviceFeatures supported{};
+        vkGetPhysicalDeviceFeatures(physDevice, &supported);
+        feat.shaderStorageImageMultisample = supported.shaderStorageImageMultisample;
+    }
     VkDeviceCreateInfo ci{};
     ci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pNext                   = &vk14Feat;

@@ -2,9 +2,9 @@
 
 Vulkan 1.4 기반 C++20 게임 엔진. 렌더러, GPU 메모리 할당자, UI 위젯 시스템, 에디터를 외부 프레임워크 없이 직접 구현하는 1인 개발 프로젝트입니다. 현재 빌드·실행되는 형태는 에디터가 함께 도는 **Windows 데스크톱 애플리케이션 하나**입니다.
 
-장기 목표는 VR입니다. PC OpenXR 연결(`--xr`, Quest Link 등 PC VR 런타임)이 들어 있지만 아직 헤드셋에서 확인하지 않았습니다. 자세한 내용은 [알려진 한계](#알려진-한계)를 보십시오.
+장기 목표는 VR입니다. PC OpenXR 연결(`--xr`, Quest Link 등 PC VR 런타임)이 들어 있고, 2026-10-15 Meta Quest Pro(Quest Link)에서 확인했습니다. 자세한 내용은 [알려진 한계](#알려진-한계)를 보십시오.
 
-소스는 `src/` 기준 `.cpp`/`.hpp` 153 파일 24,981 줄, 셰이더는 GLSL 19 파일 705 줄입니다(2026-10-15). 릴리스·태그 없음, CI 없음, 자동 테스트 15건.
+소스는 `src/` 기준 `.cpp`/`.hpp` 153 파일 25,036 줄, 셰이더는 GLSL 19 파일 705 줄입니다(2026-10-15). 릴리스·태그 없음, CI 없음, 자동 테스트 15건.
 
 ## 지금 동작하는 것
 
@@ -43,7 +43,7 @@ build.bat Release clean   :: CMake 캐시를 지우고 재구성
 
 run.bat                   :: build\Release\HarukaEngine.exe 실행
 run.bat Debug
-run.bat Release --xr              :: OpenXR 런타임으로 헤드셋에 그림(에디터 뷰포트에 왼쪽 눈)
+run.bat Release --xr              :: Play 동안 헤드셋에 그림(에디터 뷰포트에 왼쪽 눈)
 run.bat Release --emulate-stereo  :: 헤드셋 없이 두 눈 경로 확인(뷰포트를 좌우로 나눔)
 ```
 
@@ -104,7 +104,7 @@ Docs/          설계 · 결함 · 결정 기록 (색인: Docs/README.md)
 **플랫폼 · VR**
 - Windows 전용입니다. CI가 없어 Linux/macOS에서 빌드된 적이 없습니다. macOS는 MoltenVK에 필요한 `VK_KHR_portability_enumeration` 처리가 없고 요구 API가 Vulkan 1.4라 실행 자체가 불가능합니다.
 - Vulkan 1.4 드라이버가 필요합니다. 1.0~1.3 환경에서는 시작하지 않습니다.
-- **VR은 첫걸음 단계입니다.** PC OpenXR 연결(`--xr`)이 있지만 헤드셋에서 확인하지 않았습니다(개발 PC 에 런타임이 없음). 원점은 활성 카메라의 위치와 요이고(LOCAL 공간), 두 눈은 눈마다 따로 그립니다(멀티뷰는 Quest 이식 때). 입력은 기본 액션 세트 하나입니다.
+- **VR은 첫걸음 단계입니다.** PC OpenXR 연결(`--xr`)을 Quest Link(Meta Quest Pro)에서 확인했습니다(2026-10-15). 헤드셋에는 Play 동안만 그립니다. XR 중에도 소리는 Windows 기본 재생 장치로 나갑니다. 원점은 활성 카메라의 위치와 요이고(LOCAL 공간), 두 눈은 눈마다 따로 그립니다(멀티뷰는 Quest 이식 때). 입력은 기본 액션 세트 하나입니다.
 - Quest 단독 실행(Android)은 아직 없습니다. 아래 Android 항목을 보십시오.
 - Android/Quest 경로는 스텁입니다. `AndroidWindow::createSurface()`가 예외를 던지고, `Engine` 생성자가 `GlfwWindow`를 조건 없이 만들기 때문에 CMake의 ANDROID 분기는 컴파일되지 않습니다. gradle 등 안드로이드 빌드 파일도 없습니다.
 

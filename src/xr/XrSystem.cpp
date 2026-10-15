@@ -67,6 +67,7 @@ struct XrSystem::Impl {
     XrSessionState state   = XR_SESSION_STATE_UNKNOWN;
     bool           running = false;
     bool           lost    = false;
+    bool           exitRequested = false;   // requestExit 로 끝내는 중
     bool           hasRefreshRateExt = false;
     XrEnvironmentBlendMode blendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 
@@ -115,6 +116,7 @@ bool XrSystem::ready() const { return impl_->systemId != XR_NULL_SYSTEM_ID; }
 bool XrSystem::hasSession() const { return impl_->session != XR_NULL_HANDLE; }
 bool XrSystem::sessionRunning() const { return impl_->running; }
 bool XrSystem::sessionLost() const { return impl_->lost; }
+bool XrSystem::exitRequested() const { return impl_->exitRequested; }
 const std::vector<VkImage>& XrSystem::swapchainImages() const { return impl_->images; }
 VkFormat   XrSystem::swapchainFormat() const { return impl_->format; }
 VkExtent2D XrSystem::eyeExtent() const { return impl_->eyeExtent; }
@@ -433,8 +435,17 @@ void XrSystem::destroySession() {
     if (m.headSpace) { xrDestroySpace(m.headSpace); m.headSpace = XR_NULL_HANDLE; }
     if (m.appSpace)  { xrDestroySpace(m.appSpace);  m.appSpace  = XR_NULL_HANDLE; }
     if (m.session)   { xrDestroySession(m.session); m.session   = XR_NULL_HANDLE; }
-    m.running = false;
-    m.state   = XR_SESSION_STATE_UNKNOWN;
+    m.running       = false;
+    m.exitRequested = false;
+    m.state         = XR_SESSION_STATE_UNKNOWN;
+}
+
+bool XrSystem::requestExit() {
+    Impl& m = *impl_;
+    if (!m.session || !m.running) return false;
+    if (!m.ok(xrRequestExitSession(m.session), "xrRequestExitSession")) return false;
+    m.exitRequested = true;
+    return true;
 }
 
 void XrSystem::shutdown() {
