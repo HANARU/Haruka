@@ -100,7 +100,7 @@
 ### 3-1. 계층
 
 ```
-[Layer 2] 우주 · 무중력 도메인 (미착수: ZeroGController · DebrisField · 생존 규칙 · 우주 비주얼)
+[Layer 2] 우주 · 무중력 도메인 (미착수: ZeroGController · DebrisField · 생존 규칙 · 우주 비주얼 · 정적 기지 건설)
             │ 단방향 의존 (EngineContext 로만 코어에 접근)
             v
 [Layer 1] Haruka Core
@@ -427,7 +427,8 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 ### 5-5. Layer 2 (우주 · 무중력 도메인)
 
 전부 미착수입니다. 무중력 비행 역학, 파편장(`DebrisFieldComponent`, 명시적 인스턴싱과 함께), 생존 규칙, 우주 비주얼이 계획에 있고
-정본은 [Deep_Space_VR_Specification.md](Deep_Space_VR_Specification.md) 입니다. 코어 쪽 선결 조건 중 물리 API · VR 입력 · 6DOF 카메라 ·
+정본은 [Deep_Space_VR_Specification.md](Deep_Space_VR_Specification.md) 입니다. 정적 기지 건설은 2026-10-15 에 구현하기로 정했고(시점 미정),
+지침과 선결 코어 작업은 [Static_Base_Building_Design.md](Static_Base_Building_Design.md) 에 있습니다. 코어 쪽 선결 조건 중 물리 API · VR 입력 · 6DOF 카메라 ·
 인스턴싱 · 렌더 확장 지점 · 컴포넌트 등록은 갖췄습니다. [Layer_Architecture.md](Layer_Architecture.md) §6 기준으로 2단계의
 `FrameUBO.invViewProj`(DEF-13 보류)와 3단계의 감쇠 운동 적분기 · 정점 패킹 · 보이스 예산 · 깊이 정책(Reverse-Z)이 남았고,
 Floating Origin 은 Layer 1 옵션 후보입니다.
@@ -489,6 +490,6 @@ Floating Origin 은 Layer 1 옵션 후보입니다.
    의 헤드셋 항목)을 봅니다.
 2. **Quest 이식**: DEF-08 · 12 · 42 · 04 · 97 · 06 · 103, 멀티뷰, Android 빌드, 그리고 Quest 에서 DEF-34(라이트 비용) 실측.
 3. **에디터 Phase 4 · 렌더링 기능**: Light Channels, CSM, 노출 배선, 반사 프로브, 에디터 시각화 등.
-4. **Layer 2**: 우주 · 무중력 도메인과 파편장.
+4. **Layer 2**: 우주 · 무중력 도메인과 파편장, 정적 기지 건설([Static_Base_Building_Design.md](Static_Base_Building_Design.md)).
 
 남은 비VR 결함은 잠재 항목 DEF-02 · DEF-91 뿐이며, 둘 다 지금 드러나는 경로가 없습니다.

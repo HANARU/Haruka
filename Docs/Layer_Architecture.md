@@ -100,6 +100,7 @@
 | 우주 배경 (성운 큐브맵, 스타필드) | Layer 1의 패스 확장 지점을 소비 |
 | SDF 위험 구역, 추진기 플룸, 쉴드 연출 | 도메인 셰이더 |
 | 파편장 특화 오디오 군집화 튜닝 | Layer 1의 보이스 예산 위에 얹는 정책 |
+| 정적 기지 건설 (모듈 · 해치 · 건설 도구 · 방 연결 그래프) | Layer 1의 복합 콜라이더 · 컬링 가시성 질의 · 렌더 확장 지점을 소비. 2026-10-15 구현 결정, 지침은 [Static_Base_Building_Design.md](Static_Base_Building_Design.md) |
 
 ### 판정이 갈렸던 항목과 그 근거
 
@@ -224,7 +225,7 @@ Carbon Engine 저장소를 원본으로 확인한 결과, **코어에 들어갈 
 - 감쇠 운동 적분기, QTangent 정점 패킹, 보이스 예산, 깊이 정책 구조
 
 **4단계: 우주 도메인 레이어.**
-- `ZeroGControllerComponent`, 파편장, 생존 규칙, 우주 비주얼
+- `ZeroGControllerComponent`, 파편장, 생존 규칙, 우주 비주얼, 정적 기지 건설([Static_Base_Building_Design.md](Static_Base_Building_Design.md) 4절의 Layer 1 작업이 선결)
 
 우주 기능을 먼저 얹고 싶은 유혹이 있겠지만, 2단계 없이는 Layer 2 코드를 작성해도 동작시킬 방법이 없습니다. 2026-10-14 기준으로 입력 축 · 물리 힘 API · 자동 인스턴싱 · 패스 확장 지점이 들어왔습니다. 2단계에서 남은 것은 `FrameUBO.invViewProj`(레이마칭 배경에 필요)입니다. 컴포넌트 직렬화(`DEF-22`)도 2026-10-14 에 해결되어 새 도메인 컴포넌트를 등록만 하면 씬에 저장됩니다.
 

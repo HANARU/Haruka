@@ -49,14 +49,15 @@
 
 ## VR · 이식 (계획 문서)
 
-2026-10-04 에 PC OpenXR 연결과 두 눈 렌더(VR 첫걸음)를 넣었고, 헤드셋 확인과 Quest 이식이 남았습니다. 아래 두 문서는
-착수 전에 쓴 사전 조사 · 계획이라 현재 구현과 다른 부분이 있습니다. 현재 상태는 [Engine_Specification.md](Engine_Specification.md) 를 보십시오. 사운드는 2026-10-02 에
+2026-10-04 에 PC OpenXR 연결과 두 눈 렌더(VR 첫걸음)를 넣었고, 헤드셋 확인과 Quest 이식이 남았습니다. 아래 표의 앞 두 문서는
+착수 전에 쓴 사전 조사 · 계획이라 현재 구현과 다른 부분이 있습니다. 정적 기지 건설 지침은 2026-10-15 코드 기준으로 쓴 미착수 기능의 설계 지침입니다. 현재 상태는 [Engine_Specification.md](Engine_Specification.md) 를 보십시오. 사운드는 2026-10-02 에
 기초를 정리했고, 정본은 위의 [Audio_Design.md](Audio_Design.md) 입니다.
 
 | 문서 | 내용 |
 |---|---|
 | [VR_Transition_Masterplan.md](VR_Transition_Masterplan.md) | VR 전환 마스터플랜(스테레오·OpenXR·Reverse-Z 등) |
 | [Deep_Space_VR_Specification.md](Deep_Space_VR_Specification.md) | 심우주 VR 도메인 사양 |
+| [Static_Base_Building_Design.md](Static_Base_Building_Design.md) | 정적 기지 건설(Layer 2, 구현 예정) · Quest 타일 GPU 대응 지침과 필요한 코어 작업 |
 
 ## 아카이브 — 외부 엔진 분석 (신뢰도 낮음, 참고용)
 
