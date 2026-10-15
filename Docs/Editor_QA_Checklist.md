@@ -96,7 +96,7 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 | DEF-60 | Output Log 시간 열(오른쪽 정렬)과 툴바 버튼 글자의 좌우 여백을 봄 | `9.87` 과 `123.45` 의 끝이 어긋나고, 버튼 글자가 한쪽으로 치우침 | 끝이 맞고 글자가 가운데 |
 | DEF-62 | — | 화면에서 드러나는 곳 없음(Fill 슬롯에 패딩을 준 곳이 없음) | 코드 검토로 확인 |
 | DEF-63 | 디테일 제목 줄을 누른 채 TRANSFORM 헤더로 옮겨 뗌. Output Log 행을 누른 채 GPU Stats 탭으로 옮겨 뗌 | 섹션이 접힘, 탭이 바뀜 | 둘 다 아무 일 없음 |
-| DEF-64 | File 메뉴를 연 채 Play 클릭 / File 메뉴의 Load Scene 행 왼쪽 끝 클릭(Save 먼저) | 메뉴만 닫히고 Play 안 됨(의도로 둘지 결정 필요) / 메뉴가 열린 채 탭이 바뀌고 Load 가 안 됨 | 메뉴 항목 클릭은 항상 그 항목으로 감 |
+| DEF-64 | File 메뉴를 연 채 Play 클릭 / File 메뉴의 Load Scene 행 왼쪽 끝 클릭(Save 먼저) | 메뉴만 닫히고 Play 안 됨(2026-10-02 사용자 결정: 의도된 동작으로 둠) / 메뉴가 열린 채 탭이 바뀌고 Load 가 안 됨 | 메뉴 항목 클릭은 항상 그 항목으로 감 |
 | DEF-65 | — | 화면에서 드러나는 곳 없음 | 코드 검토로 확인 |
 | DEF-66 | 기즈모로 액터를 옮긴 뒤 오른쪽 Ctrl+Z, 오른쪽 Ctrl+S | 되돌리기·저장이 안 됨(왼쪽 Ctrl 은 됨, 오른쪽 Shift 도 무시) | 양쪽 다 됨 |
 | DEF-67 | — | 바인딩이 0건이라 드러나지 않음(잠재) | 코드 검토로 확인 |

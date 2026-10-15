@@ -65,10 +65,10 @@ minor 3건(사이클 크래시·직렬화 인덱스 어긋남·물리/오디오 
 1~3단계(트랜스폼 캡슐화, 픽 일반화, 아이콘) 완료. 남은 단계는 실제 그 엔티티를 다룰 때.
 
 - **4단계 `drawEditorVisual`**: 라이트 range 구/spot 원뿔/방향, 카메라 절두체, 오디오 반경을
-  와이어로. 훅 자리는 준비됨.
+  와이어로. `drawEditorVisual` 훅은 아직 없고(4단계 때 추가), 그릴 곳인 에디터 라인 · 삼각형 오버레이 목록만 있음(2026-10-15 정정).
 - **5단계 프레이밍(F 키)**: 선택 대상에 카메라 맞춤. 액터 바운드 집약(컴포넌트 localBounds 합집합).
 - **6단계 3D UI 패널**: 얇은 판 바운드 + 패널 컴포넌트. **VR 핵심.** 레이아웃·입력·렌더가 얽혀
-  별도 설계 필요.
+  별도 설계 필요. 방향은 정함(2026-08-26 결정, 2026-10-15 재확인): UE 식 render-to-texture, `UIPanelComponent`, `HWidget` 트리 재사용(상세는 Spatial_Representation_Design.md 10절 "남긴 것").
 - 아이콘 텍스처(지금 단색 사각형), 기즈모 크기 설정 UI(`setSizeFactor` 준비됨).
 
 ---
@@ -107,6 +107,8 @@ UE식 용어 채택, **"명칭만" 결정**(내부 상대값, 물리 단위·노
   슬롯 전달 + `Lo*=shadow` 범위 축소, 라이트 프러스텀 섀도 목록 + 카메라 우선 2단계 행 배정). 적대적 검증 통과.
 - **다음 — Phase 2 잔여**: **Light Channels**(per-object 채널을 셰이더까지 배선 = 중간 규모: 파이프라인
   레이아웃·푸시 상수·프리미티브 필드·직렬화·UI). GpuLight 여유 슬롯(spotParams.zw)은 라이트 쪽만 있음.
+- **라이트 방향 표현(2026-10-15 사용자 결정)**: `direction` 필드를 없애고 액터 회전의 -Z 를 빛의 방향으로 씁니다(카메라 ·
+  OpenXR · Godot 과 같은 축). 옛 씬은 읽을 때 `direction` 을 회전에 접어 넣어 화면을 유지합니다. 다음 라이팅 작업 때 합니다.
 - soon: 노출 배선, CSM 2캐스케이드, Contact Shadows, Reflection Capture, Height Fog. skip(예약어): Static/
   Stationary·Lightmass·Lumen·VSM·Distance Field·Auto Exposure.
 

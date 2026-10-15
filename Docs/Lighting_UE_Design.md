@@ -193,9 +193,17 @@ LightComponent (UE 어휘):
    1m 거리의 밝기) 물리 단위 산입·노출계는 하지 않습니다. 근거와 확인은 Core_Defects_Task_Spec.md "화면 기준 재정렬".
 2. **exposure 재보정 범위**: 물리 단위/역제곱을 건드리면 커플드 세트 전부(intensity·exposure·skyRadiance +
    bloom·ao·taa) 재조정 필요 — 한 번에 vs 단계적.
+   **[정리 · 2026-10-15]** 물리 단위는 1번 결정으로 하지 않으므로, 물리 단위에 대해서는 이 질문이 해당하지 않습니다.
+   역제곱 감쇠 모양은 2026-10-04 에 바꿨고, 그때 감마 이중 적용(DEF-96) 수정과 함께 노출만 0.4 → 1.0 으로 다시 정했습니다
+   (사용자 결정). 가짜 TAA 는 지워져 재조정 대상에서 빠졌습니다.
 3. ✅ **결정: 완전 제거(2026-08-27).** LightComponent 에서 `ambient` 삭제. 직렬화는 옛 파일 호환을 위해
    토큰 자리만 예약 슬롯으로 유지. Sky Light iblIntensity 이관은 SkyLightComponent 신설 시점으로 미룸.
 4. **라이트 방향 표현**: 현 로컬 direction+회전 혼합 유지 vs UE식 -Z(forward) 규약으로 흡수(기존 값 재해석).
+   ✅ **결정(2026-10-15): 회전에서만 유도, 축은 -Z.** `direction` 필드를 없애고 액터 회전의 -Z 를 빛이 나아가는 방향으로
+   씁니다(카메라 `forward()` · OpenXR · Godot 과 같은 축. UE 는 +X, Unity 는 +Z 이지만 모두 트랜스폼 회전만 씀). 옛 씬은 읽을 때
+   `direction` 을 액터 회전에 접어 넣어 화면이 바뀌지 않게 합니다. 시점은 다음 라이팅 작업 때입니다. 지금 코드는 아직 혼합
+   방식입니다(월드 방향 = 액터 회전 × 로컬 `direction`, `worldDirection`). [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md)
+   D6 에서 "`direction` 유지"를 정하면서 이 항목을 따로 남겼던 것입니다.
 5. ✅ **결정: enum 자체를 추가 안 함(2026-08-27).** 유효값이 Movable 하나뿐이라 필드로 만들면 방금 제거한
    `ambient` 처럼 또 다른 사문 필드가 됨. 문서(§3 Mobility 표)로만 남김.
-6. **CSM 캐스케이드 수**(Quest 예산): 2 vs 3.
+6. **CSM 캐스케이드 수**(Quest 예산): 2 vs 3. **(2026-10-15 현재 열림)** CSM 을 구현할 때 Quest 예산과 함께 정합니다.
