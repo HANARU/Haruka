@@ -6,7 +6,7 @@
 > **기준 시점**: 커밋 `5a9cb51`(2026-10-15). 수치와 기능 서술은 이 시점의 `src/` · `shaders/` · `tests/` 코드와 빌드 결과를
 > 직접 확인해 적었습니다. 이 문서를 갱신할 때도 문서가 아니라 코드를 먼저 확인하십시오.
 >
-> **갱신(2026-10-15)**: 에디터의 액터 생성 · 삭제 Undo 를 4-11 · 4-12 · 5-4 · 7장에, XR 머리 자세 청취자를 4-8 · 5-3 에 반영하고, 1-3 · 3-2 의 소스 · 테스트 수치를 이
+> **갱신(2026-10-15)**: 에디터의 액터 생성 · 삭제 Undo 를 4-11 · 4-12 · 5-4 · 7장에, XR 머리 자세 청취자를 4-8 · 5-3 에, 프로젝트 폴더 에셋 루트를 4-6 에 반영하고, 1-3 · 3-2 의 소스 · 테스트 수치를 이
 > 변경까지 다시 셌습니다. 커밋 수와 결함 수는 기준 시점 그대로입니다.
 
 ---
@@ -46,9 +46,9 @@
 
 | 항목 | 값 |
 |---|---|
-| 소스 | `src/` 의 `.cpp` · `.hpp` 152 파일, 24,920 줄 |
+| 소스 | `src/` 의 `.cpp` · `.hpp` 153 파일, 24,981 줄 |
 | 셰이더 | GLSL 19 파일(셰이더 18 + 공용 헤더 1), 705 줄. 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 15개 실행 파일, 검사 534개(`ctest -C Release`) |
+| 자동 테스트 | 15개 실행 파일, 검사 540개(`ctest -C Release`) |
 | 문서 | `Docs/` 활성 문서 25개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시) |
@@ -124,21 +124,21 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | 디렉터리 | 파일 · 줄 | 내용 |
 |---|---|---|
 | `src/`(루트) | 1 · 105 | `main.cpp`(진입점: 콘솔 없이 직접 실행할 때 C stdio 출력을 `Logs/stdout.txt` 로 돌린 뒤 `Engine` 을 만들고 돌림) |
-| `src/core/` | 24 · 2,285 | `Engine`, `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 리플렉션(`Reflect.hpp`) |
+| `src/core/` | 25 · 2,334 | `Engine`, `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 에셋 루트(`ProjectPaths.hpp`), 리플렉션(`Reflect.hpp`) |
 | `src/renderer/` | 24 · 4,204 | `Renderer`(프레임 구성), `RenderContext`, `GpuScene`, `FrameResources`, 스왑체인, 인스턴싱 묶기 · 라이트 선택 · 절두체 컬링 헤더, 렌더 확장 |
 | `src/renderer/passes/` | 11 · 2,106 | Shadow · Geometry · AO · Bloom · Post 패스(`HPass` 수명주기) |
 | `src/memory/` | 2 · 388 | `HarukaAllocator`(1GB 단일 힙, 세 구역) |
-| `src/assets/` | 15 · 1,832 | `AssetManager`, glTF 로더, `.gasset` 캐시, 씬 · 프리팹 직렬화, 컴포넌트 블록 직렬화, 회전 글자 표현 |
+| `src/assets/` | 15 · 1,838 | `AssetManager`, glTF 로더, `.gasset` 캐시, 씬 · 프리팹 직렬화, 컴포넌트 블록 직렬화, 회전 글자 표현 |
 | `src/geometry/` | 5 · 1,321 | 절차 도형 기술자와 메시 생성기 |
 | `src/components/` | 12 · 1,024 | Light · Camera · StaticMesh · Audio · RigidBody, 기본 컴포넌트 등록 |
 | `src/physics/` | 2 · 674 | `PhysicsSystem`(Jolt) |
-| `src/audio/` | 5 · 451 | `AudioSystem`(miniaudio), 3D 감쇠 설정 |
+| `src/audio/` | 5 · 453 | `AudioSystem`(miniaudio), 3D 감쇠 설정 |
 | `src/input/` | 3 · 236 | `HInputSystem`(액션 · 축 바인딩), XR 입력 상태 |
 | `src/xr/` | 2 · 746 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력) |
 | `src/platform/` | 5 · 591 | `IWindow`, GLFW 구현, Android 스텁 |
-| `src/ui/slate/` | 26 · 3,156 | HSlate: 위젯 14종, 배치 · 페인트 · 폰트 아틀라스 · 렌더러 |
-| `src/editor/` | 13 · 5,759 | `EditorApp`, 기즈모, 커맨드 스택, 액터 생성 · 삭제 Undo 스냅샷, 도킹, 셰이더 핫 리로드 |
-| `src/game/` | 2 · 42 | `DefaultGameModule` |
+| `src/ui/slate/` | 26 · 3,157 | HSlate: 위젯 14종, 배치 · 페인트 · 폰트 아틀라스 · 렌더러 |
+| `src/editor/` | 13 · 5,761 | `EditorApp`, 기즈모, 커맨드 스택, 액터 생성 · 삭제 Undo 스냅샷, 도킹, 셰이더 핫 리로드 |
+| `src/game/` | 2 · 43 | `DefaultGameModule` |
 
 ### 3-3. 부팅 · 메인 루프 · 종료
 
@@ -266,8 +266,9 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 | 기능 | 사양 |
 |---|---|
+| 에셋 루트 | 에셋은 `assets/...` 논리 경로로 가리키고 씬 · 프리팹에도 논리 경로를 저장합니다. 에디터 빌드는 프로젝트 폴더(구성할 때 넣은 소스 트리 경로)의 `assets/` 를 직접 읽고 씁니다(2026-10-15, UE · Unity · Godot 과 같음). 그 폴더가 없으면 실행 파일 옆 복사본을 씁니다. 캐시는 실행 폴더에 둡니다 |
 | glTF | `.glb` · `.gltf` 정적 메시, 텍스처 5종. 스칼라 팩터는 읽을 때 텍스처에 구워 넣음. `alphaMode = BLEND` → 반투명 |
-| 메시 캐시 | `.gasset` 바이너리 캐시(`assets/cache/`). 원본 크기와 수정 시각 또는 내용 해시(FNV-1a)가 같으면 재사용 |
+| 메시 캐시 | `.gasset` 바이너리 캐시(실행 폴더의 `assets/cache/`, 소스 트리에 쓰지 않음). 원본 크기와 수정 시각 또는 내용 해시(FNV-1a)가 같으면 재사용 |
 | 절차 도형 | Box · Plane · Sphere · Cylinder · Cone · Capsule · Torus · Arrow · Icosphere 9종. 머티리얼은 체커 또는 단색(색 · 금속도 · 거칠기) |
 | 씬 형식 | 텍스트 `.hscene` v4. 액터마다 `POS` · `ROT`(오일러 각) · `QUAT`(정확한 회전) · `SCALE` · `ACTIVE` · `PARENT`, 컴포넌트마다 `COMPONENT:타입` … `END_COMPONENT` 블록에 `이름=값`. 실수는 다시 읽으면 같은 값이 되는 가장 짧은 십진수로 씀 |
 | 호환 | v3 이하 씬 · v1 프리팹을 계속 읽음. 등록되지 않은 컴포넌트 타입은 원문 그대로 보존해 다시 저장할 때 씀 |
@@ -329,7 +330,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 15개, 검사 534개.** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 15개, 검사 540개.** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -347,7 +348,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `render_extensions` | 17 | 패스 레지스트리 · 확장 지점 |
 | `scene_components` | 39 | 컴포넌트 등록 · 씬 v4 값 · 회전 왕복 |
 | `light_selection` | 16 | 라이트 선택 · 상한 설정 파일 |
-| `asset_cache` | 8 | glTF 캐시 유효성 |
+| `asset_cache` | 14 | glTF 캐시 유효성, 에셋 논리 경로 해석 |
 
 - 2026-10-14 이후 새로 만든 검사는 수정을 되돌리면 실패하는지 **변이로 확인**했습니다.
 - 화면 회귀는 에디터를 띄워 `PrintWindow` 로 찍은 뒤 뷰포트를 픽셀 단위로 비교하고, Vulkan 검증 레이어 메시지 0 과 `Clean exit` 를

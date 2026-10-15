@@ -13,6 +13,7 @@
 #include "IGameModule.hpp"
 #include "ComponentRegistry.hpp"
 #include "EngineSettings.hpp"
+#include "ProjectPaths.hpp"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -61,6 +62,20 @@ Engine::Engine(const EngineOptions& options) {
     // 기본 컴포넌트 타입을 씬을 읽기 전에 등록합니다(DEF-22). 씬 · 프리팹의 COMPONENT 블록과 에디터의
     // 컴포넌트 추가 버튼이 이 등록을 씁니다.
     registerCoreComponents();
+
+    // 에셋 루트(2026-10-15). 에디터 빌드는 프로젝트 폴더의 assets/ 를 직접 읽고 씁니다(ProjectPaths.hpp). 구성할 때 넣은
+    // 소스 트리 경로에 assets/ 가 없으면(다른 PC 로 옮긴 실행 파일 등) 실행 폴더의 복사본을 씁니다.
+#ifdef HARUKA_PROJECT_DIR
+    {
+        std::error_code ec;
+        const std::filesystem::path project = HARUKA_PROJECT_DIR;
+        if (std::filesystem::is_directory(project / "assets", ec)) hproj::setRoot(project);
+    }
+#endif
+    if (hproj::root().empty())
+        HLOG(LogEngine, Log) << "Asset root: assets/ next to the executable";
+    else
+        HLOG(LogEngine, Log) << "Asset root: project folder " << hproj::root().generic_string() << "/assets";
 
     // 그리기 행 · 라이트 · 물리 바디 상한(DEF-10). 렌더러 · 물리를 만들기 전에 읽습니다.
     const EngineLimits limits = loadEngineLimits("Config/engine.ini");

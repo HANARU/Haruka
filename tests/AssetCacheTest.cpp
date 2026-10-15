@@ -8,6 +8,7 @@
 // 실행: build/Release/HarukaAssetCacheTest.exe
 
 #include "../src/assets/GassetCache.hpp"
+#include "../src/core/ProjectPaths.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -100,6 +101,19 @@ int main() {
 
     fs::current_path(oldCwd);
     fs::remove_all(root, ec);
+
+    // 에셋 논리 경로의 해석(2026-10-15). 에디터 빌드는 프로젝트 폴더의 assets/ 를 직접 읽고 쓰지만, 캐시는
+    // 파생 데이터라 실행 폴더에 남아야 하고 assets/ 밖의 경로(임시 파일 등)는 건드리지 않아야 합니다.
+    std::printf("\n== 에셋 경로 해석(hproj) ==\n");
+    hproj::setRoot({});
+    check(hproj::resolve("assets/models/a.glb") == "assets/models/a.glb", "루트가 없으면 그대로(실행 폴더 기준)");
+    hproj::setRoot("P:/proj");
+    check(hproj::resolve("assets/models/a.glb") == "P:/proj/assets/models/a.glb", "루트가 있으면 assets/ 를 프로젝트 폴더로");
+    check(hproj::resolve("assets/prefabs") == "P:/proj/assets/prefabs", "폴더 경로도 바꿈(프리팹 저장 · 목록)");
+    check(hproj::resolve("assets/cache/0123.gasset") == "assets/cache/0123.gasset", "캐시는 실행 폴더에 둠");
+    check(hproj::resolve("C:/tmp/x.wav") == "C:/tmp/x.wav", "assets/ 밖 경로는 그대로");
+    check(hproj::resolve("assetsX/y") == "assetsX/y", "assets/ 로 시작하지 않으면 그대로");
+    hproj::setRoot({});
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
     return g_failed ? 1 : 0;

@@ -1,6 +1,7 @@
 #include "EditorApp.hpp"
 #include "../core/ComponentRegistry.hpp"
 #include "../core/FrameTimings.hpp"
+#include "../core/ProjectPaths.hpp"
 #include "EditorCommands.hpp"
 #include "../renderer/Renderer.hpp"
 #include "../core/World.hpp"
@@ -459,12 +460,13 @@ void EditorApp::tick(float dt) {
 void EditorApp::scanModelFiles() {
     modelFiles_.clear();
     try {
-        fs::path dir = "assets/models";
+        // 프로젝트 폴더를 훑지만, 컴포넌트와 씬에는 논리 경로(assets/models/...)를 남깁니다(hproj).
+        const fs::path dir = hproj::resolve("assets/models");
         if (fs::exists(dir)) {
             for (auto& e : fs::recursive_directory_iterator(dir)) {
                 auto ext = e.path().extension();
                 if (ext == ".glb" || ext == ".gltf")
-                    modelFiles_.push_back(e.path().generic_string());
+                    modelFiles_.push_back("assets/models/" + e.path().lexically_relative(dir).generic_string());
             }
             std::sort(modelFiles_.begin(), modelFiles_.end());
         }
@@ -472,7 +474,7 @@ void EditorApp::scanModelFiles() {
 
     audioFiles_.clear();
     try {
-        fs::path dir = "assets/audio";
+        const fs::path dir = hproj::resolve("assets/audio");
         if (fs::exists(dir)) {
             for (auto& e : fs::directory_iterator(dir)) {
                 auto ext = e.path().extension().string();

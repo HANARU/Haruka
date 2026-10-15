@@ -2,6 +2,7 @@
 #include "AssetLog.hpp"
 #include "SceneSerializer.hpp"
 #include "../core/Actor.hpp"
+#include "../core/ProjectPaths.hpp"
 
 #include <fstream>
 #include <filesystem>
@@ -10,8 +11,9 @@
 namespace fs = std::filesystem;
 
 void PrefabManager::save(const Actor* actor, const std::string& path) {
-    fs::create_directories(kDir);
-    std::ofstream f(path);
+    // 에디터 빌드는 프로젝트 폴더에 씁니다(hproj). 실행 폴더에 쓰면 다음 빌드의 에셋 복사가 덮어씁니다.
+    fs::create_directories(hproj::resolve(kDir));
+    std::ofstream f(hproj::resolve(path));
     if (!f) { HLOG(LogAsset, Error) << "Prefab cannot write: " << path; return; }
 
     f << "# Haruka Prefab v2\n";   // v2: 컴포넌트를 COMPONENT 블록으로(DEF-22). v1 도 읽습니다
@@ -21,7 +23,7 @@ void PrefabManager::save(const Actor* actor, const std::string& path) {
 }
 
 Actor* PrefabManager::spawn(const std::string& path, World& world, AssetManager& assets) {
-    std::ifstream f(path);
+    std::ifstream f(hproj::resolve(path));
     if (!f) { HLOG(LogAsset, Error) << "Prefab not found: " << path; return nullptr; }
 
     SceneSerializer::ActorData data;
@@ -45,8 +47,9 @@ Actor* PrefabManager::spawn(const std::string& path, World& world, AssetManager&
 std::vector<std::string> PrefabManager::scan() {
     std::vector<std::string> result;
     std::error_code ec;
-    if (!fs::exists(kDir, ec)) return result;
-    for (auto& e : fs::directory_iterator(kDir, ec)) {
+    const fs::path dir = hproj::resolve(kDir);
+    if (!fs::exists(dir, ec)) return result;
+    for (auto& e : fs::directory_iterator(dir, ec)) {
         if (e.path().extension() == kExt)
             result.push_back(e.path().stem().string());
     }

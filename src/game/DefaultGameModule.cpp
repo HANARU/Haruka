@@ -1,5 +1,6 @@
 #include "DefaultGameModule.hpp"
 #include "../core/World.hpp"
+#include "../core/ProjectPaths.hpp"
 #include "../assets/SceneSerializer.hpp"
 #include "../core/HLog.hpp"
 
@@ -16,11 +17,11 @@ static constinit HLogCategory LogGame{ "Game", ELogVerbosity::Log };
 // 디버그 씬에 결합되지 않습니다. 배치를 바꾸려면 에디터에서 고친 뒤 Save 로 만든
 // scene.hscene 을 이 파일에 덮어쓰면 됩니다.
 //
-// 경로는 작업 디렉터리 기준입니다. 빌드가 assets/ 를 실행 파일 옆으로 복사합니다.
+// 논리 경로입니다. 에디터 빌드는 프로젝트 폴더에서, 그 밖에는 실행 파일 옆 assets/ 복사본에서 읽습니다(hproj).
 static constexpr const char* kStartScene = "assets/scenes/LightingProbe.hscene";
 
 void DefaultGameModule::onStart(EngineContext& ctx) {
-    std::ifstream f(kStartScene);
+    std::ifstream f(hproj::resolve(kStartScene));
     if (!f) {
         HLOG(LogGame, Error) << "start scene not found: " << kStartScene << " (the world stays empty)";
         return;

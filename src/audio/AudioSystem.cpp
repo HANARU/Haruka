@@ -3,6 +3,7 @@
 
 #include "AudioSystem.hpp"
 #include "../components/AudioComponent.hpp"
+#include "../core/ProjectPaths.hpp"
 #include "../core/World.hpp"
 #include "../core/Actor.hpp"
 #include "../components/CameraComponent.hpp"
@@ -179,7 +180,8 @@ bool AudioSystem::initSound(const char* filePath, bool loop, void** outSound) {
     auto* snd = new ma_sound();
     // ASYNC 여도 miniaudio 는 디코더를 초기화할 때까지 기다렸다가 돌아옵니다(WAIT_INIT 강제).
     // 그래서 없는 파일과 모르는 형식은 여기서 바로 실패하고, 디코딩은 믹싱 중에 합니다.
-    const ma_result r = ma_sound_init_from_file(asEngine(engine_), filePath, MA_SOUND_FLAG_ASYNC,
+    const std::string src = hproj::resolve(filePath);   // 컴포넌트에는 논리 경로가 남습니다
+    const ma_result r = ma_sound_init_from_file(asEngine(engine_), src.c_str(), MA_SOUND_FLAG_ASYNC,
                                                 asGroup(group_), nullptr, snd);
     if (r != MA_SUCCESS) {
         HLOG(LogAudio, Error) << "failed to load '" << filePath << "': " << ma_result_description(r);

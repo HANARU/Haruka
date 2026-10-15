@@ -3,6 +3,7 @@
 
 #include "HFontAtlas.hpp"
 #include "SlateLog.hpp"
+#include "../../core/ProjectPaths.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
@@ -25,7 +26,7 @@ const HFontAtlas* HFontAtlas::metrics() { return g_metricsFont; }
 bool HFontAtlas::loadFont(const std::string& fontPath) {
     unloadFont();
     auto tryLoad = [&](const std::string& path) -> bool {
-        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        std::ifstream f(hproj::resolve(path), std::ios::binary | std::ios::ate);
         if (!f.is_open()) return false;
         size_t sz = f.tellg(); f.seekg(0);
         ttfData_.resize(sz);

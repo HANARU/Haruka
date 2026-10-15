@@ -4,7 +4,7 @@ Vulkan 1.4 기반 C++20 게임 엔진. 렌더러, GPU 메모리 할당자, UI �
 
 장기 목표는 VR입니다. PC OpenXR 연결(`--xr`, Quest Link 등 PC VR 런타임)이 들어 있지만 아직 헤드셋에서 확인하지 않았습니다. 자세한 내용은 [알려진 한계](#알려진-한계)를 보십시오.
 
-소스는 `src/` 기준 `.cpp`/`.hpp` 152 파일 24,920 줄, 셰이더는 GLSL 19 파일 705 줄입니다(2026-10-15). 릴리스·태그 없음, CI 없음, 자동 테스트 15건.
+소스는 `src/` 기준 `.cpp`/`.hpp` 153 파일 24,981 줄, 셰이더는 GLSL 19 파일 705 줄입니다(2026-10-15). 릴리스·태그 없음, CI 없음, 자동 테스트 15건.
 
 ## 지금 동작하는 것
 
@@ -55,7 +55,7 @@ run.bat Release --emulate-stereo  :: 헤드셋 없이 두 눈 경로 확인(뷰�
 
 ### 실행 시 주의
 
-- 엔진이 셰이더와 에셋을 상대 경로(`shaders/pbr.vert.spv`, `assets/models/model.glb`)로 열기 때문에 **작업 디렉터리가 실행 파일이 있는 디렉터리여야 합니다.** `run.bat`이 `pushd`로 이를 처리하고, 출력을 콘솔과 `Logs\latest.txt`에 함께 기록하며 종료 코드를 그대로 전달합니다.
+- 엔진이 셰이더 · 설정을 상대 경로(`shaders/pbr.vert.spv`, `Config/`)로 열기 때문에 **작업 디렉터리가 실행 파일이 있는 디렉터리여야 합니다.** 에셋(`assets/...`)은 에디터 빌드가 프로젝트 폴더의 `assets/` 를 직접 읽고 씁니다(에디터에서 저장한 프리팹이 소스 트리에 남음). 그 폴더가 없으면 빌드가 실행 파일 옆에 복사한 `assets/` 를 씁니다. `run.bat`이 `pushd`로 이를 처리하고, 출력을 콘솔과 `Logs\latest.txt`에 함께 기록하며 종료 코드를 그대로 전달합니다.
 - 실행 파일은 `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup`으로 링크되어 콘솔 창이 뜨지 않습니다. 엔진 로그는 실행 방법과 상관없이 실행 폴더의 `Logs/HarukaEngine.log`(UTF-8)에 남고, exe를 직접 실행하면 로그 체계를 거치지 않는 C stdio 출력이 `Logs/stdout.txt`로 갑니다. 콘솔이 필요하면 구성 시 `-DHARUKA_CONSOLE=ON`.
 - Debug 빌드는 Vulkan 검증 레이어를 켜며, 레이어가 없으면 시작 시 예외를 던집니다.
 - UI 폰트는 저장소에 없습니다. `assets/fonts/default.ttf`를 먼저 찾고 없으면 시스템 폰트(`C:/Windows/Fonts/segoeui.ttf` 등)로 대체합니다.

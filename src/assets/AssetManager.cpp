@@ -1,5 +1,6 @@
 #include "AssetManager.hpp"
 #include "AssetLog.hpp"
+#include "../core/ProjectPaths.hpp"
 #include "../geometry/PrimitiveLog.hpp"
 #include "GltfLoader.hpp"
 #include "GassetCache.hpp"
@@ -15,20 +16,22 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
     auto it = cache.find(path);
     if (it != cache.end()) return it->second;
 
+    // 원본은 프로젝트 폴더의 실제 경로로 엽니다(hproj). 이 맵의 키와 컴포넌트 · 씬에 남는 값은 논리 경로 그대로입니다.
+    const std::string src = hproj::resolve(path);
     std::vector<MeshSourceData> meshes;
     try {
-        if (GassetCache::isValid(path)) {
+        if (GassetCache::isValid(src)) {
             try {
-                meshes = GassetCache::load(path);
+                meshes = GassetCache::load(src);
             } catch (const std::exception& cacheEx) {
                 HLOG(LogAsset, Warning) << "Cache corrupted (" << path << "): "
                                         << cacheEx.what() << " -> reloading from source";
-                meshes = GltfLoader::loadAll(path);
-                GassetCache::save(path, meshes);
+                meshes = GltfLoader::loadAll(src);
+                GassetCache::save(src, meshes);
             }
         } else {
-            meshes = GltfLoader::loadAll(path);
-            GassetCache::save(path, meshes);
+            meshes = GltfLoader::loadAll(src);
+            GassetCache::save(src, meshes);
         }
     } catch (const std::exception& e) {
         HLOG(LogAsset, Error) << "Load failed (" << path << "): "

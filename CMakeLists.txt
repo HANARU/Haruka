@@ -245,6 +245,9 @@ else()
     endif()
 
     add_executable(HarukaEngine ${CORE_SOURCES})
+    # 에디터가 프로젝트 폴더의 assets/ 를 직접 읽고 쓰도록 소스 트리 경로를 넣습니다(src/core/ProjectPaths.hpp).
+    # 실행 폴더의 assets/ 복사는 이 경로가 없을 때(배포된 실행 파일)를 위해 그대로 둡니다.
+    target_compile_definitions(HarukaEngine PRIVATE HARUKA_PROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(HarukaEngine PRIVATE Vulkan::Vulkan glfw glm::glm tinygltf Jolt openxr_loader)
     target_include_directories(HarukaEngine PRIVATE ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
 endif()
