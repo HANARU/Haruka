@@ -32,6 +32,9 @@
      재정의**. 안 하면 파괴 후 undo/redo 에서 UAF. 구현체는 `SetTransformCmd`(EditorCommands.hpp),
      `PropsSnapshotCmd`(EditorApp.cpp) 둘. **후자는 `.cpp` 안에 정의돼 있어 처음 놓쳤다가 검증이
      회귀로 잡음** — 소유 액터를 저장하고 refersTo 를 추가해 수정.
+   - **예외(2026-10-15)**: 액터 생성 · 삭제 Undo 의 `ActorPresenceCmd`(EditorCommands.hpp)는 액터를 포인터가 아니라
+     ID 로 기억하고, 지울 때 서브트리를 글로 떠 두었다가 원래 ID · 부모로 되살립니다(`ActorSnapshot`, `World::reassignId`).
+     붙잡는 포인터가 없으므로 `refersTo` 를 재정의하지 않으며, 그래야 자기가 지운 액터 때문에 걷히지 않습니다.
 3. ✅ **렌더 조회 `isEnabled()` 게이트**: `getVisibleMeshes`/`getLights`/`getActiveCamera`
    (World.cpp)에 컴포넌트 enabled 조건 추가(로드맵은 앞 둘만 지정했으나 카메라도 같은 누락이라
    함께). 디테일 패널에서 라이트를 끄면 이제 씬이 어두워짐.

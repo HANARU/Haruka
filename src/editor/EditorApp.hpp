@@ -529,6 +529,11 @@ private:
     void buildEditorIcons(World& world, const WorldViewport& wvp,
                           std::vector<LineVertex>& lines, std::vector<LineVertex>& tris);
     void deleteSelectedActor();
+    // 액터 서브트리 생성 · 삭제를 Undo 로 되돌릴 수 있게 합니다(ActorPresenceCmd, 2026-10-15).
+    // deleteActorUndoable 은 지우고 커맨드를 쌓고, recordActorCreation 은 이미 만든 루트들을 쌓습니다.
+    void deleteActorUndoable(Actor* root);
+    void recordActorCreation(const std::vector<Actor*>& roots);
+    std::unique_ptr<ICommand> makePresenceCmd(bool create, std::vector<uint64_t> rootIds);
     void tickRenameInput();
     void tickShortcuts();
     void undo();

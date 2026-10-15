@@ -101,6 +101,9 @@ public:
     // 인덱스(PARENT:)로 가리킨다. skip 은 저장하지 않을 액터(에디터 카메라)이며, 그 액터를
     // 부모로 둔 자식은 부모 없이 기록된다.
     static std::string writeScene(const World& world, const Actor* skip = nullptr);
+    // 액터 세트를 같은 블록 형식으로 씁니다(머리 줄 없음). parentIndex[i] 는 세트 안 부모의 인덱스(-1 = 없음).
+    // writeScene 과 에디터 생성 · 삭제 Undo 의 스냅샷(ActorSnapshot)이 함께 씁니다.
+    static std::string writeActorSet(const std::vector<const Actor*>& actors, const std::vector<int>& parentIndex);
     // 블록마다 한 슬롯을 돌려준다(스폰 실패면 nullptr). 부모 배선까지 마친다. 기존 액터는
     // 건드리지 않으므로, 씬을 갈아 끼우려면 호출자가 먼저 비운다.
     static std::vector<Actor*> readScene(const std::string& text, World& world, AssetManager& assets);

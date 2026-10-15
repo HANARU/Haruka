@@ -1202,8 +1202,9 @@ void EditorApp::buildMenus() {
     }, 0.f });
     menus_.push_back({ "Actor", {
         { "Add Empty", [this]{
-            if (ctx_.world)
-                ctx_.selected = ctx_.world->spawnActor("Actor_" + std::to_string(actorCounter_++));
+            if (!ctx_.world) return;
+            ctx_.selected = ctx_.world->spawnActor("Actor_" + std::to_string(actorCounter_++));
+            recordActorCreation({ ctx_.selected });
         } },
         // 계층을 만들 수단이 지금은 씬 역직렬화뿐이라, 아웃라이너 트리를 실기로 확인할
         // 방법이 없습니다. 재부모화 드래그&드롭은 아직 계획에 없으므로 메뉴로 노출합니다.
@@ -2188,11 +2189,11 @@ void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
                           if (ctx_.selected == t) {
                               ctx_.selected = nullptr;
                               renaming_     = false;
+                              gizmo_.cancel();
                           }
-                          // 이 액터를 참조하는 커맨드는 onActorDestroyed 구독이
-                          // 정밀 제거합니다(무관한 이력은 보존).
-                          ctx_.world->destroyActor(t);
-                          outlinerDirty_ = true;
+                          // Ctrl+Z 로 되살릴 수 있게 지웁니다. 이 액터를 포인터로 붙잡던
+                          // 커맨드는 onActorDestroyed 구독이 정밀 제거합니다(무관한 이력은 보존).
+                          deleteActorUndoable(t);
                       }),
            SHorizontalBox::ESizeRule::Fixed, s(kOutDelW));
 
@@ -2221,6 +2222,7 @@ void EditorApp::rebuildOutliner() {
                            [this]{
                                std::string nm = "Actor_" + std::to_string(actorCounter_++);
                                ctx_.selected = ctx_.world->spawnActor(nm);
+                               recordActorCreation({ ctx_.selected });
                            })),
         SVerticalBox::ESizeRule::Fixed, s(kOutHeaderH));
 
@@ -3059,6 +3061,7 @@ void EditorApp::rebuildBottomPanel() {
                             try {
                                 auto pairs = ctx_.assets->loadAll(path);
                                 Actor* first = nullptr;
+                                std::vector<Actor*> made;
                                 for (int i = 0; i < (int)pairs.size(); ++i) {
                                     std::string nm = display +
                                         (pairs.size() > 1 && i > 0 ? "_" + std::to_string(i) : "");
@@ -3072,8 +3075,11 @@ void EditorApp::rebuildBottomPanel() {
                                     mc->vertCount   = pairs[i].vertCount;
                                     mc->triCount    = pairs[i].triCount;
                                     if (!first) first = a;
+                                    made.push_back(a);
                                 }
                                 ctx_.selected = first;
+                                // 메시가 여럿인 모델은 한 번의 클릭이 액터 여럿을 만들므로 한 커맨드로 쌓습니다.
+                                recordActorCreation(made);
                             } catch (const std::exception& ex) {
                                 HLOG(LogEditor, Error) << "Spawn failed: " << ex.what();
                             }
@@ -3143,7 +3149,10 @@ void EditorApp::rebuildBottomPanel() {
                         ->onClick([this, path]{
                             if (!ctx_.world || !ctx_.assets) return;
                             Actor* a = PrefabManager::spawn(path, *ctx_.world, *ctx_.assets);
-                            if (a) ctx_.selected = a;
+                            if (a) {
+                                ctx_.selected = a;
+                                recordActorCreation({ a });
+                            }
                         })
                         ->content(HNew(SHorizontalBox)
                             ->addSlot(HNew(STextBlock)->text("[P]")->fontSize(s(12.f))->color({0.7f, 0.9f, 0.5f, 1.f})
@@ -3329,14 +3338,16 @@ void EditorApp::syncEulerCache() {
         cachedEuler_ = {};
 }
 
+// 기즈모를 끄는 도중에는 되돌리지 않습니다. 생성 · 삭제 Undo 는 선택 액터를 지우거나 다른 액터로 바꿀 수
+// 있는데, 그러면 드래그가 시작 때 떠 둔 트랜스폼을 엉뚱한 액터에 적용하고 그 결과를 커맨드로 쌓습니다.
 void EditorApp::undo() {
-    if (!cmdStack_.canUndo()) return;
+    if (!cmdStack_.canUndo() || gizmo_.isDragging()) return;
     cmdStack_.undo();
     syncEulerCache();
 }
 
 void EditorApp::redo() {
-    if (!cmdStack_.canRedo()) return;
+    if (!cmdStack_.canRedo() || gizmo_.isDragging()) return;
     cmdStack_.redo();
     syncEulerCache();
 }
@@ -3810,11 +3821,50 @@ HViewportRect EditorApp::viewportToolbarFbRect() const {
 // ── deleteSelectedActor ────────────────────────────────────────────────────────
 void EditorApp::deleteSelectedActor() {
     if (!ctx_.selected || ctx_.selected == editorCamActor_) return;
-    // 이 액터를 참조하는 커맨드는 onActorDestroyed 구독이 정밀 제거합니다.
-    ctx_.world->destroyActor(ctx_.selected);
+    gizmo_.cancel();
+    deleteActorUndoable(ctx_.selected);
     ctx_.selected = nullptr;
     renaming_     = false;
-    gizmo_.cancel();
+}
+
+std::unique_ptr<ICommand> EditorApp::makePresenceCmd(bool create, std::vector<uint64_t> rootIds) {
+    using Kind = ActorPresenceCmd::Kind;
+    SnapshotWriter write = [](const std::vector<const Actor*>& ordered, const std::vector<int>& parentIndex) {
+        return SceneSerializer::writeActorSet(ordered, parentIndex);
+    };
+    SnapshotReader read = [this](const std::string& text) {
+        return SceneSerializer::readScene(text, *ctx_.world, *ctx_.assets);
+    };
+    // 되살린 액터를 선택하고 그 행이 보이게 합니다(UE 도 되살린 액터를 선택함).
+    auto restored = [this](Actor* root) {
+        ctx_.selected = root;
+        revealActor(root);
+        outlinerRevealSel_ = true;
+        outlinerDirty_     = true;
+        detailsDirty_      = true;
+    };
+    return std::make_unique<ActorPresenceCmd>(create ? Kind::Create : Kind::Delete, *ctx_.world,
+                                              std::move(rootIds), std::move(write), std::move(read),
+                                              std::move(restored));
+}
+
+void EditorApp::deleteActorUndoable(Actor* root) {
+    if (!root || root == editorCamActor_ || !ctx_.world || !ctx_.assets) return;
+    // 지우는 순간 이 액터(와 자손)를 포인터로 붙잡던 커맨드는 onActorDestroyed 구독이 걷어냅니다.
+    // 삭제 커맨드는 ID 로 기억하므로 걷히지 않고, 쌓은 뒤 Ctrl+Z 로 되살립니다.
+    auto cmd = makePresenceCmd(false, { root->id });
+    cmd->redo();
+    cmdStack_.push(std::move(cmd));
+    outlinerDirty_ = true;
+}
+
+void EditorApp::recordActorCreation(const std::vector<Actor*>& roots) {
+    if (!ctx_.world || !ctx_.assets) return;
+    std::vector<uint64_t> ids;
+    for (Actor* a : roots)
+        if (a) ids.push_back(a->id);
+    if (ids.empty()) return;
+    cmdStack_.push(makePresenceCmd(true, std::move(ids)));
 }
 
 // ── tickRenameInput ────────────────────────────────────────────────────────────

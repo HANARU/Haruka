@@ -253,30 +253,32 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
 // v4(2026-10-14): 컴포넌트를 COMPONENT 블록으로 씁니다(DEF-22). v3 이하 파일도 계속 읽습니다. v4 를
 // 모르는 옛 엔진은 COMPONENT 블록의 줄을 모르는 키로 건너뛰므로 컴포넌트 없이 액터만 읽습니다.
 std::string SceneSerializer::writeScene(const World& world, const Actor* skip) {
-    std::ostringstream oss;
-    oss << "# Haruka Scene v4\n";
-
     // 직렬화 세트(skip 제외)에서 각 액터에 순번을 매겨, 부모를 인덱스로 참조합니다.
     // 부모가 세트 밖(예: 에디터 카메라)이면 -1 로 기록해 링크를 남기지 않습니다.
+    std::vector<const Actor*>             set;
     std::unordered_map<const Actor*, int> indexOf;
-    int n = 0;
     for (auto& ap : world.getActors()) {
         if (ap.get() == skip) continue;
-        indexOf[ap.get()] = n++;
+        indexOf[ap.get()] = (int)set.size();
+        set.push_back(ap.get());
     }
 
-    for (auto& ap : world.getActors()) {
-        const Actor* a = ap.get();
-        if (a == skip) continue;
-
-        int parentIdx = -1;
-        if (const Actor* p = a->getParent()) {
+    std::vector<int> parentIdx(set.size(), -1);
+    for (size_t i = 0; i < set.size(); ++i) {
+        if (const Actor* p = set[i]->getParent()) {
             auto it = indexOf.find(p);
-            if (it != indexOf.end()) parentIdx = it->second;
+            if (it != indexOf.end()) parentIdx[i] = it->second;
         }
+    }
+    return "# Haruka Scene v4\n" + writeActorSet(set, parentIdx);
+}
 
-        oss << "ACTOR:" << a->name << "\n";
-        writeActor(oss, a, parentIdx);
+std::string SceneSerializer::writeActorSet(const std::vector<const Actor*>& actors,
+                                           const std::vector<int>& parentIndex) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < actors.size(); ++i) {
+        oss << "ACTOR:" << actors[i]->name << "\n";
+        writeActor(oss, actors[i], i < parentIndex.size() ? parentIndex[i] : -1);
         oss << "END_ACTOR\n";
     }
     return oss.str();

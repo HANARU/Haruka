@@ -192,6 +192,7 @@ set(CORE_SOURCES
     src/ui/slate/HSlateRenderer.cpp
     src/editor/EditorApp.cpp
     src/editor/EditorGizmo.cpp
+    src/editor/ActorSnapshot.cpp
     src/editor/HotReloader.cpp
     src/game/DefaultGameModule.cpp
     src/input/HInputSystem.cpp
@@ -434,6 +435,24 @@ if(NOT ANDROID)
         set_target_properties(HarukaCommandTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 액터 생성 · 삭제 Undo 테스트 -----------------------------------------
+    # 서브트리를 떠 두고 원래 ID · 원래 부모로 되살리는지, World 의 ID 순서와 다음 ID 가 지켜지는지,
+    # 커맨드 스택과 purge 사이의 규칙을 검산합니다. 씬 직렬화 대신 테스트용 글 형식을 넘깁니다.
+    add_executable(HarukaActorUndoTest
+        tests/ActorUndoTest.cpp
+        src/editor/ActorSnapshot.cpp
+        src/core/World.cpp
+        src/core/Actor.cpp
+        src/core/Component.cpp
+        src/core/HLog.cpp
+    )
+    target_link_libraries(HarukaActorUndoTest PRIVATE glm::glm)
+    target_include_directories(HarukaActorUndoTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaActorUndoTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaActorUndoTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 로그 카테고리 테스트 ------------------------------------------------
     # HLog.cpp 하나만 링크합니다. 꺼진 로그의 인자 미평가, 같은 이름의 상태 공유, 링 버퍼
     # seq 연속성, 표준 출력 어댑터의 태그 해석, 다중 스레드 제출을 검산합니다.
@@ -510,6 +529,7 @@ if(NOT ANDROID)
     add_test(NAME geometry_conventions COMMAND HarukaGeometryTest)
     add_test(NAME actor_lifecycle      COMMAND HarukaActorTest)
     add_test(NAME command_stack_purge  COMMAND HarukaCommandTest)
+    add_test(NAME actor_undo           COMMAND HarukaActorUndoTest)
     add_test(NAME log_category         COMMAND HarukaLogTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)

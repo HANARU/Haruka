@@ -72,6 +72,30 @@ Actor* World::findById(uint64_t id) const {
     return it != idMap_.end() ? it->second : nullptr;
 }
 
+bool World::reassignId(Actor* actor, uint64_t newId) {
+    if (!actor || newId == 0 || ticking_) return false;
+    if (actor->id == newId) return true;
+    if (idMap_.count(newId)) return false;
+    auto owned = std::find_if(actors.begin(), actors.end(),
+        [actor](const auto& a) { return a.get() == actor; });
+    if (owned == actors.end()) return false;
+
+    idMap_.erase(actor->id);
+    actor->id      = newId;
+    idMap_[newId]  = actor;
+    // 앞으로 스폰할 액터가 이 ID 를 다시 받지 않게 합니다. 되살리는 ID 는 예전에 나눠 준 값이라
+    // 보통은 이미 nextId_ 보다 작습니다.
+    if (newId >= nextId_) nextId_ = newId + 1;
+
+    // ID 오름차순 자리로 옮깁니다.
+    std::unique_ptr<Actor> moved = std::move(*owned);
+    actors.erase(owned);
+    auto at = std::lower_bound(actors.begin(), actors.end(), newId,
+        [](const std::unique_ptr<Actor>& a, uint64_t id) { return a->id < id; });
+    actors.insert(at, std::move(moved));
+    return true;
+}
+
 CameraComponent* World::getActiveCamera() const {
     for (auto& a : actors)
         if (a->activeInHierarchy())

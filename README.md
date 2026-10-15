@@ -4,7 +4,7 @@ Vulkan 1.4 기반 C++20 게임 엔진. 렌더러, GPU 메모리 할당자, UI �
 
 장기 목표는 VR입니다. PC OpenXR 연결(`--xr`, Quest Link 등 PC VR 런타임)이 들어 있지만 아직 헤드셋에서 확인하지 않았습니다. 자세한 내용은 [알려진 한계](#알려진-한계)를 보십시오.
 
-소스는 `src/` 기준 `.cpp`/`.hpp` 150 파일 24,630 줄, 셰이더는 GLSL 19 파일 705 줄입니다(2026-10-14). 릴리스·태그 없음, CI 없음, 자동 테스트 14건.
+소스는 `src/` 기준 `.cpp`/`.hpp` 152 파일 24,885 줄, 셰이더는 GLSL 19 파일 705 줄입니다(2026-10-15). 릴리스·태그 없음, CI 없음, 자동 테스트 15건.
 
 ## 지금 동작하는 것
 
@@ -67,7 +67,7 @@ cd build
 ctest -C Release
 ```
 
-14건입니다: `geometry_conventions`(절차 도형 규약), `actor_lifecycle`(Actor 활성 · 컴포넌트 생명주기 · 카메라 자세), `command_stack_purge`, `log_category`, `audio_system`, `slate_input`(UI 입력 · 숫자 칸), `physics_lifecycle`(물리 바디 생명주기 · 물리 API), `stereo_views`(눈별 투영 · 두 눈 컬링), `xr_input`(VR 입력), `draw_batching`(자동 인스턴싱 묶기 · 행 배정), `render_extensions`(패스 레지스트리 · 렌더 확장 지점 순서), `scene_components`(컴포넌트 타입 등록 · 씬 v4 값 · 회전 왕복), `light_selection`(라이트 선택 · 상한 설정 파일), `asset_cache`(GLTF 캐시 유효성). 외부 테스트 프레임워크 없이 자체 `check()`로 만든 콘솔 실행 파일이고, 창을 띄우지 않아 그래픽 디바이스 없이 돕니다.
+15건입니다: `geometry_conventions`(절차 도형 규약), `actor_lifecycle`(Actor 활성 · 컴포넌트 생명주기 · 카메라 자세), `command_stack_purge`, `actor_undo`(액터 생성 · 삭제 Undo), `log_category`, `audio_system`, `slate_input`(UI 입력 · 숫자 칸), `physics_lifecycle`(물리 바디 생명주기 · 물리 API), `stereo_views`(눈별 투영 · 두 눈 컬링), `xr_input`(VR 입력), `draw_batching`(자동 인스턴싱 묶기 · 행 배정), `render_extensions`(패스 레지스트리 · 렌더 확장 지점 순서), `scene_components`(컴포넌트 타입 등록 · 씬 v4 값 · 회전 왕복), `light_selection`(라이트 선택 · 상한 설정 파일), `asset_cache`(GLTF 캐시 유효성). 외부 테스트 프레임워크 없이 자체 `check()`로 만든 콘솔 실행 파일이고, 창을 띄우지 않아 그래픽 디바이스 없이 돕니다.
 
 ## 저장소 구조
 
@@ -83,7 +83,7 @@ src/
   physics/  audio/  input/  assets/  geometry/  platform/  game/  main.cpp
 shaders/       GLSL → 빌드 시 glslc 로 SPIR-V 컴파일
 assets/        모델 1 · 시험 음원 3 · 시작 씬 · 프리팹
-tests/         단위 테스트 14개 (ctest)
+tests/         단위 테스트 15개 (ctest)
 Docs/          설계 · 결함 · 결정 기록 (색인: Docs/README.md)
 ```
 
@@ -126,14 +126,14 @@ Docs/          설계 · 결함 · 결정 기록 (색인: Docs/README.md)
 - HSlate 의 스크롤 막대는 위치만 보여 주고 끌어서 스크롤하지는 못합니다(휠로 스크롤). 클리핑과 스크롤 상자는 2026-10-03 에 들어갔습니다.
 - 폰트 아틀라스가 ASCII 32~127만 래스터라이즈합니다. **UI에 한글·유니코드를 표시할 수 없어** 에디터 문자열은 전부 영문이고 아이콘 대신 ASCII 글리프를 씁니다(문서와 코드 주석은 한국어).
 - UI는 한 프레임에 정점 65,536개(쿼드 16,384개)까지만 그리고 초과분은 조용히 버립니다.
-- Undo/Redo 스택에 쌓이는 것은 Transform 변경과 컴포넌트 프로퍼티 스냅샷 2종뿐입니다(최대 64단계). 액터 생성·삭제·리네임·컴포넌트 추가·부모 변경은 되돌릴 수 없습니다.
+- Undo/Redo 스택에 쌓이는 것은 Transform 변경, 컴포넌트 프로퍼티 스냅샷, 액터 생성·삭제입니다(최대 64단계). 리네임·컴포넌트 추가/제거·부모 변경은 되돌릴 수 없고, 삭제를 되돌려도 그 액터의 삭제 전 편집 이력은 돌아오지 않습니다.
 - 액터 다중 선택, 아웃라이너 드래그&드롭 재부모화, 패널의 부동 창 분리, 뷰 모드(Lit/Unlit/Wireframe) 전환이 없습니다.
 - 씬 저장/불러오기 대상이 고정 파일명 `scene.hscene` 하나이고 파일 선택 대화상자가 없습니다.
 - 액터 픽은 삼각형 단위가 아니라 컴포넌트 로컬 바운드 합집합에 대한 광선-OBB 판정입니다.
 - 셰이더 핫 리로드는 GLSL이 아니라 실행 파일 옆 `shaders` 디렉터리의 `.spv` 변경을 감시합니다(재빌드로 `.spv`가 갱신될 때 동작). 감시 구현은 `ReadDirectoryChangesW` 기반 Windows 전용입니다.
 
 **품질 관리**
-- 자동 테스트는 위 14건이고 렌더러의 GPU 경로 · 메모리 할당자에는 없습니다(렌더러는 픽셀 비교 캡처로 확인). CI 설정도 없습니다.
+- 자동 테스트는 위 15건이고 렌더러의 GPU 경로 · 메모리 할당자에는 없습니다(렌더러는 픽셀 비교 캡처로 확인). CI 설정도 없습니다.
 - 결함 대장은 109건 중 94건 해결, 9건 열림(HIGH 4건 모두 Quest 이식 묶음), 3건 보류, 3건은 자동 조작 환경의 착시로 닫았습니다(2026-10-15). 열린 항목은 [Docs/Engine_Specification.md](Docs/Engine_Specification.md) 6장에 있습니다. 문서가 코드보다 뒤처진 사례가 실재했으므로, 이 저장소에서는 체크박스보다 코드 확인이 우선입니다.
 - 의존성 중 stb(stb_truetype 용도, 이미지 디코드는 tinygltf에 들어 있는 stb_image)만 `GIT_TAG master`로 고정되지 않아 구성 시점에 따라 내려받는 소스가 달라질 수 있습니다.
 

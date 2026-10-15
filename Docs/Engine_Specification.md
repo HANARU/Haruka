@@ -5,6 +5,9 @@
 >
 > **기준 시점**: 커밋 `5a9cb51`(2026-10-15). 수치와 기능 서술은 이 시점의 `src/` · `shaders/` · `tests/` 코드와 빌드 결과를
 > 직접 확인해 적었습니다. 이 문서를 갱신할 때도 문서가 아니라 코드를 먼저 확인하십시오.
+>
+> **갱신(2026-10-15)**: 에디터의 액터 생성 · 삭제 Undo 를 4-11 · 4-12 · 5-4 · 7장에 반영하고, 1-3 · 3-2 의 소스 · 테스트 수치를 이
+> 변경까지 다시 셌습니다. 커밋 수와 결함 수는 기준 시점 그대로입니다.
 
 ---
 
@@ -43,9 +46,9 @@
 
 | 항목 | 값 |
 |---|---|
-| 소스 | `src/` 의 `.cpp` · `.hpp` 150 파일, 24,630 줄 |
+| 소스 | `src/` 의 `.cpp` · `.hpp` 152 파일, 24,885 줄 |
 | 셰이더 | GLSL 19 파일(셰이더 18 + 공용 헤더 1), 705 줄. 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 14개 실행 파일, 검사 505개(`ctest -C Release`) |
+| 자동 테스트 | 15개 실행 파일, 검사 530개(`ctest -C Release`) |
 | 문서 | `Docs/` 활성 문서 25개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시) |
@@ -121,11 +124,11 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | 디렉터리 | 파일 · 줄 | 내용 |
 |---|---|---|
 | `src/`(루트) | 1 · 105 | `main.cpp`(진입점: 콘솔 없이 직접 실행할 때 C stdio 출력을 `Logs/stdout.txt` 로 돌린 뒤 `Engine` 을 만들고 돌림) |
-| `src/core/` | 24 · 2,238 | `Engine`, `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 리플렉션(`Reflect.hpp`) |
+| `src/core/` | 24 · 2,268 | `Engine`, `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 리플렉션(`Reflect.hpp`) |
 | `src/renderer/` | 24 · 4,204 | `Renderer`(프레임 구성), `RenderContext`, `GpuScene`, `FrameResources`, 스왑체인, 인스턴싱 묶기 · 라이트 선택 · 절두체 컬링 헤더, 렌더 확장 |
 | `src/renderer/passes/` | 11 · 2,106 | Shadow · Geometry · AO · Bloom · Post 패스(`HPass` 수명주기) |
 | `src/memory/` | 2 · 388 | `HarukaAllocator`(1GB 단일 힙, 세 구역) |
-| `src/assets/` | 15 · 1,827 | `AssetManager`, glTF 로더, `.gasset` 캐시, 씬 · 프리팹 직렬화, 컴포넌트 블록 직렬화, 회전 글자 표현 |
+| `src/assets/` | 15 · 1,832 | `AssetManager`, glTF 로더, `.gasset` 캐시, 씬 · 프리팹 직렬화, 컴포넌트 블록 직렬화, 회전 글자 표현 |
 | `src/geometry/` | 5 · 1,321 | 절차 도형 기술자와 메시 생성기 |
 | `src/components/` | 12 · 1,024 | Light · Camera · StaticMesh · Audio · RigidBody, 기본 컴포넌트 등록 |
 | `src/physics/` | 2 · 674 | `PhysicsSystem`(Jolt) |
@@ -134,7 +137,7 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | `src/xr/` | 2 · 746 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력) |
 | `src/platform/` | 5 · 591 | `IWindow`, GLFW 구현, Android 스텁 |
 | `src/ui/slate/` | 26 · 3,156 | HSlate: 위젯 14종, 배치 · 페인트 · 폰트 아틀라스 · 렌더러 |
-| `src/editor/` | 11 · 5,539 | `EditorApp`, 기즈모, 커맨드 스택, 도킹, 셰이더 핫 리로드 |
+| `src/editor/` | 13 · 5,759 | `EditorApp`, 기즈모, 커맨드 스택, 액터 생성 · 삭제 Undo 스냅샷, 도킹, 셰이더 핫 리로드 |
 | `src/game/` | 2 · 42 | `DefaultGameModule` |
 
 ### 3-3. 부팅 · 메인 루프 · 종료
@@ -320,19 +323,20 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 디테일 | 트랜스폼, 컴포넌트별 속성(UE 식 숫자 칸: 드래그 · Shift 10배 · Ctrl 0.1배 · 직접 입력), 켜기/끄기 · 제거, 컴포넌트 추가(레지스트리 기반, 폭에 맞춰 줄 나눔), Save as Prefab |
 | 하단 | Content Browser(모델 · 오디오 · 프리팹), Output Log(카테고리 · 수준 필터, 검색, 꼬리 추종), GPU Stats |
 | 상태바 | 최근 로그 한 줄(수준별 색), 지금 키보드 입력이 가는 곳(Rename · Search · Value · Log Search) |
-| 편집 | Undo/Redo 64단계(트랜스폼 변경 · 컴포넌트 속성 스냅샷). Stop · New Scene · Load 는 Undo 기록을 지웁니다 |
+| 편집 | Undo/Redo 64단계: 트랜스폼 변경, 컴포넌트 속성 스냅샷, 액터 생성 · 삭제(2026-10-15. 서브트리를 글로 떠 두었다가 원래 ID · 부모로 되살리므로 아웃라이너 자리와 저장 결과가 같음). 기즈모를 끄는 동안에는 되돌리지 않습니다. Stop · New Scene · Load 는 Undo 기록을 지웁니다 |
 | 단축키 | Ctrl+Z 되돌리기, Ctrl+Y · Ctrl+Shift+Z 다시 하기, Ctrl+S 저장, Ctrl+F 아웃라이너 검색, F2 리네임, Delete 액터 삭제, Esc 글자 편집 끝내기(숫자 칸은 값 확정), 글자 · 숫자 칸의 Ctrl+A · C · V |
 | Play | Play · Pause · Stop. Play 를 누르면 씬을 글로 저장해 두고 Stop 하면 다시 읽어 복원합니다(2026-10-14 일괄 점검에서 세 번 왕복한 뒤 저장 결과가 글자까지 같음을 확인) |
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 14개, 검사 505개.** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 15개, 검사 530개.** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
 | `geometry_conventions` | 59 | 절차 도형 규약 |
 | `actor_lifecycle` | 38 | 활성 · 컴포넌트 생명주기 · 카메라 자세 |
 | `command_stack_purge` | 8 | 커맨드 스택의 액터 참조 제거 |
+| `actor_undo` | 25 | 액터 생성 · 삭제 Undo(원래 ID · 부모 · 순서로 되살림) |
 | `log_category` | 61 | 로그 카테고리 |
 | `audio_system` | 52 | 오디오(헤드리스 출력 검산) |
 | `slate_input` | 97 | UI 입력 · 숫자 칸 |
@@ -419,7 +423,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 항목 | 현재 상태 |
 |---|---|
 | 씬 파일 선택 | 없음. 저장 · 불러오기 대상이 실행 폴더의 고정 파일 `scene.hscene` 하나입니다 |
-| Undo 범위 | 트랜스폼 · 속성만. 액터 생성 · 삭제 · 리네임 · 컴포넌트 추가 · 부모 변경은 되돌릴 수 없습니다 |
+| Undo 범위 | 트랜스폼 · 속성 · 액터 생성과 삭제(2026-10-15)까지입니다. 리네임 · 컴포넌트 추가/제거 · 부모 변경은 되돌릴 수 없습니다. 삭제를 되돌려도 그 액터의 삭제 전 편집 이력은 돌아오지 않습니다(커맨드가 포인터 기반, 사용자 결정) |
 | 다중 선택 · 아웃라이너 끌어서 부모 바꾸기 · 부동 창 · 스크롤 막대 끌기 | 없음 |
 | 뷰 모드(Lit · Unlit · Wireframe) · 선택 대상 프레이밍 | 없음 |
 | 라이트 범위 · 카메라 절두체 · 오디오 반경 시각화 | 없음(Spatial 4단계) |
@@ -481,7 +485,8 @@ Floating Origin 은 Layer 1 옵션 후보입니다.
 10. **저장소 관리.** 라이선스 파일이 없고(2026-10-15 사용자 결정으로 당분간 둠), `stb` 는 버전이 고정되지 않아 구성
     시점에 따라 다른 소스를 받을 수 있습니다(영향 범위는 stb_truetype). 초기 커밋의 날짜는 문서에 적힌 작업 날짜와 맞지 않습니다
     (예: 2026-07-03 커밋의 도킹 Phase 0 은 문서상 2026-08-27 작업, 2-1).
-11. **사용성 제약.** UI 가 ASCII 만 표시하고, 씬 저장이 고정 파일 하나를 덮어쓰며, 되돌릴 수 없는 편집(액터 삭제 등)이 있습니다.
+11. **사용성 제약.** UI 가 ASCII 만 표시하고, 씬 저장이 고정 파일 하나를 덮어쓰며, 되돌릴 수 없는 편집(리네임 · 컴포넌트 추가/제거 ·
+    부모 변경)이 남아 있습니다.
 
 ---
 
