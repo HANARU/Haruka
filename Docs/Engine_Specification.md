@@ -6,7 +6,7 @@
 > **기준 시점**: 커밋 `5a9cb51`(2026-10-15). 수치와 기능 서술은 이 시점의 `src/` · `shaders/` · `tests/` 코드와 빌드 결과를
 > 직접 확인해 적었습니다. 이 문서를 갱신할 때도 문서가 아니라 코드를 먼저 확인하십시오.
 >
-> **갱신(2026-10-15)**: 에디터의 액터 생성 · 삭제 Undo 를 4-11 · 4-12 · 5-4 · 7장에 반영하고, 1-3 · 3-2 의 소스 · 테스트 수치를 이
+> **갱신(2026-10-15)**: 에디터의 액터 생성 · 삭제 Undo 를 4-11 · 4-12 · 5-4 · 7장에, XR 머리 자세 청취자를 4-8 · 5-3 에 반영하고, 1-3 · 3-2 의 소스 · 테스트 수치를 이
 > 변경까지 다시 셌습니다. 커밋 수와 결함 수는 기준 시점 그대로입니다.
 
 ---
@@ -46,9 +46,9 @@
 
 | 항목 | 값 |
 |---|---|
-| 소스 | `src/` 의 `.cpp` · `.hpp` 152 파일, 24,885 줄 |
+| 소스 | `src/` 의 `.cpp` · `.hpp` 152 파일, 24,920 줄 |
 | 셰이더 | GLSL 19 파일(셰이더 18 + 공용 헤더 1), 705 줄. 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 15개 실행 파일, 검사 530개(`ctest -C Release`) |
+| 자동 테스트 | 15개 실행 파일, 검사 534개(`ctest -C Release`) |
 | 문서 | `Docs/` 활성 문서 25개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시) |
@@ -124,7 +124,7 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | 디렉터리 | 파일 · 줄 | 내용 |
 |---|---|---|
 | `src/`(루트) | 1 · 105 | `main.cpp`(진입점: 콘솔 없이 직접 실행할 때 C stdio 출력을 `Logs/stdout.txt` 로 돌린 뒤 `Engine` 을 만들고 돌림) |
-| `src/core/` | 24 · 2,268 | `Engine`, `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 리플렉션(`Reflect.hpp`) |
+| `src/core/` | 24 · 2,285 | `Engine`, `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 리플렉션(`Reflect.hpp`) |
 | `src/renderer/` | 24 · 4,204 | `Renderer`(프레임 구성), `RenderContext`, `GpuScene`, `FrameResources`, 스왑체인, 인스턴싱 묶기 · 라이트 선택 · 절두체 컬링 헤더, 렌더 확장 |
 | `src/renderer/passes/` | 11 · 2,106 | Shadow · Geometry · AO · Bloom · Post 패스(`HPass` 수명주기) |
 | `src/memory/` | 2 · 388 | `HarukaAllocator`(1GB 단일 힙, 세 구역) |
@@ -132,7 +132,7 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | `src/geometry/` | 5 · 1,321 | 절차 도형 기술자와 메시 생성기 |
 | `src/components/` | 12 · 1,024 | Light · Camera · StaticMesh · Audio · RigidBody, 기본 컴포넌트 등록 |
 | `src/physics/` | 2 · 674 | `PhysicsSystem`(Jolt) |
-| `src/audio/` | 5 · 433 | `AudioSystem`(miniaudio), 3D 감쇠 설정 |
+| `src/audio/` | 5 · 451 | `AudioSystem`(miniaudio), 3D 감쇠 설정 |
 | `src/input/` | 3 · 236 | `HInputSystem`(액션 · 축 바인딩), XR 입력 상태 |
 | `src/xr/` | 2 · 746 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력) |
 | `src/platform/` | 5 · 591 | `IWindow`, GLFW 구현, Android 스텁 |
@@ -296,7 +296,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 ### 4-8. 오디오 (miniaudio)
 
 - 48kHz 스테레오, WAV · FLAC · MP3(miniaudio 내장) · OGG Vorbis.
-- 3D 공간화: 청취자 = 활성 카메라의 위치 · 방향, 감쇠 모델 Inverse · Linear · Exponential, 최소/최대 거리 · 롤오프.
+- 3D 공간화: 청취자 = 활성 카메라의 위치 · 방향(XR 세션 중에는 헤드셋 머리 자세, 2026-10-15), 감쇠 모델 Inverse · Linear · Exponential, 최소/최대 거리 · 롤오프.
 - 에디터 Pause 는 월드 소리만 멈추고, 컴포넌트를 끄면 멈추고 되감습니다. 장치 없이 출력 샘플을 만들어 검산하는 헤드리스 경로가 있습니다.
 
 ### 4-9. 입력
@@ -329,7 +329,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 15개, 검사 530개.** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 15개, 검사 534개.** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -338,7 +338,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `command_stack_purge` | 8 | 커맨드 스택의 액터 참조 제거 |
 | `actor_undo` | 25 | 액터 생성 · 삭제 Undo(원래 ID · 부모 · 순서로 되살림) |
 | `log_category` | 61 | 로그 카테고리 |
-| `audio_system` | 52 | 오디오(헤드리스 출력 검산) |
+| `audio_system` | 56 | 오디오(헤드리스 출력 검산, XR 머리 자세 청취자) |
 | `slate_input` | 97 | UI 입력 · 숫자 칸 |
 | `physics_lifecycle` | 65 | 바디 생명주기 · 물리 API · 얇은 콜라이더 |
 | `stereo_views` | 10 | 눈별 투영 · 두 눈 컬링 |
@@ -415,7 +415,6 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 조인트 · 컨스트레인트 | 없음 |
 | 메시 · 볼록 껍질 콜라이더 | 없음(Box · Sphere · Capsule 만) |
 | 잡기 · 던지기 같은 VR 상호작용 | 없음(API 만 있음) |
-| VR 청취자 | 없음. 청취자는 카메라 기준이고 머리 자세가 아닙니다 |
 | 긴 음악 스트리밍 · 보이스 예산 · HRTF · 버스와 마스터 볼륨 | 없음 |
 
 ### 5-4. 에디터

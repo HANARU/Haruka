@@ -17,6 +17,7 @@
 #include <fstream>
 #include <sstream>
 #include "../components/CoreComponents.hpp"
+#include "../components/CameraComponent.hpp"
 #include "FrameTimings.hpp"
 
 #ifndef ANDROID
@@ -25,6 +26,8 @@
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -101,6 +104,7 @@ Engine::Engine(const EngineOptions& options) {
     // 동적 모듈: 표준 세트(Audio, Physics). 각자 월드를 참조합니다.
     auto* audio   = modules_.registerModule(std::make_unique<AudioSystem>());
     audio->setWorld(&world_);
+    audio_ = audio;
     auto physicsModule = std::make_unique<PhysicsSystem>();
     physicsModule->setMaxBodies(limits.maxBodies);   // startup 이 등록 안에서 일어나므로 그 전에
     auto* physics = modules_.registerModule(std::move(physicsModule));
@@ -206,6 +210,17 @@ void Engine::run() {
                 }
             }
             HInputSystem::get().setXrInput(xin);
+        }
+        // 소리 청취자: XR 세션이 입력을 받는 동안에는 헤드셋 자세를 따릅니다. 카메라는 XR 원점(위치 + 요)일
+        // 뿐이라, 넘기지 않으면 고개를 돌려도 소리의 좌우가 바뀌지 않습니다. 손 자세와 같은 기준(원점 × 자세)입니다.
+        if (audio_) {
+            const HXrInputState& xr  = HInputSystem::get().xr();
+            CameraComponent*     cam = world_.getActiveCamera();
+            if (xr.focused && xr.head.valid && cam)
+                audio_->setListenerPose(cam->xrOrigin() * glm::translate(glm::mat4(1.f), xr.head.position)
+                                        * glm::mat4_cast(xr.head.orientation));
+            else
+                audio_->clearListenerPose();
         }
 
         auto  now = Clock::now();

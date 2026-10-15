@@ -20,6 +20,8 @@
 #include "../src/core/Actor.hpp"
 #include "../src/core/ComponentFields.hpp"
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -181,6 +183,28 @@ int main() {
         ac = up;
 
         faceYaw(0.f);
+        world.destroyActor(ac->owner);
+    }
+
+    // 2-1. XR 머리 자세: 헤드셋을 쓰면 카메라는 XR 원점일 뿐이라, 청취자는 Engine 이 넘기는 머리 자세를 따라야
+    // 합니다. 예전에는 늘 카메라를 따라 고개를 돌려도 소리의 좌우가 그대로였습니다(2026-10-15).
+    std::printf("\n== 2-1. XR 머리 자세 청취자 ==\n");
+    {
+        AudioComponent* ac = spawnSound(world, "Right", toneFile, {3.f, 0.f, 0.f}, true, true);
+        Level cam = measure(sys);
+        check(cam.R > 2.0 * cam.L, "자세를 넘기지 않으면 카메라(정면 -Z)를 따라 +X 음원이 오른쪽");
+
+        sys.setListenerPose(glm::mat4_cast(CameraComponent::yawPitchRotation(kPi, 0.f)));   // 머리만 +Z 로 돌림
+        Level turned = measure(sys);
+        check(turned.L > 2.0 * turned.R, "머리를 뒤로 돌리면 카메라가 그대로여도 같은 음원이 왼쪽");
+
+        sys.setListenerPose(glm::translate(glm::mat4(1.f), glm::vec3(6.f, 0.f, 0.f)));   // 머리 위치만 +X 6m
+        Level moved = measure(sys);
+        check(moved.L > 2.0 * moved.R, "머리 위치도 따른다(음원보다 오른쪽에 서면 음원이 왼쪽)");
+
+        sys.clearListenerPose();
+        Level back = measure(sys);
+        check(back.R > 2.0 * back.L, "자세를 지우면 다시 카메라를 따른다");
         world.destroyActor(ac->owner);
     }
 

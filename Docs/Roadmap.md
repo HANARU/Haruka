@@ -142,7 +142,8 @@ UE식 용어 채택, **"명칭만" 결정**(내부 상대값, 물리 단위·노
   그룹), 비활성화하면 멈추고 되감음, stop 은 되감기, 플레이 중 Loop·설정 반영, 3D 감쇠 설정 노출
   (Spatialize·Attenuation·Min/Max Distance·Rolloff, 씬 `AUDIO_3D`), OGG Vorbis(stb_vorbis), 종료 정리.
   시험 음원 3종 + AudioProbe 프리팹, `HarukaAudioTest`(장치 없는 엔진으로 출력 샘플 검산) 추가.
-- 다음 후보: VR 청취자(HMD 자세), 긴 음악 스트리밍, 보이스 예산, HRTF, 버스·마스터 볼륨.
+- ✅ **VR 청취자(2026-10-15)**: XR 세션 중에는 청취자가 헤드셋 머리 자세를 따릅니다(Audio_Design.md 3-1). 헤드셋에서 귀로 확인할 일만 남음.
+- 다음 후보: 긴 음악 스트리밍, 보이스 예산, HRTF, 버스·마스터 볼륨.
 
 ## H. 정적 기지 건설 (정본: Static_Base_Building_Design.md)
 

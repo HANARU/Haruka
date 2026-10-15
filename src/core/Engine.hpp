@@ -11,6 +11,7 @@ class EditorApp;
 class IGameModule;
 class XrSystem;
 class PhysicsSystem;
+class AudioSystem;
 struct EngineContext;
 
 // 실행 옵션(명령줄). main() 이 채워 Engine 에 넘깁니다.
@@ -53,6 +54,7 @@ private:
     // ── 동적 모듈 레지스트리 (Physics, Audio, …) ────────────────────────────────
     ModuleManager                  modules_;
     PhysicsSystem*                 physics_ = nullptr;   // modules_ 소유. XR 주사율에 스텝을 맞출 때 씁니다
+    AudioSystem*                   audio_   = nullptr;   // modules_ 소유. XR 중 청취자를 머리 자세에 둘 때 씁니다
 
     // ── 에디터 레이어 (데스크톱 전용. 런타임 분리는 VR 이식 때) ─────────────────
     std::unique_ptr<EditorApp>     editor_;

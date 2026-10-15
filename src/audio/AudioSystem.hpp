@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/IEngineModule.hpp"
 #include <cstdint>
+#include <glm/glm.hpp>
 
 class World;
 class AudioComponent;
@@ -27,6 +28,12 @@ public:
 
     void setWorld(World* w) { world_ = w; }
     bool isPaused() const   { return paused_; }
+
+    // 청취자를 활성 카메라 대신 이 월드 자세(위치 + 방향, -Z 가 정면 · +Y 가 위)에 둡니다. XR 세션이 입력을
+    // 받는 동안 Engine 이 매 프레임 헤드셋(두 눈 사이)의 자세를 넘깁니다. 카메라는 XR 원점일 뿐이라, 넘기지
+    // 않으면 고개를 돌려도 소리의 좌우가 바뀌지 않습니다. clearListenerPose 뒤에는 다시 카메라를 따릅니다.
+    void setListenerPose(const glm::mat4& worldPose) { listenerPose_ = worldPose; hasListenerPose_ = true; }
+    void clearListenerPose()                          { hasListenerPose_ = false; }
 
     // AudioComponent::play()/stop() 이 부릅니다. stopSound 는 처음으로 되감습니다.
     void playSound (void* maSound);
@@ -57,4 +64,7 @@ private:
     World* world_    = nullptr;
     bool   headless_ = false;
     bool   paused_   = false;
+
+    glm::mat4 listenerPose_{ 1.f };
+    bool      hasListenerPose_ = false;
 };

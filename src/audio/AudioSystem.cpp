@@ -81,11 +81,19 @@ void AudioSystem::releaseWorldSounds() {
 }
 
 void AudioSystem::updateListener() {
-    CameraComponent* cam = world_->getActiveCamera();
-    if (!cam || !cam->owner) return;
-    const glm::vec3 pos = cam->owner->worldPosition();
-    const glm::vec3 fwd = cam->forward();
-    const glm::vec3 up  = cam->up();
+    glm::vec3 pos, fwd, up;
+    if (hasListenerPose_) {
+        // XR 세션 동안의 머리 자세. 카메라와 같은 규약(-Z 정면, +Y 위)입니다.
+        pos = glm::vec3(listenerPose_[3]);
+        fwd = -glm::normalize(glm::vec3(listenerPose_[2]));
+        up  =  glm::normalize(glm::vec3(listenerPose_[1]));
+    } else {
+        CameraComponent* cam = world_->getActiveCamera();
+        if (!cam || !cam->owner) return;
+        pos = cam->owner->worldPosition();
+        fwd = cam->forward();
+        up  = cam->up();
+    }
     ma_engine_listener_set_position(asEngine(engine_), 0, pos.x, pos.y, pos.z);
     // 예전에는 위치만 넘겨서 청취자가 늘 -Z 를 보고 있었고, 카메라를 돌려도 소리의 좌우가
     // 바뀌지 않았습니다. miniaudio 는 방향 × 위 벡터로 오른쪽을 정합니다. 카메라 자세가 액터
