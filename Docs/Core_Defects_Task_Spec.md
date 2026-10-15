@@ -90,6 +90,9 @@ DEF-34 · DEF-13 은 보류했습니다(문서 끝 "DEF-33 · 10 수정 결과" 
 DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC 에서 측정해 보류를 유지했습니다(Quest 측정 뒤 결정). 문서 끝
 "일괄 점검 결과와 신규 결함" 절을 보십시오.
 
+**[갱신 · 2026-10-15 · 정본 동기화]** 빠져 있던 DEF-16 ~ DEF-22 행을 아래 표에 넣었습니다(심층 분석과 해결 사양은
+[Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) 2절). 같은 날 그 문서 1절의 진단 맵도 결함 절의 현재 상태에 맞췄습니다.
+
 | ID | 결함명 | 심각도 | 대상 파일 | 관련 라인 |
 |---|---|---|---|---|
 | **DEF-01** | Transform SSBO 인덱스 동기화 붕괴 | **해결됨** (2026-08-25, 원래 CRITICAL) | `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L215, L296, L313~326 |
@@ -107,6 +110,13 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-13** | `FrameUBO`에 `invViewProj` 부재 | **보류 · 2026-10-14** (LOW, 첫 사용처가 생길 때. 렌더 확장이 CPU 행렬을 받음) | `shaders/include/haruka_shared.h` | `FrameUBO` |
 | **DEF-14** | `GpuTransform` 셰이더 4곳 중복 선언, 공유 include 부재 | **해결됨 · 2026-10-04** (원래 LOW, `haruka_shared.h`) | `shaders/pbr.vert`, `depth.vert`, `shadow.vert`, `triangle.vert` | L25, L18, L18, L19 |
 | **DEF-15** | `prevViewProj` 선언만 존재, TAA 입력 미비 | **해결됨 · 2026-10-04** (원래 LOW, 가짜 TAA 잔재와 함께 제거) | `shaders/post.frag` 외 4개 셰이더 | L48~51 |
+| **DEF-16** | 인스턴싱 `instanceCount = 1` 하드코딩 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 자동 인스턴싱. 명시적 인스턴싱 컴포넌트는 파편장 때) | `src/renderer/DrawBatching.hpp`, `src/renderer/passes/GeometryPass.cpp` | `hbatch::build`, 끝 "DEF-16 자동 인스턴싱 수정 결과" 절 |
+| **DEF-17** | 패스 레지스트리 부재 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 고정 지점 넷의 렌더 확장) | `src/renderer/RenderExtension.hpp`, `src/renderer/RenderExtensionRegistry.hpp` | `IRenderExtension`, `RenderExtensionRegistry`, 끝 "DEF-17 · 18 패스 확장 지점 수정 결과" 절 |
+| **DEF-18** | `EngineContext`에 렌더러 참조 없음 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 등록 · 해제만 여는 `IRenderExtensionHost`) | `src/core/IGameModule.hpp` | `EngineContext::render` |
+| **DEF-19** | 물리 힘·임펄스·속도·레이캐스트 API 부재 | **해결됨 · 2026-10-04** (원래 HIGH · 경계, UE 식 규칙) | `src/physics/PhysicsSystem.cpp`, `src/components/RigidBodyComponent.cpp` | 끝 "3단계 VR 첫걸음 수정 결과" 절 |
+| **DEF-20** | 디지털 전용 입력 (아날로그 축·VR 포즈 부재) | **해결됨 · 2026-10-04** (원래 HIGH · 경계, XR 입력은 창이 아니라 `XrSystem`) | `src/xr/XrSystem.cpp`, `src/input/HInputSystem.cpp` | 끝 "3단계 VR 첫걸음 수정 결과" 절 |
+| **DEF-21** | 오일러각 카메라 (6DOF 자세 불가) | **해결됨 · 2026-10-04** (원래 HIGH · 경계, 쿼터니언 자세 · 눈별 투영) | `src/components/CameraComponent.cpp` | `projFromFov`, XR 원점 |
+| **DEF-22** | `SceneSerializer` 컴포넌트 하드코딩 | **해결됨 · 2026-10-14** (원래 HIGH · 경계, 타입 등록 · 씬 v4 · 프리팹 v2) | `src/core/ComponentRegistry.hpp`, `src/assets/ComponentSerializer.cpp` | 끝 "DEF-22 직렬화 타입 등록 수정 결과" 절 |
 | **DEF-23** | 스피어 인덱스 도메인 불일치 (DEF-01의 직계 형제) | **해결됨** (2026-08-25, 원래 CRITICAL) | `shaders/cull.comp`, `src/renderer/passes/CullPass.cpp`, `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L54·L57 |
 | **DEF-24** | 라이트 개수 이중 계산 | **해결됨 · 2026-08-25** (원래 HIGH) | `src/renderer/Renderer_render.cpp`, `src/renderer/Renderer.hpp`, `src/renderer/RenderTypes.hpp`, `shaders/pbr.frag` | 8-2절 |
 | **DEF-33** | 라이트 선택 정책 부재 (생성 순서로 절단) | **해결됨 · 2026-10-14** (원래 MEDIUM, 화면 밖 거르기 + 상한 초과 시 방향광 우선 · 가까운 순) | `src/renderer/LightSelection.hpp`, `Renderer::updateLightSSBO` | 8-2-a절 |
@@ -136,9 +146,9 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 
 > **상태 주의**: 이 표의 라인 번호는 2026-08-24 시점의 `E:\Haruka\src` 실측값이며, DEF-23부터 DEF-30까지는 2026-08-25 시점의 실측값입니다. 이전 판이 제시하던 `Renderer_render.cpp:L355~364`(DEF-05)와 `RenderContext.cpp:L154~168`(DEF-04)은 실제 위치와 다릅니다.
 
-> **결함 ID 규약**: 위 표의 `DEF-01`부터 `DEF-15`까지, `DEF-23`부터 `DEF-30`까지, `DEF-31`과 `DEF-32`, `DEF-36`부터 `DEF-46`까지, 그리고 `DEF-47`과 `DEF-48`은 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md)와 **ID, 심각도, 해결 여부 표기가 동일합니다.** `DEF-39`, `DEF-40`, `DEF-43`, `DEF-44`의 **미검증 표기도 두 문서가 동일합니다.** `DEF-47`과 `DEF-48`의 심층 분석은 그 문서의 **2-F절**에 있습니다. 두 문서가 어긋나면 안 되므로, 한쪽을 고칠 때는 반드시 다른 쪽도 함께 고치십시오.
+> **결함 ID 규약**: 위 표의 `DEF-01`부터 `DEF-15`까지, `DEF-16`부터 `DEF-22`까지(2026-10-15 추가), `DEF-23`부터 `DEF-30`까지, `DEF-31`과 `DEF-32`, `DEF-36`부터 `DEF-46`까지, 그리고 `DEF-47`과 `DEF-48`은 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md)와 **ID, 심각도, 해결 여부 표기가 동일합니다.** `DEF-39`, `DEF-40`, `DEF-43`, `DEF-44`는 등재 당시 미검증이었으며, 모두 실측으로 성립을 확인한 뒤 해결했습니다. `DEF-47`과 `DEF-48`의 심층 분석은 그 문서의 **2-F절**에 있습니다. 두 문서가 어긋나면 안 되므로, 한쪽을 고칠 때는 반드시 다른 쪽도 함께 고치십시오.
 
-> **이 문서가 다루는 범위**: 아래 1절부터 7절까지는 `DEF-01`부터 `DEF-07`까지의 **정밀 작업 지시서**이고, 8절은 2026-08-25에 등재된 `DEF-23`부터 `DEF-30`까지의 작업 지시서이며, 9절은 같은 날 2차 작업에서 등재된 `DEF-31`과 `DEF-32`의 작업 지시서이며, 11절은 같은 날 설계 검토에서 등재된 `DEF-36`부터 `DEF-46`까지와 머티리얼 작업에서 등재된 `DEF-47`, `DEF-48`의 작업 지시서입니다. 11절 끝의 11-14절과 11-15절은 **결함이 아니라 정책 결정과 기능 요구**이므로 결함 ID를 부여하지 않았습니다. 10절의 **VR 컬링 설계 지침**은 결함이 아니라 판단 기준이므로 결함 ID를 부여하지 않았습니다. 위 표에 함께 실린 `DEF-08`부터 `DEF-15`까지의 심층 분석과 해결 사양은 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) 2절에 있습니다. 그 문서에는 [Layer_Architecture.md](Layer_Architecture.md) 4절의 경계 누출 지점을 결함으로 등재한 `DEF-16`부터 `DEF-22`까지도 있으며, 이들은 아직 위 요약 매트릭스에 반영되어 있지 않습니다. 착수 순서를 판단할 때는 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) 3절의 마스터 체크리스트를 따르십시오.
+> **이 문서가 다루는 범위**: 아래 1절부터 7절까지는 `DEF-01`부터 `DEF-07`까지의 **정밀 작업 지시서**이고, 8절은 2026-08-25에 등재된 `DEF-23`부터 `DEF-30`까지의 작업 지시서이며, 9절은 같은 날 2차 작업에서 등재된 `DEF-31`과 `DEF-32`의 작업 지시서이며, 11절은 같은 날 설계 검토에서 등재된 `DEF-36`부터 `DEF-46`까지와 머티리얼 작업에서 등재된 `DEF-47`, `DEF-48`의 작업 지시서입니다. 11절 끝의 11-14절과 11-15절은 **결함이 아니라 정책 결정과 기능 요구**이므로 결함 ID를 부여하지 않았습니다. 10절의 **VR 컬링 설계 지침**은 결함이 아니라 판단 기준이므로 결함 ID를 부여하지 않았습니다. 위 표에 함께 실린 `DEF-08`부터 `DEF-15`까지의 심층 분석과 해결 사양은 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) 2절에 있습니다. 그 문서에는 [Layer_Architecture.md](Layer_Architecture.md) 4절의 경계 누출 지점을 결함으로 등재한 `DEF-16`부터 `DEF-22`까지도 있으며, 2026-10-15 에 위 요약 매트릭스에도 넣었습니다. `DEF-49` 이후는 이 문서 뒤쪽 절에만 있습니다. 착수 순서를 판단할 때는 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) 3절의 마스터 체크리스트를 따르십시오.
 
 > **계층 지위**: 이 문서가 다루는 결함은 전부 **Layer 1(코어)**의 문제입니다. 우주 도메인 고유의 결함은 하나도 없습니다. 계층 판정 기준은 [Layer_Architecture.md](Layer_Architecture.md) 2절을 따릅니다.
 

@@ -13,6 +13,7 @@
 
 | 문서 | 내용 |
 |---|---|
+| [Engine_Specification.md](Engine_Specification.md) | 엔진 사양 명세서: 개발 이력 · 구현 기능 · 미구현 기능 · 열린 결함 · 우려되는 점 종합 |
 | [Roadmap.md](Roadmap.md) | 진행 예정 작업의 우선순위 정본 |
 | [CHANGES.md](CHANGES.md) | 변경 이력 |
 | [Architecture_Overview.md](Architecture_Overview.md) | 엔진 아키텍처 개요 |
@@ -46,9 +47,10 @@
 | [Engine_Strategy_Evaluation.md](Engine_Strategy_Evaluation.md) | 엔진 전략 평가(범용 코어 + 첫 도메인) |
 | [Threading.md](Threading.md) | 스레드 소유권 규칙(계층 무관 전역 규약) |
 
-## VR · 이식 (보류)
+## VR · 이식 (계획 문서)
 
-현재 VR 은 진행하지 않는 상태입니다. 착수 시점의 사전 조사·계획으로 보관합니다. 사운드는 2026-10-02 에
+2026-10-04 에 PC OpenXR 연결과 두 눈 렌더(VR 첫걸음)를 넣었고, 헤드셋 확인과 Quest 이식이 남았습니다. 아래 두 문서는
+착수 전에 쓴 사전 조사 · 계획이라 현재 구현과 다른 부분이 있습니다. 현재 상태는 [Engine_Specification.md](Engine_Specification.md) 를 보십시오. 사운드는 2026-10-02 에
 기초를 정리했고, 정본은 위의 [Audio_Design.md](Audio_Design.md) 입니다.
 
 | 문서 | 내용 |
