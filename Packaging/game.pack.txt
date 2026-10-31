@@ -1,0 +1,22 @@
+# Haruka game pack manifest (2026-10-24). Read by HarukaPak (src/tools/HarukaPak.cpp); the build runs it for the
+# GamePack target and the Windows package (cmake --build build --config Release --target PACKAGE) ships the result
+# as game.hpak next to HarukaGame.exe. Design: Docs/Packaging_Design.md section 5.
+#
+# One command per line. ${NAME} comes from -D NAME=VALUE on the HarukaPak command line.
+#   map <folder> <logical prefix>   every file under the folder, as "<prefix>/<relative path>"
+#   exclude <pattern>...            logical paths to leave out
+#   stored <pattern>...             keep as is (already compressed formats); everything else is LZ4
+#   text <pattern>...               convert CRLF to LF before packing, so every checkout gives the same pack
+# Patterns: * = any characters except '/', ** = any characters including '/', ? = one character.
+# A pattern without '/' is matched against the file name only. Letter case is ignored.
+
+map ${SOURCE_DIR}/assets assets
+map ${SHADER_DIR} shaders
+
+# Derived data and leftovers. The glTF cache is rebuilt on the device under the write folder.
+# **/.* leaves out hidden files (name starts with '.'), **/.*/** everything under a hidden folder (.svn, .vs).
+exclude assets/cache/** **/*.tmp **/.* **/.*/** Thumbs.db desktop.ini
+exclude shaders/*.d
+
+stored *.ogg *.mp3 *.flac *.opus *.wav *.png *.jpg *.jpeg *.ktx2 *.basis *.webp *.zip
+text *.hscene *.hprefab *.ini *.txt

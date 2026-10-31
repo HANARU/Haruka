@@ -2,10 +2,12 @@
 #include "../renderer/VulkanDeviceHooks.hpp"
 #include "../renderer/RenderTypes.hpp"
 #include "../input/HXrInput.hpp"
+#include "../platform/PlatformContext.hpp"
 
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 // ── XrSystem ──────────────────────────────────────────────────────────────────
@@ -32,11 +34,13 @@ public:
     XrSystem(const XrSystem&)            = delete;
     XrSystem& operator=(const XrSystem&) = delete;
 
-    // 1. 인스턴스와 헤드셋을 준비합니다. 실패해도 예외 없이 false 를 돌려주고 이유를 로그에 남깁니다.
-    bool init();
+    // 1. 인스턴스와 헤드셋을 준비합니다. 실패해도 예외 없이 false 를 돌려주고 이유를 로그에 남깁니다. Android 는 platform 의
+    //    JavaVM · 액티비티로 로더를 먼저 초기화합니다(2026-10-31).
+    bool init(const PlatformContext& platform = {});
     bool ready() const;   // init 이 성공했고 세션을 만들 수 있음
 
     // 2. IVulkanDeviceHooks (렌더러가 부름)
+    bool             vulkanApiRange(uint32_t& minApi, uint32_t& maxApi) const override;
     VkResult         createVulkanInstance(const VkInstanceCreateInfo& ci, VkInstance& out) override;
     VkPhysicalDevice vulkanPhysicalDevice(VkInstance instance) override;
     VkResult         createVulkanDevice(VkPhysicalDevice physicalDevice,
@@ -50,18 +54,27 @@ public:
     void shutdown();      // 세션 + 인스턴스
 
     // ── 매 프레임 ─────────────────────────────────────────────────────────────
-    // 런타임 이벤트를 처리합니다. READY 면 세션을 시작하고, STOPPING 이면 끝냅니다.
+    // 런타임 이벤트를 처리합니다. READY 면 세션을 시작하고(실패하면 잃은 세션으로 둠), STOPPING 이면 끝냅니다. 세션이 없을 때도
+    // 불러 인스턴스 손실을 받습니다(DEF-155).
     void pollEvents();
     bool hasSession() const;       // 세션이 있음(시작 전 · 실행 중 · 멈춤 모두)
     bool sessionRunning() const;   // xrBeginSession 과 xrEndSession 사이
-    // 세션이 끝났거나 잃었습니다(EXITING · LOSS_PENDING). 엔진이 렌더러에서 스왑체인을 떼고
-    // destroySession() 을 부른 뒤 데스크톱으로 계속합니다.
+    // 세션이 끝났거나 잃었습니다(EXITING · LOSS_PENDING, 시작 실패, 프레임 함수의 SESSION_LOST · INSTANCE_LOST). 엔진이
+    // 렌더러에서 스왑체인을 떼고 destroySession() 을 부른 뒤 이유에 따라 데스크톱으로 계속하거나 끝냅니다.
     bool sessionLost() const;
     // 세션을 정상 순서로 끝내 달라고 런타임에 요청합니다(xrRequestExitSession). 런타임이 STOPPING 을
     // 보내면 pollEvents 가 xrEndSession 을 부르고, EXITING 이 오면 sessionLost() 가 참이 됩니다.
     // 세션이 돌고 있지 않으면(헤드셋을 벗어 IDLE 등) 요청할 것이 없어 false 이고, 그때는 바로 지웁니다.
     bool requestExit();
     bool exitRequested() const;    // 이 세션의 끝을 requestExit 로 요청했음(런타임이 끝낸 것과 구별)
+    // 세션을 잃은 이유(2026-10-19, 게임 실행 파일이 이유마다 다르게 처리). sessionLost() 가 참인 동안 읽습니다.
+    //   Exiting      런타임이 앱을 끝내라고 함(대시보드에서 종료 등, 또는 requestExit 의 끝)
+    //   Disconnected 헤드셋 연결이 끊김(LOSS_PENDING). 다시 연결되면 세션을 새로 만들 수 있습니다
+    //   InstanceLost OpenXR 인스턴스를 잃음. 이번 실행에서는 다시 열 수 없습니다
+    enum class LossReason { None, Exiting, Disconnected, InstanceLost };
+    LossReason lossReason() const;
+    // 헤드셋이 다시 연결되었는지 로그 없이 확인합니다(xrGetSystem). 세션이 없을 때 몇 초에 한 번 부릅니다.
+    bool headsetAvailable();
 
     struct FrameInfo {
         bool    shouldRender = false;   // 헤드셋이 화면을 보여 주는 중(VISIBLE · FOCUSED)
@@ -85,6 +98,27 @@ public:
     VkExtent2D eyeExtent() const;
     // 헤드셋 주사율(Hz). 물리 스텝을 맞출 때 씁니다. 모르면 0.
     float displayRefreshRate() const;
+
+    // ── 기준 공간 (2026-10-15, 2026-10-16 리그 높이 모드) ──────────────────────
+    // XR 에는 언제나 리그가 있습니다(씬의 XrRigComponent, 없으면 엔진이 붙이는 보이지 않는 리그). 리그의 높이 모드에 따라
+    // 공간을 고릅니다.
+    //   trackedHeight = true  바닥 기준(LOCAL_FLOOR, XR_EXT_local_floor)으로 자세를 받아 실제 키가 반영됩니다.
+    //   trackedHeight = false LOCAL(세션을 시작할 때의 머리 = 원점)에 eyeHeight 를 더해 눈높이를 고정합니다.
+    // 런타임에 바닥 공간이 없으면 tracked 여도 LOCAL + eyeHeight 로 갑니다. 더할 높이는 syncInput 이 floorOffset 에
+    // 실어 원점 쪽에서 보정합니다. 두 공간을 함께 만들어 두고 프레임을 시작하기 전에 고릅니다(한 프레임 안에서는 바꾸지 않음).
+    void setRigSpace(bool trackedHeight, float eyeHeight);
+    bool floorSpaceAvailable() const;
+    // 지금 고른 공간에서 리그 원점(바닥)에 더할 높이(m). 바닥 기준이면 0, 머리 기준이면 눈높이입니다. 입력의 floorOffset 과
+    // 같은 값이지만 입력은 FOCUSED 일 때만 채워지므로, 시스템 메뉴가 떠 VISIBLE 인 동안에도 그리는 원점은 이것을 씁니다.
+    float rigLift() const;
+
+    // 런타임이 알려 주는 헤드셋 소리 출력 장치 ID(XR_OCULUS_audio_device_guid, WASAPI 끝점 ID 형식). 모르면 빈 문자열.
+    // 엔진이 XR Play 동안 오디오 출력을 이 장치로 바꿉니다(에디터 설정에서 끌 수 있음, 2026-10-16).
+    const std::string& headsetAudioOutputId() const;
+
+    // ── 햅틱 (2026-10-15) ────────────────────────────────────────────────────
+    // hand: 0 = 왼손, 1 = 오른손. amplitude 0..1, seconds 진동 길이. 세션이 입력을 받는 동안만 보냅니다.
+    void applyHaptic(int hand, float amplitude, float seconds);
 
 private:
     struct Impl;   // OpenXR 헤더는 cpp 에만 둡니다(엔진 다른 곳이 OpenXR 를 모르게).

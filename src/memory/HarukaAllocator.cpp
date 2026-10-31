@@ -1,100 +1,81 @@
 #include "HarukaAllocator.hpp"
+#include "MemoryTypeSelect.hpp"
 #include <stdexcept>
 #include <algorithm>
+#include <cassert>
+#include <string>
 #include "../core/HLog.hpp"
 
 static constinit HLogCategory LogMemory{ "Memory", ELogVerbosity::Log };
 
-// ── selectMemType ─────────────────────────────────────────────────────────────
-// props에서 required 플래그를 모두 만족하고, 해당 heap 크기가 minHeapSize 이상인
-// 첫 번째 memoryTypeIndex를 반환한다. 없으면 UINT32_MAX.
-uint32_t HarukaAllocator::selectMemType(
-    const VkPhysicalDeviceMemoryProperties& props,
-    VkMemoryPropertyFlags required,
-    VkDeviceSize minHeapSize)
-{
-    for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
-        const VkMemoryPropertyFlags flags = props.memoryTypes[i].propertyFlags;
-        const VkDeviceSize          avail = props.memoryHeaps[
-                                                props.memoryTypes[i].heapIndex].size;
-        if ((flags & required) == required && avail >= minHeapSize)
-            return i;
+static const char* zoneName(AllocZone z) {
+    switch (z) {
+        case AllocZone::A:         return "A";
+        case AllocZone::B:         return "B";
+        case AllocZone::C:         return "C";
+        case AllocZone::Dedicated: return "Dedicated";
     }
-    return UINT32_MAX;
+    return "?";
 }
 
 // ── init ──────────────────────────────────────────────────────────────────────
-void HarukaAllocator::init(VkDevice dev, VkPhysicalDevice physDev) {
+// 핵심 힙은 1GB 를 한 번에 잡습니다(DEF-42). 예전에는 힙의 75% 로 줄이고, 실패하면 절반씩 256MB 까지 줄여 다시 잡았는데,
+// Zone 오프셋은 1GB 기준 상수라 줄어든 힙에서는 Zone B · C 가 할당 범위 밖을 가리켰습니다. 이제 못 잡으면 이유(필요한
+// 크기 · 고른 타입 · 힙 크기 · VkResult · 최대 단일 할당)를 적은 예외로 멈춥니다. Quest 는 maxMemoryAllocationSize 가
+// 정확히 1GiB 이고 힙이 12GB 넘게 있어 이 경로를 타지 않습니다. 타입 고르기 규칙은 hmem::planCoreHeap 입니다.
+void HarukaAllocator::init(VkDevice dev, VkPhysicalDevice physDev, VkDeviceSize maxAllocationSize) {
     device     = dev;
     physDevice = physDev;
+    vkGetPhysicalDeviceMemoryProperties(physDev, &memProps_);
 
-    VkPhysicalDeviceMemoryProperties props;
-    vkGetPhysicalDeviceMemoryProperties(physDev, &props);
-
-    // 1순위: DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT (UMA, Quest Pro 이상적)
-    constexpr VkMemoryPropertyFlags kIdeal =
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT  |
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT  |
-        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-
-    // 2순위: HOST_VISIBLE | HOST_COHERENT (PC discrete GPU, DEVICE_LOCAL 없음)
-    constexpr VkMemoryPropertyFlags kFallback =
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT  |
-        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-
-    bool isUMA = true;
-
-    // 1GB를 수용할 수 있는 이상적인 타입 탐색
-    memType = selectMemType(props, kIdeal, kHeapTarget);
-
-    if (memType == UINT32_MAX) {
-        // 1GB짜리 HOST_VISIBLE 힙이 없으면 크기 제한 없이 fallback
-        isUMA   = false;
-        memType = selectMemType(props, kFallback, 0);
+    const hmem::CoreHeapPlan plan = hmem::planCoreHeap(memProps_, kHeapTarget);
+    if (plan.fail != hmem::CoreHeapFail::None)
+        throw std::runtime_error(hmem::describeCoreHeapFailure(plan, VK_SUCCESS, maxAllocationSize, kHeapTarget));
+    memType = plan.memType;
+    if (plan.tight) {
+        HLOG(LogMemory, Warning) << "Core heap takes more than 75% of heap " << plan.heapIndex << " ("
+                                 << plan.heapBytes / (1024 * 1024) << " MB); the driver and OS have little left";
+    }
+    if (maxAllocationSize && kHeapTarget > maxAllocationSize) {
+        HLOG(LogMemory, Warning) << "Core heap (1024 MB) is larger than the device's max single allocation ("
+                                 << maxAllocationSize / (1024 * 1024) << " MB); trying anyway";
     }
 
-    if (memType == UINT32_MAX)
-        throw std::runtime_error("[Haruka] No suitable memory type for Core Heap!");
-
-    // 실제 힙 크기 확인, 75%까지만 선점 (드라이버/OS 여유분)
-    const uint32_t   heapIdx = props.memoryTypes[memType].heapIndex;
-    const VkDeviceSize avail = props.memoryHeaps[heapIdx].size;
-    heapSize = std::min(kHeapTarget, avail * 3 / 4);
-
-    if (heapSize < kHeapTarget) {
-        HLOG(LogMemory, Warning) << "Core Heap: target 1GB, available "
-                                 << avail / (1024 * 1024) << "MB - capping to "
-                                 << heapSize / (1024 * 1024) << "MB";
+    VkMemoryAllocateInfo ai{};
+    ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    ai.allocationSize  = kHeapTarget;
+    ai.memoryTypeIndex = memType;
+    const VkResult ar = vkAllocateMemory(device, &ai, nullptr, &hHeap);
+    if (ar != VK_SUCCESS) {
+        hHeap = VK_NULL_HANDLE;
+        throw std::runtime_error(hmem::describeCoreHeapFailure(plan, ar, maxAllocationSize, kHeapTarget));
     }
-
-    // 1GB 선점 시도 → 실패 시 절반씩 줄여 재시도 (최소 256MB)
-    while (hHeap == VK_NULL_HANDLE && heapSize >= kHeapTarget / 4) {
-        VkMemoryAllocateInfo ai{};
-        ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        ai.allocationSize  = heapSize;
-        ai.memoryTypeIndex = memType;
-        if (vkAllocateMemory(device, &ai, nullptr, &hHeap) != VK_SUCCESS) {
-            heapSize /= 2;
-        }
-    }
-    if (hHeap == VK_NULL_HANDLE)
-        throw std::runtime_error("[Haruka] vkAllocateMemory failed for Core Heap!");
 
     // 전체 범위 지속 매핑 (HOST_COHERENT → flush 불필요)
-    if (vkMapMemory(device, hHeap, 0, VK_WHOLE_SIZE, 0, &heapMapped) != VK_SUCCESS)
-        throw std::runtime_error("[Haruka] vkMapMemory failed for Core Heap!");
+    const VkResult mr = vkMapMemory(device, hHeap, 0, VK_WHOLE_SIZE, 0, &heapMapped);
+    if (mr != VK_SUCCESS) {
+        vkFreeMemory(device, hHeap, nullptr);
+        hHeap = VK_NULL_HANDLE;
+        heapMapped = nullptr;
+        throw std::runtime_error("Core heap: vkMapMemory failed (VkResult " + std::to_string((int)mr) + ")");
+    }
+    heapSize = kHeapTarget;
 
     HLOG(LogMemory, Log) << "Core Heap ready: "
                          << heapSize / (1024 * 1024) << "MB"
                          << " | memType[" << memType << "]"
                          // 이 조합은 UMA(Quest 등)뿐 아니라 ReBAR 를 켠 독립 GPU 에도 있어 UMA 라고 단정하지 않습니다.
-                         << (isUMA ? " | DEVICE_LOCAL+HOST_VISIBLE (UMA or ReBAR)"
-                                   : " | HOST_VISIBLE only (discrete GPU)");
+                         << (plan.deviceLocal ? " | DEVICE_LOCAL+HOST_VISIBLE (UMA or ReBAR)"
+                                              : " | HOST_VISIBLE only (discrete GPU)");
+    if (forceDedicated_) {
+        HLOG(LogMemory, Log) << "--vk-dedicated-msaa: MSAA color goes to a separate device-local allocation";
+    }
 
     // Zone B free list init
     VkPhysicalDeviceProperties devProps;
     vkGetPhysicalDeviceProperties(physDev, &devProps);
     bigGranularity = devProps.limits.bufferImageGranularity;
+    assert(heapSize == kHeapTarget);   // Zone 오프셋은 1GB 기준 상수입니다
     freeListB.push_back({ kZoneBOffset, kZoneBSize });
     HLOG(LogMemory, Log) << "Zone B ready: "
                          << kZoneBSize / (1024 * 1024) << "MB FreeList"
@@ -202,12 +183,19 @@ HarukaAllocation HarukaAllocator::allocC(VkDeviceSize size, VkDeviceSize alignme
 
 void HarukaAllocator::freeB(const HarukaAllocation& alloc) {
     if (!alloc.isValid()) return;
+    // 핵심 힙 밖 별도 할당(DEF-06)은 메모리를 풀기만 합니다. 빈 목록에 넣으면 { 0, size } 가 Zone A 위에 빈 칸으로 광고되므로
+    // 이 갈래가 Zone 검사보다 먼저입니다.
+    if (alloc.zone == AllocZone::Dedicated) {
+        if (alloc.auxMem != VK_NULL_HANDLE) vkFreeMemory(device, alloc.auxMem, nullptr);
+        if (dedicatedCount_ > 0) --dedicatedCount_;
+        dedicatedBytes_ -= std::min(dedicatedBytes_, alloc.size);
+        return;
+    }
     // Zone B 가 아닌 할당을 받으면 빈 목록에 엉뚱한 범위가 들어가, 다음 allocB 가 Zone C 위에
     // 이미지를 놓을 수 있습니다(DEF-100: AOPass 가 Zone C 버퍼를 여기로 돌려줬음). Zone A · C 는
     // 하나씩 돌려받지 않습니다(A 는 resetZoneA, C 는 링).
     if (alloc.zone != AllocZone::B) {
-        HLOG(LogMemory, Warning) << "freeB ignored an allocation from zone "
-                                 << (alloc.zone == AllocZone::A ? "A" : "C")
+        HLOG(LogMemory, Warning) << "freeB ignored an allocation from zone " << zoneName(alloc.zone)
                                  << " (offset " << alloc.offset << ", size " << alloc.size << ")";
         return;
     }
@@ -239,6 +227,7 @@ VkResult HarukaAllocator::bind(VkBuffer buf, const HarukaAllocation& alloc) {
 }
 
 VkResult HarukaAllocator::bind(VkImage img, HarukaAllocation& alloc) {
+    assert(alloc.zone != AllocZone::Dedicated);   // allocLazyImage 가 이미 바인드함
     VkMemoryRequirements reqs;
     vkGetImageMemoryRequirements(device, img, &reqs);
 
@@ -247,17 +236,13 @@ VkResult HarukaAllocator::bind(VkImage img, HarukaAllocation& alloc) {
     }
 
     // Heap memory type not compatible (discrete GPU). Allocate standalone DEVICE_LOCAL memory.
-    VkPhysicalDeviceMemoryProperties props;
-    vkGetPhysicalDeviceMemoryProperties(physDevice, &props);
-    uint32_t fallbackType = UINT32_MAX;
-    for (uint32_t i = 0; i < props.memoryTypeCount; ++i) {
-        if ((reqs.memoryTypeBits >> i) & 1 &&
-            (props.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-            fallbackType = i;
-            break;
-        }
-    }
+    const uint32_t fallbackType = hmem::selectMemType(memProps_, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, reqs.memoryTypeBits);
     if (fallbackType == UINT32_MAX) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    if (!loggedAux_) {
+        loggedAux_ = true;
+        HLOG(LogMemory, Log) << "An image cannot use the core heap's memory type " << memType << "; using a separate "
+                                "device-local allocation (type " << fallbackType << ") for such images";
+    }
 
     VkMemoryAllocateInfo ai{};
     ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -268,8 +253,69 @@ VkResult HarukaAllocator::bind(VkImage img, HarukaAllocation& alloc) {
     return vkBindImageMemory(device, img, alloc.auxMem, 0);
 }
 
+// ── 지연 할당 이미지 (DEF-06) ────────────────────────────────────────────────────
+// 타일 GPU(Quest)에서 MSAA 컬러는 타일 안에서만 쓰이고 resolve 뒤 버려집니다. LAZILY_ALLOCATED 타입에 두면 실제 메모리가
+// 거의 잡히지 않아 Zone B 에서 눈 해상도 4x RGBA16F 만큼(약 100MB)을 아낍니다. 데스크톱 GPU 에는 이 타입이 없어 지금처럼
+// Zone B 로 갑니다. --vk-dedicated-msaa 면 장치 로컬 타입으로 별도 할당해 이 경로를 데스크톱에서도 탑니다.
+HarukaAllocation HarukaAllocator::allocLazyImage(VkImage img, const VkMemoryRequirements& reqs, const char* what) {
+    uint32_t t = hmem::selectLazyMemType(memProps_, reqs.memoryTypeBits);
+    const bool forced = (t == UINT32_MAX && forceDedicated_);
+    if (forced) {
+        // 장치 로컬이면서 호스트에서 보이지 않는 타입(데스크톱 VRAM). 없으면 장치 로컬 아무것이나.
+        for (uint32_t i = 0; i < memProps_.memoryTypeCount && i < 32 && t == UINT32_MAX; ++i) {
+            const VkMemoryPropertyFlags f = memProps_.memoryTypes[i].propertyFlags;
+            if ((reqs.memoryTypeBits >> i & 1) && (f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) &&
+                !(f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
+                t = i;
+        }
+        if (t == UINT32_MAX) t = hmem::selectMemType(memProps_, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0, reqs.memoryTypeBits);
+    }
+    if (t == UINT32_MAX) {
+        if (!loggedNoLazy_) {
+            loggedNoLazy_ = true;
+            HLOG(LogMemory, Log) << what << ": no lazily allocated memory type, using Zone B";
+        }
+        return {};
+    }
+    VkMemoryAllocateInfo ai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    ai.allocationSize  = reqs.size;
+    ai.memoryTypeIndex = t;
+    VkDeviceMemory mem = VK_NULL_HANDLE;
+    VkResult r = vkAllocateMemory(device, &ai, nullptr, &mem);
+    if (r == VK_SUCCESS) r = vkBindImageMemory(device, img, mem, 0);
+    if (r != VK_SUCCESS) {
+        if (mem) vkFreeMemory(device, mem, nullptr);
+        HLOG(LogMemory, Warning) << what << ": separate allocation on memory type " << t << " failed (VkResult " << (int)r
+                                 << "); using Zone B";
+        return {};
+    }
+    HarukaAllocation a;
+    a.offset = 0;
+    a.size   = reqs.size;
+    a.zone   = AllocZone::Dedicated;
+    a.auxMem = mem;
+    ++dedicatedCount_;
+    dedicatedBytes_ += reqs.size;
+    if (!loggedLazy_) {
+        loggedLazy_ = true;
+        HLOG(LogMemory, Log) << what << ": " << (forced ? "forced separate" : "lazily allocated") << " memory type " << t
+                             << ", " << reqs.size / (1024 * 1024) << " MB outside the core heap";
+    } else {
+        HLOG(LogMemory, Verbose) << what << ": memory type " << t << ", " << reqs.size / (1024 * 1024) << " MB";
+    }
+    return a;
+}
+
 // ── destroy ───────────────────────────────────────────────────────────────────
 void HarukaAllocator::destroy() {
+    if (dedicatedCount_ != 0) {
+        HLOG(LogMemory, Warning) << dedicatedCount_ << " dedicated allocations (" << dedicatedBytes_ / (1024 * 1024)
+                                 << " MB) were not freed";
+    }
+    dedicatedCount_ = 0;
+    dedicatedBytes_ = 0;
+    loggedLazy_ = loggedNoLazy_ = loggedAux_ = false;
+    memProps_ = {};
     if (heapMapped) {
         vkUnmapMemory(device, hHeap);
         heapMapped = nullptr;

@@ -208,6 +208,16 @@ void AOPass::createDataBuffers() {
     nsci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     vkCreateSampler(rc_->device, &nsci, nullptr, &noiseSampler_);
 
+    // 깊이 입력은 보간하지 않습니다(DEF-156). 예전에는 렌더러의 LINEAR clampSampler 로 R32_SFLOAT 선형 깊이를 읽었는데, 이 포맷의
+    // FILTER_LINEAR 는 선택 기능이라(Android 2022 기준선 · Adreno 에 없음) 그런 장치에서는 결과가 정의되지 않습니다
+    // (VUID-vkCmdDraw-magFilter-04553). 중심 · 법선 페치는 텍셀 중심이라 값이 같고, 커널 샘플만 가장 가까운 텍셀을 씁니다.
+    VkSamplerCreateInfo dsci{};
+    dsci.sType     = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    dsci.magFilter = dsci.minFilter = VK_FILTER_NEAREST;
+    dsci.addressModeU = dsci.addressModeV = dsci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    dsci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    vkCreateSampler(rc_->device, &dsci, nullptr, &depthSampler_);
+
     VkDeviceSize noiseBytes = kN * kN * 2;
     VkBufferCreateInfo sbi{};
     sbi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -222,7 +232,7 @@ void AOPass::createDataBuffers() {
     memcpy(stagingAlloc.mappedPtr, noisePixels.data(), noiseBytes);
 
     auto cmd = rc_->beginOneTimeCmd();
-    RenderContext::transitionImage(cmd, noiseTex_,
+    rc_->transitionImage(cmd, noiseTex_,
         VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
         VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
@@ -231,7 +241,7 @@ void AOPass::createDataBuffers() {
     region.imageExtent      = { kN, kN, 1 };
     vkCmdCopyBufferToImage(cmd, stagingBuf, noiseTex_,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    RenderContext::transitionImage(cmd, noiseTex_,
+    rc_->transitionImage(cmd, noiseTex_,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
@@ -281,6 +291,7 @@ void AOPass::destroy() {
     };
     freeSlot(noiseTex_, noiseView_, noiseAlloc_);
     if (noiseSampler_) { vkDestroySampler(rc_->device, noiseSampler_, nullptr); noiseSampler_ = VK_NULL_HANDLE; }
+    if (depthSampler_) { vkDestroySampler(rc_->device, depthSampler_, nullptr); depthSampler_ = VK_NULL_HANDLE; }
     // 데이터 UBO 는 Zone C(링)에 있어 하나씩 돌려주지 않습니다. 예전에는 Zone B 해제 함수로
     // 돌려줘 Zone B 빈 목록에 Zone C 범위가 들어갔습니다(DEF-100).
     for (int i = 0; i < kDataBufs; i++) {
@@ -298,8 +309,7 @@ void AOPass::destroy() {
 
 // ── record ─────────────────────────────────────────────────────────────────────
 void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
-                    VkImageView msaaDepthView, VkSampler clampSampler,
-                    const CameraParams& cam) {
+                    VkImageView msaaDepthView, const CameraParams& cam) {
     const uint32_t dataIdx = frameIdx * kMaxViews + viewIndex;
     uint32_t hw = std::max(1u, rc_->renderExtent.width  / 2);
     uint32_t hh = std::max(1u, rc_->renderExtent.height / 2);
@@ -316,13 +326,13 @@ void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
         vkCmdSetViewport(cmd, 0, 1, &lvp); vkCmdSetScissor(cmd, 0, 1, &lsc);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, linDepthPipeline_);
 
-        VkDescriptorImageInfo depthI{ clampSampler, msaaDepthView,
+        VkDescriptorImageInfo depthI{ depthSampler_, msaaDepthView,
                                       VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL };
         VkWriteDescriptorSet depthW{};
         depthW.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         depthW.dstBinding = 0; depthW.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         depthW.descriptorCount = 1; depthW.pImageInfo = &depthI;
-        vkCmdPushDescriptorSet(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        rc_->vk.push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             linDepthPipeLayout_, 0, 1, &depthW);
 
         struct LinPC { float zNear, zFar, w, h; };
@@ -356,7 +366,7 @@ void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
         vkCmdSetViewport(cmd, 0, 1, &lvp); vkCmdSetScissor(cmd, 0, 1, &lsc);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ssaoPipeline_);
 
-        VkDescriptorImageInfo  ldI { clampSampler, linDepthView_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkDescriptorImageInfo  ldI { depthSampler_, linDepthView_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorImageInfo  noI { noiseSampler_, noiseView_,   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
         VkDescriptorBufferInfo ubI { dataBufs_[dataIdx], 0, sizeof(SSAOData) };
         VkWriteDescriptorSet ws[3] = {};
@@ -364,7 +374,7 @@ void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
         ws[0].dstBinding=0; ws[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; ws[0].descriptorCount=1; ws[0].pImageInfo=&ldI;
         ws[1].dstBinding=1; ws[1].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; ws[1].descriptorCount=1; ws[1].pImageInfo=&noI;
         ws[2].dstBinding=2; ws[2].descriptorType=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;         ws[2].descriptorCount=1; ws[2].pBufferInfo=&ubI;
-        vkCmdPushDescriptorSet(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        rc_->vk.push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             ssaoPipeLayout_, 0, 3, ws);
 
         vkCmdDraw(cmd, 3, 1, 0, 0);

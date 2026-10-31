@@ -53,7 +53,7 @@ static glm::quat fromNegZTo(const glm::vec3& dir) {
     return glm::angleAxis(std::acos(glm::clamp(d, -1.f, 1.f)), ax);
 }
 
-static void selectedAabb(Actor* a, glm::vec3& lo, glm::vec3& hi) {
+static void selectedAabb(const Actor* a, glm::vec3& lo, glm::vec3& hi) {
     lo = glm::vec3(-0.5f); hi = glm::vec3(0.5f);
     if (auto* sm = a->getComponent<StaticMeshComponent>(); sm && sm->mesh) {
         lo = sm->mesh->aabbMin;
@@ -118,6 +118,21 @@ static void emitBox(std::vector<LineVertex>& out, const glm::vec3& c,
         out.push_back({v[f[0]],col}); out.push_back({v[f[1]],col}); out.push_back({v[f[2]],col});
         out.push_back({v[f[0]],col}); out.push_back({v[f[2]],col}); out.push_back({v[f[3]],col});
     }
+}
+
+void EditorGizmo::appendSelectionBox(const Actor* a, std::vector<LineVertex>& lines, const glm::vec4& color) {
+    glm::vec3 lo, hi;
+    selectedAabb(a, lo, hi);
+    const glm::mat4 wm = a->worldMatrix();
+    glm::vec3 c[8];
+    for (int k = 0; k < 8; ++k) {
+        glm::vec3 corner{ (k & 1) ? hi.x : lo.x, (k & 2) ? hi.y : lo.y, (k & 4) ? hi.z : lo.z };
+        c[k] = glm::vec3(wm * glm::vec4(corner, 1.f));
+    }
+    auto edge = [&](int p, int q) { lines.push_back({ c[p], color }); lines.push_back({ c[q], color }); };
+    edge(0,1); edge(1,3); edge(3,2); edge(2,0);
+    edge(4,5); edge(5,7); edge(7,6); edge(6,4);
+    edge(0,4); edge(1,5); edge(2,6); edge(3,7);
 }
 
 // ── tick ───────────────────────────────────────────────────────────────────────
@@ -379,7 +394,8 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
         const Transform after = selected->transform();
         // 잡았다가 그대로 놓은 드래그로 64칸 커맨드 스택이 빈 이력에 차지 않게 합니다.
         if (!nearlyEqualT(undoSnap_, after)) {
-            cmdStack.push(std::make_unique<SetTransformCmd>(selected, undoSnap_, after));
+            if (onCommit) onCommit(undoSnap_, after);
+            else          cmdStack.push(std::make_unique<SetTransformCmd>(world, selected, undoSnap_, after));
             selected->notifyTransformCommitted();   // 물리 바디 등이 드래그 결과를 따라오게
         }
         dragging_ = false;

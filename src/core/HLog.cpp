@@ -1,4 +1,5 @@
 #include "HLog.hpp"
+#include "FileUtil.hpp"
 
 #include <cctype>
 #include <chrono>
@@ -433,9 +434,10 @@ void HLog::closeFileSink() {
 }
 
 // ── 기록 수준 보존 ────────────────────────────────────────────────────────────
-bool HLog::loadLevelOverrides(const std::string& path) {
-    std::ifstream in(path);
-    if (!in) return false;
+bool HLog::loadLevelOverrides(const std::string& path, std::string* why) {
+    std::string text;
+    if (!hfile::readConfigText(path, text, why)) return false;
+    std::istringstream in(text);
 
     std::vector<std::pair<std::string, ELogVerbosity>> entries;
     std::string line;

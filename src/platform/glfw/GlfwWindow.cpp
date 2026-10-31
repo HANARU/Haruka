@@ -64,6 +64,10 @@ bool GlfwWindow::shouldClose() const {
     return glfwWindowShouldClose(window);
 }
 
+void GlfwWindow::setShouldClose(bool close) {
+    glfwSetWindowShouldClose(window, close ? GLFW_TRUE : GLFW_FALSE);
+}
+
 void GlfwWindow::pollEvents() {
     // 걸쇠와 누름 횟수는 이번 폴링에서 들어올 이벤트만 담아야 합니다. 비우고 나서 받습니다.
     std::fill(std::begin(keyLatch_), std::end(keyLatch_), false);

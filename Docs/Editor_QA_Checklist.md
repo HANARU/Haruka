@@ -37,7 +37,7 @@
 |---|---|---|
 | 0-1 | `cmake --build build --config Release` 후 `ctest --test-dir build -C Release` | 빌드 성공(경고 0), 테스트 전부 통과(2026-10-02 기준 7개) |
 | 0-2 | `build/Release/Config/` 를 통째로 백업 | 백업 폴더에 `editor_layout.txt` 등이 있음 |
-| 0-3 | `build/Release/scene.hscene` 이 있으면 백업 | Save · Ctrl+S 가 이 파일을 덮어씁니다 |
+| 0-3 | 프로젝트 폴더 `assets/scenes/` 의 씬이 git 기준과 같은지 확인(`git status assets`) | Save · Ctrl+S 가 열린 씬 파일을 프로젝트 폴더에 덮어씁니다(2026-10-15 부터). 점검 뒤 `git checkout` 으로 되돌립니다. 마지막에 연 씬은 0-2 의 `Config/editor_state.txt` 에 남습니다 |
 | 0-4 | 로그 위치 확인: `build/Release/Logs/HarukaEngine.log`(엔진 로그, UTF-8), `Logs/stdout.txt`(표준 출력·오류) | 실행할 때마다 새로 써집니다 |
 | 0-5 | 검증 레이어를 켜고 실행합니다. Release 빌드는 기본으로 꺼져 있습니다(`kEnableValidation = !NDEBUG`). 아래 환경 변수를 둔 PowerShell 에서 `Start-Process ... -WorkingDirectory build\Release` 로 띄웁니다 | 0-6 에서 확인 |
 | 0-6 | 레이어가 실제로 켜졌는지 확인합니다. 로더 디버그 출력은 남지 않지만(2026-10-02 확인), 레이어가 켜지면 `Logs/validation.txt` 가 생기고 종료 뒤 `Logs/stdout.txt` 에 `Validation Layer Info - Logging validation error to Logs\validation.txt` 한 줄이 남습니다. FPS 도 눈에 띄게 낮아집니다 | 그 한 줄과 파일이 있음 |
@@ -58,7 +58,7 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 | # | 할 일 | 통과 기준 |
 |---|---|---|
 | 1-1 | 부팅 로그 확인 | `Error` 0건. 알려진 경고는 `model.glb` 의 `Material.001` 하나(정책상 정상, Haruka_Conventions) |
-| 1-2 | 시작 씬 | `start scene loaded: ... (13 actors)`, 뷰포트 통계 `Draw: 8  Culled: 4` |
+| 1-2 | 시작 씬 | `Scene opened: assets/scenes/LightingProbe.hscene (13 actors)`(마지막에 연 씬이 있으면 그 씬. 0-2 백업에서 `editor_state.txt` 를 지우면 시작 씬), 제목 표시줄에 씬 이름 |
 | 1-3 | 검증 레이어 메시지(부팅 직후) | 0건 |
 | 1-4 | 창을 최대화했다가 되돌리기, 크기 조절 | 검증 메시지 0건, 화면 깨짐 없음 |
 | 1-5 | 창 X 로 종료(모든 점검 뒤 마지막에) | `[Engine] Clean exit.`, 종료 때 검증 메시지(객체 누수 등) 0건 |
@@ -137,12 +137,13 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 각 항목은 "조작 → 기대 결과" 입니다. 실패하면 5절 표에 적고, 결함 문서에 없는 것이면 새 번호를 받습니다.
 
 ### 3-1. 아웃라이너
-- [ ] 행 클릭으로 선택, 같은 행을 다시 누르면 선택 해제(의도된 동작)
+- [ ] 행 클릭으로 선택, 같은 행을 다시 누르면 선택 해제(의도된 동작). Ctrl+클릭은 넣고 빼기, Shift+클릭은 주 선택부터 그 행까지
 - [ ] F2 리네임 → 글자 입력 → Enter 확정, Esc 취소
 - [ ] 검색(Ctrl+F) → 목록이 걸러지고 지우면 돌아옴
 - [ ] 눈(O) 토글 → 뷰포트에서 사라지고 다시 나타남, 자식은 'o' 로 표시
-- [ ] x 삭제 → 목록·뷰포트에서 사라지고 Ctrl+Z 로 되돌아오지 않음(삭제는 undo 대상 아님, 기존 규칙 확인)
+- [ ] x 삭제 → 목록·뷰포트에서 사라지고 Ctrl+Z 로 같은 자리에 되돌아옴(2026-10-15 부터 Undo 대상)
 - [ ] Actor 메뉴 Attach To Prev Selected / Detach Selected → 들여쓰기·펼침 정상
+- [ ] 행을 끌어 다른 행에 놓으면 그 아래로, 빈 곳에 놓으면 루트로 옮겨지고 뷰포트는 그대로(월드 자세 유지), Ctrl+Z 로 되돌아옴. 자기 자손 아래로는 옮겨지지 않음(경고)
 
 ### 3-2. 디테일 패널
 - [ ] TRANSFORM 숫자 칸을 좌우로 끌어 값 스크럽 → 뷰포트가 따라 움직임, Ctrl+Z 로 되돌아감
@@ -150,20 +151,23 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 - [ ] + Light / + Camera / + Audio / + RigidBody 추가, x 로 제거
 - [ ] 라이트 Type 드롭다운 전환 → 조건부 행이 바뀜(Point 는 Attenuation Radius, Spot 은 Cone)
 - [ ] 오디오 Spatialize 토글 → 거리 행 숨김·표시
-- [ ] Save as Prefab → 콘텐츠 브라우저 PREFABS 에 나타남(Refresh 후)
+- [ ] Save as Prefab → 콘텐츠 브라우저 PREFABS 에 나타남(Refresh 후), 자식이 있으면 계층째 저장됨
+- [ ] 여러 액터를 고르면 머리에 "N actors selected" 배지, 컴포넌트 추가 · 제거 · 켜기 · 리네임 · 활성 토글이 Ctrl+Z 로 되돌아옴
 
 ### 3-3. 뷰포트
 - [ ] 클릭 픽(메시·아이콘), 빈 곳 클릭으로 선택 해제
-- [ ] 기즈모 이동·회전·크기(W/E/R), 스냅 토글과 값, World/Local 전환
+- [ ] 기즈모 이동·회전·크기(W/E/R), 스냅 토글과 값, World/Local 전환. 여러 액터를 고르면 함께 변환되고 한 번에 되돌아옴
+- [ ] F 키(Edit > Frame Selected) → 선택한 액터들이 화면에 맞춰짐
 - [ ] 우클릭 + WASD/QE 비행, 휠 돌리, 카메라 속도 칩(Shift+클릭으로 감소)
 - [ ] 뷰포트 툴바 폭 축약: 디테일·아웃라이너를 넓혀 뷰포트를 좁힐 때 단계적으로 줄고, 다시 넓히면 돌아옴
 
 ### 3-4. 툴바 · 메뉴 · 단축키
-- [ ] File: New Scene / Save Scene / Load Scene, Edit: Undo / Redo / Delete Selected, View: Reset Layout
-- [ ] Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z / Ctrl+S / Ctrl+F / Delete / F2 / Q·W·E·R
+- [ ] File: New / Open / Save / Save As Scene, Edit: Undo / Redo / Copy / Paste / Duplicate / Delete / Frame Selected, View: Reset Layout
+- [ ] Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z / Ctrl+N · O · S · Shift+S / Ctrl+C · V · D / F / Ctrl+F / Delete / F2 / Q·W·E·R
 - [ ] 텍스트 입력 중에는 Ctrl+Z 가 씬 undo 를 하지 않음
 
 ### 3-5. 콘텐츠 브라우저
+- [ ] 씬 클릭 → 열기(변경이 있으면 확인 창), 지금 열린 씬 강조
 - [ ] 모델(model) 클릭 → 스폰, 프리팹 클릭 → 스폰, 음원 클릭 → 선택 액터에 지정(선택 없으면 경고)
 - [ ] Refresh → 새 파일 반영
 
@@ -181,9 +185,12 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 - [ ] 물리: 액터에 RigidBody(Dynamic) 추가 → Play 에서 낙하 → Stop 에서 원위치
 - [ ] 오디오: AudioProbe 스폰 → Play 에서 소리, Pause 무음, 액터 끄면 무음(Audio_Design.md 5-2절 방법)
 - [ ] Play 중 액터 삭제·컴포넌트 제거 → 크래시 없음, Stop 으로 복원
+- [ ] XrDemo 씬 Play → 플레이어 머리 카메라(1.7m)로 바뀜, WASD 이동 · 뷰포트 오른쪽 끌기 둘러보기, Stop → 에디터 카메라로 돌아옴
 
 ### 3-9. 저장 · 불러오기 · 프리팹
-- [ ] Save → Load → Save 결과가 같음(주석 제외 한 글자도 같아야 함)
+- [ ] Save → Open → Save 결과가 같음(주석 제외 한 글자도 같아야 함)
+- [ ] 편집하면 제목에 `*`, 되돌려 저장 시점으로 가면 사라짐. Play 동안에는 그 표시가 고정되고 Play 중 저장은 경고로 막힘
+- [ ] Save As(Ctrl+Shift+S) → 이름 입력 → `assets/scenes/` 에 저장, 있는 이름이면 Replace 확인. 변경이 있을 때 New · Open · 창 X → Save · Don't Save · Cancel
 - [ ] 깨진 값이 든 씬(PRIM·PRIM_MAT·AUDIO_3D) → 오류 한 줄씩, 크래시 없음
 
 ## 4. 마무리
@@ -192,7 +199,7 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 |---|---|
 | 4-1 | 창 X 로 종료하고 1-5 확인 |
 | 4-2 | `Logs/HarukaEngine.log`, `Logs/stdout.txt`, (있으면) `Logs/validation.txt` 를 보관 |
-| 4-3 | `Config/` 와 `scene.hscene` 을 0-2 · 0-3 백업으로 복원, 점검 중 만든 파일(프리팹 등) 정리 |
+| 4-3 | `Config/` 를 0-2 백업으로 복원하고 `assets/` 를 git 기준으로 되돌림(0-3), 점검 중 만든 파일(씬 · 프리팹 등) 정리 |
 | 4-4 | 5절 표를 채우고, 새 결함은 Core_Defects_Task_Spec.md 에 등재 |
 
 ## 5. 결과 기록
@@ -320,8 +327,10 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 | 런타임 없이 `--xr` | 통과 | "No OpenXR runtime is available (XrResult -51) ... Continuing in desktop mode" 경고 하나, 화면은 일반 실행과 같음(제목 · 통계 숫자 제외 0 픽셀) |
 | 헤드셋(Quest Link) | 통과(2026-10-15) | Meta Quest Pro · USB Link · Oculus 1.208.0. 런타임 · 헤드셋 로그, FOCUSED 까지 진행, 두 눈 원근 · 깊이감, 뷰포트의 왼쪽 눈, 머리를 돌릴 때 한쪽 눈 소실 없음, 컨트롤러 축 · 선이 손을 따라감, `Physics step matched to the headset: 72 Hz`, 벗었다 쓸 때 이어짐(착용 센서가 꺼지면 IDLE), 71 FPS(13.95ms). 상세는 Core_Defects_Task_Spec.md "헤드셋 확인 결과" |
 | Play 와 VR 세션(DEF-111) | 통과 | 편집 중에는 세션 없음. Play → 세션 생성 → FOCUSED, Stop → STOPPING → IDLE → EXITING → 세션 지움, 헤드셋을 쓰지 않아 IDLE 일 때 Stop 은 바로 지움, 다시 Play → 새 세션, Pause · Resume 동안 유지 |
-| 헤드셋 남은 항목 | 남음 | Play 중 데스크톱 창을 최소화해도 두 눈이 계속 그려짐(DEF-106). Play 중 소리 나는 액터(Speaker 등)를 두고 고개를 좌우로 돌리면 소리의 좌우가 바뀜(머리 자세 청취자). XR 중에도 소리는 Windows 기본 재생 장치로 나가므로, 확인 전에 기본 장치를 헤드셋(Oculus Virtual Audio Device)으로 바꾸거나 처리 방법을 정함 |
-| XR 검증 메시지 | 남음 | DEF-110 수정 뒤(2026-10-15, XR 장치에 `shaderStorageImageMultisample` 을 켬) 다음 헤드셋 실행에서 Play 마다 0 인지 확인. 수정 전에는 세션마다 1건 |
+| 헤드셋 남은 항목 | 최소화 통과 · 소리는 재생만 확인(2026-10-16) | Play 중 데스크톱 창을 최소화해도 두 눈이 계속 그려짐(DEF-106): 통과. Play 중 소리 나는 액터(Speaker 등)를 두고 고개를 좌우로 돌리면 소리의 좌우가 바뀜(머리 자세 청취자): 사용자가 기본 장치를 헤드셋으로 바꾸고 소리를 들었으나 좌우 변화는 따로 보고하지 않음. 지금은 XR Play 동안 헤드셋 장치로 자동 전환하므로 기본 장치를 바꿀 필요가 없음(아래 "XR 소리 자동 전환" 줄) |
+| XR 검증 메시지 | 통과(2026-10-16, Play 마다 0건) | DEF-110 수정 뒤(2026-10-15, XR 장치에 `shaderStorageImageMultisample` 을 켬) 다음 헤드셋 실행에서 Play 마다 0 인지 확인. 수정 전에는 세션마다 1건 |
+| XR 소리 자동 전환(2026-10-16) | 남음 | 에디터 출력 장치를 헤드셋이 아닌 것(예: PC 헤드셋)으로 고른 뒤 `--xr` Play: 로그 `Audio output: …(Oculus Virtual Audio Device) (temporary)`, 소리가 헤드셋에서 남. Stop 하면 고른 장치로 돌아옴 |
+| 플레이어 리그(2026-10-15) | 통과(2026-10-16) | `--xr` 로 XrDemo 씬 Play: 바닥 높이가 실제 키와 맞음(LOCAL_FLOOR, 로그로 바닥 공간 사용 확인), 왼쪽 스틱 이동 · 오른쪽 스틱 45° 스냅 회전(돌려놓아야 다시 돎), 탁자의 상자 · 공을 그립으로 잡고 던짐, 잡고 놓을 때 진동, 손 축 · 가리키는 선이 손 액터를 따라감 |
 | DEF-104 배리어 | 통과 | 창 확인을 다시 허락받은 뒤: 단안 · 스테레오 흉내 · `--xr`(런타임 없음) 모두 검증 메시지 0, `Clean exit`. 단안 화면은 배리어 전 캡처와 차이 0 픽셀, `--xr` 화면도 단안과 0 픽셀 |
 | 물리(Play) | 통과 | 실행 폴더의 씬 사본에만 바닥 정적 상자와 높이 2.2m 의 동적 구(반지름 1m)를 넣고 Play: 3초 뒤 구가 바닥에 내려앉음. 물리 없이 구를 1m 에 둔 화면과 89픽셀만 다르고 모두 코드값 10 미만(바닥 윗면에 정확히 앉음). Stop 하면 처음 자리로 돌아옴. 검증 메시지 0. 사본은 원본 해시로 되돌림 |
 | GPU 시간 측정 | 참고 | 확인하는 동안 다른 프로그램(Unreal Editor 등)이 GPU 를 84% 쓰고 있어, 프레임마다 AO 나 Bloom 칸이 1~2ms 로 튀었습니다. 프레임 시작 배리어를 끈 진단 빌드에서도 같았고, 튀지 않은 프레임은 배리어 유무와 상관없이 합계 0.32 ~ 0.37ms 였습니다. 시간 비교는 GPU 가 한가할 때 다시 합니다 |
@@ -401,3 +410,80 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 | Play 중 소리 | 통과 | 프로젝트 폴더의 음원을 오류 없이 읽음 |
 | 캐시 | 통과 | 캐시 키가 바뀐 첫 실행에만 모델을 다시 읽어 기존 머티리얼 경고(7줄)가 나오고, 두 번째 실행은 경고 0. 소스 트리의 `assets/cache` 는 비어 있음 |
 | 종료 | 통과 | 두 실행 모두 검증 메시지 0, `Clean exit` |
+
+### 2026-10-15 엔진 기본 기능 보강(창 메시지 조작 + 검증 레이어 켬)
+
+씬 관리 · 편집 기본기 · 플레이어와 입력([Engine_Basics_Design.md](Engine_Basics_Design.md))을 단계마다 확인했습니다. 시험용으로 저장한 씬 ·
+프리팹은 모두 지웠고, 설정 · 시작 씬은 원본으로 되돌렸습니다. 모든 실행이 검증 메시지 0, `Clean exit` 입니다.
+
+**1단계 씬 관리**
+
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| 시작 | 통과 | `assets/project.ini` 의 시작 씬을 열고 제목 표시줄 · 상태바에 `LightingProbe.hscene`, 입력 바인딩 8줄(프로젝트 설정) |
+| 변경 표시 | 통과 | 편집 → `*`, Ctrl+Z → 사라짐, Ctrl+Y → 다시 `*` |
+| Save As | 통과 | 지금 이름을 전체 선택한 채 뜨고, 하위 폴더 이름(`drv_test/Sub Scene`)으로 저장 → 제목이 바뀌고 `editor_state.txt` 의 `lastScene` 이 그 씬 |
+| Open | 통과 | 대화상자에 하위 폴더 씬까지 나오고, 고르면 저장한 액터 수(14개)로 열림 |
+| New + 변경 확인 | 통과 | Unsaved Changes 가 뜨는 동안 바깥이 어두워지고(픽셀 밝기 약 25% 낮아짐), Don't Save → 새 씬(Untitled) |
+| SCENES 목록 | 통과 | 콘텐츠 브라우저에 씬이 나오고 지금 씬을 강조 |
+| Play 중 | 통과 | 변경 표시가 고정되고 Ctrl+S 는 "Stop Play before saving the scene" 경고로 막힘 |
+| 창 닫기 | 통과 | 변경이 있으면 확인 창. Cancel → 창 유지, 다시 X → Don't Save → 종료 |
+| 시작 씬 v4 다시 저장 | 통과 | 다시 저장 전후 뷰포트 차이는 통계 글자 가장자리 18픽셀뿐(장면 픽셀 같음) |
+
+창 메시지로 보낸 Shift 는 GLFW 가 폴링 끝에 실제 키 상태로 풀어 버리므로, Ctrl+Shift+S 는 수정자와 키를 같은 폴링에 보내야 합니다(처음에
+일반 저장으로 처리되어 시작 씬을 덮어썼고 git 으로 되돌림).
+
+**2단계 편집 기본기**
+
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| 다중 선택 | 통과 | 아웃라이너 Ctrl+클릭, 뷰포트 Ctrl+클릭, Shift+클릭 범위(Ground ~ ProbePlane 4개 → "4 actors selected (showing the last one)"), 다른 선택 액터의 상자 |
+| 복제 · 붙여넣기 · 삭제 | 통과 | 13 → 15 → 13 개, 각각 Ctrl+Z 한 번에 되돌아감 |
+| 삭제 뒤 이력 | 통과 | 편집 → 삭제 → Ctrl+Z(되살림) → Ctrl+Z(편집 되돌림) |
+| 컴포넌트 · 이름 · 활성 | 통과 | 컴포넌트 추가 · 제거 · 켜기 토글, 리네임, 활성 토글이 모두 되돌아감 |
+| 끌어 놓아 부모 바꾸기 | 통과 | 다른 행 위로 → 자식이 되고 뷰포트 차이 0픽셀, 빈 곳으로 → 루트로 빠지고 차이 0픽셀, 두 번 되돌리면 `*` 가 사라짐 |
+| F 화면 맞추기 | 통과 | 선택한 액터들로 카메라가 이동 |
+| 그룹 기즈모 | 통과 | 주 선택을 끌면 나머지가 같은 양(+0.67283)만큼 함께 이동, Ctrl+Z 한 번에 모두 되돌아감 |
+| 계층 프리팹 | 통과 | 자식이 있는 액터를 Save as Prefab → v3 파일에 `PARENT:0` 과 함께 저장, 꺼내면 자식까지 생김 |
+| AudioProbe v3 | 통과 | 다시 저장한 프리팹을 꺼내면 녹색 구 · 크기 0.3 · 소리 컴포넌트(Loop · AutoPlay) 그대로, Ctrl+Z 로 지워짐 |
+
+Shift+클릭도 같은 이유로 창 메시지만으로는 재현되지 않습니다. 확인할 때는 엔진 스레드에 입력 상태를 붙이고(`AttachThreadInput`) 키 상태에
+Shift 를 눌린 것으로 둔(`SetKeyboardState`) 채 클릭을 보냈습니다.
+
+**3단계 플레이어와 입력(데스크톱)**
+
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| XrDemo Play | 통과 | 화면이 플레이어 머리 카메라(1.7m)로 바뀜, W 로 앞으로 이동, 뷰포트 오른쪽 끌기로 회전, Stop → 월드 복원과 에디터 카메라 |
+| 헤드셋 항목 | 남음 | 위 "2026-10-04 3단계 VR 첫걸음" 표의 "플레이어 리그" 줄 |
+
+### 2026-10-16 헤드셋 2차 확인(Quest Link, 창 메시지 조작 + 검증 레이어 켬)
+
+Meta Quest Pro, USB Link, 기본 재생 장치 = 헤드셋(사용자가 바꿈). 정본은 Core_Defects_Task_Spec.md 끝 "헤드셋 2차 확인" 절입니다.
+
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| 1. LightingProbe Play · Stop 두 번(DEF-110) | 통과 | 검증 메시지 0 · 0, 71 FPS, 물리 72Hz. 사용자: 특별히 이상한 점 없음 |
+| 보이지 않는 리그 · 실제 키 | 통과 | `LOCAL_FLOOR (real height)`, 카메라 아래 0.3m 바닥에 섬 |
+| 보이지 않는 리그 · 고정 1.0m | 통과 | `LOCAL + 1.00 m fixed eye height`. 프로젝트 설정은 끝난 뒤 원래대로 |
+| 2. XrDemo 플레이어 리그 | 통과 | 씬 리그로 `LOCAL_FLOOR`. 사용자: 큰 문제 없음 |
+| 3. 최소화(DEF-106) | 통과 | 20초 동안 세션 FOCUSED 유지, 복원 뒤 거울 화면 복귀 |
+| 4. 소리 | 확인 | AudioProbe(플레이어 오른쪽 뒤). 엔진 오류 없음, 사용자 판단 "충분" |
+
+자동 조작 주의: 시작할 때 Link 가 잠들어 있으면 "No headset found" 로 데스크톱 모드가 되어 FOCUSED 가 오지 않습니다(스크립트가 이 경우
+바로 멈추게 함). Stop 은 Undo 기록을 지우므로 Play 전에 꺼낸 액터를 Stop 뒤 Ctrl+Z 로 되돌릴 수 없습니다. 닫기 전에 씬을 git 이나 백업으로
+되돌리십시오.
+
+### 2026-10-16 소리 출력 장치 선택(창 메시지 조작 + 루프백 측정 + 검증 레이어 켬)
+
+정본은 Audio_Design.md 8절입니다. 시작 씬 사본에 AudioProbe 를 더한 씬을 drv 의 임시 시작 씬으로 열어(닫을 때 원본으로 되돌림) 씬을
+편집하지 않고 확인했습니다. 실제 출력은 WASAPI 루프백 RMS 로 쟀습니다.
+
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| Edit > Audio Output... | 통과 | 장치 6개가 ASCII 로 정리된 이름으로 나오고, 시스템 기본 장치에 "(Windows default)", 지금 고른 항목에 `>` |
+| 장치 고르기 | 통과 | PC 헤드셋을 고르고 Play: 그 장치에만 소리(RMS 왼쪽 0.0096 · 오른쪽 0.0351), 다른 장치 0 |
+| 재생 중 바꾸기 | 통과 | Play 중 시스템 기본으로 바꾸자 같은 크기의 소리가 옮겨 가고 앞 장치는 0 |
+| 다시 열기 | 통과 | `Config/editor_state.txt` 의 `audioOutput` 을 읽어 시작하자마자 그 장치로 바꿈 |
+| 종료 | 통과 | 검증 메시지 0, `Clean exit`. 시험용 설정은 지우고 원래 상태로 |
+| XR 자동 전환 | 남음 | 그때 Link 가 잠들어 세션을 만들지 못함. 위 VR 표의 "XR 소리 자동 전환" 줄 |

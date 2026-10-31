@@ -1,7 +1,9 @@
 #pragma once
 
 // ── 엔진 상한 설정 (DEF-10) ─────────────────────────────────────────────────────
-// 그리기 행 · 라이트 · 물리 바디의 상한을 실행 폴더의 Config/engine.ini 에서 읽습니다(사용자 결정). 예전에는
+// 그리기 행 · 라이트 · 물리 바디의 상한을 Config/engine.ini 에서 읽습니다(사용자 결정). 2026-10-19 부터 두 겹입니다:
+// 실행 폴더의 파일(패키지 기본값, 읽기 전용) 위에 쓰기 루트의 파일(사용자 값)을 덮습니다. 에디터는 두 자리가 같은
+// 실행 폴더라 한 파일입니다. 예전에는
 // 렌더러와 물리에 상수로 따로 박혀 있어, 한쪽만 올리면 다른 쪽에서 조용히 잘렸습니다. 이제 한 파일에 나란히
 // 있습니다. Godot 이 Jolt 바디 상한을 프로젝트 설정(physics/jolt_physics_3d/limits/max_bodies)으로 두는 것과
 // 같은 방식입니다. 시작할 때 한 번 읽고(버퍼와 Jolt 를 그 크기로 만듦), 바꾸면 다시 실행해야 합니다.
@@ -31,9 +33,10 @@ struct EngineLimits {
 
 namespace engine_settings {
 
-// 파일 내용을 읽습니다. 알릴 것은 messages 에 넣습니다(호출자가 로그로 남김).
-inline EngineLimits parse(const std::string& text, std::vector<std::string>& messages) {
-    EngineLimits l;
+// 파일 내용을 읽습니다. 알릴 것은 messages 에 넣습니다(호출자가 로그로 남김). base 위에 파일에 적힌 값만 덮어,
+// 패키지 기본값 위에 사용자 설정을 겹쳐 읽을 수 있습니다(2026-10-19).
+inline EngineLimits parse(const std::string& text, std::vector<std::string>& messages, EngineLimits base = {}) {
+    EngineLimits l = base;
     auto readU = [&](const std::string& key, const std::string& value, uint32_t& out, uint32_t lo, uint32_t hi) {
         int v = 0;
         if (!fieldparse::toInt(value, v)) {

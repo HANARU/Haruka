@@ -103,15 +103,15 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-01** | Transform SSBO 인덱스 동기화 붕괴 | **해결됨** (2026-08-25, 원래 CRITICAL) | `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L215, L296, L313~326 |
 | **DEF-02** | Zone C Ring Buffer 펜스 추적 부재 | **MEDIUM** (잠재) | `src/memory/HarukaAllocator.cpp` | L177~199 |
 | **DEF-03** | `drawIndirectCount` 무조건 요구 및 폴백 부재 | **해결됨 · 2026-10-04** (원래 HIGH, 요구 제거. 장치 버전 전제는 DEF-97) | `src/renderer/passes/GeometryPass.cpp`, `src/renderer/Renderer.cpp` | L507, L586 |
-| **DEF-04** | `vkCmdPipelineBarrier2` (Synch2) 무조건 호출 | **HIGH** | `src/renderer/RenderContext.cpp`, `src/renderer/passes/CullPass.cpp`, `src/renderer/Renderer.cpp` | L167, L166·L194, L586 |
+| **DEF-04** | `vkCmdPipelineBarrier2` (Synch2) 무조건 호출 | **해결됨 · 2026-10-31** (원래 HIGH, 배리어는 `RenderContext` 래퍼와 `hsync::record` 로만: sync2 가 있으면 KHR 함수, 없으면 1.0 으로 변환. 끝 "패키징 2단계 결과" 절) | `src/renderer/RenderContext.cpp`, `src/renderer/BarrierCompat.hpp`, `src/renderer/Renderer_render.cpp` | `pipelineBarrier` · `memoryBarrier` · `transitionImage` |
 | **DEF-05** | 스왑체인 리사이즈 시 GPU In-Flight 자원 파괴 | **해결됨** | `src/renderer/Renderer_swap.cpp` | L59~60 |
-| **DEF-06** | MSAA `LAZILY_ALLOCATED` 메모리 속성 누락 | **HIGH** | `src/renderer/passes/GeometryPass.cpp` | L239 |
+| **DEF-06** | MSAA `LAZILY_ALLOCATED` 메모리 속성 누락 | **해결됨 · 2026-10-31** (원래 HIGH, MSAA 컬러만 지연 할당 타입에 핵심 힙 밖으로. 깊이는 SAMPLED · STORE 라 제외) | `src/renderer/passes/GeometryPass.cpp`, `src/memory/HarukaAllocator.cpp` | `acquireSizeDependent`, `allocLazyImage` |
 | **DEF-07** | `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터 | **해결됨 · 2026-08-26** (원래 MEDIUM, A-1: EditorApp 구독 + 컴포넌트 `notifyDestroy`) | `src/core/World.hpp`, `src/core/World.cpp` | L27, L27 |
-| **DEF-08** | 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성) | **HIGH** | `src/core/Engine.cpp`, `CMakeLists.txt` | `Engine::Engine`, CMake `if(ANDROID)` 분기 (예전 `main.cpp` L38) |
+| **DEF-08** | 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성) | **HIGH · 빌드는 해결(2026-10-31)**, 헤드셋 실행 확인 남음. 창 팩토리 · 표면 없는 AndroidWindow · `android_main` · OpenXR 로더 · APK(Gradle 없이) | `src/core/Engine.cpp`, `src/platform/android/AndroidMain.cpp`, `cmake/HarukaAndroid.cmake` | `Engine::Engine`, `android_main` |
 | **DEF-09** | 멀티뷰 절반 구현 (피처만 켜지고 경로 없음) | **해결됨 · 2026-10-04** (원래 HIGH, 첫 단계는 눈마다 두 번 그리기. 셰이더 · UBO 는 두 눈 기준이라 멀티뷰는 Quest 이식 때 뷰 번호만 바꿔 켬) | `src/renderer/Renderer_render.cpp`, `shaders/include/haruka_shared.h` | `drawFrame` 의 눈 루프 |
 | **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **해결됨 · 2026-10-14** (원래 MEDIUM, `Config/engine.ini` 의 render.maxDrawRows · render.maxLights · physics.maxBodies) | `src/core/EngineSettings.hpp`, `src/core/Engine.cpp` | `loadEngineLimits` |
 | **DEF-11** | 셰이더 빌드 파이프라인 결함 (DEPENDS 누락·하드코딩·고아·죽은 파일) | **해결됨 · 2026-10-04** (원래 MEDIUM) | `CMakeLists.txt`, `shaders/include/` | L94~108 |
-| **DEF-12** | `World::tick`이 에디터 Play 상태에서만 실행 | **MEDIUM** | `src/core/Engine.cpp` | `Engine::run` 의 Tick 블록 (예전 `main.cpp` L115~119) |
+| **DEF-12** | `World::tick`이 에디터 Play 상태에서만 실행 | **해결됨 · 2026-10-19** (원래 MEDIUM, 엔진 앞단 인터페이스 + 게임 실행 파일 `HarukaGame`. 끝 "패키징 1단계 결과" 절) | `src/core/Engine.cpp`, `src/core/IEngineFrontend.hpp` | `Engine::run` |
 | **DEF-13** | `FrameUBO`에 `invViewProj` 부재 | **보류 · 2026-10-14** (LOW, 첫 사용처가 생길 때. 렌더 확장이 CPU 행렬을 받음) | `shaders/include/haruka_shared.h` | `FrameUBO` |
 | **DEF-14** | `GpuTransform` 셰이더 4곳 중복 선언, 공유 include 부재 | **해결됨 · 2026-10-04** (원래 LOW, `haruka_shared.h`) | `shaders/pbr.vert`, `depth.vert`, `shadow.vert`, `triangle.vert` | L25, L18, L18, L19 |
 | **DEF-15** | `prevViewProj` 선언만 존재, TAA 입력 미비 | **해결됨 · 2026-10-04** (원래 LOW, 가짜 TAA 잔재와 함께 제거) | `shaders/post.frag` 외 4개 셰이더 | L48~51 |
@@ -141,7 +141,7 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-39** | `defaultCube` 탄젠트 handedness 반전 (여섯 면 전부) | **해결됨 · 2026-08-25** (원래 MEDIUM · 미검증 → 실측으로 성립 확인) | `src/assets/GltfLoader.cpp` | `defaultCube`, 11-4절 |
 | **DEF-40** | 라인 오버레이 정점 버퍼의 GPU 인플라이트 레이스 | **해결됨 · 2026-10-02** (원래 MEDIUM, 라인·기즈모 삼각형 버퍼를 프레임 슬롯별로 분리) | `src/renderer/passes/GeometryPass.*` | 라인 오버레이 정점 버퍼 |
 | **DEF-41** | 콜라이더가 `Transform.scale`을 반영하지 않음 | **해결됨 · 2026-08-25** (원래 MEDIUM · 절차 도형 선결 조건) | `src/physics/PhysicsSystem.cpp` | 바디 생성 지점, 11-6절 |
-| **DEF-42** | 힙이 1GB 미만일 때 Zone 오프셋이 실제 할당 범위를 넘음 | **MEDIUM** (Quest 포팅 전 필수) | `src/memory/HarukaAllocator.cpp`, `HarukaAllocator.hpp` | init 경로, Zone 상수 |
+| **DEF-42** | 힙이 1GB 미만일 때 Zone 오프셋이 실제 할당 범위를 넘음 | **해결됨 · 2026-10-31** (원래 MEDIUM, 1GB 를 한 번에 잡고 못 잡으면 이유를 적은 예외로 멈춤. 축소 경로 삭제) | `src/memory/HarukaAllocator.cpp`, `src/memory/MemoryTypeSelect.hpp` | `init`, `hmem::planCoreHeap` |
 | **DEF-43** | 세터 안의 `resetIfLive`로 인한 매 프레임 바디 재생성 | **해결됨 · 2026-10-02** (원래 LOW, 재생성을 편집 확정 훅으로 옮김) | `src/components/RigidBodyComponent.cpp` | `resetIfLive` |
 | **DEF-44** | `RIGID:`의 enum 서수 직렬화 | **해결됨 · 2026-10-02** (원래 LOW, 이름으로 기록하고 옛 순번도 읽음) | `src/assets/SceneSerializer.cpp` | `RIGID:` 기록 경로 |
 | **DEF-45** | `uploadMesh`의 핸들 누수 | **해결됨 · 2026-08-25** (원래 LOW) | `src/renderer/GpuScene.cpp` | `uploadMesh`, 11-10절 |
@@ -261,6 +261,8 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 **[정정]** 이전 판은 호출 지점을 `RenderContext.cpp`의 `transitionImage` 한 곳(L154-L168)으로만 적었으나, 실제 호출 지점은 세 곳이며 정확한 위치도 다릅니다. 그리고 DEF-03과 마찬가지로 실패는 디바이스 생성 단계에서 먼저 일어납니다.
 
 * `vkCmdPipelineBarrier2`가 `RenderContext.cpp:167`, `CullPass.cpp:166`, `CullPass.cpp:194` 세 곳에서 **무조건** 호출됩니다.
+  **[갱신 · 2026-10-19]** `CullPass.cpp` 는 2026-10-04 에 지웠습니다. 지금 직접 호출은 `RenderContext.cpp`(`transitionImage`) 한 곳과
+  `Renderer_render.cpp` 네 곳입니다(끝 "패키징 1단계 결과" 절).
 * `Renderer.cpp:599-613`이 `Vulkan13Features{synchronization2}`를 조건 없이 요구하므로, 이 피처가 없는 디바이스에서는 `vkCreateDevice`부터 실패합니다.
 
 ### 4-3. 수정 가이드라인 (담당 에이전트 지시사항)
@@ -1468,13 +1470,13 @@ Verbose 로 옮깁니다.
 |---|---|---|---|
 | DEF-95 | MEDIUM · **해결 2026-10-04** | 카메라 투영의 깊이 범위가 Vulkan 의 [0,1] 이 아니라 [-1,1] 입니다. `Reflect.hpp` 가 `GLM_FORCE_DEPTH_ZERO_TO_ONE` 없이 GLM 을 먼저 포함해, 뒤에 정의한 매크로가 효과가 없습니다. 실제 근평면이 0.1m 가 아니라 약 0.2m 이고, 그림자 투영([0,1])과 규약이 섞여 있으며, SSAO 선형 깊이 계산은 [0,1] 을 가정합니다 | `CameraComponent.cpp` 의 `glm::perspective`, `Reflect.hpp`, `linDepth.frag` |
 | DEF-96 | MEDIUM · **해결 2026-10-04** | 감마가 두 번 적용됩니다. `post.frag` 가 `pow(1/2.2)` 를 한 값을 sRGB 스왑체인에 써서 GPU 가 한 번 더 변환합니다. 화면이 의도보다 밝고 흐리며, 노출은 이 상태에 맞춰져 있습니다. UI 도 같은 스왑체인에 그리므로 고치는 방법에 따라 UI 색도 바뀝니다 | `post.frag`, `GlfwSwapchain::chooseFormat` |
-| DEF-97 | HIGH · 열림 (Quest 이식) | 엔진이 Vulkan 1.4 장치를 전제합니다. 1.3 · 1.4 기능 구조체를 조건 없이 연결하고, 1.4 코어 이름 `vkCmdPushDescriptorSet` 를 6곳에서 직접 부릅니다. Quest 2 · Pro 는 1.1, Quest 3 은 1.3 입니다(push descriptor · synchronization2 는 확장으로 있음). DEF-04 와 함께 처리합니다 | `Renderer::createLogicalDevice`, 6개 호출부 |
+| DEF-97 | HIGH · **해결 2026-10-31** (끝 "패키징 2단계 결과" 절) | 엔진이 Vulkan 1.4 장치를 전제합니다. 1.3 · 1.4 기능 구조체를 조건 없이 연결하고, 1.4 코어 이름 `vkCmdPushDescriptorSet` 를 6곳에서 직접 부릅니다. Quest 2 · Pro 는 1.1, Quest 3 은 1.3 입니다(push descriptor · synchronization2 는 확장으로 있음). DEF-04 와 함께 처리합니다 | `Renderer::createLogicalDevice`, 6개 호출부 |
 | DEF-98 | LOW · **해결 2026-10-04** | 셰이더 핫 리로드가 덜 복사된 .spv 로 파이프라인을 만들다 예외를 잡지 못해 에디터가 종료될 수 있었습니다(옛 파이프라인을 먼저 지움) | `HotReloader`, `Renderer::reloadPipelines`, 각 패스 `rebuildPipelines` |
 | DEF-99 | MEDIUM · **해결 2026-10-04** (VR) | Kinematic 바디 동기화가 스텝 루프 뒤에 한 번 돌아 한 프레임 늦고, 한 프레임에 스텝이 여럿이면 목표를 지나칩니다. VR 손과 잡은 물체에서 드러납니다 | `PhysicsSystem::tick` |
 | DEF-100 | LOW · **해결 2026-10-04** | `AOPass::destroy` 가 Zone C 할당을 `freeB` 로 돌려줘, Zone B 빈 목록에 960MB 이상 범위가 들어갑니다. 지금은 종료할 때만 일어납니다 | `AOPass.cpp`, `HarukaAllocator::freeB`(구역 확인 없음) |
 | DEF-101 | LOW · **해결 2026-10-14** (DEF-22) | `StaticMeshComponent::transparent` 는 디테일에서 바꿀 수 있지만 저장되지 않고, 불러올 때 에셋 값으로 다시 정해집니다 | `SceneSerializer`, DEF-22 와 함께 |
 | DEF-102 | LOW · **해결 2026-10-04** (DEF-21) | 씬 카메라의 yaw · pitch 가 디테일에 없고 저장되지 않아, 씬 카메라는 방향을 정할 수 없고 저장하면 방향을 잃습니다 | `CameraComponent`, DEF-21 과 함께 |
-| DEF-103 | LOW · 열림 (Quest 이식) | `AndroidWindow` 가 `IWindow` 의 순수 가상 클립보드 함수 두 개를 구현하지 않아 추상 클래스입니다 | `AndroidWindow.hpp`, DEF-08 과 함께 |
+| DEF-103 | LOW · **해결 2026-10-31** (클립보드 스텁, 표면 없는 0x0 창) | `AndroidWindow` 가 `IWindow` 의 순수 가상 클립보드 함수 두 개를 구현하지 않아 추상 클래스입니다 | `AndroidWindow.hpp`, DEF-08 과 함께 |
 
 **문서 정정**
 - Quest 2 · Pro · 3 의 두 눈 시야는 기울어져(canted) 있지 않습니다(HMD 기하 데이터베이스의 시야 회전 0°). 9-1절,
@@ -1712,7 +1714,7 @@ physics bodies 4096" 이 남는지. ② 값을 바꾸면(예: render.maxLights=2
 
 | ID | 심각도 · 상태 | 내용 | 다른 엔진의 방법 | 수정 | 확인 |
 |---|---|---|---|---|---|
-| DEF-106 | MEDIUM · **해결 2026-10-14** | 창을 최소화하면 프레임버퍼가 0x0 이 되어 표시가 실패하고, 스왑체인을 다시 만드는 함수가 복원될 때까지 이벤트만 기다렸습니다. 그동안 메인 루프 전체가 멈춰 시뮬레이션 · XR 도 멈추고, 최소화한 채 작업 표시줄에서 창을 닫으면 엔진이 끝나지 않았습니다(복원해야 끝남). 일괄 점검 중 캡처 창이 최소화되며 드러났습니다 | UE 의 Slate 는 최소화한 창을 그리지 않고 엔진 루프는 계속 돌립니다. Godot 도 그릴 수 없는 창은 건너뛰고 루프는 쉬어 가며 돕니다. Vulkan 입문서의 "복원될 때까지 기다리기"가 Haruka 에 남아 있던 것입니다 | `ISwapchain::hasArea()`. 최소화 중에는 데스크톱 화면을 건너뛰고(XR 프레임이면 두 눈만 그려 헤드셋은 계속 보임), 스왑체인 다시 만들기는 복원된 뒤 첫 프레임이 합니다. 에디터 UI 배치는 0 크기를 다루지 않으므로 최소화 중에는 부르지 않고, 시뮬레이션 · 소리는 계속 돕니다. 그릴 것이 없을 때는 약 60Hz 로 쉬어 갑니다 | 최소화한 채 닫으면 0.42초에 `Clean exit`(단안 · 스테레오 흉내). 최소화 중 CPU 1% 안팎(보일 때 90%). 복원 뒤 화면 0 픽셀. Play 중 2.5초 최소화한 동안 공이 떨어져 받침대 위에 놓임. 검증 0. 헤드셋에서 최소화 중 두 눈이 계속 그려지는지는 Quest Link 확인 항목 |
+| DEF-106 | MEDIUM · **해결 2026-10-14** | 창을 최소화하면 프레임버퍼가 0x0 이 되어 표시가 실패하고, 스왑체인을 다시 만드는 함수가 복원될 때까지 이벤트만 기다렸습니다. 그동안 메인 루프 전체가 멈춰 시뮬레이션 · XR 도 멈추고, 최소화한 채 작업 표시줄에서 창을 닫으면 엔진이 끝나지 않았습니다(복원해야 끝남). 일괄 점검 중 캡처 창이 최소화되며 드러났습니다 | UE 의 Slate 는 최소화한 창을 그리지 않고 엔진 루프는 계속 돌립니다. Godot 도 그릴 수 없는 창은 건너뛰고 루프는 쉬어 가며 돕니다. Vulkan 입문서의 "복원될 때까지 기다리기"가 Haruka 에 남아 있던 것입니다 | `ISwapchain::hasArea()`. 최소화 중에는 데스크톱 화면을 건너뛰고(XR 프레임이면 두 눈만 그려 헤드셋은 계속 보임), 스왑체인 다시 만들기는 복원된 뒤 첫 프레임이 합니다. 에디터 UI 배치는 0 크기를 다루지 않으므로 최소화 중에는 부르지 않고, 시뮬레이션 · 소리는 계속 돕니다. 그릴 것이 없을 때는 약 60Hz 로 쉬어 갑니다 | 최소화한 채 닫으면 0.42초에 `Clean exit`(단안 · 스테레오 흉내). 최소화 중 CPU 1% 안팎(보일 때 90%). 복원 뒤 화면 0 픽셀. Play 중 2.5초 최소화한 동안 공이 떨어져 받침대 위에 놓임. 검증 0. 2026-10-16 헤드셋: Play 중 20초 최소화하는 동안 세션이 FOCUSED 를 유지했고 복원 뒤 거울 화면이 돌아옴(끝 "헤드셋 2차 확인") |
 | DEF-107 | HIGH · **해결 2026-10-14** | 반높이가 Jolt 의 기본 모서리 반경(0.05m)보다 작은 상자, 곧 두께 10cm 이하의 바닥 · 벽 콜라이더는 셰이프 생성이 실패하는데, 결과를 확인하지 않고 꺼내 썼습니다. Jolt 의 `Result` 는 오류 문자열과 결과를 같은 자리에 담아, 실패한 결과를 꺼내면 쓰레기 포인터가 나옵니다. 그런 상자가 하나라도 있으면 Play 를 누르는 순간 엔진이 접근 위반으로 죽었습니다(오류 기록 없음). 크기 0 인 구 · 상자도 같았습니다 | Godot 의 Jolt 모듈과 UE Chaos 는 모서리 반경(collision margin)을 가장 짧은 변에 맞춰 줄입니다. Godot 은 만들 수 없는 크기면 오류를 남기고 셰이프를 만들지 않습니다 | 상자의 모서리 반경을 `min(0.05, 가장 짧은 반변의 절반)` 으로(두께 10cm 이상이면 예전과 같음). 셰이프 생성 결과의 오류를 확인하고, 스케일 적용 뒤 0.1mm 보다 작은 반지름 · 반변은 만들지 않고 경고합니다(Play · 속성 편집 때 다시 시도) | `physics_lifecycle` 에 5개 추가(두께 10cm · 1cm 상자에 바디가 생기고 구가 그 위 y=0.25 에 놓임, 두께 0 상자 · 반지름 0 구는 실패로 표시). 반경 조정을 빼면 3개 실패, 예전 코드로 되돌리면 테스트가 충돌합니다. 실기에서 Play 정상 |
 | DEF-108 | LOW · **해결 2026-10-14** | 씬 · 프리팹은 회전을 오일러 각(`ROT:`)으로만 썼습니다. 엔진이 들고 있는 값은 쿼터니언이라 쓰고 읽을 때마다 마지막 자리가 흔들렸고, Play → Stop 은 씬을 글로 써 두었다가 다시 읽으므로 아무것도 바꾸지 않아도 Play 할 때마다 회전이 조금씩 바뀌었습니다. 무작위 회전 2000개 중 1988개가 한 번 왕복으로 값이 바뀝니다. 위치 · 색은 예전에 이미 정밀도를 잃지 않게 고쳐 두었습니다 | Unity 는 쿼터니언을 저장하고 오일러 각은 편집 화면용으로 따로 둡니다. Godot 은 행렬을 저장합니다. UE 는 오일러 각(FRotator)이 원본 값이라 변환이 없습니다 | `ROT:` 다음 줄에 쿼터니언을 정확한 값으로 함께 씁니다(`QUAT:x y z w`, `TransformText.hpp`). 읽을 때 QUAT 에서 다시 구한 오일러 각이 ROT 와 비트까지 같으면 QUAT 를, 다르면(사람이 ROT 를 손으로 고침) ROT 를 씁니다. QUAT 가 없는 옛 파일은 예전처럼 읽고, 옛 엔진은 모르는 줄로 건너뜁니다 | `scene_components` 에 7개 추가(무작위 2000개가 다섯 번 왕복해도 비트까지 같음, ROT 를 고치면 ROT 가 이김, 옛 파일 · 깨진 QUAT). QUAT 를 무시하면 2개, 늘 QUAT 를 쓰면 1개 실패. 실기에서 Play → Stop 세 번 · Load → Save 뒤 저장 결과가 같음 |
 | DEF-109 | MEDIUM · **해결 2026-10-14** | 디테일의 컴포넌트 추가 버튼을 한 줄에 늘어놓아, 기본 창 크기(150% 배율)에서 컴포넌트가 없는 액터는 `+ Audio` 가 잘리고 `+ RigidBody` 는 보이지 않아 누를 수 없었습니다. DEF-22 전부터 있던 배치입니다 | UE · Unity 는 추가 버튼 하나가 검색할 수 있는 목록을 엽니다 | 패널 폭에 맞춰 여러 줄로 나눕니다. 폭은 스크롤 막대 자리를 늘 뺀 값이라 막대가 생기고 없어져도 줄 나눔이 바뀌지 않고, 패널 폭이 바뀌면(4px 양자화) 디테일을 다시 만듭니다. Layer 2 컴포넌트가 많아지면 UE 식 목록이 낫습니다(에디터 Phase 4) | 실기: 빈 액터는 `+ Light + Camera + Mesh` / `+ Audio + RigidBody` 두 줄, Glass 는 세 개 / 한 개 |
@@ -1745,23 +1747,259 @@ DEF-34 측정을 더했습니다.
 | 프레임 | 통과 | 71 FPS, 프레임 13.95ms 로 72Hz 를 유지 |
 | 벗었다 쓰기 | 통과 | 벗으면 STOPPING → IDLE, 다시 쓰면 READY → FOCUSED 로 이어짐. Oculus 서버 로그에서 READY 가 착용 센서가 켜진 직후에 오는 것을 확인했습니다. 헤드셋을 쓰지 않은 동안 세션이 IDLE 에 머무는 것은 런타임의 정상 동작입니다 |
 | Play · Stop 과 세션 | 통과(DEF-111 수정 뒤) | 아래 신규 결함 표 |
-| 검증 메시지 | 세션마다 1건 → 수정(헤드셋 확인 남음) | DEF-110 |
-| 최소화(DEF-106) · 소리 | 남음 | 아래 "남은 것" |
+| 검증 메시지 | 세션마다 1건 → 수정, 2026-10-16 헤드셋에서 Play 마다 0건 | DEF-110 |
+| 최소화(DEF-106) · 소리 | 2026-10-16 확인 | 끝 "헤드셋 2차 확인" 절 |
 
 **신규 결함**
 
 | ID | 심각도 · 상태 | 내용 | 다른 엔진의 방법 | 수정 | 확인 |
 |---|---|---|---|---|---|
-| DEF-110 | LOW · **해결 2026-10-15(헤드셋 확인 남음)** | XR 세션을 만들 때마다 검증 오류 `VUID-VkShaderModuleCreateInfo-pCode-08740` 이 한 건 나옵니다. SPIR-V 가 `StorageImageMultisample` 을 선언했는데 장치에서 `shaderStorageImageMultisample` 기능을 켜지 않았다는 내용입니다. 엔진 셰이더에는 다중 샘플 저장 이미지가 없고, 메시지 수가 실행마다 만든 세션 수와 같았습니다(1 · 1 · 3). 그래서 Oculus 런타임이 엔진의 Vulkan 장치에 자기 셰이더를 만들면서 생긴 것으로 판단합니다. 런타임은 장치를 만들 때 확장만 덧붙이고 이 기능은 켜지 않습니다. 화면에는 영향이 보이지 않습니다 | 짧은 검색으로는 다른 엔진의 사례를 찾지 못했습니다 | 사용자 결정. 런타임이 고른 장치로 XR 장치를 만들 때(`Renderer::createLogicalDevice`) GPU 가 지원하면 `shaderStorageImageMultisample` 을 켭니다. 데스크톱 경로는 그대로입니다 | 빌드 경고 0, 테스트 15개. 헤드셋 없이 `--xr`: "No headset found" 경고 뒤 데스크톱으로 계속, Play · Stop 정상, 검증 메시지 0, `Clean exit`. 메시지가 사라졌는지는 다음 헤드셋 연결 때 확인 |
+| DEF-110 | LOW · **해결 2026-10-15(헤드셋 확인 2026-10-16)** | XR 세션을 만들 때마다 검증 오류 `VUID-VkShaderModuleCreateInfo-pCode-08740` 이 한 건 나옵니다. SPIR-V 가 `StorageImageMultisample` 을 선언했는데 장치에서 `shaderStorageImageMultisample` 기능을 켜지 않았다는 내용입니다. 엔진 셰이더에는 다중 샘플 저장 이미지가 없고, 메시지 수가 실행마다 만든 세션 수와 같았습니다(1 · 1 · 3). 그래서 Oculus 런타임이 엔진의 Vulkan 장치에 자기 셰이더를 만들면서 생긴 것으로 판단합니다. 런타임은 장치를 만들 때 확장만 덧붙이고 이 기능은 켜지 않습니다. 화면에는 영향이 보이지 않습니다 | 짧은 검색으로는 다른 엔진의 사례를 찾지 못했습니다 | 사용자 결정. 런타임이 고른 장치로 XR 장치를 만들 때(`Renderer::createLogicalDevice`) GPU 가 지원하면 `shaderStorageImageMultisample` 을 켭니다. 데스크톱 경로는 그대로입니다 | 빌드 경고 0, 테스트 15개. 헤드셋 없이 `--xr`: "No headset found" 경고 뒤 데스크톱으로 계속, Play · Stop 정상, 검증 메시지 0, `Clean exit`. 2026-10-16 헤드셋: Play 두 번 모두 검증 메시지 0(끝 "헤드셋 2차 확인") |
 | DEF-111 | MEDIUM · **해결 2026-10-15** | `--xr` 이면 실행 내내 세션을 유지해 편집 중에도 헤드셋에 에디터 월드를 그렸습니다. 사용자는 헤드셋 화면을 보고 실행 중이라고 여겨 Stop 을 눌렀지만, 에디터가 Play 상태가 아니어서 아무 일도 일어나지 않았습니다(그 실행의 로그에 Play 기록이 없음). Stop 버튼은 Play 중이 아닐 때도 같은 모양이라 알아챌 수 없었습니다 | UE 의 VR Preview 는 Play 모드의 한 종류라 Stop 하면 VR 세션이 끝나고 헤드셋은 런타임 홈으로 돌아갑니다. Unity 도 에디터에서는 Play 모드에 들어갈 때 XR 을 켜고 나올 때 끕니다 | 사용자 결정("Play 동안만 VR"). 시작할 때는 OpenXR 인스턴스와 Vulkan 장치만 준비합니다. 엔진이 프레임을 시작하기 전에 Play 상태를 보고(`Engine::syncXrWithPlay`) Play 에 들어가면 세션을 만들고, Stop 하면 `xrRequestExitSession` 으로 정상 종료를 요청합니다(`XrSystem::requestExit`). 런타임이 STOPPING → IDLE → EXITING 을 보내면 스왑체인을 떼고 세션을 지웁니다. 세션이 돌고 있지 않으면(헤드셋을 쓰지 않아 IDLE) 바로 지웁니다. 일시정지 동안에는 세션을 유지합니다. 런타임이 Play 중에 세션을 끝내면 Play 는 데스크톱으로 계속하고 다음 Play 에서 다시 엽니다 | 실기: 편집 중에는 세션 없음. Play → 세션 생성 → FOCUSED. Stop(FOCUSED) → STOPPING → IDLE → EXITING → 세션 지움. Stop(IDLE) → 바로 지움. 다시 Play → 새 세션. Pause · Resume 동안 세션 유지 |
 
 **남은 것.**
-- **최소화(DEF-106):** 데스크톱 창을 최소화해도 헤드셋 두 눈이 계속 그려지는지는 헤드셋을 쓰고 봐야 합니다.
+- ~~**최소화(DEF-106)**~~: 2026-10-16 확인(끝 "헤드셋 2차 확인").
 - **소리:** 엔진은 Windows 기본 재생 장치로 소리를 냅니다. 이 PC 의 기본 장치는 PC 에 연결된 다른 헤드셋이라, 지금은 소리가 Quest
   Pro 로 나가지 않습니다. 런타임은 `XR_OCULUS_audio_device_guid` 로 헤드셋 장치(Oculus Virtual Audio Device)를 알려 줍니다. 처리
-  방법과 "고개를 돌리면 소리의 좌우가 바뀜" 확인은 사용자 지시에 따라 뒤로 미뤘습니다.
+  방법과 "고개를 돌리면 소리의 좌우가 바뀜" 확인은 사용자 지시에 따라 뒤로 미뤘습니다. 2026-10-16 에는 사용자가 기본 장치를 헤드셋으로
+  바꾼 뒤 확인했습니다(끝 "헤드셋 2차 확인"). 같은 날부터 엔진은 에디터에서 고른 출력 장치로 소리를 내고, XR Play 동안에는
+  헤드셋 장치로 자동 전환합니다(Audio_Design.md 8절).
 - **Stop 직후 곧바로 Play:** 끝나는 중인 세션이 다 끝난 뒤 다시 여는 경로는 재현하지 못했습니다. 런타임이 종료 요청을 받은 그
   프레임 안에 EXITING 까지 보내서, 다음 Play 때는 이미 세션이 없었습니다.
 
 **검증.** 빌드 경고 0. 단위 테스트 15개 통과. DEF-111 수정은 OpenXR 런타임이 있어야 도는 경로라 단위 테스트를 더하지 않고 위 실기로
 확인했습니다. 모든 실행이 `Clean exit` 으로 끝났습니다.
+
+## 헤드셋 2차 확인 (Quest Link, 2026-10-16)
+
+1차 확인에서 남은 항목과 엔진 기본 기능 3단계(플레이어 리그 · 잡기)를 헤드셋으로 보았습니다. 검증 레이어를 켠 Release 빌드를 `--xr` 로
+띄우고, 에디터는 창 메시지로 조작했습니다. 사용자가 Windows 기본 재생 장치를 헤드셋(Oculus Virtual Audio Device)으로 바꿨고, 세션 없는
+점검 프로그램으로 런타임에 `XR_EXT_local_floor` 가 있음을 먼저 확인했습니다.
+
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| DEF-110 검증 메시지 | 통과 | LightingProbe 에서 Play → Stop 두 번, 두 번 모두 0건(수정 전 세션마다 1건). 레이어가 켜졌다는 표시(`Logging validation error to Logs\validation.txt`)도 확인 |
+| 리그 없는 씬의 높이 | 고침 | 에디터 카메라(바닥 위 0.3m)가 곧 눈높이라 바닥에 누운 듯 보였습니다. 사용자 결정으로 "XR 에는 언제나 리그"를 넣었습니다(Engine_Basics_Design.md 2-5) |
+| 보이지 않는 리그 | 통과 | 실제 키: `Reference space: LOCAL_FLOOR (real height)`, `XR rig: none in the scene; standing on the floor 0.3 m below the camera`. 고정 1.0m(프로젝트 설정을 잠시 바꿈): `LOCAL + 1.00 m fixed eye height`. 거울 화면에서 두 높이가 뚜렷이 다름. 둘 다 검증 0, `Clean exit` |
+| 플레이어 리그(XrDemo) | 통과 | `Reference space: LOCAL_FLOOR (real height)`(씬 리그를 씀). 사용자가 바닥 · 이동 · 스냅 회전 · 손 표시 · 잡기 · 던지기 · 진동을 해 보고 "큰 문제는 없었다" |
+| 최소화(DEF-106) | 통과 | Play 중 20초 최소화하는 동안 세션이 FOCUSED 를 유지하고 오류가 없었음. 복원하자 스왑체인을 다시 만들고 거울 화면이 돌아옴(71 FPS). 최소화 중에는 에디터 UI 가 입력을 받지 않아 툴바 Stop 이 듣지 않는 것은 의도된 동작 |
+| 소리 | 확인 | XrDemo 에 AudioProbe 를 두고(플레이어 오른쪽 뒤) Play. 엔진 쪽 오류 없음. 사용자는 세부 보고 없이 "이 정도면 충분하다"고 판단 |
+| 세션 종료 | 통과 | 헤드셋을 벗어 세션이 IDLE 인 채 Stop 하면 종료 요청 없이 바로 지움(DEF-111 의 규칙) |
+
+**확인 중 실수.** 마지막 정리 스크립트가 꺼낸 AudioProbe 를 Ctrl+Z 로 되돌리려 했지만, Stop 이 Undo 기록을 지우므로 되돌려지지
+않았습니다. 그래서 닫을 때 저장 확인 창이 떴고 XrDemo.hscene 이 AudioProbe 를 포함해 저장되었습니다. 처음 만든 생성 스크립트로 원본을
+다시 만들어, AudioProbe 와 머리 주석 말고는 저장된 내용과 같음을 확인한 뒤 원본으로 되돌렸습니다. 결함이 아니라 점검 절차의 실수입니다.
+
+**남은 것.** 같은 날 사용자 결정으로 소리 출력 장치를 에디터에서 고르게 하고 XR Play 동안 헤드셋 장치로 자동 전환하게 했습니다
+(Audio_Design.md 8절). 헤드셋을 쓰고 전환되는지 보는 확인이 남았습니다. Stop 직후 곧바로 Play 하는 경로는 여전히 재현하지 못했습니다.
+
+## 패키징 1단계 결과와 신규 결함 (2026-10-17 ~ 10-24)
+
+**목표.** 2026-10-17 사용자가 패키징(Windows · Android XR)을 목표로 두고 "현재 열려 있는 에러부터 해결"하기로 했습니다. 열린 결함을 코드와
+대조하고 다른 엔진 조사 6건(런타임 분리 · Android OpenXR 진입 · Vulkan 1.1 · 에셋 배포와 쓰기 경로 · GPU 힙 · 묶음 형식)을 거쳐 사용자
+결정을 받았습니다. 정본은 [Packaging_Design.md](Packaging_Design.md) 입니다.
+
+**DEF-12 해결(2026-10-19).** 월드 · 게임 모듈 · 동적 모듈 tick 이 에디터 Play 에 묶여 있던 것은 tick 조건 한 줄이 아니라 메인 루프 전체가
+에디터를 직접 부르는 구조였습니다. 엔진이 에디터 대신 앞단 인터페이스(`IEngineFrontend`)를 부르게 하고, 에디터를 뺀 엔진을
+`HarukaRuntime` 라이브러리로 묶어 에디터 실행 파일과 게임 실행 파일(`HarukaGame`, 시작 씬을 열고 처음부터 Play)이 각각 링크하게 했습니다.
+게임 실행 파일에는 에디터 코드가 들어가지 않고(실행 파일 문자열 검사), 런타임 코드가 에디터에 기대면 링크가 실패합니다.
+
+**기록 정정.**
+- DEF-08 의 해결 사양("IWindow 를 팩토리 뒤로, AndroidWindow 로 화면 표면")은 Quest 에 맞지 않습니다. Khronos hello_xr · Meta OpenXR SDK
+  예제는 Android 에서 VkSurfaceKHR · VkSwapchainKHR 를 만들지 않고 XR 스왑체인에만 그립니다. 창 없는 렌더 경로(빈 스왑체인), NativeActivity,
+  Khronos OpenXR 로더가 맞습니다(Packaging_Design.md 2절).
+- DEF-04 의 위치: `CullPass.cpp` 는 2026-10-04 에 지웠습니다. `vkCmdPipelineBarrier2` 직접 호출은 `RenderContext.cpp`(`transitionImage`)
+  한 곳과 `Renderer_render.cpp` 네 곳이고, 2형식 배리어 구조체는 `GpuScene.cpp` · `Renderer.cpp` · `AOPass.cpp` · `GeometryPass.cpp` 가
+  `transitionImage` 로 넘깁니다. Quest 2 · Pro 의 현재 OS 는 Vulkan 1.1.295 이고 `VK_KHR_synchronization2` 는 있습니다(gpuinfo.org).
+- DEF-97: Android 의 libvulkan 은 `vkCmdPushDescriptorSet` 을 API 36 부터, `vkCmdPipelineBarrier2` 를 API 33 부터 내보내므로 Quest(API 34)
+  에서는 링크 · 로드부터 막힙니다. Quest Link 런타임도 Vulkan 범위를 1.0 ~ 1.2 로 알려 줍니다.
+
+**신규 결함.**
+
+| ID | 심각도 | 내용 | 상태 |
+|---|---|---|---|
+| DEF-112 | MEDIUM | 디버그 선(`hdebug`) 목록을 에디터의 tick 만 비웠습니다. 에디터가 없거나(게임 실행 파일) 최소화로 에디터 tick 을 건너뛰면, 디버그 표시를 켠 잡기 컴포넌트가 매 프레임 넣는 선이 끝없이 쌓입니다 | 해결 · 2026-10-19. 엔진이 앞단 tick 뒤 · 월드 tick 전에 비움 |
+| DEF-113 | MEDIUM | UI 패스의 렌더 패스(finalLayout = PRESENT_SRC)가 스왑체인 이미지의 표시 전 레이아웃 전환을 맡아, UI 가 없으면(게임 실행 파일) 톤매핑이 남긴 COLOR_ATTACHMENT 레이아웃 그대로 표시했습니다. 프레임마다 검증 오류 `VUID-VkPresentInfoKHR-pImageIndices-01430` | 해결 · 2026-10-24. UI 가 없으면 렌더러가 직접 전환(검증 20건 → 0) |
+| DEF-114 | MEDIUM | 셰이더 · 에셋 · 설정 · 로그를 작업 폴더 기준 상대 경로로 열어, `run.bat` 의 `pushd` 덕분에만 맞았습니다. 바로가기나 다른 폴더에서 실행하면 셰이더를 찾지 못합니다 | 해결 · 2026-10-19. 패키지 파일은 실행 파일 기준, 쓰는 파일은 쓰기 루트(`core/AppPaths`) |
+| DEF-115 | LOW | 로그 파일을 열지 못해도 아무 표시 없이 로그 없이 돌았습니다(Program Files 에 설치하면 해당) | 해결 · 2026-10-19. 경고를 남기고, 게임은 사용자 폴더에 씀 |
+| DEF-116 | LOW | 경로를 `std::string` 으로 다뤄 시스템 코드 페이지(CP949)로 해석했습니다. 사용자 이름이 한글이면 `%LOCALAPPDATA%` 경로가 깨질 수 있습니다 | 해결 · 2026-10-19. 실행 파일 매니페스트로 코드 페이지를 UTF-8 로 |
+| DEF-117 | LOW | glTF 캐시 파일 이름이 실제 경로의 `std::hash` 라 실행 · 컴파일러마다 달라질 수 있고 에디터(절대 경로)와 게임의 키가 달라, 캐시를 미리 만들어 넣을 수 없었습니다 | 해결 · 2026-10-24. 논리 경로의 FNV-1a 키, 원본 해시는 XXH3-64(묶음 목차와 같은 값), 캐시 형식 v3 |
+| DEF-118 | LOW · 잠재 | 데스크톱 스왑체인 이미지가 0장이면 제출 단계의 `frames_.renderDoneSem(imgIdx)`(`Renderer_render.cpp`)가 범위 검사 없이 읽힙니다. 지금은 스왑체인이 언제나 2장 이상이라 드러나지 않습니다 | 해결 · 2026-10-31. 접근자가 범위 밖이면 VK_NULL_HANDLE, 제출은 데스크톱을 그린 프레임에서만 이미지별 세마포어를 씀 |
+| DEF-119 | LOW | 엔진에 넣은 글꼴이 없습니다(`assets/fonts/default.ttf` 가 없어 Windows 의 Segoe UI 를 씀). Android 에는 쓸 글꼴이 없습니다 | 열림. 게임 UI 를 만들 때 라이선스를 확인한 글꼴을 넣음 |
+
+**빌드 쪽에서 고친 것(결함 번호 없음).** Visual Studio 자동 업데이트(2026-10-20, 재배포 폴더 14.51 → 14.52) 뒤 CMake 캐시의 옛 재배포
+경로 때문에 패키지 생성이 실패했습니다. 캐시된 경로가 사라졌으면 다시 찾게 했습니다. 루트 프로젝트가 C 를 켜지 않아 LZ4(`lz4.c`)가 정적
+C 런타임으로 컴파일되던 링크 경고(LNK4098)도 C 를 켜서 없앴습니다. 실행 파일이 둘이 된 뒤 두 실행 파일의 빌드 후 단계가 같은 폴더로
+셰이더 · 에셋을 복사해, 병렬 빌드에서 가끔 복사가 부딪혀 빌드가 실패했습니다(MSB3073). 복사를 `RuntimeFiles` 대상 하나로 모았습니다.
+
+**확인.** 빌드 경고 0, 테스트 18개 · 검사 775개 통과. 묶음 시험의 변이 14종(머리 · 목차 · 내용 해시 검사 제거, 정렬 제거, 정렬 순서 제거,
+대소문자 키, 점 구성요소 허용, 버전 · incompat 검사 제거, 우선순위 반전, 언제나 LZ4, 범위 읽기 위치, 모르는 코덱 읽기, 같은 우선순위 순서)을
+모두 잡았습니다. 배포 ZIP 을 저장소 밖에 풀어 다른 작업 폴더에서 실행해 시작 씬 · 모델을 묶음에서 읽고 쓰기 루트에만 썼으며, 두 번째
+실행은 묶음 원본 기준으로 glTF 캐시를 썼습니다. 에디터 Play · Stop 회귀도 통과했습니다. 검증 메시지는 모두 0건입니다.
+
+## 패키징 마무리 묶음과 오류 검토 결과 (2026-10-31)
+
+**경위.** 헤드셋을 다른 사람이 쓰고 있어 2026-10-31 사용자가 패키징 2단계(Android 준비)를 먼저 준비하고 "현재 확인 가능한 에러가 남아
+있는지도 검토"하라고 했습니다. 워크플로로 4cc931a 뒤 미커밋 작업 전체를 영역별로 훑고, 찾은 것마다 검증 에이전트 두 명이 코드로 다시
+확인했습니다. 패키징 1단계 코드에서 11건(결함 9건, 결함이 아닌 것 2건), 나머지 미커밋 작업에서 19건(18건이 새 결함, 1건은 1단계의 것과
+같음)이 나왔습니다. 2단계 명세의 비평에서 1건(DEF-120)이 더 나왔습니다. 사용자 결정("전부 권장대로 진행해. 패키징 마무리 묶음부터
+시작해")에 따라 패키징 마무리 묶음 8건을 2단계 전에 고쳤고, 나머지는 열린 결함으로 둡니다.
+
+**결함이 아닌 것.** ① 새 에셋이 배포 ZIP 에서 빠질 수 있다는 지적: 이 저장소의 Visual Studio 생성기는 `CONFIGURE_DEPENDS` 로 빌드마다 다시
+훑고 의존 목록이 바뀌면 묶음을 다시 만듭니다. 기존 에셋을 더 옛 수정 시각의 파일로 덮어쓸 때만 묶음이 낡는데, 이것은 시각 기반 증분 빌드의
+일반 한계입니다. ② 게임 실행 파일에서 첫 XR 세션 생성이 실패하면 그 실행 내내 데스크톱인 것: 결정 3(시작 때 VR 을 쓸 수 없으면 데스크톱,
+다시 시도는 연결 끊김 뒤에만)대로입니다. 이때 창 제목에 "VR unavailable" 이 붙지 않는 표시만 어긋나며, DEF-129 와 함께 봅니다.
+
+**해결(패키징 마무리 묶음).**
+
+| ID | 심각도 | 내용 | 상태 |
+|---|---|---|---|
+| DEF-121 | MEDIUM | `HarukaPak` 에만 UTF-8 코드 페이지 매니페스트가 없어, 시스템 코드 페이지가 CP949 이면 한글 이름의 에셋이 묶음 목차에 CP949 바이트로 들어갔습니다. 개발 중 낱개 파일 실행에서는 찾던 에셋을 배포 ZIP 에서만 조용히 찾지 못하고, CP949 로 나타낼 수 없는 글자가 있으면 잡히지 않은 예외로 도구가 끝나 빌드가 실패합니다. 지금 저장소에는 한글 이름의 에셋이 없어 잠재 결함이었습니다 | 해결 · 2026-10-31. 도구와 모든 시험 실행 파일에 매니페스트, 목차의 경로는 코드 페이지와 상관없이 UTF-8 로(`src/vfs/PathUtf8.hpp`), `main` 은 예외를 이유와 종료 코드 1 로 |
+| DEF-122 | LOW | 묶음을 열 때 목차 크기 검사(`개수 × 크기` 의 합)와 LZ4 블록 수 계산이 64비트에서 넘칠 수 있었고, 압축 블록 크기 0 을 막지 않았습니다. 해시를 다시 맞춰 조작한 묶음은 마운트를 지나 거대한 할당으로 게임을 FATAL 로 끝내거나, 실제 바이트 없이 거대한 크기를 선언할 수 있었습니다. 우연한 손상은 목차 해시가 먼저 막습니다 | 해결 · 2026-10-31. 나눗셈으로 확인, 넘치지 않는 블록 수, 블록마다 원문 크기 · 압축 크기 0 · LZ4 최대 배율을 마운트 때 확인, 읽기는 메모리 부족을 false 로 |
+| DEF-123 | MEDIUM | 소리 파일을 여는 miniaudio 콜백(`vfsOpen`)에 예외 경계가 없었습니다. 씬 · 프리팹의 소리 경로가 올바르지 않은 UTF-8 이면 VFS 의 경로 변환이 `std::system_error` 를 던지고, 이 예외가 리소스 관리자의 잠금을 쥔 채 C 코드를 빠져나가 엔진 전체가 FATAL 로 끝나거나 종료 정리에서 멈출 수 있었습니다 | 해결 · 2026-10-31. VFS 의 읽기 함수(`exists` · `stat` · `readAll` · `readText` · `contentHash` · `diskPath`)가 예외를 던지지 않음(올바르지 않은 UTF-8 은 "없음", 메모리 부족은 false), 콜백은 모든 예외를 오류 코드로, 읽지 못한 이유를 경고로 |
+| DEF-124 | LOW | 에디터가 실행 폴더 전체를 접두어 없이 맨 아래에 마운트해, 프로젝트에서 지우거나 이름을 바꾼 모델 · 프리팹 · 소리를 빌드가 남긴 `build/Release/assets` 의 옛 복사본으로 아무 표시 없이 읽었습니다(4cc931a 대비 에디터 쪽 회귀). 배포 ZIP 에서만 실패가 드러납니다 | 해결 · 2026-10-31. 프로젝트 폴더를 쓰는 에디터는 실행 폴더에서 `shaders/` 만 마운트 |
+| DEF-125 | LOW | `.gltf` 의 외부 uri 에 `../` · `./` 가 있으면 tinygltf 가 이은 경로를 VFS 가 거부해, 버퍼는 모델 전체가 기본 큐브로, 텍스처는 경고만 남긴 채 빠졌습니다. 텍스처가 빠진 결과는 glTF 캐시에 남았습니다(4cc931a 대비 회귀, 지금 저장소에는 외부 참조 모델이 없음) | 해결 · 2026-10-31. 로더의 경로 콜백이 `.` · `..` 를 접고, 결과는 논리 경로 규칙을 통과해야 함(맨 위보다 위로 가는 경로 · 드라이브 문자 uri 거부, glTF 를 절대 경로로 열 때만 운영체제 경로). glTF 캐시 v4 |
+| DEF-126 | LOW | `--loose` 의 우선순위 1000 이 패치 묶음 `game_p979.hpak` 이상(최대 1000022)에 가려졌고, 에디터에 주면 실행 폴더의 에셋 복사본이 프로젝트 폴더를 가렸습니다 | 해결 · 2026-10-31. 우선순위는 `int` 최댓값(`hvfs::kLoosePriority`), 에디터에서는 무시하고 경고 |
+| DEF-127 | LOW | 묶음 목록의 `**/.*` 는 이름이 점으로 시작하는 파일만 빼서, 숨김 폴더(`.svn` · `.vs`) 아래 파일은 묶음에 들어갔습니다 | 해결 · 2026-10-31. 목록에 `**/.*/**` · `Thumbs.db` · `desktop.ini` |
+| DEF-128 | LOW | OpenXR 로더는 시스템 JsonCpp 가 없으면 동봉한 jsoncpp 를 함께 컴파일해 게임 실행 파일에 넣는데, 라이선스 고지에 jsoncpp 가 없었습니다(퍼블릭 도메인을 인정하지 않는 곳에서는 MIT 저작권 문구가 필요) | 해결 · 2026-10-31. 고지에 JsonCpp 를 더함. 같은 고지 블록이 Android 구성에서 없는 OpenXR 폴더를 읽어 구성이 멈추던 것(1단계부터)도 MIT 원문을 CMake 에 두어 고침 |
+
+**열림.**
+
+| ID | 심각도 | 내용 | 상태 |
+|---|---|---|---|
+| DEF-120 | LOW · 잠재 | `HSlateRenderer::record` 가 그릴 것이 없어(루트가 없거나 접힘, 프레임버퍼 없음, 요소 0개) 일찍 돌아가면 UI 렌더 패스를 열지 않아, 스왑체인 이미지가 표시 레이아웃으로 바뀌지 않습니다(DEF-113 과 같은 계열). 지금 에디터는 UI 가 늘 있어 드러나지 않습니다 | 해결 · 2026-10-31. `record` · `flush` 가 렌더 패스를 기록했는지 돌려주고, 아니면 렌더러가 표시 전환 |
+| DEF-129 | LOW · 잠재 | 헤드셋 재연결 때 `headsetAvailable` 이 새 시스템 ID 만 받고 그 ID 로 그래픽 요구사항을 다시 묻지 않으며, 렌더러의 Vulkan 장치가 그 시스템에 맞는지도 확인하지 않습니다. 런타임이 다른 ID 를 주면 세션 생성이 계속 실패해 2초마다 오류 · 경고가 쌓입니다(Quest Link 가 ID 를 바꾸는지는 확인하지 않음) | 열림. `--xr` 게임 실행 확인(헤드셋)과 함께 |
+| DEF-130 | MEDIUM | 대화상자 버튼을 마우스로 눌러 씬을 열거나 비우면, `flushChromeRebuilds` 가 디테일을 다시 만든 뒤에 대화상자 동작(`flushModal`)을 돌려, 그 프레임에 낡은 디테일 패널이 해제된 액터 · 컴포넌트를 읽으며 그립니다(`EditorApp.cpp`) | 열림. 대화상자 동작 뒤에 아웃라이너 · 디테일 다시 만들기를 한 번 더(또는 `flushModal` 을 맨 앞으로) |
+| DEF-131 | MEDIUM | 라이트의 Use Temperature 토글을 Undo · Redo 하면 값이 다른 칸에 들어갑니다. 속성 Undo 가 값을 "지금 칸 목록의 종류별 순번"으로 맞추는데, Temperature 칸이 토글이 켜졌을 때만 Attenuation Radius · Cone 앞에 끼기 때문입니다(`EditorCommands.hpp`, `LightComponent.cpp`) | 열림. 값을 순번이 아니라 칸 이름으로 저장 · 적용(또는 토글 · 열거를 먼저 적용하고 칸 목록을 다시 받음) |
+| DEF-132 | LOW | 기즈모를 끄는 도중 Ctrl+D · Ctrl+V 를 누르면 주 선택이 새 액터로 바뀌어, 드래그 결과가 새 액터의 커맨드로 쌓이고 원본이 움직인 양은 Undo 이력에 남지 않습니다(Undo · Redo 는 드래그 중에 막혀 있음) | 열림. Undo 와 같이 드래그 중에는 막음(또는 드래그를 확정한 뒤 실행) |
+| DEF-133 | LOW | 기즈모 · 숫자 칸을 끄는 도중 Ctrl+S 가 저장해, 중간 상태가 파일에 들어가고 저장 표지가 어긋납니다. 드래그를 Undo 하면 월드와 파일이 다른데 "저장됨"으로 보입니다 | 열림. 드래그 · 숫자 칸 끄는 중에는 Ctrl+S 를 막음 |
+| DEF-134 | LOW | 여러 액터를 고른 채 F2 를 누르면 선택된 모든 행이 주 선택의 이름 칸을 보여 줍니다(이름이 바뀌는 것은 주 선택 하나, 표시 결함) | 열림. 이름 칸 표시를 주 선택 행에만 |
+| DEF-135 | LOW | 주 선택은 그대로 두고 선택 집합만 바꾸면(뷰포트 Ctrl+클릭, 아웃라이너 Ctrl · Shift+클릭) 아웃라이너 강조나 디테일의 "N actors selected" 배지가 낡습니다(표시 결함) | 열림. tick 에서 선택 집합의 서명을 앞 프레임과 비교해 다시 만듦 |
+| DEF-136 | LOW | 붙여넣기가 클립의 부모 ID(그 프로세스에서만 뜻이 있음)를 지금 월드에서 찾아, 다시 켠 에디터나 다른 인스턴스에서 붙이면 같은 번호의 관계없는 액터 아래에 붙습니다 | 열림. 클립에 실행마다 다른 세션 표지를 넣고, 다르면 루트에 붙임 |
+| DEF-137 | LOW | 어떤 대화상자든 열려 있으면 창 닫기 요청을 버려, Audio Output · Open Scene · Save As 창이 떠 있는 동안 창의 X 가 아무 알림 없이 무시됩니다 | 열림. 닫기 흐름(Unsaved Changes)에 속한 대화상자만 기다리고, 다른 대화상자는 취소로 닫은 뒤 진행 |
+| DEF-138 | LOW | Save As 가 입력 칸을 채울 때 씬 경로가 늘 `assets/scenes/` 로 시작한다고 보고 14글자를 잘라, 다른 폴더의 씬이면 엉뚱한 이름이 채워집니다 | 열림. 접두가 맞을 때만 떼고, 아니면 파일 이름 부분만 채움 |
+| DEF-139 | LOW | 아웃라이너와 이웃한 세로 스플리터의 잡기 범위가 행 오른쪽 끝과 겹쳐, 거기서 크기를 조절하면 아웃라이너 끌기가 함께 시작되어 원치 않은 부모 바꾸기가 일어날 수 있습니다(Undo 가능) | 열림. 스플리터 · 탭을 누르면 아웃라이너 끌기를 지움 |
+| DEF-140 | LOW | Save as Prefab 이 액터 이름을 그대로 파일 이름으로 써, 이름에 `/` · `\` 가 있으면 하위 폴더에 저장이 "성공"하지만 프리팹 목록(한 단계만 훑음)에는 나오지 않습니다(4cc931a 대비 회귀, `..` 는 전에도 있던 문제) | 열림. Save Scene As 와 같은 이름 검사(금지 글자 · `..` 거부) |
+| DEF-141 | LOW | v3 프리팹을 꺼낼 때 루트나 중간 블록이 실패하면 이미 스폰한 나머지 액터가 부모 없는 루트로 월드에 남고, 선택 · 생성 Undo 어디에도 잡히지 않습니다(손편집 · 깨진 파일에서만) | 열림. 루트가 실패하면 스폰한 액터를 모두 지우고, 루트 서브트리 밖의 고아도 지우며 경고 |
+| DEF-142 | LOW | v3 프리팹 판별이 파일 첫 바이트만 봐서, UTF-8 BOM 이나 머리 줄 앞의 빈 줄 · 주석이 있으면 옛 형식 경로로 빠져 "Prefab missing NAME" 오류만 남습니다 | 열림. 텍스트 파일 앞의 BOM 을 떼고, 빈 줄 · 주석을 건너뛴 뒤 머리 줄로 판별 |
+| DEF-143 | MEDIUM | 잡은 Dynamic 강체를 던지지 않고 놓으면(`throwable=false`, 다른 물체로 바꿔 잡기, 손 · 잡기 끄기) Kinematic 동안 들어간 손 속도가 남아 물체가 날아갑니다. `throwable=false` 가 사실상 동작하지 않습니다(`XrComponents.cpp` 의 `release`) | 열림. 던지지 않고 놓을 때 Dynamic 으로 돌린 뒤 선속도 · 각속도를 0 으로 |
+| DEF-144 | LOW | 부모가 XR Rig 가 아닌 화면 카메라에 Tracked Pose(Head) 가 붙어 있으면 엔진이 보이지 않는 리그를 붙여, 머리 이동 · 요 · 높이가 두 번 적용됩니다(30° 돌면 60°) | 열림. 이 경우 카메라 부모의 자세를 원점으로(또는 자세를 쓰지 않고 한 번 경고) |
+| DEF-145 | MEDIUM | 직접 고른 소리 장치를 실행 중에 잃으면 소리가 끊긴 채 남고, 같은 장치를 다시 골라도 장치 ID 만 비교해 다시 열지 않습니다(UI 는 계속 그 장치로 표시) | 열림. 같은 장치 판정에 장치 상태(started)를 더하고, tick 에서 멈춘 장치를 간격을 두고 다시 엶 |
+| DEF-146 | LOW | 소리 장치를 바꿀 때 돌던 장치를 먼저 닫은 뒤 새 장치 열기가 실패하면(다른 앱의 독점 모드 등) 시스템 기본으로 돌아가지 않아 소리가 나지 않습니다 | 열림. 고른 장치 열기가 실패하면 시스템 기본으로 한 번 더 열고 경고 |
+| DEF-147 | LOW | XR Play 동안 쓸 헤드셋 장치가 목록에 없으면, 사용자가 고른 장치가 아니라 시스템 기본 장치로 엽니다. 대화상자는 "(headset during VR Play)" 라고 잘못 표시합니다 | 열림. 헤드셋 장치가 없으면 고른 장치로 엶, 표시는 헤드셋 장치가 실제로 열렸을 때만 |
+
+DEF-130 ~ 147 은 2단계 뒤 별도 묶음으로 처리합니다(사용자 결정, 중간 등급 4건부터). 상태 칸의 고칠 방향은 검토 때의 제안이며, 고칠 때 다시 확인합니다.
+
+**확인(마무리 묶음).** 빌드 경고 0, 테스트 19개(새 테스트 `gltf_external_files` 11개) · 검사 807개 통과. 묶음 시험에 조작한 목차 · UTF-8
+경로 · 실제 목록 파일의 제외 패턴 · `--loose` 우선순위 · 에디터 배치 검사 20개, glTF 캐시 시험에 v3 캐시 검사 1개를 더했습니다. 임시
+폴더를 한글 이름으로 바꿔도 모든 테스트가 통과합니다. 변이 15종을 모두 잡았습니다([Packaging_Design.md](Packaging_Design.md) 5-2). 고친
+뒤 독립 검토가 4건(매니페스트가 없는 테스트 실행 파일, `readText` 의 복사 할당, Android 구성의 고지 블록, glTF 의 `./C:/...` 후보)을 더
+찾아 위 DEF-121 · 123 · 125 · 128 에서 함께 고쳤고, 3건은 근거를 확인해 결함이 아닌 것으로 닫았습니다. 실행 확인: `HarukaPak` 이 한글 · 이모지 이름을 UTF-8 로 묶고
+풀며 숨김 폴더를 뺌. 에디터를 `--loose` 로 띄우면 경고를 남기고 무시하며 실행 폴더는 `shaders/` 만 마운트(검증 0, 정상 종료). 새 배포
+ZIP 을 밖에 풀어 실행하면 묶음에서 읽고 캐시 v4 로 모델을 한 번 다시 읽으며, 두 번째 실행은 캐시를 씀. `--loose` 폴더는 맨 위에
+마운트. 두 실행 모두 검증 0, 종료 코드 0. 배포 고지에 JsonCpp 가 들어감.
+
+## 패키징 2단계 결과와 3단계 진행 (2026-10-31)
+
+**경위.** 사용자 결정 "전부 권장대로 진행해"(2단계 결정 18개)에 따라 순수 헤더 → 창 없는 뼈대 + DEF-118 → DEF-04 + DEF-120 → DEF-97 →
+DEF-42 · 06 순서로 고쳤습니다. 같은 날 사용자가 "가장 큰 목표는 가능한 빨리 스탠드얼론에 넣어 보는 것"이라고 정해, 3단계(Android 빌드)를
+바로 이어서 APK 까지 만들었습니다. 구조와 개발 옵션은 [Packaging_Design.md](Packaging_Design.md) 6 · 7절입니다.
+
+**해결.**
+
+| ID | 고친 것 |
+|---|---|
+| DEF-04 | 배리어는 `RenderContext::transitionImage` · `pipelineBarrier` · `memoryBarrier` 로만 기록합니다(`hsync::record`). sync2 가 있으면 `vkCmdPipelineBarrier2KHR`, 없거나 `--vk-no-sync2` 면 Vulkan 1.0 `vkCmdPipelineBarrier` 로 바꿉니다(변환표 · 단계 합치기 · sync2 전용 레이아웃 거부는 `BarrierCompat.hpp`). 기능 체인에서 Vulkan13Features 를 빼고 sync2 확장 구조체 하나만 답니다. 하는 일이 없던 깊이 전환은 지웠습니다(사용자 결정) |
+| DEF-06 | MSAA 컬러(TRANSIENT)만 지연 할당 타입이 있으면 핵심 힙 밖 별도 할당(`AllocZone::Dedicated`, `freeB` 로 돌려줌). 데스크톱은 지금처럼 Zone B. `--vk-dedicated-msaa` 로 PC 에서도 별도 할당 경로를 탐 |
+| DEF-42 | 핵심 힙은 1GB 를 한 번에 잡고, 못 잡으면 필요한 크기 · 고른 타입 · 힙 크기 · VkResult · 최대 단일 할당을 적은 예외로 멈춥니다. 대체 경로도 힙 크기를 봅니다(256MB BAR 힙을 고르던 구멍). 75% 를 넘으면 경고만 |
+| DEF-97 | 인스턴스 1.1, 장치는 `hvk::planDevice`(1.1 이상 · push descriptor 필수 · sync2 선택 · 이방성 없으면 끔), push descriptor 6곳은 장치에서 받은 KHR 포인터(`rc.vk.push`), XR 런타임 Vulkan 범위 판정(최솟값 미만이면 XR 끔, 최댓값 초과는 경고), glslc `--target-env=vulkan1.0`. 실행 파일은 1.0 · 1.1 코어와 표면 · 스왑체인 함수만 가져옵니다(`vulkan_imports` 시험) |
+| DEF-103 | AndroidWindow 에 클립보드 구현, 표면 없이 0x0 |
+| DEF-118 | 이미지별 세마포어 접근자가 범위 밖이면 VK_NULL_HANDLE, 제출은 데스크톱을 그린 프레임에서만 이미지별 세마포어를 씀. 창 없는 실행(이미지 0장)이 이 경로를 탑니다 |
+| DEF-120 | UI 렌더러가 렌더 패스를 기록하지 않은 프레임(루트 없음 · 접힘 · 프레임버퍼 없음 · 그릴 것 없음)은 렌더러가 표시 전환 |
+
+DEF-08 은 빌드까지 해결했습니다(창 팩토리, `android_main`, OpenXR 로더, APK). 헤드셋에서 실행을 확인하면 닫습니다.
+
+**새 결함.**
+
+| ID | 심각도 | 내용 | 상태 |
+|---|---|---|---|
+| DEF-148 | LOW | 동기화 검증(`VK_LAYER_VALIDATE_SYNC=1`)이 메인 렌더 패스에서 WRITE_AFTER_WRITE 를 보고합니다. 깊이 첨부가 서브패스 0 → 1 에서 읽기 전용 레이아웃으로 바뀐 뒤 서브패스 2 끝에서 저장(STORE)되는데, 1 → 2 의존성에 깊이 단계와 깊이 쓰기 접근이 없습니다(`GeometryPass::create` 의 의존성 배열). 두 배리어 경로에서 같고 이번 변경 전부터 있던 것입니다. 타일 GPU 에서 깊이 저장이 레이아웃 전환과 겹칠 수 있다는 뜻이라 Quest 에서 확인이 필요합니다 | 열림. 1 → 2 의존성에 EARLY · LATE_FRAGMENT_TESTS 와 DEPTH_STENCIL_ATTACHMENT_WRITE 를 더하는 방향 |
+
+**확인.**
+- 경고 0(데스크톱), 시험 24개 · 검사 1,030개 통과. 새 시험 5개는 `vulkan_baseline` · `barrier_compat` · `memory_types` · `headless_render` · `vulkan_imports` 입니다. 헤더 변이 39종을 모두 잡았습니다.
+- 창 없는 실행(`HarukaGame --headless --no-xr --synthetic-eyes --frames=120 --capture=…`, Debug 검증 켬)은 기본 · 1.0 배리어 · 별도 할당 경로 모두 검증 0 이고, PNG 가 바이트까지 같습니다.
+- Quest Pro 형 프로필 레이어(1.1.295)에서 10-31 의 접근 위반 없이 120프레임, 검증 0 입니다. sync2 를 뺀 프로필은 1.0 배리어로 내려가고, push descriptor 를 뺀 프로필 · 1.0 장치는 이유를 적은 FATAL 로 끝납니다.
+- 독립 검토(4갈래, 지적마다 반박 검증)에서 결함 1건이 확인되어 고쳤습니다: 자동 실행의 종료 코드를 엔진 정리 전에 정해, 정리 중의 검증 오류(누수)가 빠졌습니다. 이제 main 이 정리 뒤 다시 보고 3 으로 끝냅니다. 변이(합성 눈 이미지 누수)로 확인했습니다. 합성 눈 이미지 포맷은 고정(R8G8B8A8_SRGB)으로 단단하게 했습니다.
+- Android: NDK r30 으로 `libHarukaGame.so` 가 `--no-undefined` · API 32 libvulkan 으로 링크됩니다(1.2 이상 기호 없음, `ANativeActivity_onCreate` 내보냄, 16KB 정렬). APK 5.6MB(zipalign `-P 16` · apksigner 검증). 처음 컴파일된 Android 갈래에서 `AppPaths.cpp` 의 변수 재정의 오류 1건을 고쳤습니다.
+
+## Android 오류 검출과 수정 (2026-11-01)
+
+**경위.** 2026-11-01 사용자가 "안드로이드 계열 에러 검출을 해 두고, 해결은 오전 3시 32분에 시작해. 에러는 특히 패키징 관점에서
+봐"라고 했습니다. 워크플로(영역 4갈래: APK · 매니페스트, 네이티브 라이브러리, 경로 · 묶음, 수명주기, 장치 이식성 + 지적마다 반박
+검증)로 Android 빌드와 그 주변을 훑어 18건이 나왔고, 10건이 실제 결함으로 남았습니다(겹치는 것을 합쳐 8가지, DEF-149 ~ 156).
+03:32 부터 패키징 쪽을 먼저, 심각도 순서로 고쳤습니다. 확인하다가 Windows 쪽 기존 결함 1건(DEF-157)을 더 찾아 함께 고쳤습니다.
+
+**해결.**
+
+| ID | 심각도 | 내용 | 고친 것 |
+|---|---|---|---|
+| DEF-149 | MEDIUM | 묶음(`game.hpak`)과 실행 파일이 같은 빌드인지 확인하는 곳이 없었습니다. Android 빌드는 묶음을 만들지 않아 데스크톱 트리의 묶음을 따로 올렸고(셰이더를 바꾼 뒤 데스크톱을 다시 빌드하지 않으면 새 .so 가 옛 SPIR-V 를 받음), `adb install -r` 뒤에도 외부 파일 폴더에 남는 옛 묶음이 OBB 폴더의 새 묶음을 아무 표시 없이 가렸습니다. 엔진은 SPIR-V 를 리플렉션 없이 읽고 기기에는 검증 레이어가 없어 결과가 정의되지 않습니다. 마운트 로그에는 파일 이름만 있어 어느 폴더의 묶음인지도 알 수 없었습니다 | 빌드가 컴파일한 셰이더의 경로 · 내용 해시(XXH3-64, 목차와 같은 값)를 `HarukaPak shader-manifest` 가 목록 파일에 적어 엔진에 넣고(`src/core/ShaderManifest.cpp`), 게임 실행 파일은 마운트 뒤 실제로 읽힐 셰이더와 비교해 다르면 셰이더 이름을 적은 FATAL 로 멈춤(`--loose` 면 경고, 에디터는 핫 리로드 때문에 확인하지 않음). Android 구성도 데스크톱의 HarukaPak 으로 자기 셰이더에서 묶음을 만들고(`build/android/pack/game.hpak`, HarukaGame 이 GamePack 에 기댐), 쓰이지 않던 셰이더 · 에셋 복사는 뺌. 마운트 이름은 전체 경로, 뒤 폴더에도 묶음이 있으면 경고. 묶음 형식(v1)은 그대로 |
+| DEF-150 | LOW | 매니페스트의 `configChanges` 에 언어 · 글꼴 크기와 굵기 · 색 모드 · SIM 국가 등이 없어, 그런 설정이 바뀌면 시스템이 액티비티를 다시 만들고 `android_main` 의 `_exit` 때문에 게임이 그냥 꺼졌습니다 | API 34 가 정의하는 18개 항목 전부(`0x5000ffff`). 검출 결과가 제안한 `fontWeightAdjust` 는 이름이 틀려 aapt2 가 거부했고, 실제 이름은 `fontWeightAdjustment` 입니다 |
+| DEF-151 | LOW | APK 에 서드파티 고지 파일이 없었고, Android 에서만 들어가는 jnipp(MIT, OpenXR 로더 안)와 android_native_app_glue(Apache-2.0, 엔진 .so 안)가 고지 목록에 없었습니다 | 둘을 고지에 더함(glue 는 NDK 의 NOTICE 와 Apache-2.0 원문). `package_apk.py` 가 `assets/THIRD_PARTY_NOTICES.txt` 로 넣고, 파일이 없으면 멈춤 |
+| DEF-152 | LOW | `Config/args.txt` · `Config/log_levels.txt` 를 인코딩 처리 없이 읽어, Windows PowerShell 5.1 로 만든 파일(BOM 이 있는 UTF-16LE, `-Encoding utf8` 의 BOM)에서는 옵션이 사라졌습니다. 경고에는 멀쩡한 옵션이 거부된 것으로 보여 원인을 찾기 어려웠습니다 | `hfile::readConfigText`: UTF-8 BOM 을 지우고, BOM 이 있는 UTF-16 은 UTF-8 로 바꾸며, BOM 없이 NUL 이 있으면 이유와 함께 거부. Android 옵션 파일과 두 플랫폼의 로그 수준 파일에 적용 |
+| DEF-153 | LOW | `pipeline_cache.bin` 을 최종 파일에 바로 덮어쓰고, 읽을 때 크기 · 무결성 · 장치를 확인하지 않고 드라이버에 넘겼으며, 정상 종료 때만 저장했습니다. Android 처럼 프로세스가 언제든 끝나는 곳에서는 저장 도중 잘린 파일이 다음 실행의 드라이버로 갈 수 있었습니다(VUID-VkPipelineCacheCreateInfo-initialDataSize-00768) | 자체 머리(마법 수 · 버전 · 크기 · XXH3)로 감싸 임시 파일에 쓴 뒤 이름을 바꿈(`PipelineCacheFile.hpp`, `hfile::writeAtomicBinary`). 읽을 때 크기 · 해시 · Vulkan 캐시 머리(vendorID · deviceID · pipelineCacheUUID)를 확인하고, 맞지 않으면 빈 캐시로 시작. 파이프라인을 새로 만든 뒤 첫 프레임에도 저장하고, 내용이 같으면 쓰지 않음. 예전 형식의 파일은 한 번 버려짐 |
+| DEF-154 | LOW | 끝날 때 DESTROY 까지 기다린 뒤 `_exit` 했습니다. 보이던 액티비티의 DESTROY 는 다음 액티비티가 쉴 때까지(최대 약 10초) 미뤄질 수 있어, 그 사이 다시 실행하면 같은 프로세스에 생긴 새 실행이 이 `_exit` 에 함께 끝났습니다 | 시스템이 끝내기를 받았다는 첫 표시(PAUSE · STOP · DESTROY)까지만, 최대 1초 기다린 뒤 끝냄. 같은 프로세스에 두 번째로 들어오면 부팅하지 않고 로그를 남긴 뒤 끝냄 |
+| DEF-155 | LOW | XR 이 필수인 Quest 에서 첫 세션 뒤 다시 열 수 없는 실패(인스턴스 손실, `xrBeginSession` 실패, 프레임 함수의 SESSION_LOST · INSTANCE_LOST)가 나면, 에디터용 갈래로 가거나 실패 로그만 남겨 앱이 빈 화면인 채 끝나지 않았습니다. 다시 열기를 기다리는 동안에는 XR 이벤트를 받지 않아 인스턴스 손실도 알 수 없었습니다 | 그런 실패를 모두 잃은 세션으로 보고(`markLostOnError`), 인스턴스 손실이면 이번 실행에서 XR 을 끔. XR 이 필수이면 앱을 끝냄(연결 끊김은 30초 안에 돌아오지 않을 때). 세션이 없어도 이벤트를 받음. 에디터 · PC 게임은 인스턴스를 잃은 뒤 같은 실행에서 세션을 다시 만들지 않음(예전에는 Play 마다 실패) |
+| DEF-156 | LOW | SSAO 가 R32_SFLOAT 선형 깊이와 D32_SFLOAT MSAA 깊이를 렌더러의 LINEAR 샘플러로 읽었습니다. 두 포맷의 선형 필터링은 선택 기능이라 Android 2022 기준선과 Adreno 에 없을 수 있고, 그런 장치에서는 결과가 정의되지 않습니다(VUID-vkCmdDraw-magFilter-04553). 깊이를 실루엣 너머로 섞는 것 자체도 틀립니다 | AO 패스 전용 NEAREST · CLAMP_TO_EDGE 샘플러. 화면 차이는 화소 9.9%, 최대 8/255(구 가장자리 · 접촉 부분 · 지평선 띠). 창 없는 실행의 PNG 기준이 `884daefd…` 로 바뀜 |
+| DEF-157 | MEDIUM | (Windows, 확인 중 새로 찾음) Jolt 의 기본값이 MSVC 에서 `_HAS_EXCEPTIONS=0` 을 PUBLIC 정의로 걸어, Jolt 를 링크하는 엔진 전체가 "예외 없는 STL" 로 컴파일되었습니다. 그 모드의 `std::exception` 은 메시지를 복사하지 않아, 문자열로 만든 예외 22곳(핵심 힙 실패 · GPU 를 고르지 못한 이유 · 셰이더 열기 실패 등)의 FATAL 문구가 해제된 메모리를 읽었습니다(Debug 에서는 0xDD 바이트). Jolt 를 링크하지 않는 라이브러리(HarukaVfs)와는 표준 라이브러리 정의도 어긋났습니다. Android(clang)는 영향 없음 | Jolt 의 `CPP_EXCEPTIONS_ENABLED` 를 켬. 엔진이 다시 `_HAS_EXCEPTIONS=0` 으로 컴파일되면 `Engine.cpp` 가 컴파일을 멈춤 |
+
+DEF-150 · 154 · 155 의 실제 수명주기 동작, DEF-153 의 Adreno 드라이버 캐시, DEF-149 의 adb push 흐름은 헤드셋 첫 실행 때 함께 확인합니다.
+
+**결함이 아닌 것(검출 단계에서 반박된 8건).** 패치 · DLC 묶음만 있는 폴더가 기본 묶음을 가림(그런 배치를 만드는 경로가 없음), OBB
+확장 파일 이름 규칙(지금의 배포 경로가 아님), 외부 파일 폴더에 쓸 수 없는 기기(Quest 의 adb shell 은 씀), ABI 검사 없음(문서의 구성 명령이
+arm64-v8a 로 고정), 엔진을 만드는 동안 루퍼를 처리하지 않아 ANR(몰입형 앱의 입력 경로에서는 조건이 성립하지 않음), 일시정지 중 15ms 마다
+깨어남(실패 없음), .so 가 기호를 모두 내보냄(로더의 미해결 기호와 겹치지 않음), 섀도맵 D32_SFLOAT 를 확인하지 않음(Android 기기의 99.5% ·
+Quest 가 깊이 첨부를 지원). 마지막 것은 아래 포맷 흉내 확인에서도 보입니다.
+
+**확인.**
+- 데스크톱 Release · Debug 경고 0, 시험 24개 · 검사 1,061개 통과. 묶음 시험에 셰이더 목록(16절), 씬 문서 시험에 바이너리 저장과 설정 파일
+  인코딩(UTF-32 거부 포함), 창 없는 시험에 파이프라인 캐시 파일 검사를 더했습니다.
+- 창 없는 실행: DEF-156 을 넣기 전까지 PNG 가 2단계 기준(`5a4b800b…`)과 바이트까지 같았습니다(DEF-157 의 Jolt 옵션을 바꾼 뒤에도). DEF-156
+  뒤의 새 기준 `884daefd…` 은 기본 · `--vk-no-sync2` · `--vk-dedicated-msaa` · Release · Quest Pro 형 프로필(포맷 흉내 포함)에서 모두 같고,
+  검증 0 입니다. 동기화 검증은 DEF-148 의 10건 그대로입니다.
+- Quest Pro 형 프로필에 포맷 흉내(`SIMULATE_FORMATS_BIT`)를 켜고 120프레임: Android 2022 기준선은 D32_SFLOAT 를 깊이 첨부로 적지 않아 엔진이
+  "No supported depth format" 으로 멈추므로, D32_SFLOAT 깊이 첨부만 더한 변형(실제 Quest 와 같음)으로 돌렸습니다. 04553 은 없고, 깊이 샘플러를
+  LINEAR 로 되돌리는 변이는 R32_SFLOAT · D32_SFLOAT 에서 04553 을 냅니다. 남는 메시지는 R32G32B32_SFLOAT 정점 형식 20건인데, 명세가 모든
+  장치에 의무로 요구하는 기능을 프로필 JSON 이 빠뜨린 것입니다.
+- DEF-149: 짝이 맞는 묶음은 "Shaders match this build (18 files)", 셰이더 하나를 바꾼 묶음은 종료 코드 1 과 그 셰이더 이름이 든 FATAL,
+  `--loose` 면 경고 뒤 계속, 낱개 셰이더만 다르면 "rebuild HarukaGame", 아무것도 없으면 그렇다고 알립니다. Android 빌드가 만든 셰이더 목록 ·
+  묶음이 데스크톱 것과 바이트까지 같고, 도구 소스의 시각만 새로 하면 Android 빌드가 "older than its sources" 로 멈춥니다.
+- DEF-157: 셰이더 짝 FATAL, push descriptor 를 뺀 프로필 · 1.0 장치 프로필의 "No suitable GPU found (...)" 가 이유를 그대로 남깁니다.
+- DEF-153: 예전 형식 캐시를 한 번 버리고 새 형식으로 저장하며, 다음 실행은 경고 없이 읽고 내용이 같아 다시 쓰지 않습니다.
+- Android: `libHarukaGame.so` 빌드(이번 수정이 만든 clang 경고 2곳은 고침, 경고 종류는 이전과 같음). NEEDED · 진입점 · 16KB 정렬 · Vulkan
+  가져오기(1.0 · 1.1 코어와 표면 · 스왑체인)가 이전과 같습니다. APK 5,756 KB 에 `assets/THIRD_PARTY_NOTICES.txt`, `configChanges` 0x5000ffff,
+  zipalign `-P 16` · apksigner(v3) 통과.
+
+**독립 검토(고친 뒤).** 영역 4갈래(빌드 · 패키징, 수명주기 · 인코딩, XR 손실, 렌더러)와 지적마다 반박 검증을 돌려 6건이 실제 결함(모두
+LOW)으로 남았고, 같은 날 고쳤습니다. 렌더러 쪽은 지적이 없었습니다.
+- XR 다시 열기 상한이 손실 때마다 다시 잡혀, 다시 연 세션이 시작에 계속 실패하면 Quest 앱이 여전히 끝나지 않았습니다(DEF-155 의 일부만
+  고쳐짐). 이제 처음 잃은 때의 마감 시각을 다시 연 세션이 5초 동안 이어서 돌 때까지 유지하고, 다시 열기 간격은 2초에서 30초까지 두 배씩
+  늘립니다.
+- UTF-32LE 파일(BOM `FF FE 00 00`)을 UTF-16LE 로 읽어 NUL 이 섞인 글이 통과했습니다(DEF-152). 이제 이유와 함께 거부하고, UTF-16 으로 바꾼
+  글도 NUL 검사를 거칩니다.
+- 셰이더를 목록에서 빼기만 하면 셰이더 목록 파일이 다시 만들어지지 않아, 그 뒤의 묶음에서 거짓 FATAL 이 날 수 있었습니다(DEF-149).
+  이제 목록 명령에 셰이더 파일 목록을 넘기고, 구성 단계가 옛 결과물을 지우면 묶음도 지웁니다.
+- 묶음이 없을 때도 FATAL 안내가 묶음을 탓했습니다(DEF-149). 이제 묶음이 있을 때 · 데스크톱에서 낱개 셰이더만 다를 때(셰이더만 다시 빌드한
+  경우) · 아무것도 없을 때 · Android 에서 묶음이 없을 때를 나눠 알립니다.
+- Android 구성이 데스크톱 HarukaPak 이 낡았는지 보지 않았고, 사라진 캐시 경로를 다시 찾지 않았습니다(DEF-149). 이제 묶음 형식 · 쓰기
+  규칙의 소스(PakFormat · PakWriter · PathUtf8 · HarukaPak)가 도구보다 새로우면 빌드가 멈추고(`cmake/CheckHostPak.cmake`, 안내는 실제 도구의
+  빌드 폴더 · 구성), 사라진 경로는 다시 찾으며, Debug 도구로 캐시되었으면 Release 도구가 생긴 뒤 그것을 고릅니다.
+- OpenXR 로더 고지에 Collabora 저작권 줄이 없었습니다(DEF-151, 데스크톱 고지도 같음). 줄을 더했습니다.
+
+**재검토.** 위 6건의 수정만 다시 반박 검증해 4건(모두 LOW)을 더 고쳤습니다. 다시 연 세션이 첫 프레임 하나만 돌고 곧 잃으면(성공 코드
+`XR_SESSION_LOSS_PENDING`) 마감 시각이 다시 잡히던 것(5초 동안 이어서 돌아야 복구로 봄), 묶음 파일이 있지만 마운트하지 못하면(잘림 · 손상 ·
+형식 버전) "묶음이 없다"고 안내하던 것("Pack not mounted" 를 보라고 안내), 호스트 도구 확인의 안내가 늘 Release 를 가리키던 것, 확인 대상에
+출력과 관계없는 PakReader 가 들어가 Android 읽기 코드만 고쳐도 멈추던 것입니다. 확인: 경고 0, 시험 24개 · 검사 1,061개, 창 없는 실행 PNG
+그대로, 짝 확인 여섯 경우(같은 묶음 · 다른 묶음 · `--loose` · 낱개 셰이더만 다름 · 아무것도 없음 · 잘린 묶음)의 문구, Android 에서 PakReader
+시각만 새로 하면 멈추지 않고 PakWriter 시각을 새로 하면 실제 도구 경로로 안내하며 멈춤, APK 검사 통과. 다시 연 세션의 시간 판정은 헤드셋에서
+확인합니다.

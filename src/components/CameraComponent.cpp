@@ -53,10 +53,18 @@ glm::mat4 CameraComponent::projFromFov(float angleLeft, float angleRight, float 
 
 glm::mat4 CameraComponent::xrOrigin() const {
     if (!owner) return glm::mat4(1.f);
+    if (xrRig_) {
+        // 리그는 바닥에 서 있고 머리 자세가 실제 키를 가집니다. 회전은 리그의 것을 그대로 씁니다(무중력에서 리그를 기울일 수 있음).
+        const glm::quat r = xrRig_->worldRotation();
+        return glm::translate(glm::mat4(1.f), xrRig_->worldPosition() + r * glm::vec3(0.f, xrRigLift_, 0.f)) *
+               glm::mat4_cast(r);
+    }
     // 정면을 수평면에 내린 방향의 요입니다. 똑바로 위 · 아래를 보면 요가 정해지지 않아 0 으로 둡니다.
     const glm::vec3 f = forward();
     const float yaw = (f.x * f.x + f.z * f.z > 1e-8f) ? std::atan2(-f.x, -f.z) : 0.f;
-    return glm::translate(glm::mat4(1.f), owner->worldPosition()) *
+    // 보이지 않는 리그: 카메라 아래 바닥(drop)에 서고, 머리 기준 공간이면 lift 만큼 올립니다.
+    const glm::vec3 lift = implicitRig_ ? glm::vec3(0.f, xrRigLift_ - implicitDrop_, 0.f) : glm::vec3(0.f);
+    return glm::translate(glm::mat4(1.f), owner->worldPosition() + lift) *
            glm::mat4_cast(glm::angleAxis(yaw, glm::vec3(0.f, 1.f, 0.f)));
 }
 

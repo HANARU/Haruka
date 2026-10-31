@@ -62,6 +62,68 @@ void Actor::refreshSubtreeActive() {
     for (Actor* child : children_) child->refreshSubtreeActive();
 }
 
+void Actor::attachTo(Actor* parent, int index) {
+    if (parent && parent_ == parent) {
+        // 같은 부모 안에서 자리만 옮깁니다(실효 활성은 그대로).
+        auto& c = parent_->children_;
+        c.erase(std::remove(c.begin(), c.end(), this), c.end());
+        const size_t at = (index < 0 || (size_t)index > c.size()) ? c.size() : (size_t)index;
+        c.insert(c.begin() + (std::ptrdiff_t)at, this);
+        return;
+    }
+    if (!parent) { detach(); return; }
+    attachTo(parent);
+    if (parent_ != parent) return;   // 사이클로 거부됨
+    auto& c = parent_->children_;
+    if (index < 0 || (size_t)index >= c.size()) return;   // 이미 끝에 있음
+    c.erase(std::remove(c.begin(), c.end(), this), c.end());
+    c.insert(c.begin() + index, this);
+}
+
+int Actor::siblingIndex() const {
+    if (!parent_) return -1;
+    const auto& c = parent_->children_;
+    const auto it = std::find(c.begin(), c.end(), this);
+    return it == c.end() ? -1 : (int)(it - c.begin());
+}
+
+bool Actor::removeComponent(Component* comp) {
+    auto it = std::find_if(components.begin(), components.end(),
+                           [comp](const auto& c) { return c.get() == comp; });
+    if (it == components.end()) return false;
+    // 캐시에서 이 포인터를 빼고, 같은 타입의 다른 컴포넌트가 있으면 그것(먼저 붙은 것)을 다시 넣습니다.
+    const std::type_index type(typeid(*comp));
+    if (auto ci = componentCache_.find(type); ci != componentCache_.end() && ci->second == comp)
+        componentCache_.erase(ci);
+    if (comp->isEnabled()) comp->setEnabled(false);
+    comp->onDestroy();
+    components.erase(it);
+    if (componentCache_.find(type) == componentCache_.end())
+        for (auto& c : components)
+            if (std::type_index(typeid(*c)) == type) { componentCache_.emplace(type, c.get()); break; }
+    return true;
+}
+
+int Actor::componentIndex(const Component* comp) const {
+    for (size_t i = 0; i < components.size(); ++i)
+        if (components[i].get() == comp) return (int)i;
+    return -1;
+}
+
+void Actor::moveComponent(Component* comp, size_t index) {
+    const int from = componentIndex(comp);
+    if (from < 0) return;
+    std::unique_ptr<Component> owned = std::move(components[(size_t)from]);
+    components.erase(components.begin() + from);
+    const size_t at = std::min(index, components.size());
+    components.insert(components.begin() + (std::ptrdiff_t)at, std::move(owned));
+    // 같은 타입이 여럿이면 캐시는 "먼저 붙은 것"이라 순서가 바뀌면 다시 고릅니다.
+    const std::type_index type(typeid(*comp));
+    componentCache_.erase(type);
+    for (auto& c : components)
+        if (std::type_index(typeid(*c)) == type) { componentCache_.emplace(type, c.get()); break; }
+}
+
 void Actor::attachTo(Actor* parent) {
     if (parent_ == parent) return;
     // 사이클 가드: parent 가 자신이거나 자신의 자손이면 거부합니다. 그러지 않으면

@@ -157,7 +157,7 @@ TexSlot GpuScene::uploadTexture(const uint8_t* pixels, int w, int h, VkFormat fm
         0, slot.alloc);
 
     auto cmd = rc_->beginOneTimeCmd();
-    RenderContext::transitionImage(cmd, slot.image,
+    rc_->transitionImage(cmd, slot.image,
         VK_IMAGE_LAYOUT_UNDEFINED,                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_PIPELINE_STAGE_2_NONE,                 VK_ACCESS_2_NONE,
         VK_PIPELINE_STAGE_2_COPY_BIT,             VK_ACCESS_2_TRANSFER_WRITE_BIT);
@@ -166,7 +166,7 @@ TexSlot GpuScene::uploadTexture(const uint8_t* pixels, int w, int h, VkFormat fm
     region.imageExtent      = { (uint32_t)w, (uint32_t)h, 1 };
     vkCmdCopyBufferToImage(cmd, stagingBuf, slot.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    RenderContext::transitionImage(cmd, slot.image,
+    rc_->transitionImage(cmd, slot.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_PIPELINE_STAGE_2_COPY_BIT,               VK_ACCESS_2_TRANSFER_WRITE_BIT,
         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,    VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);

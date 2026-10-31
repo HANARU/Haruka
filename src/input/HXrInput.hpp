@@ -37,4 +37,8 @@ struct HXrInputState {
     bool       focused = false;   // XR 세션이 입력을 받는 중(FOCUSED). 아니면 나머지는 기본값
     HPose      head;              // 헤드셋(두 눈 사이)
     HHandInput hands[2];          // 0 = 왼손, 1 = 오른손
+    // 자세의 기준 공간이 바닥(LOCAL_FLOOR)인지. 리그 높이가 실제 키(tracked)이고 런타임에 그 공간이 있으면 바닥 기준입니다.
+    bool       floorSpace  = false;
+    // 자세가 머리 기준 공간(LOCAL)일 때 리그 원점(바닥)에 더하는 눈높이(m). 바닥 기준이면 0 입니다(2026-10-15, 10-16).
+    float      floorOffset = 0.f;
 };

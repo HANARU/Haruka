@@ -1,5 +1,7 @@
 #include "GassetCache.hpp"
 #include "AssetLog.hpp"
+#include "../vfs/PakFormat.hpp"
+#include "../vfs/Vfs.hpp"
 #include <fstream>
 #include <filesystem>
 #include <sstream>
@@ -10,47 +12,47 @@ namespace fs = std::filesystem;
 
 static constexpr uint32_t kMagic   = 0x47415354u; // "GAST"
 // 2: 원본의 크기 · 내용 해시를 함께 기록합니다(DEF-105). 버전 1 캐시는 다시 만듭니다.
-static constexpr uint32_t kVersion = 2u;
+// 3: 파일 이름이 실제 경로가 아니라 논리 경로에서 나오고, 원본 해시가 묶음 목차와 같은 XXH3-64 입니다(2026-10-24).
+//    버전 2 이하 캐시는 다시 만듭니다.
+// 4: 내용은 3 과 같습니다. 버전 3 은 uri 에 "../" · "./" 가 든 텍스처를 찾지 못한 채(DEF-125) 텍스처 없이 저장했을 수
+//    있어 다시 만듭니다(2026-10-31).
+static constexpr uint32_t kVersion = 4u;
 // 머리: magic(4) version(4) mtime(8) size(8) hash(8) meshCount(4)
 static constexpr std::streamoff kMtimeOffset = 8;
 
-static uint64_t getMtime(const std::string& path) {
-    std::error_code ec;
-    auto ft = fs::last_write_time(path, ec);
-    if (ec) return 0;
-    return (uint64_t)ft.time_since_epoch().count();
+// 원본 정보는 가상 파일 시스템에서 얻습니다. 묶음 안이면 목차의 크기 · 내용 해시를 그대로 쓰고(파일을 읽지 않음),
+// 낱개 파일이면 수정 시각을 함께 씁니다. 해시는 낱개 파일일 때 필요할 때만 계산합니다.
+static uint64_t sourceHash(const std::string& srcPath, const hvfs::Stat& st) {
+    if (st.inPack) return st.contentHash;
+    uint64_t h = 0;
+    return hvfs::contentHash(srcPath, h) ? h : 0;
 }
 
-static uint64_t getSize(const std::string& path) {
-    std::error_code ec;
-    const auto n = fs::file_size(path, ec);
-    return ec ? 0 : (uint64_t)n;
+static std::string& cacheDirStorage() {
+    static std::string dir = "assets/cache";
+    return dir;
 }
 
-// 원본 내용의 FNV-1a 64비트 해시. 수정 시각이 바뀌었을 때만 계산합니다.
-static uint64_t hashFile(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
-    uint64_t h = 1469598103934665603ull;
-    char buf[1 << 16];
-    while (f) {
-        f.read(buf, sizeof(buf));
-        const std::streamsize n = f.gcount();
-        for (std::streamsize i = 0; i < n; ++i) { h ^= (uint8_t)buf[i]; h *= 1099511628211ull; }
-    }
-    return h;
-}
+void GassetCache::setDirectory(const std::string& dir) { cacheDirStorage() = dir; }
+const std::string& GassetCache::directory() { return cacheDirStorage(); }
 
+// 캐시 파일 이름은 정규화한 논리 경로(대소문자 무시)의 FNV-1a 64비트 해시입니다(2026-10-24). 실행 · 컴파일러 · 기기와
+// 상관없이 같은 값이라, 나중에 캐시를 미리 만들어 묶음에 넣을 수 있습니다. 예전에는 실제 경로의 std::hash 라 실행마다
+// 달라질 수 있었고 에디터(절대 경로)와 게임의 키가 달랐습니다. 논리 경로가 아닌 경로(절대 경로)는 그 문자열을 씁니다.
 std::string GassetCache::cachePath(const std::string& srcPath) {
-    size_t h = std::hash<std::string>{}(srcPath);
+    std::string norm;
+    const std::string key = hpak::normalizePath(srcPath, norm) ? hpak::foldKey(norm) : srcPath;
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : key) { h ^= c; h *= 1099511628211ull; }
     std::ostringstream oss;
-    oss << "assets/cache/" << std::hex << std::setw(16) << std::setfill('0') << h << ".gasset";
+    oss << cacheDirStorage() << "/" << std::hex << std::setw(16) << std::setfill('0') << h << ".gasset";
     return oss.str();
 }
 
-// 수정 시각과 크기가 같으면 그대로 씁니다. 수정 시각만 다르면 내용 해시를 비교해, 같으면 캐시를 쓰고 기록한
-// 수정 시각을 새 값으로 고쳐 다음부터는 해시를 다시 계산하지 않습니다. 예전에는 수정 시각만 비교해, 빌드가
-// 에셋을 실행 폴더로 복사하며 시각을 바꿀 때마다 GLTF 를 다시 읽었습니다(DEF-105). Godot 의 가져오기도
-// 수정 시각이 다르면 내용 해시(md5)로 다시 확인합니다.
+// 크기가 다르면 무효입니다. 원본이 묶음 안이면 목차의 내용 해시로 판정합니다. 낱개 파일이면 수정 시각이 같을 때 그대로
+// 쓰고, 다르면 내용 해시를 비교해 같으면 캐시를 쓰고 기록한 수정 시각을 새 값으로 고쳐 다음부터는 해시를 다시 계산하지
+// 않습니다. 예전에는 수정 시각만 비교해, 빌드가 에셋을 실행 폴더로 복사하며 시각을 바꿀 때마다 GLTF 를 다시 읽었습니다
+// (DEF-105). Godot 의 가져오기도 수정 시각이 다르면 내용 해시(md5)로 다시 확인합니다.
 bool GassetCache::isValid(const std::string& srcPath) {
     std::string cp = cachePath(srcPath);
     if (!fs::exists(cp)) return false;
@@ -66,16 +68,16 @@ bool GassetCache::isValid(const std::string& srcPath) {
         f.read(reinterpret_cast<char*>(&hash),    8);
         if (!f || magic != kMagic || version != kVersion) return false;
     }
-    const uint64_t curSize = getSize(srcPath);
-    if (size != curSize) return false;
-    const uint64_t curMtime = getMtime(srcPath);
-    if (mtime == curMtime) return true;
-    if (hash != hashFile(srcPath)) return false;
+    hvfs::Stat st;
+    if (!hvfs::stat(srcPath, st) || size != st.size) return false;
+    if (st.inPack) return hash == st.contentHash;
+    if (mtime == st.mtime) return true;
+    if (hash != sourceHash(srcPath, st)) return false;
 
     std::fstream rw(cp, std::ios::binary | std::ios::in | std::ios::out);
     if (rw) {
         rw.seekp(kMtimeOffset);
-        rw.write(reinterpret_cast<const char*>(&curMtime), 8);
+        rw.write(reinterpret_cast<const char*>(&st.mtime), 8);
     }
     HLOG(LogAsset, Verbose) << "gasset cache kept (same content, new timestamp): " << srcPath;
     return true;
@@ -102,7 +104,8 @@ static void wTex(std::ofstream& f, const TexSourceData& t) {
 }
 
 void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceData>& meshes) {
-    fs::create_directories("assets/cache");
+    std::error_code dirEc;
+    fs::create_directories(cacheDirStorage(), dirEc);
     std::string cp  = cachePath(srcPath);
     std::string tmp = cp + ".tmp";
 
@@ -110,11 +113,13 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
         if (!f) { HLOG(LogAsset, Warning) << "gasset cache cannot write: " << tmp; return; }
 
+        hvfs::Stat st;
+        hvfs::stat(srcPath, st);
         wU32(f, kMagic);
         wU32(f, kVersion);
-        wU64(f, getMtime(srcPath));
-        wU64(f, getSize(srcPath));
-        wU64(f, hashFile(srcPath));
+        wU64(f, st.mtime);
+        wU64(f, st.size);
+        wU64(f, sourceHash(srcPath, st));
         wU32(f, (uint32_t)meshes.size());
 
         for (const auto& m : meshes) {

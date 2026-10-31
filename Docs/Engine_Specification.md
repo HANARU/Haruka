@@ -8,6 +8,27 @@
 >
 > **갱신(2026-10-15)**: 에디터의 액터 생성 · 삭제 Undo 를 4-11 · 4-12 · 5-4 · 7장에, XR 머리 자세 청취자를 4-8 · 5-3 에, 프로젝트 폴더 에셋 루트를 4-6 에 반영하고, 1-3 · 3-2 의 소스 · 테스트 수치를 이
 > 변경까지 다시 셌습니다. 커밋 수와 결함 수는 기준 시점 그대로입니다.
+>
+> **갱신(2026-10-15, 엔진 기본 기능 보강)**: 커밋 `4cc931a` 뒤의 씬 관리 · 편집 기본기 · 플레이어와 입력 작업을 반영했습니다
+> (정본 [Engine_Basics_Design.md](Engine_Basics_Design.md)). 1-3 · 3-2 의 소스 · 테스트 수치를 이 작업까지 다시 셌습니다.
+>
+> **갱신(2026-10-16)**: 헤드셋 2차 확인(DEF-110 · DEF-106 · 플레이어 리그)과 "XR 에는 언제나 리그" 결정을 2-2 · 2-3 · 4-5 · 7 · 8장에 반영하고
+> 수치를 다시 셌습니다. 같은 날의 소리 출력 장치 선택은 4-8 · 4-11 에 있습니다.
+>
+> **갱신(2026-10-24, 패키징 1단계)**: 런타임 분리(게임 실행 파일 `HarukaGame`, DEF-12 해결) · 실행 폴더 기준 경로와 쓰기 루트 · 배포 ZIP ·
+> 자체 묶음 파일(.hpak)과 가상 파일 시스템을 1-1 · 1-3 · 2장 · 3-2 · 3-3 · 4-1 · 4-6 · 4-12 · 5-1 · 6 · 7 · 8장에 반영하고 수치를 다시
+> 셌습니다(정본 [Packaging_Design.md](Packaging_Design.md)). 이 작업에서 찾은 DEF-112 ~ 119 를 등재했습니다.
+>
+> **갱신(2026-10-31, 오류 검토와 패키징 마무리 묶음)**: 미커밋 작업 전체의 오류 검토에서 나온 DEF-120 ~ 147 을 등재하고, 그중 패키징
+> 마무리 묶음 DEF-121 ~ 128 을 고친 결과를 1-3 · 2장 · 4-12 · 6 · 7 · 8장에 반영했습니다.
+>
+> **갱신(2026-10-31, 패키징 2단계 · 3단계 진행)**: Vulkan 1.1 기준선 · 확장 함수 · 배리어 분기 · 창 없는 렌더 경로 · 핵심 힙 · MSAA
+> 지연 할당(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120 해결)과 Android 빌드 · APK(DEF-08 빌드 부분)를 1-1 · 1-3 · 2장 · 4-3 · 4-4 ·
+> 4-12 · 5-1 · 6 · 7 · 8장에 반영했습니다(정본 [Packaging_Design.md](Packaging_Design.md) 6 · 7절). 새 결함 DEF-148 을 등재했습니다.
+>
+> **갱신(2026-11-01, Android 오류 검출과 수정)**: 패키징 관점의 Android 오류 검출에서 나온 DEF-149 ~ 156 과 확인 중 찾은 Windows 쪽
+> DEF-157 을 등재하고 모두 고쳤습니다(묶음과 실행 파일의 짝 확인 · configChanges · APK 고지 · 설정 파일 인코딩 · 파이프라인 캐시 파일 ·
+> 종료 순서 · XR 손실 · SSAO 깊이 샘플러 · `_HAS_EXCEPTIONS`). 1-3 · 4-12 의 수치를 고쳤습니다(정본 [Packaging_Design.md](Packaging_Design.md) 7-1).
 
 ---
 
@@ -22,9 +43,9 @@
 | 항목 | 내용 |
 |---|---|
 | 최종 목표 기기 | Meta Quest Pro(Snapdragon XR2+ Gen 1) 단독 실행 VR |
-| 현재 실행 형태 | Windows 데스크톱 애플리케이션 하나. 엔진과 에디터가 같은 창에서 함께 돕니다 |
-| VR 상태 | PC OpenXR 연결(`--xr`, Quest Link 등)과 두 눈 렌더. 2026-10-15 Meta Quest Pro(Quest Link)에서 두 눈 · 머리 추적 · 컨트롤러 · 72Hz 를 확인했습니다. 헤드셋에는 Play 동안만 그립니다. Quest 단독 실행은 아직 없습니다 |
-| 언어 · API | C++20, Vulkan 1.4, GLSL(빌드 시 SPIR-V 로 컴파일) |
+| 현재 실행 형태 | Windows 데스크톱 실행 파일 둘(2026-10-19): 에디터 `HarukaEngine`(엔진과 에디터가 같은 창), 게임만 실행하는 `HarukaGame`(에디터 코드 없음, 배포 ZIP 으로 내보냄) |
+| VR 상태 | PC OpenXR 연결(`--xr`, Quest Link 등)과 두 눈 렌더. 2026-10-15 Meta Quest Pro(Quest Link)에서 두 눈 · 머리 추적 · 컨트롤러 · 72Hz 를 확인했습니다. 헤드셋에는 Play 동안만 그립니다. Quest 단독 실행은 APK 까지 만들었고(2026-10-31) 헤드셋 첫 실행이 남았습니다 |
+| 언어 · API | C++20, Vulkan 1.1(데스크톱 · Quest 같은 경로, 2026-10-31), GLSL(빌드 시 SPIR-V 1.0 으로 컴파일) |
 | 개발 형태 | 1인 개발. 외부 엔진 프레임워크 없이 렌더러 · GPU 메모리 할당자 · UI 위젯 시스템 · 에디터를 직접 구현 |
 | 저장소 | `github.com/HANARU/Haruka`(공개). 라이선스 파일 없음 |
 
@@ -42,16 +63,16 @@
 - **엔티티 모델은 Unity 식, UI 와 이름은 UE 식**입니다. Actor = GameObject, Component 조합, `activeSelf` / `activeInHierarchy` 는
   Unity 를 따르고, 에디터 UI(HSlate)와 명칭(Actor · tick · BeginPlay, 라이트 용어)은 UE 를 따릅니다.
 
-### 1-3. 규모 (2026-10-15)
+### 1-3. 규모 (2026-10-31)
 
 | 항목 | 값 |
 |---|---|
-| 소스 | `src/` 의 `.cpp` · `.hpp` 153 파일, 25,036 줄 |
+| 소스 | `src/` 의 `.cpp` · `.hpp` 179 파일, 30,275 줄 |
 | 셰이더 | GLSL 19 파일(셰이더 18 + 공용 헤더 1), 705 줄. 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 15개 실행 파일, 검사 540개(`ctest -C Release`) |
-| 문서 | `Docs/` 활성 문서 25개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
+| 자동 테스트 | 24개 실행 파일, 검사 1,061개(`ctest -C Release`, 2026-11-01) |
+| 문서 | `Docs/` 활성 문서 28개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
-| 결함 대장 | 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시) |
+| 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳐, 지금은 157건 중 해결 127 · 열림 24 · 보류 3 · 닫음 3 입니다 |
 
 ---
 
@@ -80,6 +101,11 @@
 | 2026-10-02 ~ 10-03 | 절차 도형 직렬화, 사운드 기초, **종합 오류 검출**(DEF-76 ~ 94 등재, 잠재 DEF-91 을 뺀 전부 수정), 기반 공사(클리핑 · 위젯 휠 · 키 반복 · 글자 폭 실측) | [Audio_Design.md](Audio_Design.md), [Editor_QA_Checklist.md](Editor_QA_Checklist.md) |
 | 2026-10-04 | **남은 결함 정리** 1 · 2단계(셰이더 의존성 · 감마 이중 적용 · 깊이 규약 · 역제곱 감쇠 · 숫자 칸 정밀도), **VR 첫걸음**(OpenXR 연결 · 두 눈 렌더 · 두 눈 컬링 · VR 입력 · 물리 API) | 커밋 `cbae320`, `5d3a86b` |
 | 2026-10-14 ~ 10-15 | 남은 결함 정리 "나머지": 자동 인스턴싱(DEF-16), 렌더 확장 지점(DEF-17 · 18), 직렬화 타입 등록과 씬 v4(DEF-22), 라이트 선택(DEF-33) · 상한 설정 파일(DEF-10), **일괄 점검**과 그 과정에서 찾은 DEF-105 ~ 109 수정 | 커밋 `744cc69` ~ `5a9cb51` |
+| 2026-10-15 | 헤드셋 확인(Quest Link), VR 은 Play 동안만(DEF-111), **엔진 기본 기능 보강**: 씬 관리(씬 파일 선택 · 변경 표시 · 프로젝트 설정), 편집 기본기(ID 기반 Undo · 다중 선택 · 복사와 붙여넣기 · 부모 바꾸기 · 화면 맞추기 · 계층 프리팹), 플레이어와 입력(리그 · 추적 자세 · 이동 · 잡기 · 키와 마우스 축 · 햅틱) | 헤드셋 확인 · DEF-111 은 커밋 `4cc931a`, 기본 기능은 [Engine_Basics_Design.md](Engine_Basics_Design.md) |
+| 2026-10-16 | 헤드셋 2차 확인(DEF-110 검증 메시지 0, DEF-106 최소화 중 헤드셋 유지, 플레이어 리그 · 잡기), XR 에는 언제나 리그(보이지 않는 리그 · 리그 높이 모드), 소리 출력 장치 선택(에디터 Edit > Audio Output, XR Play 동안 헤드셋 자동) | [Engine_Basics_Design.md](Engine_Basics_Design.md) 2-5, [Audio_Design.md](Audio_Design.md) 8절, [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) "헤드셋 2차 확인" |
+| 2026-10-17 ~ 10-24 | **패키징 1단계**(목표: Windows · Android XR 배포): 열린 결함과 패키징 조사 6건, 런타임 분리(빌드 타깃 `HarukaRuntime` · `HarukaEngine` · `HarukaGame`, 엔진 앞단 인터페이스, DEF-12), 게임 실행 규칙(VR 시작 설정 · 런타임 종료 처리 · 초점 일시정지), 실행 폴더 기준 경로와 쓰기 루트(`%LOCALAPPDATA%`), 배포 ZIP(CMake install · CPack), 자체 묶음 파일 `.hpak` v1 · 가상 파일 시스템 · 묶음 도구 `HarukaPak`, 서드파티 라이선스 고지, 이 과정에서 찾은 DEF-112 ~ 119 | [Packaging_Design.md](Packaging_Design.md) |
+| 2026-10-31 | 미커밋 작업 전체의 **오류 검토**(결함마다 검증 두 표, DEF-120 ~ 147 등재), **패키징 마무리 묶음**(UTF-8 묶음 도구 · 조작한 목차 검사 · C 콜백 예외 경계 · 에디터의 옛 에셋 복사본 · glTF `../` · `--loose` 우선순위 · 숨김 폴더 · jsoncpp 고지, DEF-121 ~ 128), 패키징 2단계 계획 | [Packaging_Design.md](Packaging_Design.md) 5-2, [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 절 |
+| 2026-10-31 | **패키징 2단계**: Vulkan 1.1 기준선(장치 계획 · 확장 함수 포인터 · XR 런타임 범위), 배리어 분기(sync2 또는 1.0), 창 없는 렌더 경로(`--headless` · 합성 눈 · 자동 확인 종료 코드), 핵심 힙 1GB 고정 · MSAA 지연 할당(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120). **3단계 진행**: Android 빌드(NDK, Gradle 없이) · `android_main` · OpenXR 로더(공유) · APK | [Packaging_Design.md](Packaging_Design.md) 6 · 7절, [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 절 |
 
 ### 2-3. 주요 결정 기록
 
@@ -98,7 +124,16 @@
 | 3D UI 는 render-to-texture | 2026-08-26 (2026-10-15 재확인) | `UIPanelComponent` 와 기존 `HWidget` 트리, HSlate 오프스크린 렌더. 미구현 | [Spatial_Representation_Design.md](Spatial_Representation_Design.md) 10절 |
 | 라이트 방향은 회전에서만 | 2026-10-15 | `direction` 필드를 없애고 액터 회전의 -Z 를 씁니다. 다음 라이팅 작업 때 구현 | [Lighting_UE_Design.md](Lighting_UE_Design.md) 6절 4번 |
 | VR 은 Play 동안만 | 2026-10-15 | `--xr` 은 OpenXR 를 준비만 하고, 세션은 Play 때 만들고 Stop 때 끝냅니다(UE VR Preview · Unity 와 같음) | [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) "헤드셋 확인 결과" |
-| 할당자 · 런타임 분리는 이식 때 조사 | 2026-10-15 | VMA 대 자체 할당자, 런타임 · 에디터 분리 방식은 Quest 이식 착수 때 다른 엔진을 조사한 뒤 정합니다 | [Roadmap.md](Roadmap.md) |
+| 할당자는 이식 때 조사 | 2026-10-15 | VMA 대 자체 할당자는 Quest 이식 착수 때 정합니다. 2026-10-19 GPU 힙 조사에서 판단 근거(메모리 종류를 여럿 다뤄야 함)가 더해졌습니다 | [Roadmap.md](Roadmap.md), [Packaging_Design.md](Packaging_Design.md) 2절 |
+| 런타임 분리는 빌드 타깃 | 2026-10-19 | 에디터를 뺀 엔진을 `HarukaRuntime` 정적 라이브러리로 묶고 에디터 · 게임 실행 파일이 각각 링크합니다(UE 의 Game · Editor 타깃, O3DE 와 같음). 엔진은 앞단 인터페이스로만 에디터 · 게임을 부릅니다 | [Packaging_Design.md](Packaging_Design.md) 3 · 4-1절 |
+| 게임 실행 규칙 | 2026-10-19 | VR 시작은 `project.ini` 의 `xr.startInVr` + 명령줄 `--xr` · `--no-xr`. 시작 때 헤드셋이 없으면 데스크톱, 실행 중 런타임이 끝내면(EXITING) 종료, 연결이 끊기면 데스크톱으로 계속하며 다시 연결. 헤드셋을 벗으면 게임만 일시정지(에디터 Play 는 그대로) | 같은 문서 3 · 4-2절 |
+| 쓰기 위치 | 2026-10-19 | 게임의 설정 · 로그 · 캐시는 `%LOCALAPPDATA%\Haruka\<실행 파일 이름>`(Android 는 외부 앱 폴더), 에디터는 실행 폴더. 설정은 패키지 기본값 + 사용자 덮어쓰기 두 겹 | 같은 문서 3 · 4-3절 |
+| 자체 묶음 파일 | 2026-10-19 결정, 2026-10-24 형식 | 게임 배포물의 에셋 · 셰이더는 `.hpak` 하나로 묶습니다(사용자: "실제 게임 개발에 들어가면 커진다, 규약을 하나 만들어 두자"). LZ4 64KiB 블록 · XXH3-64 · 대소문자 무시 찾기 · 16B/4KiB 정렬 · 이름 규칙에 따른 여러 묶음 | 같은 문서 5절 |
+| 프로젝트 설정 파일 | 2026-10-15 | 시작 씬 · 입력 바인딩은 프로젝트 폴더의 `assets/project.ini`(Godot 의 `project.godot` 자리), 마지막에 연 씬은 실행 폴더의 `Config/editor_state.txt` 에 둡니다 | [Engine_Basics_Design.md](Engine_Basics_Design.md) 2-2 |
+| Undo 커맨드는 ID 기반 | 2026-10-15 | 액터는 ID, 컴포넌트는 타입 이름 + 순번으로 찾습니다. 삭제를 되돌리면 그 전 편집 이력도 이어집니다(같은 날 정한 "삭제 전 이력은 버림"을 뒤집음). 저장 여부는 Undo 상태 표지로 판정합니다 | 같은 문서 2-2 · 2-4 |
+| 소리 출력 장치는 에디터 설정 | 2026-10-16 | 기계별 값(`Config/editor_state.txt`), Edit 메뉴의 목록 대화상자로 고름. XR Play 동안 헤드셋 장치로 자동 전환(기본 켜짐). 패키징된 빌드는 같은 API 를 설정 화면이 씀(UE 의 에디터 Audio 설정 · Swap Audio Output Device, Godot 의 `AudioServer.output_device` 와 같은 구분) | [Audio_Design.md](Audio_Design.md) 8절 |
+| XR 에는 언제나 리그 | 2026-10-16 | 씬 리그가 없으면 카메라 아래 바닥에 보이지 않는 리그를 붙입니다. 리그 높이는 실제 키(LOCAL_FLOOR) 또는 고정 눈높이(Unity XR Origin 의 Floor · Device 모드와 같은 구분). 데스크톱 카메라는 그대로 | [Engine_Basics_Design.md](Engine_Basics_Design.md) 2-5 |
+| 플레이어 기초는 코어에 | 2026-10-15 | 리그 · 추적 자세 · 기본 이동 · 잡기 컴포넌트만 Layer 1 에 두고 도메인 이동은 Layer 2 가 붙입니다. 잡기는 Kinematic 전환 + 손 속도이고, 속도 추적 잡기 · 텔레포트 · 캐릭터 컨트롤러는 미룹니다 | 같은 문서 2절 |
 
 ---
 
@@ -115,7 +150,7 @@
    ├─ 코어 서비스(고정 순서): 창 → (XR) → 렌더러 → 에셋 관리자
    ├─ 동적 모듈(ModuleManager): AudioSystem, PhysicsSystem
    ├─ 에디터(EditorApp, HSlate)
-   └─ 게임 모듈(IGameModule, 기본은 DefaultGameModule: 시작 씬 불러오기)
+   └─ 게임 모듈(IGameModule, 기본은 빈 DefaultGameModule. 시작 씬은 에디터가 엶)
 ```
 
 Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확장 등록(`render`) · 컴포넌트 등록(`components`)에만 닿습니다.
@@ -124,37 +159,52 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 
 | 디렉터리 | 파일 · 줄 | 내용 |
 |---|---|---|
-| `src/`(루트) | 1 · 105 | `main.cpp`(진입점: 콘솔 없이 직접 실행할 때 C stdio 출력을 `Logs/stdout.txt` 로 돌린 뒤 `Engine` 을 만들고 돌림) |
-| `src/core/` | 25 · 2,364 | `Engine`, `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 에셋 루트(`ProjectPaths.hpp`), 리플렉션(`Reflect.hpp`) |
-| `src/renderer/` | 24 · 4,212 | `Renderer`(프레임 구성), `RenderContext`, `GpuScene`, `FrameResources`, 스왑체인, 인스턴싱 묶기 · 라이트 선택 · 절두체 컬링 헤더, 렌더 확장 |
+| `src/`(루트) | 1 · 128 | `main.cpp`(진입점: 실행 파일의 앞단을 만들어 쓰기 루트를 정하고, 콘솔 없이 직접 실행할 때 C stdio 출력을 `Logs/stdout.txt` 로 돌린 뒤 `Engine` 을 만들고 돌림. 에디터 · 게임 실행 파일이 함께 씀) |
+| `src/core/` | 32 · 3,107 | `Engine`, 엔진 앞단 인터페이스(`IEngineFrontend.hpp`), `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 프로젝트 설정(`ProjectSettings.hpp`), 실행 폴더 · 쓰기 루트(`AppPaths`), 원자적 저장(`FileUtil.hpp`), 디버그 선(`DebugDraw.hpp`), 에셋 루트(`ProjectPaths.hpp`), 리플렉션(`Reflect.hpp`) |
+| `src/renderer/` | 24 · 4,223 | `Renderer`(프레임 구성), `RenderContext`, `GpuScene`, `FrameResources`, 스왑체인, 인스턴싱 묶기 · 라이트 선택 · 절두체 컬링 헤더, 렌더 확장 |
 | `src/renderer/passes/` | 11 · 2,106 | Shadow · Geometry · AO · Bloom · Post 패스(`HPass` 수명주기) |
 | `src/memory/` | 2 · 388 | `HarukaAllocator`(1GB 단일 힙, 세 구역) |
-| `src/assets/` | 15 · 1,838 | `AssetManager`, glTF 로더, `.gasset` 캐시, 씬 · 프리팹 직렬화, 컴포넌트 블록 직렬화, 회전 글자 표현 |
+| `src/assets/` | 15 · 1,916 | `AssetManager`, glTF 로더, `.gasset` 캐시, 씬 · 프리팹 직렬화, 컴포넌트 블록 직렬화, 회전 글자 표현 |
 | `src/geometry/` | 5 · 1,321 | 절차 도형 기술자와 메시 생성기 |
-| `src/components/` | 12 · 1,024 | Light · Camera · StaticMesh · Audio · RigidBody, 기본 컴포넌트 등록 |
-| `src/physics/` | 2 · 674 | `PhysicsSystem`(Jolt) |
-| `src/audio/` | 5 · 453 | `AudioSystem`(miniaudio), 3D 감쇠 설정 |
-| `src/input/` | 3 · 236 | `HInputSystem`(액션 · 축 바인딩), XR 입력 상태 |
-| `src/xr/` | 2 · 763 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력) |
-| `src/platform/` | 5 · 591 | `IWindow`, GLFW 구현, Android 스텁 |
-| `src/ui/slate/` | 26 · 3,157 | HSlate: 위젯 14종, 배치 · 페인트 · 폰트 아틀라스 · 렌더러 |
-| `src/editor/` | 13 · 5,761 | `EditorApp`, 기즈모, 커맨드 스택, 액터 생성 · 삭제 Undo 스냅샷, 도킹, 셰이더 핫 리로드 |
-| `src/game/` | 2 · 43 | `DefaultGameModule` |
+| `src/components/` | 14 · 1,641 | Light · Camera · StaticMesh · Audio · RigidBody, XR 리그 · 추적 자세 · 이동 · 잡기(`XrComponents`), 기본 컴포넌트 등록 |
+| `src/physics/` | 2 · 687 | `PhysicsSystem`(Jolt) |
+| `src/audio/` | 5 · 697 | `AudioSystem`(miniaudio, 출력 장치 선택, 가상 파일 시스템 파일 콜백), 3D 감쇠 설정 |
+| `src/input/` | 3 · 456 | `HInputSystem`(액션 · 축 바인딩, 키 · 마우스 축, 설정 줄 바인딩, 햅틱), XR 입력 상태 |
+| `src/xr/` | 2 · 894 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력 · 진동 · 바닥 기준 공간 · 세션을 잃은 이유) |
+| `src/platform/` | 5 · 602 | `IWindow`, GLFW 구현, Android 스텁 |
+| `src/ui/slate/` | 26 · 3,161 | HSlate: 위젯 14종, 배치 · 페인트 · 폰트 아틀라스 · 렌더러 |
+| `src/editor/` | 18 · 7,285 | `EditorApp`(엔진 앞단 구현, 씬 파일 · 대화상자 `EditorApp_scene.cpp`, 다중 선택 · 클립보드 · 부모 바꾸기 `EditorApp_edit.cpp`), 에디터 앞단 선택(`EditorFrontend.cpp`), 기즈모, 커맨드 스택과 ID 기반 Undo 커맨드, 씬 문서(`SceneDocument.hpp`), 액터 스냅샷, 도킹, 셰이더 핫 리로드. 에디터 실행 파일에만 링크 |
+| `src/game/` | 3 · 118 | `DefaultGameModule`(빈 게임 모듈), 게임 실행 파일의 앞단(`GameFrontend.cpp`: 시작 씬 · 처음부터 Play · 기본 카메라) |
+| `src/vfs/` | 8 · 1,022 | 묶음 파일 `.hpak` v1 형식 · 쓰기 · 읽기(`PakFormat` · `PakWriter` · `PakReader`), 가상 파일 시스템(`Vfs`: 낱개 폴더 · 묶음 마운트와 우선순위). `HarukaVfs` 라이브러리 |
+| `src/tools/` | 1 · 293 | 묶음 도구 `HarukaPak`(build · list · verify · extract) |
 
 ### 3-3. 부팅 · 메인 루프 · 종료
 
+**앞단**(2026-10-19): 엔진은 에디터를 직접 알지 않고 `IEngineFrontend` 로만 부릅니다. 에디터 실행 파일은 `EditorApp`, 게임 실행
+파일은 `GameFrontend` 를 링크하고, 앞단의 정책(프로젝트 폴더 · VR 시작 · 초점 일시정지 · 런타임 종료 처리 · 쓰기 루트 · 묶음 마운트)이
+아래 순서의 갈림길을 정합니다. `main()` 이 앞단을 먼저 만들어 쓰기 루트를 정한 뒤 로그를 엽니다.
+
 **부팅 순서**(`Engine::Engine`):
-1. 기본 컴포넌트 5종 등록 → `Config/engine.ini` 읽기(없으면 기본값으로 생성).
-2. GLFW 창(1600x900) → `--xr` 이면 OpenXR 초기화(렌더러보다 먼저, OpenXR 이 GPU 를 고름) → 렌더러(XR 세션은 Play 때 만듦) →
-   `--emulate-stereo` 처리 → 에셋 관리자.
-3. 동적 모듈(Audio, Physics) 등록 → 에디터 초기화 → 입력 바인딩(현재 비어 있음) → 게임 모듈 `onStart`(시작 씬 불러오기).
+1. 컴포넌트 등록(기본 5종 + XR 5종) → 에셋 루트(에디터는 프로젝트 폴더, 그 밖에는 실행 폴더) → 가상 파일 시스템 마운트(실행 폴더의 낱개
+   파일 위에 에디터는 프로젝트 폴더의 `assets/`, 게임은 실행 폴더의 묶음 파일, `--loose` 면 낱개 파일이 맨 위) → 프로젝트 설정
+   `assets/project.ini` → `Config/engine.ini`(실행 폴더의 패키지 기본값 위에 쓰기 루트의 사용자 값, 에디터는 없으면 기본값으로 생성).
+2. GLFW 창(1600x900) → VR 을 원하면 OpenXR 초기화(명령줄 `--xr` · `--no-xr`, 없으면 게임은 `xr.startInVr`. 렌더러보다 먼저, OpenXR 이
+   GPU 를 고름) → 렌더러(에디터는 XR 세션을 Play 때, 게임은 시작하자마자 만듦) → `--emulate-stereo` 처리 → 에셋 관리자.
+3. 동적 모듈(Audio, Physics) 등록 → 앞단 초기화 → 입력 바인딩(프로젝트 설정, 없으면 엔진 기본값) → 게임 모듈 `onStart` → 앞단이 처음 씬을
+   엶(에디터: 마지막에 연 씬, 없으면 `startScene`, 그것도 없으면 빈 씬. 게임: `startScene` 을 열고 카메라가 없으면 기본 카메라를 둔 뒤 Play).
 
-**메인 루프**(`Engine::run`, 프레임마다): 창 이벤트 → 최소화 확인 → Play 상태에 맞춰 XR 세션 열기 · 닫기 → XR 프레임 시작(세션이 돌면 헤드셋이 루프 속도를 정함) →
-Play 상태 전이(BeginPlay · EndPlay · 일시정지 통지) → 에디터 tick · 입력 시스템 갱신 → **Play 중에만** 월드 · 게임 모듈 · 동적 모듈
-tick → 에디터 입력 처리 → 렌더(XR 이면 두 눈 + 거울 화면) → 제목 표시줄 FPS. 최소화 중에는 에디터 UI 를 건너뛰고 약 60Hz 로 쉽니다.
+**메인 루프**(`Engine::run`, 프레임마다): 창 닫기 요청 확인(에디터는 저장하지 않은 씬이 있으면 확인 창을 띄우고 닫기를 미룸, 게임은 바로 끝냄)
+→ 창 이벤트 → 최소화 확인 → Play 상태에 맞춰 XR 세션 열기 · 닫기(게임은 연결이 끊긴 뒤 2초마다 다시 연결 확인) → 리그 높이 모드에 맞춰
+기준 공간을 고름(화면 카메라가 씬 리그의 머리면 그 리그의 값, 아니면 프로젝트 설정) → XR 프레임 시작(세션이 돌면 헤드셋이 루프 속도를 정함.
+런타임이 세션을 끝내면 에디터는 데스크톱으로 계속, 게임은 EXITING 이면 종료 · 연결 끊김이면 데스크톱으로 계속) → 카메라에 XR 원점을 넘김(씬
+리그가 있으면 그 리그, 없으면 XR 세션 동안은 카메라 아래 바닥의 보이지 않는 리그, 세션이 없으면 카메라 위치 + 요) → 소리 청취자 갱신(XR
+중에는 머리 자세) → Play 상태 전이(BeginPlay · EndPlay · 일시정지 통지. 게임은 헤드셋이 입력 초점을 잃으면 일시정지를 겹침) → 앞단 tick →
+디버그 선 비움 → 입력 시스템 갱신 → **Play 중에만** 월드 · 게임 모듈 · 동적 모듈 tick → 마우스 시선 양 비움 → 앞단 입력 처리 → 렌더(XR 이면
+두 눈 + 거울 화면, UI 가 없으면 렌더러가 스왑체인 이미지를 표시 레이아웃으로 전환) → 제목 표시줄(앞단 제목, VR 을 쓸 수 없거나 끊겼으면
+알림, FPS). 최소화 중에는 앞단 UI 를 건너뛰고 약 60Hz 로 쉽니다.
 
-**종료**는 대체로 부팅의 역순입니다. 실제 순서는 게임 모듈 → 동적 모듈 → 에셋 → 에디터 → XR 세션 → 렌더러 → XR 인스턴스이며,
-에디터는 부팅 때 동적 모듈보다 늦게 만들지만 정리는 에셋 뒤에 합니다.
+**종료**는 대체로 부팅의 역순입니다. 실제 순서는 게임 모듈 → 동적 모듈 → 에셋 → 앞단 → XR 세션 → 렌더러 → XR 인스턴스이며,
+앞단은 부팅 때 동적 모듈보다 늦게 만들지만 정리는 에셋 뒤에 합니다.
 
 ### 3-4. 스레드
 
@@ -181,6 +231,8 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | miniaudio | 0.11.21 | 오디오 장치 · 디코드(OGG 는 함께 들어 있는 stb_vorbis) |
 | JoltPhysics | v5.1.0 | 물리 |
 | OpenXR-SDK | release-1.1.63 | OpenXR 로더(정적 링크) |
+| LZ4 | v1.10.0 | 묶음 파일 압축(`lib/lz4.c` · `lz4hc.c` 만, BSD-2, 2026-10-24) |
+| xxHash | v0.8.3 | 묶음 파일 · glTF 캐시의 내용 해시 XXH3-64(헤더 하나, BSD-2, 2026-10-24) |
 
 ---
 
@@ -193,6 +245,13 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 - 셰이더는 빌드 시 `glslc` 로 SPIR-V 컴파일, include 의존성 추적, 목록 밖 셰이더 파일은 구성 단계에서 경고합니다.
 - 실행 파일은 콘솔 창 없이(`/SUBSYSTEM:WINDOWS`) 뜨고, 콘솔이 필요하면 `-DHARUKA_CONSOLE=ON` 으로 구성합니다. 실행 파일 · 창
   아이콘이 리소스로 들어 있습니다.
+- 빌드 결과(2026-10-19 ~ 24): 에디터를 뺀 엔진 라이브러리 `HarukaRuntime`, 에디터 `HarukaEngine.exe`, 게임 `HarukaGame.exe`, 묶음 도구
+  `HarukaPak.exe`, 게임 묶음 `build/pack/game.hpak`(목록 `Packaging/game.pack.txt`). 실행 파일 매니페스트가 프로세스 코드 페이지를
+  UTF-8 로 둡니다(한글 사용자 폴더 경로).
+- 게임 배포: `cmake --build build --config Release --target PACKAGE` 가 `build/HarukaGame-<버전>-win64.zip` 을 만듭니다. 들어가는 것은
+  `HarukaGame.exe` · `game.hpak` · VC++ 런타임 DLL · `THIRD_PARTY_NOTICES.txt` 이고, 압축을 풀면 바로 실행됩니다.
+- 경로: 셰이더 · 에셋은 작업 폴더가 아니라 실행 파일 기준으로 찾고, 실행 중에 쓰는 파일은 쓰기 루트(에디터 실행 폴더, 게임
+  `%LOCALAPPDATA%\Haruka\HarukaGame`)에 둡니다.
 - 경고 수준 `/W4`, 빌드 경고 0 을 유지합니다.
 
 ### 4-2. 코어
@@ -218,9 +277,13 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
   B 896MB(에셋, free-list. 이미지는 시작 주소를 `bufferImageGranularity` 에 맞춰 정렬) · C 64MB(프레임별 동적 데이터, ring)이고 합이 1GB 임을 `static_assert` 로
   강제합니다.
 - 메모리 타입은 `DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT`(UMA · ReBAR)를 먼저 고르고, 없으면 `HOST_VISIBLE | HOST_COHERENT` 로
-  내려갑니다(이때 이미지는 별도 `DEVICE_LOCAL` 할당). 힙의 75% 까지만 잡고, 실패하면 절반씩 줄여 256MB 까지 다시 시도합니다.
+  내려갑니다(이때 이미지는 별도 `DEVICE_LOCAL` 할당). 두 단계 모두 힙이 1GB 이상이어야 합니다. 1GB 를 한 번에 잡고, 못 잡으면
+  필요한 크기 · 고른 타입 · 힙 크기 · VkResult · 최대 단일 할당을 적은 예외로 멈춥니다(DEF-42, 2026-10-31. 예전의 75% 상한과 절반씩
+  줄이는 재시도는 Zone 오프셋을 넘어 지웠습니다). 1GB 가 힙의 75% 를 넘으면 경고만 합니다.
+- MSAA 컬러(TRANSIENT 첨부)는 지연 할당(LAZILY_ALLOCATED) 타입이 있으면 핵심 힙 밖에 따로 놓습니다(DEF-06, Quest). 데스크톱에는
+  그 타입이 없어 Zone B 이고, `--vk-dedicated-msaa` 로 별도 할당 경로를 시험합니다.
 - 1GB 힙이 엔진 장치 메모리의 전부는 아닙니다. HSlate 의 폰트 아틀라스 · 흰 텍스처 · 정점/인덱스 버퍼(와 업로드용 스테이징),
-  라인 · 기즈모 정점 버퍼, 위의 대체 경로 이미지는 힙 밖에서 `vkAllocateMemory` 로 따로 할당합니다.
+  라인 · 기즈모 정점 버퍼, 위의 대체 경로 이미지, 지연 할당 MSAA 컬러는 힙 밖에서 `vkAllocateMemory` 로 따로 할당합니다.
 
 ### 4-4. 렌더러
 
@@ -230,7 +293,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 | 기능 | 사양 |
 |---|---|
-| 장치 요구 | Vulkan 1.4, 확장 `VK_KHR_swapchain` · `VK_KHR_push_descriptor`, 기능 `synchronization2` · `pushDescriptor` · `samplerAnisotropy` |
+| 장치 요구 | Vulkan 1.1 이상, 확장 `VK_KHR_push_descriptor`(필수) · `VK_KHR_swapchain`(창이 있을 때) · `VK_KHR_synchronization2`(있으면 씀, 없으면 1.0 배리어), 기능 `samplerAnisotropy`(있으면). 장치 버전이 높아도 같은 경로입니다(2026-10-31, `renderer/VulkanBaseline.hpp`) |
 | 프레임 | 프레임 인 플라이트 2, MSAA 4x(장치가 못 하면 2x → 1x), HDR `R16G16B16A16_SFLOAT` |
 | 셰이딩 | 메탈릭 · 러프니스 PBR(GGX · Smith · Schlick), 텍스처 5종(알베도 · 노멀 · 금속/거칠기 · AO · 이미시브) |
 | 라이트 | Directional · Point · Spot, 색온도(Kelvin) 틴트, 라이트별 Cast Shadows. 점광원 · 스팟 감쇠는 역제곱 × 창 함수 `(1-(d/r)⁴)²`(UE · Frostbite · Filament) |
@@ -257,28 +320,32 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 |---|---|
 | 런타임 연결 | `--xr` 로 켬. `XR_KHR_vulkan_enable2` 필수, `XR_FB_display_refresh_rate` 있으면 사용. 런타임 · 헤드셋이 없으면 경고 하나 남기고 데스크톱으로 계속. Quest Link(Oculus 1.208, Meta Quest Pro)에서 확인(2026-10-15) |
 | 세션 수명 | Play 에 들어가면 세션을 만들고 Stop 하면 `xrRequestExitSession` 으로 끝냄. 편집 중에는 헤드셋에 그리지 않음(UE VR Preview · Unity 와 같음, 2026-10-15 사용자 결정, DEF-111). 일시정지 중에는 유지. 런타임이 Play 중에 끝내면 Play 는 데스크톱으로 계속하고 다음 Play 에서 다시 엶. 헤드셋을 쓰지 않는 동안 런타임은 세션을 IDLE 로 둠 |
-| 공간 · 원점 | LOCAL 기준 공간, 원점 = 활성 카메라의 위치 + 요(yaw) |
+| 공간 · 원점 | XR 에는 언제나 리그가 있습니다(2026-10-16). 화면 카메라가 씬 리그의 머리면 원점 = 그 리그, 아니면 카메라 아래 바닥에 붙인 보이지 않는 리그(수평 위치 · 요는 카메라). 리그 높이가 실제 키면 바닥 기준 공간(LOCAL_FLOOR, `XR_EXT_local_floor`), 고정 눈높이면 LOCAL + 눈높이(런타임에 바닥 공간이 없을 때도). 두 공간을 함께 만들어 두고 프레임마다 고름. XR 세션이 없으면 카메라 위치 + 요(yaw) |
 | 프레임 | `xrWaitFrame` 이 루프 속도를 정함. 한 프레임에 자세 하나로 컬링 · 렌더 · 제출. 헤드셋이 화면을 보이지 않으면 빈 프레임 제출 |
 | 스왑체인 | 두 층 배열 스왑체인 하나(눈마다 한 층). 오른쪽 눈을 먼저 그리고 왼쪽 눈을 에디터 뷰포트에 거울 화면으로 비춤 |
-| 입력 | 기본 액션 세트 하나. Touch 컨트롤러 · simple 컨트롤러 프로필(Quest Pro 컨트롤러도 Touch 프로필로 연결됨). 머리 · 양손 자세, 트리거 · 그립 · 스틱 · 버튼 → `HInputSystem` 의 XR 버튼 · 축 |
+| 입력 | 기본 액션 세트 하나. Touch 컨트롤러 · simple 컨트롤러 프로필(Quest Pro 컨트롤러도 Touch 프로필로 연결됨). 머리 · 양손 자세와 손 속도, 트리거 · 그립 · 스틱 · 버튼 → `HInputSystem` 의 XR 버튼 · 축, 손 진동(`xrApplyHapticFeedback`) |
 | 물리 | XR 세션 동안 물리 스텝을 헤드셋 주사율에 맞춤(30 ~ 240Hz 범위) |
-| 시각화 | 씬의 라인 오버레이로 그려 헤드셋 두 눈과 거울 화면에 모두 보입니다. 손 자세에 10cm 축 세 개, 가리키는 방향에 선 하나(트리거 → 색, 그립 → 길이) |
+| 플레이어 | 리그 · 추적 자세 · 스틱 이동 · 45° 스냅 회전 · 그립 잡기와 던지기(아래 4-9, [Engine_Basics_Design.md](Engine_Basics_Design.md) 5절). 표준 구성 `XrPlayer` 프리팹, 시연 씬 `XrDemo` |
+| 시각화 | 씬의 라인 오버레이로 그려 헤드셋 두 눈과 거울 화면에 모두 보입니다. 손 자세에 10cm 축 세 개, 가리키는 방향에 선 하나(트리거 → 색, 그립 → 길이). 손 액터의 Tracked Pose(`showDebug`)가 그리고, 손 추적 컴포넌트가 없는 씬에서만 에디터가 예전처럼 카메라 원점 기준으로 그림 |
 
 ### 4-6. 에셋 · 씬
 
 | 기능 | 사양 |
 |---|---|
-| 에셋 루트 | 에셋은 `assets/...` 논리 경로로 가리키고 씬 · 프리팹에도 논리 경로를 저장합니다. 에디터 빌드는 프로젝트 폴더(구성할 때 넣은 소스 트리 경로)의 `assets/` 를 직접 읽고 씁니다(2026-10-15, UE · Unity · Godot 과 같음). 그 폴더가 없으면 실행 파일 옆 복사본을 씁니다. 캐시는 실행 폴더에 둡니다 |
-| glTF | `.glb` · `.gltf` 정적 메시, 텍스처 5종. 스칼라 팩터는 읽을 때 텍스처에 구워 넣음. `alphaMode = BLEND` → 반투명 |
-| 메시 캐시 | `.gasset` 바이너리 캐시(실행 폴더의 `assets/cache/`, 소스 트리에 쓰지 않음). 원본 크기와 수정 시각 또는 내용 해시(FNV-1a)가 같으면 재사용 |
+| 에셋 루트 | 에셋은 `assets/...` 논리 경로로 가리키고 씬 · 프리팹에도 논리 경로를 저장합니다. 에디터 빌드는 프로젝트 폴더(구성할 때 넣은 소스 트리 경로)의 `assets/` 를 직접 읽고 씁니다(2026-10-15, UE · Unity · Godot 과 같음). 그 폴더가 없으면 실행 파일 옆 복사본을 씁니다 |
+| 가상 파일 시스템 | 엔진이 읽는 셰이더 · 에셋은 논리 경로로 가상 파일 시스템에서 찾습니다(2026-10-24). 낱개 폴더와 묶음 파일을 우선순위대로 겹치고, 찾기는 대소문자를 무시합니다. 여러 스레드가 함께 읽을 수 있습니다(오디오 비동기 로딩). 절대 경로(시스템 글꼴)는 그 파일을 직접 읽습니다 |
+| 묶음 파일 | `.hpak` v1(2026-10-24): 128B 머리 + 데이터 + 끝 목차, 파일마다 그대로 저장 또는 LZ4 64KiB 독립 블록, 머리 · 목차 · 내용의 XXH3-64, 16B(64KiB 이상 4KiB) 정렬. 실행 폴더의 `game.hpak` < `dlc_*.hpak` < `game_p<N>.hpak` 순으로 위에 올라감. 묶음 도구가 같은 입력에서 같은 바이트를 만들고 텍스트 에셋의 줄 끝을 LF 로 맞춤 |
+| glTF | `.glb` · `.gltf` 정적 메시, 텍스처 5종. 스칼라 팩터는 읽을 때 텍스처에 구워 넣음. `alphaMode = BLEND` → 반투명. 본문은 메모리에서 파싱하고 외부 파일도 가상 파일 시스템으로 읽음 |
+| 메시 캐시 | `.gasset` 바이너리 캐시 v3(에디터는 실행 폴더의 `assets/cache/`, 게임은 쓰기 루트의 `Cache/models`). 파일 이름은 논리 경로에서 나오고, 원본 크기와 수정 시각 또는 내용 해시(XXH3-64, 원본이 묶음 안이면 목차 값)가 같으면 재사용 |
 | 절차 도형 | Box · Plane · Sphere · Cylinder · Cone · Capsule · Torus · Arrow · Icosphere 9종. 머티리얼은 체커 또는 단색(색 · 금속도 · 거칠기) |
 | 씬 형식 | 텍스트 `.hscene` v4. 액터마다 `POS` · `ROT`(오일러 각) · `QUAT`(정확한 회전) · `SCALE` · `ACTIVE` · `PARENT`, 컴포넌트마다 `COMPONENT:타입` … `END_COMPONENT` 블록에 `이름=값`. 실수는 다시 읽으면 같은 값이 되는 가장 짧은 십진수로 씀 |
-| 호환 | v3 이하 씬 · v1 프리팹을 계속 읽음. 등록되지 않은 컴포넌트 타입은 원문 그대로 보존해 다시 저장할 때 씀 |
-| 프리팹 | `.hprefab` v2, 액터 하나(같은 형식). 에디터에서 저장 · 콘텐츠 브라우저에서 꺼내기 |
-| 시작 씬 | `assets/scenes/LightingProbe.hscene`(라이팅 확인용 절차 도형 씬, v3 형식으로 유지) |
-| 추적 에셋 | 모델 1(`model.glb`), 시험 음원 3, 시작 씬 1, 프리팹 1 |
+| 호환 | v3 이하 씬 · v1 · v2 프리팹을 계속 읽음. 등록되지 않은 컴포넌트 타입은 원문 그대로 보존해 다시 저장할 때 씀 |
+| 프리팹 | `.hprefab` v3, 서브트리(씬 블록, 첫 블록이 루트. 2026-10-15). 에디터에서 저장 · 콘텐츠 브라우저에서 꺼내기. v1 · v2 도 읽음 |
+| 씬 파일 | 프로젝트 폴더의 `assets/scenes/` 아래 논리 경로로 열고 저장. 임시 파일에 쓴 뒤 바꾸는 원자적 저장(2026-10-15) |
+| 시작 씬 | `assets/project.ini` 의 `startScene`(기본 `assets/scenes/LightingProbe.hscene`, 라이팅 확인용 절차 도형 씬, v4). 에디터는 마지막에 연 씬을 먼저 엶 |
+| 추적 에셋 | 모델 1(`model.glb`), 시험 음원 3, 씬 2(`LightingProbe` · `XrDemo`), 프리팹 2(`AudioProbe` · `XrPlayer`), 프로젝트 설정 `project.ini` |
 
-**컴포넌트 5종**
+**컴포넌트 10종**
 
 | 컴포넌트 | 주요 값 |
 |---|---|
@@ -287,25 +354,37 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | StaticMesh | visible · transparent · 절차 도형(prim · primMaterial) 또는 모델(model · meshIndex) |
 | Audio | file · volume · loop · autoPlay · attenuation(공간화 · 감쇠 모델 · 최소/최대 거리 · 롤오프) |
 | RigidBody | shape(Box · Sphere · Capsule) · motion(Static · Dynamic · Kinematic) · friction · restitution · mass · halfExtent |
+| XR Rig | height(tracked · fixed) · eyeHeight. 플레이어 원점(바닥) |
+| Tracked Pose | source(head · left · right) · showDebug |
+| Locomotion | moveSpeed · snapTurn · flying · lookSensitivity |
+| Grabbable | throwable |
+| Grab Hand | radius |
 
 ### 4-7. 물리 (Jolt)
 
 - 고정 스텝 1/60 초(XR 중에는 헤드셋 주사율), 정적 · 동적 두 레이어, 바디 상한은 설정 파일.
 - 콜라이더 크기는 월드 스케일을 반영합니다. 구 · 캡슐은 균등 스케일만 지원(비균등이면 가장 큰 값으로 근사하고 경고). 얇은 상자는
   모서리 반경을 두께에 맞춰 줄이고, 만들 수 없는 크기는 경고 후 바디를 만들지 않습니다.
-- API: 힘 · 위치 지정 힘 · 토크 · 충격량 · 선속도 · 각속도 · 중력 설정, 레이캐스트, 구 겹침 질의, 바디 상태 조회, 마찰 · 반발 즉시 반영.
+- API: 힘 · 위치 지정 힘 · 토크 · 충격량 · 선속도 · 각속도 · 중력 설정, 레이캐스트, 구 겹침 질의, 바디 상태 조회, 마찰 · 반발 즉시 반영,
+  바디를 다시 만들지 않는 Dynamic ↔ Kinematic 전환(잡기, 2026-10-15). 질량은 Static 이 아닌 모든 바디에 적용합니다.
 - 바디는 Play 중 지연 생성되고, 끄면 지우며 주변 잠든 바디를 깨웁니다. 편집 확정 때만 다시 만듭니다.
 
 ### 4-8. 오디오 (miniaudio)
 
 - 48kHz 스테레오, WAV · FLAC · MP3(miniaudio 내장) · OGG Vorbis.
+- 출력 장치(2026-10-16): 에디터 Edit > Audio Output 에서 시스템 기본 또는 특정 장치를 고르고(기계별 `Config/editor_state.txt`),
+  재생 중에 바꿔도 소리가 이어집니다. XR Play 동안에는 런타임이 알려 주는 헤드셋 장치로 자동 전환합니다(끌 수 있음).
 - 3D 공간화: 청취자 = 활성 카메라의 위치 · 방향(XR 세션 중에는 헤드셋 머리 자세, 2026-10-15), 감쇠 모델 Inverse · Linear · Exponential, 최소/최대 거리 · 롤오프.
 - 에디터 Pause 는 월드 소리만 멈추고, 컴포넌트를 끄면 멈추고 되감습니다. 장치 없이 출력 샘플을 만들어 검산하는 헤드리스 경로가 있습니다.
 
 ### 4-9. 입력
 
 - 키보드 · 마우스(창), XR 컨트롤러. 키 · 버튼은 직전 폴링 이후 눌린 적이 있으면 눌림으로 봅니다(짧은 클릭 유실 방지). OS 자동 반복 횟수를 셉니다.
-- `HInputSystem`: 액션 이름에 키 · XR 버튼을, 축 이름에 XR 축을 묶고 Pressed · Released · Held 를 구독합니다. 텍스트 입력 중에는 게임 입력이 모든 키를 뗀 것으로 봅니다.
+- `HInputSystem`: 액션 이름에 키 · XR 버튼(트리거 · 그립은 0.5 에서 끊음)을, 축 이름에 XR 축 · 키 쌍 · 마우스 축을 묶고 Pressed · Released · Held 를
+  구독하거나 `held()` 로 묻습니다. 축 값 = 가장 큰 XR 축 + 키 축 + 마우스 축입니다. 텍스트 입력 중에는 게임 입력이 모든 키를 뗀 것으로 봅니다.
+- 바인딩은 `assets/project.ini` 의 `input.action.*` · `input.axis.*` 줄로 정합니다(`key:W`, `keys:W/S`, `xr:left.grip`, `xr:left.stick.y`, `mouse:x*0.5`).
+  틀린 줄은 경고하고 기존 바인딩을 바꾸지 않습니다. 줄이 없으면 엔진 기본값(MoveX · MoveY · MoveUp · TurnX · LookX · LookY · GrabLeft · GrabRight).
+- 마우스 축은 Play 중 뷰포트 오른쪽 버튼 끌기 양입니다. 햅틱(`haptic(손, 세기, 초)`)은 XR 진동으로 갑니다(2026-10-15).
 
 ### 4-10. UI (HSlate)
 
@@ -320,37 +399,47 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 영역 | 기능 |
 |---|---|
 | 레이아웃 | 도크 트리(분할 + 탭), 스플리터, 탭 끌어 다시 도킹, 탭 닫기와 Window 메뉴로 다시 열기, 레이아웃 저장 · 복원(`Config/editor_layout.txt`), Reset Layout, 창 높이에 따른 UI 배율(1 ~ 2.5배) |
-| 메뉴 · 툴바 | File(New · Save · Load Scene), Edit(Undo · Redo · Delete), Actor(Add Empty · 직전 선택에 붙이기 · 떼기), View, Window. Play · Pause · Stop · Save · Load · Refresh |
-| 뷰포트 | 기즈모(Q 선택 · W 이동 · E 회전 · R 스케일. 이동 · 회전은 World/Local, 스케일은 언제나 로컬, 스냅), 액터 픽(아이콘 → 로컬 바운드 광선-OBB), 우클릭 비행 카메라(WASD · Q/E, 비행 중 휠은 속도 단계) · 좌클릭 끌기 이동 · 휠 전후 이동, 라이트 · 카메라 · 오디오 아이콘, 선택한 액터의 바운드 상자 |
-| 아웃라이너 | 계층 트리(들여쓰기 · 펼침), 검색(Ctrl+F), 가시성 토글, F2 리네임, 삭제, 타입 열, 액터 수 |
-| 디테일 | 트랜스폼, 컴포넌트별 속성(UE 식 숫자 칸: 드래그 · Shift 10배 · Ctrl 0.1배 · 직접 입력), 켜기/끄기 · 제거, 컴포넌트 추가(레지스트리 기반, 폭에 맞춰 줄 나눔), Save as Prefab |
-| 하단 | Content Browser(모델 · 오디오 · 프리팹), Output Log(카테고리 · 수준 필터, 검색, 꼬리 추종), GPU Stats |
-| 상태바 | 최근 로그 한 줄(수준별 색), 지금 키보드 입력이 가는 곳(Rename · Search · Value · Log Search) |
-| 편집 | Undo/Redo 64단계: 트랜스폼 변경, 컴포넌트 속성 스냅샷, 액터 생성 · 삭제(2026-10-15. 서브트리를 글로 떠 두었다가 원래 ID · 부모로 되살리므로 아웃라이너 자리와 저장 결과가 같음). 기즈모를 끄는 동안에는 되돌리지 않습니다. Stop · New Scene · Load 는 Undo 기록을 지웁니다 |
-| 단축키 | Ctrl+Z 되돌리기, Ctrl+Y · Ctrl+Shift+Z 다시 하기, Ctrl+S 저장, Ctrl+F 아웃라이너 검색, F2 리네임, Delete 액터 삭제, Esc 글자 편집 끝내기(숫자 칸은 값 확정), 글자 · 숫자 칸의 Ctrl+A · C · V |
-| Play | Play · Pause · Stop. Play 를 누르면 씬을 글로 저장해 두고 Stop 하면 다시 읽어 복원합니다(2026-10-14 일괄 점검에서 세 번 왕복한 뒤 저장 결과가 글자까지 같음을 확인) |
+| 메뉴 · 툴바 | File(New · Open · Save · Save As Scene), Edit(Undo · Redo · Copy · Paste · Duplicate · Delete · Frame Selected · Audio Output), Actor(Add Empty · 직전 선택에 붙이기 · 떼기), View, Window. Play · Pause · Stop · Save · Open · Refresh |
+| 뷰포트 | 기즈모(Q 선택 · W 이동 · E 회전 · R 스케일. 이동 · 회전은 World/Local, 스케일은 언제나 로컬, 스냅. 여러 액터를 고르면 주 선택 피벗 기준으로 함께 변환), 액터 픽(아이콘 → 로컬 바운드 광선-OBB, Ctrl+클릭은 선택에 넣고 빼기), 우클릭 비행 카메라(WASD · Q/E, 비행 중 휠은 속도 단계) · 좌클릭 끌기 이동 · 휠 전후 이동, F 화면 맞추기, 라이트 · 카메라 · 오디오 아이콘, 선택한 액터들의 바운드 상자 |
+| 아웃라이너 | 계층 트리(들여쓰기 · 펼침), 검색(Ctrl+F), 가시성 토글, F2 리네임, 삭제, 타입 열, 액터 수, 다중 선택(Ctrl 넣고 빼기 · Shift 범위), 끌어 놓아 부모 바꾸기(빈 곳은 루트, 월드 자세 유지) |
+| 디테일 | 트랜스폼, 컴포넌트별 속성(UE 식 숫자 칸: 드래그 · Shift 10배 · Ctrl 0.1배 · 직접 입력), 켜기/끄기 · 제거, 컴포넌트 추가(레지스트리 기반, 폭에 맞춰 줄 나눔), Save as Prefab(서브트리). 여러 액터를 고르면 주 선택만 보여 주고 "N actors selected" 배지 |
+| 하단 | Content Browser(씬 · 모델 · 오디오 · 프리팹, 지금 열린 씬 강조), Output Log(카테고리 · 수준 필터, 검색, 꼬리 추종), GPU Stats |
+| 상태바 | 최근 로그 한 줄(수준별 색), 지금 키보드 입력이 가는 곳(Rename · Search · Value · Log Search · Dialog), 열린 씬 이름과 변경 표시 |
+| 씬 파일 | 에디터 안의 대화상자: Open Scene(씬 목록), Save Scene As(`assets/scenes/` 아래 이름, 덮어쓰기 확인), Unsaved Changes(새 씬 · 다른 씬 · 창 닫기 전 Save · Don't Save · Cancel). 변경 여부는 저장한 순간의 Undo 상태 표지와 비교. Play 중에는 저장 · 열기를 막음 |
+| 편집 | Undo/Redo 64단계, 모든 커맨드가 액터 ID 기반(2026-10-15): 트랜스폼, 리네임, 활성, 부모 바꾸기, 컴포넌트 켜기 · 속성 · 추가 · 제거, 액터 생성 · 삭제(서브트리를 원래 ID · 부모로 되살림), 여러 액터 편집은 한 번에. 삭제를 되돌리면 그 전 편집 이력도 이어집니다. 복사(OS 클립보드) · 붙여넣기 · 복제는 같은 부모 · 같은 트랜스폼, 이름은 "Name (n)". 기즈모를 끄는 동안에는 되돌리지 않습니다. Stop · New Scene · Open 은 Undo 기록을 지웁니다 |
+| 단축키 | Ctrl+Z 되돌리기, Ctrl+Y · Ctrl+Shift+Z 다시 하기, Ctrl+N · O · S · Shift+S 씬, Ctrl+C · V · D 복사 · 붙여넣기 · 복제, F 화면 맞추기, Ctrl+F 아웃라이너 검색, F2 리네임, Delete 액터 삭제, Esc 글자 편집 끝내기(숫자 칸은 값 확정), 글자 · 숫자 칸의 Ctrl+A · C · V |
+| Play | Play · Pause · Stop. Play 를 누르면 씬을 글로 저장해 두고 Stop 하면 다시 읽어 복원합니다(2026-10-14 일괄 점검에서 세 번 왕복한 뒤 저장 결과가 글자까지 같음을 확인). Play 중 화면 카메라는 켜진 첫 primary 씬 카메라(없으면 에디터 카메라)이고, 그때 뷰포트 오른쪽 끌기는 플레이어 둘러보기로 갑니다 |
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 15개, 검사 540개.** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 24개, 검사 1,061개(2026-11-01).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
 | `geometry_conventions` | 59 | 절차 도형 규약 |
 | `actor_lifecycle` | 38 | 활성 · 컴포넌트 생명주기 · 카메라 자세 |
 | `command_stack_purge` | 8 | 커맨드 스택의 액터 참조 제거 |
-| `actor_undo` | 25 | 액터 생성 · 삭제 Undo(원래 ID · 부모 · 순서로 되살림) |
+| `actor_undo` | 27 | 액터 생성 · 삭제 Undo(원래 ID · 부모 · 순서로 되살림, 삭제 전 이력이 이어짐) |
 | `log_category` | 61 | 로그 카테고리 |
-| `audio_system` | 56 | 오디오(헤드리스 출력 검산, XR 머리 자세 청취자) |
+| `audio_system` | 74 | 오디오(헤드리스 출력 검산, XR 머리 자세 청취자, 출력 장치 설정 · 장치 ID 변환, 묶음 안 음원 디코딩) |
 | `slate_input` | 97 | UI 입력 · 숫자 칸 |
-| `physics_lifecycle` | 65 | 바디 생명주기 · 물리 API · 얇은 콜라이더 |
-| `stereo_views` | 10 | 눈별 투영 · 두 눈 컬링 |
-| `xr_input` | 9 | VR 입력 |
+| `physics_lifecycle` | 109 | 바디 생명주기 · 물리 API · 얇은 콜라이더, 잡기 · 던지기 · 플레이어 리그 · 추적 자세 · XR 원점, 카메라 아래 바닥 찾기 · 보이지 않는 리그 · 리그 높이 값 |
+| `stereo_views` | 18 | 눈별 투영 · 두 눈 컬링 · 합성 눈 |
+| `xr_input` | 31 | VR 입력, 키 · 마우스 축, 설정 줄 바인딩, 햅틱 |
 | `draw_batching` | 26 | 자동 인스턴싱 묶기 · 행 배정 |
 | `render_extensions` | 17 | 패스 레지스트리 · 확장 지점 |
 | `scene_components` | 39 | 컴포넌트 등록 · 씬 v4 값 · 회전 왕복 |
 | `light_selection` | 16 | 라이트 선택 · 상한 설정 파일 |
-| `asset_cache` | 14 | glTF 캐시 유효성, 에셋 논리 경로 해석 |
+| `asset_cache` | 24 | glTF 캐시 유효성(옛 형식 v1 ~ 3 다시 만듦), 논리 경로 키의 안정성, 묶음 안 원본 판정, 에셋 논리 경로 해석 |
+| `scene_document` | 51 | 씬 변경 여부(Undo 상태 표지 · Play 고정), 원자적 저장(바이너리판 포함), 프로젝트 설정 읽기(XR 리그 높이 · 게임 VR 시작 포함), 손으로 만든 설정 파일의 인코딩(BOM · UTF-16 · UTF-32 거부, DEF-152) |
+| `editor_commands` | 47 | ID 기반 Undo 커맨드, 부모 바꾸기의 월드 자세 유지, 그룹 변환, 클립보드 형식, 복사 이름, 화면 맞추기 거리 |
+| `pak_format` | 83 | 묶음 파일 왕복 · 블록 경계 범위 읽기 · 손상 감지 · 조작한 목차 · 정렬 · 결정적 출력 · 경로 정규화 · UTF-8 경로 · 버전 규칙 · 여러 묶음과 낱개 폴더의 우선순위(`--loose`, 에디터 배치) · 이름 규칙 · 동시 읽기 · 실제 목록 파일의 제외 패턴 · 셰이더 목록으로 묶음과 빌드의 짝 확인 · 묶음 폴더 확인 · 전체 경로 마운트 이름(DEF-149) |
+| `gltf_external_files` | 11 | glTF uri 의 `../` · `./` 외부 버퍼 · 텍스처를 낱개 폴더와 묶음에서 찾음, 논리 경로 맨 위보다 위로 가는 uri · 드라이브 문자 uri 거부, 절대 경로로 연 glTF 는 운영체제 경로 |
+| `vulkan_baseline` | 54 | 장치 계획(1.1 · push descriptor 필수 · sync2 선택 · 창 없음), 기능 체인, KHR 이름만 묻는 함수 로드, 큐 계열, XR 런타임 범위 |
+| `barrier_compat` | 63 | sync2 → 1.0 배리어 변환표 · 엔진 값 전수 · 단계 합치기 · 거부 · KHR/1.0 기록 분기 |
+| `memory_types` | 25 | 핵심 힙 타입 선택(Quest Pro · ReBAR 유무 · 작은 UMA), 지연 할당 타입, 실패 문구 |
+| `headless_render` | 72 | 빈 스왑체인, 이미지별 세마포어(DEF-118), 표면 없는 창(Headless · Android), 명령줄, 종료 코드 · 빈 화면, 파이프라인 캐시 파일의 잘림 · 손상 · 다른 장치 거르기(DEF-153) |
+| `vulkan_imports` | 11 | 실행 파일이 vulkan-1.dll 에서 1.0 · 1.1 코어와 표면 · 스왑체인 함수만 가져옴(PE 가져오기 표, Windows) |
 
 - 2026-10-14 이후 새로 만든 검사는 수정을 되돌리면 실패하는지 **변이로 확인**했습니다.
 - 화면 회귀는 에디터를 띄워 `PrintWindow` 로 찍은 뒤 뷰포트를 픽셀 단위로 비교하고, Vulkan 검증 레이어 메시지 0 과 `Clean exit` 를
@@ -374,6 +463,8 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 장치 메모리 힙 | 1GB(64 / 896 / 64MB) | 코드 |
 | UI 정점 | 65,536 / 프레임 | 코드 |
 | Undo 단계 | 64 | 코드 |
+| 잡기 반지름 · 이동 속도 · 스냅 각 | 0.12m · 2m/s · 45° | 컴포넌트 값(Grab Hand · Locomotion) |
+| XR 리그 눈높이(고정 모드 · 바닥 공간이 없을 때) | 1.7m(0.5 ~ 2.5m) | XR Rig 컴포넌트, 리그 없는 씬은 `assets/project.ini` |
 
 ---
 
@@ -383,12 +474,10 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 | 항목 | 현재 상태 | 관련 |
 |---|---|---|
-| Quest 단독 실행(Android) | 없음. `Engine` 이 `GlfwWindow` 를 조건 없이 만들고 `AndroidWindow::createSurface` 는 예외를 던지는 스텁입니다. gradle 등 Android 빌드 파일도 없습니다 | DEF-08 · 103 |
-| Vulkan 1.1 ~ 1.3 장치 | 시작하지 않음. 1.4 기능을 조건 없이 요구합니다(Quest 2 · Pro 는 1.1, Quest 3 은 1.3) | DEF-97 · 04 |
+| Quest 단독 실행(Android) | APK 까지 만듦(2026-10-31): NDK 빌드(Gradle 없이) · `android_main` · 표면 없는 AndroidWindow · 공유 OpenXR 로더. 헤드셋 첫 실행이 남았고, 첫 실행은 묶음 파일을 `adb push` 로 넣고 소리를 끕니다([Packaging_Design.md](Packaging_Design.md) 7절) | DEF-08 |
 | 멀티뷰 | 없음. 눈마다 두 번 그립니다(셰이더 · UBO 는 두 눈 기준이라 이식 때 뷰 번호만 바꾸면 됨) | DEF-09 후속 |
-| 런타임 · 에디터 분리 | 없음. 월드 tick 은 에디터 Play 중에만 돌고, 에디터를 빼는 빌드가 없습니다(`HARUKA_EDITOR` 는 정의만 되고 쓰이지 않음) | DEF-12 |
+| 게임 배포 형태 | Windows 는 2026-10-19 ~ 24 에 생겼습니다(게임 실행 파일 · 묶음 파일 · 배포 ZIP, DEF-12 해결). Android APK 는 개발용(디버그 서명)만 있고 묶음 파일을 아직 APK 안에서 읽지 않습니다. 게임 설정 화면(창 크기 · 전체 화면 · 소리 장치)도 없습니다 | [Packaging_Design.md](Packaging_Design.md) |
 | Linux · macOS | 빌드된 적 없음 | |
-| 입력 액션 정의 | `HInputSystem` 은 있으나 엔진이 등록한 액션이 없습니다(`Engine::setupInputBindings` 비어 있음) | |
 | 비동기 에셋 로딩 | 없음. glTF 를 메인 스레드에서 동기로 읽습니다 | [Threading.md](Threading.md) |
 | Zero-Copy 로딩 | 이름만 남음. 캐시를 호스트 메모리로 읽은 뒤 업로드합니다 | |
 
@@ -417,17 +506,16 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 |---|---|
 | 조인트 · 컨스트레인트 | 없음 |
 | 메시 · 볼록 껍질 콜라이더 | 없음(Box · Sphere · Capsule 만) |
-| 잡기 · 던지기 같은 VR 상호작용 | 없음(API 만 있음) |
+| VR 상호작용 | 그립 잡기 · 던지기 기초만 있음(2026-10-15). 속도 추적 잡기(잡은 물체가 벽을 뚫지 않게) · 텔레포트 · 벽에 막히는 이동(캐릭터 컨트롤러) · 레이 포인터 · 두 손 잡기는 없음 |
 | 긴 음악 스트리밍 · 보이스 예산 · HRTF · 버스와 마스터 볼륨 | 없음 |
+| 오디오 입력(마이크) · 패키징된 빌드의 장치 선택 화면 | 없음. 출력 장치 API 는 있음(2026-10-16) |
 
 ### 5-4. 에디터
 
 | 항목 | 현재 상태 |
 |---|---|
-| 씬 파일 선택 | 없음. 저장 · 불러오기 대상이 실행 폴더의 고정 파일 `scene.hscene` 하나입니다 |
-| Undo 범위 | 트랜스폼 · 속성 · 액터 생성과 삭제(2026-10-15)까지입니다. 리네임 · 컴포넌트 추가/제거 · 부모 변경은 되돌릴 수 없습니다. 삭제를 되돌려도 그 액터의 삭제 전 편집 이력은 돌아오지 않습니다(커맨드가 포인터 기반, 사용자 결정) |
-| 다중 선택 · 아웃라이너 끌어서 부모 바꾸기 · 부동 창 · 스크롤 막대 끌기 | 없음 |
-| 뷰 모드(Lit · Unlit · Wireframe) · 선택 대상 프레이밍 | 없음 |
+| 여러 액터 속성 동시 편집 · 부동 창 · 스크롤 막대 끌기 | 없음. 여러 액터를 고르면 디테일 패널은 주 선택만 보여 줍니다 |
+| 뷰 모드(Lit · Unlit · Wireframe) | 없음 |
 | 라이트 범위 · 카메라 절두체 · 오디오 반경 시각화 | 없음(Spatial 4단계) |
 | 머티리얼 편집 | 없음(요구만 등재). 머티리얼은 텍스처 슬롯만 있고 팩터를 따로 보관하지 않습니다 |
 | 한글 · 유니코드 표시 | 불가(폰트 아틀라스가 ASCII 전용). 에디터 문자열은 영어입니다 |
@@ -448,47 +536,53 @@ Floating Origin 은 Layer 1 옵션 후보입니다.
 
 | ID | 심각도 | 내용 | 처리 시점 |
 |---|---|---|---|
-| DEF-04 | HIGH | `synchronization2` 를 조건 없이 요구합니다(1.1 장치에서는 확장으로 켜야 함) | Quest 이식 |
-| DEF-06 | HIGH | MSAA 이미지에 `TRANSIENT` 용도는 있으나 `LAZILY_ALLOCATED` 메모리를 쓰지 않아, 타일 GPU 에서 실제 메모리를 차지합니다 | Quest 이식 |
-| DEF-08 | HIGH | Android 진입점 없음(위 5-1) | Quest 이식 |
-| DEF-97 | HIGH | Vulkan 1.4 장치 전제(위 5-1) | Quest 이식 |
-| DEF-12 | MEDIUM | 월드 tick 이 에디터 Play 상태에 묶여 있음 | Quest 이식 |
-| DEF-42 | MEDIUM | 힙이 1GB 보다 작게 잡히면 구역 오프셋이 할당 범위를 넘습니다 | Quest 이식 전 필수 |
+| DEF-08 | HIGH · 빌드 해결 | Android 진입점 · 빌드는 2026-10-31 에 생겼습니다(위 5-1). 헤드셋 실행 확인이 남았습니다 | Quest 첫 실행 |
 | DEF-02 | MEDIUM · 잠재 | Zone C ring 할당에 펜스 추적이 없습니다. 지금은 시작할 때만 할당하므로 드러나지 않습니다 | 매 프레임 할당이 생길 때 |
 | DEF-91 | LOW · 잠재 | 에디터 일부가 창 좌표, 일부가 프레임버퍼 좌표를 씁니다. Windows 에서는 둘이 같아 드러나지 않습니다 | 다른 플랫폼 |
-| DEF-103 | LOW | `AndroidWindow` 가 클립보드 함수 둘을 구현하지 않아 추상 클래스입니다 | Quest 이식 |
+| DEF-119 | LOW | 엔진에 넣은 글꼴이 없어 Windows 의 Segoe UI 를 씁니다. Android 에는 쓸 글꼴이 없습니다 | 게임 UI 를 만들 때 |
+| DEF-129 | LOW · 잠재 | 헤드셋 재연결 때 새 시스템 ID 로 그래픽 요구사항을 다시 묻지 않습니다 | `--xr` 게임 실행 확인(헤드셋) |
+| DEF-148 | LOW | 메인 렌더 패스의 서브패스 1 → 2 의존성에 깊이 단계 · 쓰기 접근이 없어 동기화 검증이 깊이 저장의 WRITE_AFTER_WRITE 를 보고합니다(기존 결함, 2026-10-31 발견) | Quest 에서 확인과 함께 |
+| DEF-130 · 131 · 143 · 145 | MEDIUM | 대화상자로 씬을 열 때 낡은 디테일 패널을 그림(해제된 메모리 읽기) · 라이트 Use Temperature Undo 값 밀림 · `throwable=false` 인데 날아감 · 잃은 소리 장치가 복구되지 않음 | 2단계 뒤 별도 묶음(이 넷부터) |
+| DEF-132 ~ 142 · 144 · 146 · 147 | LOW | 에디터(드래그 중 단축키 · 표시 · 붙여넣기 부모 · 창 닫기 · Save As 이름 · 스플리터) · 프리팹(이름 검사 · 실패 시 고아 · BOM) · XR(리그가 아닌 부모의 머리 추적) · 소리 장치(열기 실패 · 헤드셋 장치 없음) | 2단계 뒤 별도 묶음 |
 | DEF-13 · 32 · 34 | 보류 | `invViewProj` · 재투영 여유분 · 클러스터드 라이팅 | 첫 사용처 · 늦은 자세 갱신 · Quest 측정 |
 
 ---
 
 ## 7. 우려되는 점
 
-1. **VR 경로가 헤드셋에서 검증되지 않았습니다.** 엔진의 정체성이 VR 인데, OpenXR 세션 · 두 눈 렌더 · 컨트롤러 입력 · 헤드셋 주사율
-   물리 · 최소화 중 XR 그리기는 모두 코드와 단위 테스트, 스테레오 흉내 모드로만 확인했습니다. 개발 PC 에 OpenXR 런타임이 없습니다.
-   첫 헤드셋 실행에서 여러 문제가 한꺼번에 드러날 수 있습니다.
-2. **Quest 이식 장벽이 한 덩어리로 남아 있습니다.** Android 진입점 · 빌드 파일(DEF-08 · 103), Vulkan 1.4 전제(DEF-97 · 04), 1GB 미만
-   힙(DEF-42), 타일 메모리(DEF-06), 멀티뷰, 런타임 분리(DEF-12)가 서로 얽혀 있어 하나씩 끝내기 어렵고, 이식 착수가 곧 큰 작업입니다.
+1. **VR 은 PC(Quest Link)에서만 확인했습니다.** 2026-10-15 첫 헤드셋 확인에서 OpenXR 세션 · 두 눈 렌더 · 컨트롤러 입력 · 헤드셋
+   주사율 물리가 통과했습니다. 2026-10-16 2차 확인에서 DEF-110(검증 메시지 0), 최소화 중 XR 그리기(DEF-106), 플레이어 리그 · 잡기,
+   보이지 않는 리그를 보았고 사용자가 충분하다고 판단했습니다. 소리 방향은 사용자가 따로 보고하지 않았습니다. Quest 단독 실행은 아래
+   2번 때문에 아직 실행해 보지 못했습니다.
+2. **Quest 단독 실행은 헤드셋 확인만 남았지만, PC 흉내로만 다져졌습니다.** 2026-10-31 에 Vulkan 1.1 기준선 · 배리어 분기 · 창 없는
+   렌더 · 힙 · 지연 할당(DEF-04 · 06 · 42 · 97)을 고치고 APK 까지 만들었습니다. 확인은 창 없는 PC 실행과 Quest Pro 형 Vulkan 프로필
+   레이어뿐입니다. 프로필 레이어는 메모리 표와 런타임이 덧붙이는 확장을 흉내 내지 못하고, OpenXR 런타임 · Android 수명주기 · 실제
+   드라이버는 헤드셋에서 처음 탑니다. 멀티뷰는 아직 없습니다([Packaging_Design.md](Packaging_Design.md) 6 · 7절).
 3. **성능 근거가 PC 측정 몇 건뿐입니다.** Quest 실측이 한 번도 없습니다. 라이트 비용(DEF-34)은 PC 측정에서 어림한 값입니다.
    문서에 남은 측정은 2026-09 의 데스크톱(RTX 3080) 측정(GPU 1.52ms 중 AO + Bloom 0.84ms, 55%)과 2026-10-04 의 기본 씬 GPU 합계
    0.32 ~ 0.37ms(다른 프로그램이 GPU 를 쓰는 중이라 참고값)뿐이며, 화면 크기에 비례하는 후처리가 큰 몫이었습니다.
    Quest 의 90Hz 예산(11.1ms)에 들어가는지는 아직 모릅니다.
-4. **에디터와 런타임이 분리되어 있지 않습니다.** 게임만 실행하는 빌드가 없어, 배포 가능한 형태가 아직 없습니다(DEF-12).
+4. **배포 형태는 Windows ZIP 과 개발용 APK 뿐입니다.** 2026-10-19 ~ 24 에 게임 실행 파일과 묶음 파일로 Windows 배포 형태가 생겼지만,
+   다른 PC(ReBAR 가 없는 GPU, VC++ 런타임 설치 여부가 다른 PC)에서 실행해 본 적이 없고 게임 설정 화면도 없습니다. Quest 는 디버그
+   서명 APK 와 `adb push` 한 묶음 파일로 첫 실행을 준비했습니다(APK 안 묶음 읽기 · 라이선스 고지는 다음 단계).
 5. **자동 검증의 공백이 있습니다.** 렌더러의 GPU 경로 · 메모리 할당자 · 에디터 UI 조작에는 자동 테스트가 없고, 화면 회귀는 사람이
    에디터를 띄워 픽셀을 비교해야 확인됩니다. CI 가 없어 빌드 · 테스트가 개발 PC 한 대에서만 돌았습니다.
 6. **문서가 코드보다 쉽게 낡습니다.** 이번 작성 중에도 루트 README 의 "알려진 한계"(드로우 상한 1024, 스크롤 · 클리핑 없음 등)와 문서
    색인의 "VR 진행하지 않음"이 낡아 있었습니다. 결함 정본 두 문서의 동기화와 줄 번호 갱신도 손으로 해야 합니다. 그래서 이 저장소에서는
    문서의 체크박스보다 코드 확인이 우선입니다.
-7. **원시 포인터를 붙잡는 구조가 남아 있습니다.** 디테일 패널의 값 접근자와 리플렉션 속성(`Reflect.hpp`)이 컴포넌트 주소를 캡처합니다.
-   지금은 액터 파괴 이벤트와, 컴포넌트를 제거하기 직전에 부르는 `purgeComponent`(DEF-55)로 막고 있지만, 컴포넌트를 해제하거나 옮기는 새 경로가 생기면 DEF-55 같은 use-after-free 가 다시 나올 수 있습니다.
+7. **원시 포인터를 붙잡는 구조가 남아 있습니다.** Undo 커맨드는 2026-10-15 에 ID 기반으로 바뀌어 포인터를 붙잡지 않지만, 디테일 패널의
+   값 접근자와 리플렉션 속성(`Reflect.hpp`)은 여전히 컴포넌트 주소를 캡처합니다. 지금은 액터 파괴 이벤트와 컴포넌트를 제거할 때 패널을 다시
+   만드는 것으로 막고 있지만, 컴포넌트를 해제하거나 옮기는 새 경로가 생기면 DEF-55 같은 use-after-free 가 다시 나올 수 있습니다. 잡기
+   컴포넌트의 정적 목록 · 손과 물체의 연결도 포인터이며, 끄기와 소멸자 양쪽에서 정리합니다.
 8. **메인 스레드 하나에 모든 일이 몰려 있습니다.** 에셋 로딩이 동기라 큰 모델을 읽는 동안 프레임이 멈추고, VR 에서는 곧 멀미로
    이어집니다. 비동기 로딩이 첫 멀티스레딩 도입 지점으로 예정되어 있습니다.
 9. **직접 만든 부분이 많아 유지 비용이 큽니다.** 할당자 · UI 시스템 · 에디터를 외부 라이브러리 없이 1인이 유지합니다. 종합 오류 검출과
-   일괄 점검에서 매번 새 결함이 나온 것(DEF-76 ~ 94, 105 ~ 109)은 아직 덜 다져진 영역이 있다는 뜻입니다.
+   일괄 점검에서 매번 새 결함이 나온 것(DEF-76 ~ 94, 105 ~ 109, 2026-10-31 오류 검토의 120 ~ 147)은 아직 덜 다져진 영역이 있다는 뜻입니다.
 10. **저장소 관리.** 라이선스 파일이 없고(2026-10-15 사용자 결정으로 당분간 둠), `stb` 는 버전이 고정되지 않아 구성
     시점에 따라 다른 소스를 받을 수 있습니다(영향 범위는 stb_truetype). 초기 커밋의 날짜는 문서에 적힌 작업 날짜와 맞지 않습니다
     (예: 2026-07-03 커밋의 도킹 Phase 0 은 문서상 2026-08-27 작업, 2-1).
-11. **사용성 제약.** UI 가 ASCII 만 표시하고, 씬 저장이 고정 파일 하나를 덮어쓰며, 되돌릴 수 없는 편집(리네임 · 컴포넌트 추가/제거 ·
-    부모 변경)이 남아 있습니다.
+11. **사용성 제약.** UI 가 ASCII 만 표시합니다. 씬 파일 선택 · 되돌릴 수 없던 편집 · 다중 선택은 2026-10-15 에 해결했지만, 여러 액터의
+    속성을 한 번에 바꾸지는 못하고 Play 중 둘러보기는 오른쪽 버튼 끌기만 됩니다(마우스 고정 없음).
 
 ---
 
@@ -496,10 +590,20 @@ Floating Origin 은 Layer 1 옵션 후보입니다.
 
 정본은 [Roadmap.md](Roadmap.md) 입니다. 2026-10-15 기준으로 합의한 순서는 다음과 같습니다.
 
-1. **헤드셋 확인**: 2026-10-15 기본 확인을 마쳤습니다(두 눈 · 추적 · 컨트롤러 · 72Hz). 남은 것은 최소화(DEF-106) · 소리 확인과, DEF-110 수정(2026-10-15)이
-   헤드셋에서 검증 메시지를 없애는지 보는 일이고([Editor_QA_Checklist.md](Editor_QA_Checklist.md) 의 헤드셋 항목), 사용자 결정에 따라 이어서 잡기 · 던지기 데모를 만듭니다.
-2. **Quest 이식**: DEF-08 · 12 · 42 · 04 · 97 · 06 · 103, 멀티뷰, Android 빌드, 그리고 Quest 에서 DEF-34(라이트 비용) 실측.
+1. ~~**헤드셋 확인**~~: 2026-10-15 기본 확인, 2026-10-16 2차 확인(DEF-110 · DEF-106 · 플레이어 리그 · 보이지 않는 리그)을 마쳤습니다
+   ([Editor_QA_Checklist.md](Editor_QA_Checklist.md) 5절). 같은 날 넣은 XR Play 동안의 헤드셋 소리 자동 전환만 헤드셋에서 확인하지 못했습니다.
+2. **패키징(Windows · Android XR, 2026-10-17 목표)**: 1단계(Windows 첫 패키징)는 2026-10-24 에 끝났고 Quest Link 실행 확인만
+   남았습니다. 2단계(PC 에서 확인하는 Android 준비)는 2026-10-31 에 코드를 끝냈고(창 · 헤드셋 확인 남음), 3단계(Android 빌드)는 APK 까지
+   만들어 헤드셋 첫 실행이 남았습니다. 사용자 목표는 "가능한 빨리 스탠드얼론"(2026-10-31)이라 검토 결함 묶음(DEF-130 ~ 147)보다 먼저
+   합니다. 그 뒤 Quest 에서 DEF-34(라이트 비용)를 실측하고, 멀티뷰는 그 뒤입니다. 정본
+   [Packaging_Design.md](Packaging_Design.md).
 3. **에디터 Phase 4 · 렌더링 기능**: Light Channels, CSM, 노출 배선, 반사 프로브, 에디터 시각화 등.
 4. **Layer 2**: 우주 · 무중력 도메인과 파편장, 정적 기지 건설([Static_Base_Building_Design.md](Static_Base_Building_Design.md)).
 
-남은 비VR 결함은 잠재 항목 DEF-02 · DEF-91 뿐이며, 둘 다 지금 드러나는 경로가 없습니다.
+남은 비VR 결함은 잠재 항목 DEF-02 · DEF-91, 글꼴(DEF-119), 2026-10-31 오류 검토에서 나온 에디터 · 프리팹 · 소리 결함(DEF-130 ~ 142 ·
+145 ~ 147)입니다. 앞의 둘은 지금 드러나는 경로가 없고, 검토 결함은 패키징 2단계 뒤 별도 묶음으로 중간 등급부터 처리합니다(2026-10-31
+사용자 결정).
+
+2026-10-15 에 고른 엔진 기본 기능 다섯 가지 중 씬 관리 · 편집 기본기 · 플레이어와 입력은 같은 날 구현했고
+([Engine_Basics_Design.md](Engine_Basics_Design.md)), 독립 실행 빌드는 패키징 1단계로 2026-10-24 에 Windows 형태가 생겼습니다
+([Packaging_Design.md](Packaging_Design.md)). 머티리얼 편집은 위 순서 안의 자리를 아직 정하지 않았습니다.

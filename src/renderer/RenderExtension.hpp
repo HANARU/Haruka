@@ -11,6 +11,18 @@
 //
 // 지점마다 눈별로 부릅니다(단안 1번, 스테레오 2번). 같은 지점에 확장이 여럿이면 등록한 순서대로 부릅니다.
 // 렌더러는 단일 스레드라(Threading.md) 등록 · 해제 · 기록이 모두 메인 스레드에서 일어납니다.
+//
+// Vulkan 범위 규약(2026-10-31, 패키징 2단계). 게임 코드는 엔진과 같은 실행 파일(Android 는 같은 .so)에 링크되므로, 확장
+// 하나가 아래를 어기면 Quest 에서 링크 · 로드부터 막힙니다. vulkan_imports 시험과 프로필 레이어 실행이 확인합니다.
+//   1. 이름으로 부를 수 있는 Vulkan 함수는 1.0 · 1.1 코어뿐입니다. *KHR 이름이나 1.2 이상 코어 이름을 링크하거나
+//      vkGetDeviceProcAddr 로 묻지 마십시오.
+//   2. push descriptor 는 rc->vk.push, 배리어는 rc->transitionImage · rc->pipelineBarrier · rc->memoryBarrier 로만
+//      기록합니다(RenderContext.hpp 를 포함). vkCmdPipelineBarrier2 를 직접 부르면 Quest 2 · Pro 에서 멈춥니다.
+//   3. 엔진이 켠 기능만 씁니다: rc->vk.sync2 · rc->vk.anisotropy 를 보고, 멀티뷰 · 동적 렌더링 · 타임라인 세마포어 ·
+//      버퍼 장치 주소 · 디스크립터 인덱싱은 없습니다.
+//   4. 셰이더는 SPIR-V 1.0(glslc --target-env=vulkan1.0)이고, 능력은 켠 기능 안에서만 씁니다.
+//   5. push descriptor 세트 레이아웃은 VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR, 바인딩은 32개 이하입니다.
+//   6. 렌더 패스는 VkRenderPass(1.0)입니다. renderpass2 는 쓰지 않습니다.
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
@@ -65,7 +77,8 @@ struct HRenderStageContext {
     VkRect2D              rect{};
 
     // AfterScene. HDR 은 1샘플(MSAA 를 푼 결과)이고 SHADER_READ_ONLY_OPTIMAL 로 받습니다. 쓰려면 바꿔 쓰고
-    // 같은 레이아웃으로 돌려놓아야 합니다. 깊이는 MSAA 이고 DEPTH_STENCIL_READ_ONLY_OPTIMAL(읽기 전용)입니다.
+    // 같은 레이아웃으로 돌려놓아야 합니다(레이아웃 전환은 rc->transitionImage 로). 깊이는 MSAA 이고
+    // DEPTH_STENCIL_READ_ONLY_OPTIMAL(읽기 전용)입니다.
     // 렌더러가 이 지점 앞뒤에 그래픽 · 컴퓨트 전체 배리어를 둡니다.
     VkImage     hdrImage  = VK_NULL_HANDLE;
     VkImageView hdrView   = VK_NULL_HANDLE;

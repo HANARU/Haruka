@@ -14,6 +14,7 @@ public:
     void cleanup() override;
 
     bool shouldClose() const override;
+    void setShouldClose(bool close) override;
     void pollEvents() override;
     void waitEvents() override;
     
@@ -23,6 +24,7 @@ public:
     bool wasResized() const override;
     void resetResizedFlag() override;
 
+    bool providesSurface() const override { return true; }
     VkSurfaceKHR createSurface(VkInstance instance) override;
     std::vector<const char*> getRequiredInstanceExtensions() const override;
 

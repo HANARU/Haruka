@@ -1,0 +1,250 @@
+# Haruka Scene v4
+# Player rig + grab demo: walk with WASD or the left stick, grab the props on the table with the grip button.
+ACTOR:Sun
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:LightComponent
+enabled=1
+type=directional
+color=1 1 1
+intensity=3
+attenuationRadius=10
+innerConeAngle=15
+outerConeAngle=30
+direction=0.37139067 0.74278134 0.557086
+useTemperature=0
+temperatureK=6500
+castShadows=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Ground
+POS:0 -0.1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:20 0.2 20
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:Table
+POS:0 0.4 -0.9
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1.2 0.8 0.6
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color 8C6A4AFF 0 0.7
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:GrabCubeRed
+POS:-0.35 0.875 -0.9
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.15 0.15 0.15
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color D94D4DFF 0 0.5
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=dynamic
+friction=0.6
+restitution=0.1
+mass=0.5
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+COMPONENT:GrabbableComponent
+enabled=1
+throwable=1
+END_COMPONENT
+END_ACTOR
+ACTOR:GrabCubeBlue
+POS:0.35 0.875 -0.9
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.15 0.15 0.15
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color 4D73D9FF 0 0.5
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=dynamic
+friction=0.6
+restitution=0.1
+mass=0.5
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+COMPONENT:GrabbableComponent
+enabled=1
+throwable=1
+END_COMPONENT
+END_ACTOR
+ACTOR:GrabBall
+POS:0 0.86 -0.9
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.12 0.12 0.12
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=checker
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=sphere
+motion=dynamic
+friction=0.6
+restitution=0.5
+mass=0.3
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+COMPONENT:GrabbableComponent
+enabled=1
+throwable=1
+END_COMPONENT
+END_ACTOR
+ACTOR:ProbeSphere
+POS:0 1 -6
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:2 2 2
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=checker
+END_COMPONENT
+END_ACTOR
+ACTOR:XrPlayer
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:XrRigComponent
+enabled=1
+height=tracked
+eyeHeight=1.7
+END_COMPONENT
+COMPONENT:RigLocomotionComponent
+enabled=1
+moveSpeed=2
+snapTurn=45
+flying=0
+lookSensitivity=0.15
+END_COMPONENT
+END_ACTOR
+ACTOR:Head
+POS:0 1.7 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+PARENT:7
+COMPONENT:CameraComponent
+enabled=1
+fovY=75
+zNear=0.05
+zFar=1000
+primary=1
+END_COMPONENT
+COMPONENT:TrackedPoseComponent
+enabled=1
+source=head
+showDebug=0
+END_COMPONENT
+END_ACTOR
+ACTOR:LeftHand
+POS:-0.2 1.2 -0.3
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.06 0.06 0.06
+ACTIVE:1
+PARENT:7
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color E8C8A8FF 0 0.6
+END_COMPONENT
+COMPONENT:TrackedPoseComponent
+enabled=1
+source=left
+showDebug=1
+END_COMPONENT
+COMPONENT:GrabInteractorComponent
+enabled=1
+radius=0.12
+END_COMPONENT
+END_ACTOR
+ACTOR:RightHand
+POS:0.2 1.2 -0.3
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.06 0.06 0.06
+ACTIVE:1
+PARENT:7
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color E8C8A8FF 0 0.6
+END_COMPONENT
+COMPONENT:TrackedPoseComponent
+enabled=1
+source=right
+showDebug=1
+END_COMPONENT
+COMPONENT:GrabInteractorComponent
+enabled=1
+radius=0.12
+END_COMPONENT
+END_ACTOR

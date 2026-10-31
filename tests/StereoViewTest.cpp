@@ -7,6 +7,7 @@
 
 #include "../src/components/CameraComponent.hpp"
 #include "../src/renderer/FrustumCull.hpp"
+#include "../src/xr/SyntheticEyes.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>
@@ -104,6 +105,44 @@ int main() {
         // 눈 하나(단안)면 그 눈 판정과 같습니다.
         check(sphereInAnyView(planes.data(), 1, rightOnly, r) == sphereInFrustum(planes[0], rightOnly, r),
               "뷰가 하나면 단안 판정과 같음");
+    }
+
+    // 4. 합성 눈(창 없는 렌더 경로의 --synthetic-eyes). XR 런타임이 주는 형식으로 스테레오 흉내와 같은 두 눈을 만듭니다.
+    std::printf("\n== 4. 합성 눈 ==\n");
+    {
+        const float ipd = hxr::kSyntheticIpd, headY = 1.6f;
+        const float tanUp = std::tan(glm::radians(45.f) * 0.5f), aspect = 1.f;
+        const std::array<XrEyePose, 2> e = hxr::syntheticEyes(ipd, tanUp, aspect, headY);
+        check(e[0].position == glm::vec3(-ipd * 0.5f, headY, 0.f) && e[1].position == glm::vec3(ipd * 0.5f, headY, 0.f),
+              "왼쪽 눈 x = -IPD/2, 오른쪽 +IPD/2, 높이 headY");
+        check(e[0].qw == 1.f && e[0].qx == 0.f && e[0].qy == 0.f && e[0].qz == 0.f &&
+              e[1].qw == 1.f && e[1].qx == 0.f && e[1].qy == 0.f && e[1].qz == 0.f,
+              "두 눈 방향이 단위 쿼터니언(정면 -Z)");
+
+        // 스테레오 흉내(Renderer::gatherViews)와 같은 공식: 가로 시야 = 2 · tanUp · 비율, 바깥 55% · 코 쪽 45%.
+        const float tanWidth = 2.f * tanUp * aspect;
+        check(e[0].angleLeft == std::atan(-0.55f * tanWidth) && e[0].angleRight == std::atan(0.45f * tanWidth),
+              "왼쪽 눈: 왼쪽(바깥) = -atan(55%), 오른쪽(코 쪽) = +atan(45%)");
+        check(e[1].angleLeft == -e[0].angleRight && e[1].angleRight == -e[0].angleLeft, "오른쪽 눈은 왼쪽 눈의 거울");
+        check(e[0].angleUp == -e[0].angleDown && e[1].angleUp == -e[1].angleDown && e[0].angleUp == std::atan(tanUp),
+              "위 = -아래 = atan(tanUp)");
+
+        CameraComponent cam;   // near 0.1 · far 100
+        bool finite = true, ahead = true;
+        for (const XrEyePose& p : e) {
+            const glm::mat4 proj = CameraComponent::projFromFov(p.angleLeft, p.angleRight, p.angleUp, p.angleDown,
+                                                                cam.zNear, cam.zFar);
+            for (int c = 0; c < 4; ++c)
+                for (int r = 0; r < 4; ++r) finite = finite && std::isfinite(proj[c][r]);
+            const glm::mat4 view = glm::inverse(glm::translate(glm::mat4(1.f), p.position));
+            ahead = ahead && sphereInFrustum(extractFrustumPlanes(proj * view), glm::vec3(0.f, headY, -2.f), 0.001f);
+        }
+        check(finite, "두 눈 투영 행렬이 모두 유한");
+        check(ahead, "정면 2m 의 점이 두 눈 절두체에 모두 들어감");
+
+        const std::array<XrEyePose, 2> wide = hxr::syntheticEyes(ipd, tanUp, 4.f / 3.f, 0.f);
+        check(wide[0].angleLeft < e[0].angleLeft && wide[0].position.y == 0.f,
+              "화면 비율이 넓으면 가로 시야가 넓어짐, 리그가 없으면 높이 0");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

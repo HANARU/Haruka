@@ -1,14 +1,25 @@
-# Haruka Prefab v1
+# Haruka Prefab v3
 # Audio test probe (Docs/Audio_Design.md). A small sphere that loops Test_BeepLoop.wav.
 # Spawn it from the content browser, press Play, then move the camera to hear panning and distance.
-NAME:AudioProbe
+ACTOR:AudioProbe
 POS:0.9 0.35 1.2
 ROT:0 0 0
+QUAT:0 0 0 1
 SCALE:0.3 0.3 0.3
 ACTIVE:1
-PRIM:sphere|32x16|0|0.0000
-PRIM_MAT:color 4DD966FF 0 0.4
-MESH_STATE:1 1
-AUDIO:assets/audio/Test_BeepLoop.wav
-AUDIO_VOL:1 1 1 1
-AUDIO_3D:1 inverse 1 100 1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color 4DD966FF 0 0.4
+END_COMPONENT
+COMPONENT:AudioComponent
+enabled=1
+file=assets/audio/Test_BeepLoop.wav
+volume=1
+loop=1
+autoPlay=1
+attenuation=1 inverse 1 100 1
+END_COMPONENT
+END_ACTOR

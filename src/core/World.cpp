@@ -97,11 +97,12 @@ bool World::reassignId(Actor* actor, uint64_t newId) {
 }
 
 CameraComponent* World::getActiveCamera() const {
+    if (editorCam_ && !playing_) return editorCam_;
     for (auto& a : actors)
         if (a->activeInHierarchy())
             if (auto* c = a->getComponent<CameraComponent>())
-                if (c->isEnabled() && c->primary) return c;
-    return nullptr;
+                if (c != editorCam_ && c->isEnabled() && c->primary) return c;
+    return editorCam_;
 }
 
 std::vector<StaticMeshComponent*> World::getVisibleMeshes() const {

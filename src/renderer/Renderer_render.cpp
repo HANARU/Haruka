@@ -29,11 +29,10 @@ static glm::mat4 sCurLightViewProj{ 1.f };
 // ── createCommandPool ─────────────────────────────────────────────────────────
 
 void Renderer::createCommandPool() {
-    auto idx = findQueueFamilies(physDevice);
     VkCommandPoolCreateInfo ci{};
     ci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     ci.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    ci.queueFamilyIndex = idx.graphics.value();
+    ci.queueFamilyIndex = queueFamilies_.graphics.value();
     if (vkCreateCommandPool(device, &ci, nullptr, &cmdPool) != VK_SUCCESS)
         throw std::runtime_error("Failed to create command pool!");
 }
@@ -60,8 +59,9 @@ void Renderer::createSamplers() {
             throw std::runtime_error("Failed to create sampler!");
     };
 
+    // 이방성은 장치 계획을 직접 읽습니다(지원하지 않는 장치는 끔). rc_ 를 채우기 전에 불리므로 rc_ 를 거치지 않습니다.
     make(textureSampler, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT,
-         true,  VK_BORDER_COLOR_INT_OPAQUE_BLACK,    16.f);
+         devicePlan_.samplerAnisotropy, VK_BORDER_COLOR_INT_OPAQUE_BLACK, 16.f);
     make(clampSampler_,  VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
          false, VK_BORDER_COLOR_INT_OPAQUE_BLACK,    16.f);
     // (shadow sampler는 ShadowPass가 소유)
@@ -465,9 +465,17 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     const bool xrFrame = (xr != nullptr) && xrActive_;
     // 데스크톱 창이 최소화되면(표면 크기 0) 스왑체인 이미지를 받을 수 없습니다. 데스크톱 화면은 건너뛰고,
     // XR 프레임이면 두 눈만 그려 헤드셋은 계속 보이게 합니다(DEF-106). UE · Godot 도 최소화한 창은 그리지
-    // 않고 루프는 계속 돌립니다.
+    // 않고 루프는 계속 돌립니다. 창이 없는 실행(--headless · Quest)은 desktop 이 늘 거짓입니다.
     const bool desktop = swapchain_->hasArea();
-    if (!desktop && !xrFrame) return false;
+    lastFrameDesktop_  = false;
+    if (!desktop && !xrFrame) {
+        // 창도 XR 이미지도 없습니다. Android 에서 세션이 READY 되기 전과 같은 정상 상태라 쉬어 가되, 한 번은 알립니다.
+        if (headless_ && !nothingToDrawLogged_) {
+            nothingToDrawLogged_ = true;
+            HLOG(LogRenderer, Log) << "Nothing to draw: no surface and no XR target";
+        }
+        return false;
+    }
     auto& ft = gFrameTimings();
     ScopedCpuTimer timerWhole(ft.drawFrame);
     const uint32_t fi = frameIdx;
@@ -566,21 +574,16 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     // 톤매핑이 AO · Bloom 을 읽음)가 끝난 뒤에 이번 프레임이 쓰도록 한 번 묶습니다. 렌더 패스의 외부 의존성은
     // 조각 셰이더의 읽기를 포함하지 않아, 예전에는 앞 프레임의 읽기와 이번 프레임의 쓰기가 겹칠 수 있었습니다
     // (DEF-104). 배리어의 앞쪽 범위는 같은 큐에 먼저 제출된 명령 전체라 앞 프레임까지 닿습니다.
-    {
-        VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
-        mb.srcStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
-        mb.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
-                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        mb.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
-        mb.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
-                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
-                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-                           VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-        VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-        di.memoryBarrierCount = 1; di.pMemoryBarriers = &mb;
-        vkCmdPipelineBarrier2(cmd, &di);
-    }
+    // 눈 사이(아래 k > 0)도 같은 배리어입니다. 배리어는 rc_ 래퍼로만 기록합니다(sync2 또는 1.0, DEF-04).
+    constexpr VkAccessFlags2 kTargetWrites = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    constexpr VkAccessFlags2 kTargetReads  = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                                             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+                                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                             VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                                             VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+    rc_.memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, kTargetWrites,
+                           VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, kTargetReads);
 
     // ── Shadow pass ───────────────────────────────────────────────────────────
     // view.shadowDraws 는 buildDrawCommands 가 **라이트 프러스텀**으로 걸러 만든 캐스터
@@ -658,15 +661,9 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     };
     // AfterScene 은 렌더 패스 밖이라 확장이 그래픽 · 컴퓨트 어느 쪽으로든 HDR 을 읽고 쓸 수 있습니다.
     // 메인 패스의 resolve 결과가 보이도록 앞에, 확장의 쓰기가 AO · Bloom · 톤매핑에 보이도록 뒤에 둡니다.
-    auto fullBarrier = [&cmd]() {
-        VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
-        mb.srcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        mb.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
-        mb.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-        mb.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
-        VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-        di.memoryBarrierCount = 1; di.pMemoryBarriers = &mb;
-        vkCmdPipelineBarrier2(cmd, &di);
+    auto fullBarrier = [this, &cmd]() {
+        rc_.memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                               VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
     };
 
     // XR 은 오른쪽 눈을 먼저 그립니다. 중간 타깃에 왼쪽 눈이 남아 있어야 아래에서 그것을 에디터
@@ -677,21 +674,9 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
         // 앞 눈이 쓰던 중간 타깃을 다음 눈이 다시 씁니다. 앞 눈의 읽기(AO 의 깊이, 톤매핑의 HDR ·
         // AO · Bloom)가 끝나고 쓰기가 보이도록 그래픽 단계 전체를 한 번 묶습니다. 눈이 둘뿐이라
         // 비용은 무시할 수준입니다.
-        if (k > 0) {
-            VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
-            mb.srcStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
-            mb.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
-                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-            mb.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
-            mb.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
-                               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
-                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-                               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-            VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-            di.memoryBarrierCount = 1; di.pMemoryBarriers = &mb;
-            vkCmdPipelineBarrier2(cmd, &di);
-        }
+        if (k > 0)
+            rc_.memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, kTargetWrites,
+                                   VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, kTargetReads);
 
         // ── Main render pass (3 subpasses) ────────────────────────────────────
         // 불투명 끝(서브패스 1)과 반투명 끝(서브패스 2)에서 확장을 부릅니다.
@@ -723,7 +708,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
         }
 
         // ── AO (linDepth + SSAO, half-res) ───────────────────────────────────
-        ao_.record(cmd, fi, v, geometry_.depthView(), clampSampler_, view.aoCam[v]);
+        ao_.record(cmd, fi, v, geometry_.depthView(), view.aoCam[v]);
         if (timestampPool_)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 1);
 
@@ -770,14 +755,9 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
             mirror.uvScale[0]  = vpAspect / eyeAspect;
             mirror.uvOffset[0] = 0.5f * (1.f - mirror.uvScale[0]);
         }
-        VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
-        mb.srcStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
-        mb.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        mb.dstStageMask  = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
-        mb.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
-        di.memoryBarrierCount = 1; di.pMemoryBarriers = &mb;
-        vkCmdPipelineBarrier2(cmd, &di);
+        rc_.memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                               VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+                               VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
         // 거울 화면에도 톤매핑 뒤 확장을 부릅니다(헤드셋과 같은 화면 효과가 보이도록). 왼쪽 눈 기준입니다.
         PostPass::OverlayHook mirrorHook;
         if (extPost)
@@ -802,9 +782,20 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     // UI 정점 버퍼는 fi 슬롯별입니다. 슬롯 수가 어긋나면 두 프레임이 한 버퍼를 같이 씁니다(DEF-93).
     static_assert(HSlateRenderer::kFramesInFlight == MAX_FRAMES,
                   "HSlateRenderer vertex buffers must match MAX_FRAMES");
+    bool uiPresented = false;
     if (uiRenderer_ && desktop) {
         ScopedCpuTimer t(ft.uiRecord);
-        uiRenderer_->record(cmd, imgIdx, swapchain_->extent(), fi);
+        uiPresented = uiRenderer_->record(cmd, imgIdx, swapchain_->extent(), fi);
+    }
+    if (desktop && !uiPresented) {
+        // UI 패스가 기록되지 않았으면(게임 실행 파일처럼 UI 가 없거나, UI 가 그릴 것 없이 일찍 돌아감) 표시 전 레이아웃
+        // 전환을 여기서 합니다(2026-10-24, DEF-120 은 2026-10-31). 예전에는 UI 패스의 렌더 패스(finalLayout = PRESENT_SRC)가
+        // 이 일을 맡아, UI 없이 표시하면 톤매핑이 남긴 COLOR_ATTACHMENT 레이아웃 그대로 표시해 프레임마다 검증 오류
+        // (VUID-VkPresentInfoKHR-pImageIndices-01430)가 났습니다.
+        transitionImage(cmd, swapchain_->images()[imgIdx],
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE);
     }
 
     // 마지막 칸: after UI
@@ -817,16 +808,19 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
                       std::chrono::steady_clock::now() - recordT0).count());
 
     // ── Submit ────────────────────────────────────────────────────────────────
+    // 데스크톱을 건너뛴 XR 프레임은 받은 스왑체인 이미지가 없어 기다릴 것도 알릴 것도 없습니다. 이미지별 세마포어는 데스크톱을
+    // 그린 프레임에서만 읽습니다. 창이 없으면 이미지가 0장이라 예전에는 여기서 빈 목록을 읽었습니다(DEF-118).
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSemaphore waitSem   = frames_.imageAvailSem(fi);
-    VkSemaphore signalSem = frames_.renderDoneSem(imgIdx);
-    // 데스크톱을 건너뛴 XR 프레임은 받은 스왑체인 이미지가 없어 기다릴 것도 알릴 것도 없습니다.
+    VkSemaphore waitSem   = desktop ? frames_.imageAvailSem(fi)    : VK_NULL_HANDLE;
+    VkSemaphore signalSem = desktop ? frames_.renderDoneSem(imgIdx) : VK_NULL_HANDLE;
     VkSubmitInfo si{};
     si.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    si.waitSemaphoreCount   = desktop ? 1u : 0u; si.pWaitSemaphores   = &waitSem;
-    si.pWaitDstStageMask    = &waitStage;
+    si.waitSemaphoreCount   = desktop ? 1u : 0u;
+    si.pWaitSemaphores      = desktop ? &waitSem : nullptr;
+    si.pWaitDstStageMask    = desktop ? &waitStage : nullptr;
     si.commandBufferCount   = 1; si.pCommandBuffers   = &cmd;
-    si.signalSemaphoreCount = desktop ? 1u : 0u; si.pSignalSemaphores = &signalSem;
+    si.signalSemaphoreCount = desktop ? 1u : 0u;
+    si.pSignalSemaphores    = desktop ? &signalSem : nullptr;
     {
         ScopedCpuTimer t(ft.submit);
         if (vkQueueSubmit(graphicsQueue, 1, &si, frameFence) != VK_SUCCESS)
@@ -844,5 +838,12 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     frameIdx  = (frameIdx + 1) % MAX_FRAMES;
     frameNum_++;
     time_     = (float)frameNum_ / 60.f;
+    lastFrameDesktop_ = desktop;
+    // 파이프라인을 새로 만든 뒤 처음 그린 프레임에서 캐시를 저장합니다(DEF-153). 정리 경로를 거치지 않고 끝나는 실행(Android
+    // 백그라운드 종료)에서도 다음 실행이 다시 컴파일하지 않습니다.
+    if (pipelineCacheDirty_) {
+        pipelineCacheDirty_ = false;
+        savePipelineCache();
+    }
     return xrFrame;
 }

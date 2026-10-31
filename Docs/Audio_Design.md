@@ -10,7 +10,7 @@
 
 | 요소 | 위치 | 역할 |
 |---|---|---|
-| miniaudio 0.11.21 | `CMakeLists.txt`(FetchContent) | `ma_engine` 하나, 48 kHz 스테레오 |
+| miniaudio 0.11.21 | `CMakeLists.txt`(FetchContent) | `ma_engine` 하나, 48 kHz 스테레오. 출력 장치는 `AudioSystem` 이 직접 만들어 엔진에 연결합니다(2026-10-16, 8절) |
 | 구현부 번역 단위 | `src/audio/MiniaudioImpl.cpp` | miniaudio·stb_vorbis 구현만 담습니다(9만 줄 넘는 구현을 따로 컴파일) |
 | `AudioSystem` | `src/audio/AudioSystem.*` | 엔진 모듈. 사운드 생성, 매 틱 위치·설정 반영, 청취자 갱신, 일시정지 |
 | `AudioComponent` | `src/components/AudioComponent.*` | 파일·볼륨·Loop·AutoPlay·3D 설정. 활성 변화에 따라 멈춤·재생 |
@@ -183,10 +183,11 @@ ffmpeg -f lavfi -i "anoisesrc=d=2:c=pink:r=48000:a=0.2:s=1" -ac 1 -c:a libvorbis
 
 ## 7. 남은 일
 
-- ~~VR 청취자~~: 2026-10-15 에 해결했습니다(3-1). 헤드셋에서 귀로 확인하는 일만 남았습니다.
-- **헤드셋으로 소리 보내기**: 엔진은 Windows 기본 재생 장치로 소리를 냅니다. Quest Link 에서 헤드셋 장치(Oculus Virtual Audio
-  Device)가 기본 장치가 아니면 소리가 헤드셋으로 나가지 않습니다(2026-10-15 헤드셋 확인에서 찾음). 런타임은
-  `XR_OCULUS_audio_device_guid` 로 헤드셋 장치를 알려 줍니다. 그 장치를 자동으로 쓸지는 소리를 확인할 때 정합니다.
+- ~~VR 청취자~~: 2026-10-15 에 해결했습니다(3-1). 2026-10-16 헤드셋 장치를 기본 재생 장치로 두고 확인했습니다(사용자 판단 "충분").
+- ~~헤드셋으로 소리 보내기~~: 2026-10-16 사용자 결정으로 XR Play 동안 헤드셋 장치로 자동 전환합니다(8절). 헤드셋을 쓰고
+  전환되는지 보는 확인이 남았습니다.
+- **패키징된 빌드의 장치 선택 화면**: 엔진 API(8절)는 있고 화면은 없습니다. 독립 실행 빌드를 만들 때 게임 설정 화면에 둡니다.
+- **오디오 입력(마이크)**: 엔진에 오디오 입력이 없습니다. 입력 장치 선택도 그때 함께 합니다.
 - ~~부모가 있는 카메라~~: DEF-21(2026-10-04) 뒤로 `viewMatrix` 와 청취자가 모두 액터의 월드 위치 · 월드 회전을 씁니다.
 - **긴 음악**: 지금은 파일 전체를 메모리에 올리고 믹싱 중에 디코딩합니다. 긴 음악은 스트리밍
   (`MA_SOUND_FLAG_STREAM`), 짧은 효과음은 미리 디코딩(`MA_SOUND_FLAG_DECODE`)이 맞습니다.
@@ -196,3 +197,46 @@ ffmpeg -f lavfi -i "anoisesrc=d=2:c=pink:r=48000:a=0.2:s=1" -ac 1 -c:a libvorbis
   일시정지와 무관하게 둡니다.
 - **기능**: Pitch, 도플러(속도), 지향성 음원(콘), 한 번 재생하고 잊는 API.
 - **에디터**: 감쇠 반경(Min/Max) 와이어 표시(Spatial_Representation_Design.md 4단계), 콘텐츠 브라우저 미리듣기.
+
+## 8. 출력 장치 (2026-10-16)
+
+사용자 요청: 에디터에서 소리 출력 장치를 고를 수 있게 하고, 패키징된 빌드는 다른 엔진처럼 설정 화면에서 고르게 합니다.
+
+### 8-1. 다른 엔진과 결정
+
+| 엔진 | 방법 |
+|---|---|
+| UE | 에디터 설정의 Audio 항목(`UAudioEditorSettings`)이 출력 장치 ID 를 에디터 설정 파일에 기억합니다. 게임 메뉴용으로는 런타임의 Swap Audio Output Device 가 있습니다 |
+| Godot | `AudioServer.output_device` · `get_output_device_list()` 로 코드에서 고르고, 화면은 직접 만듭니다. 에디터 전용 설정은 찾지 못했습니다 |
+
+| 항목 | 결정 |
+|---|---|
+| 저장 위치 | 이 PC 에 속한 값이라 실행 폴더의 `Config/editor_state.txt`(`audioOutput`, `audioHeadsetInVr`). 프로젝트 설정(`project.ini`)이 아닙니다 |
+| 고르는 자리 | Edit 메뉴 **Audio Output...** → 목록 대화상자(사용자 선택). 시스템 기본 · 장치들 · "Headset during VR Play" 켜고 끄기. 지금 고른 항목에 `>` 표시 |
+| XR | XR Play 동안 런타임이 알려 주는 헤드셋 장치(`XR_OCULUS_audio_device_guid`)로 자동 전환, 기본 켜짐(사용자 선택). Stop 하면 고른 장치로 돌아갑니다 |
+| 패키징된 빌드 | 같은 엔진 API 를 게임 설정 화면이 부릅니다(아직 화면 없음) |
+
+### 8-2. 구현
+
+- **장치를 엔진 밖에서 소유**: `AudioSystem` 이 `ma_context` · `ma_device` 를 직접 만들고 `ma_engine_config::pDevice` 로 엔진에 연결합니다.
+  장치를 바꿀 때는 엔진과 사운드를 그대로 두고 같은 `ma_device` 자리를 닫았다 다시 엽니다. 장치는 언제나 f32 · 2채널 · 48kHz 로 열어
+  (실제 장치 형식과 다르면 miniaudio 가 변환) 엔진이 처음 본 형식이 바뀌지 않습니다. 그래서 **재생 중에 바꿔도 소리가 이어집니다**.
+- **API**: `outputDevices()`(ID · 이름 · 시스템 기본 여부), `setOutputDevice(id)`(빈 문자열 = 시스템 기본, 운영체제에서 기본 장치를 바꾸면
+  따라감), `setOutputOverride(id)`(잠시 다른 장치, 비우면 고른 장치로), `activeOutputName()`. 고른 장치가 없으면(뽑힘) 경고하고 시스템
+  기본 장치로 엽니다. 장치 없는 엔진(테스트)은 값만 기억합니다.
+- **장치 ID**: WASAPI 는 끝점 ID(`{0.0.0.00000000}.{GUID}`, UTF-16 → UTF-8, `hutf::fromUtf16`)를 쓰고, 대소문자를 무시하고 비교합니다.
+  OpenXR 런타임이 알려 주는 헤드셋 장치 ID 와 같은 형식입니다. 다른 백엔드는 장치 이름을 씁니다.
+- **헤드셋 장치**: `XrSystem` 이 인스턴스를 만들 때 `XR_OCULUS_audio_device_guid` 를 켜고 헤드셋 장치 ID 를 받아 둡니다
+  (`headsetAudioOutputId()`). 이 확장은 `openxr_platform.h` 에서 Win32 정의 아래에 있어 windows.h 가 필요하므로, 확장 이름과 함수 모양만
+  같게 두고 함수 주소를 런타임에서 받습니다. 엔진이 세션을 만들 때 `setOutputOverride(헤드셋)`, 세션을 끝낼 때 `setOutputOverride("")` 합니다.
+- **장치 이름 표시**: UI 글꼴이 ASCII 만 그리므로 한국어 Windows 의 장치 이름("헤드폰(Oculus Virtual Audio Device)")에서 ASCII 가 아닌
+  글자를 빼고, 남은 글을 감싼 괄호를 벗겨 보여 줍니다(`hutf::asciiLabel`). 로그 파일에는 원래 이름이 남습니다.
+
+### 8-3. 확인
+
+- **테스트**: 오디오 테스트 13절(15항목): 장치 없는 엔진의 값 기억 · 잠시 쓰는 장치, UTF-16 변환(한글 · 서로게이트 쌍 · 짝 없는 서로게이트),
+  대소문자 무시 비교, 장치 이름 정리. 일부러 넣은 결함 6개를 모두 잡습니다(처음에 살아남은 둘은 검사를 보강).
+- **실기(2026-10-16, 루프백 측정)**: 대화상자에 장치 6개가 정리된 이름으로 나옴. PC 헤드셋을 고르고 Play 하면 소리가 그 장치에만
+  나옴(RMS 왼쪽 0.0096 · 오른쪽 0.0351, 헤드셋 장치 0). **Play 중에** 시스템 기본으로 바꾸자 같은 크기의 소리가 헤드셋 장치로 옮겨 가고
+  PC 헤드셋은 0. 에디터를 다시 열면 기억한 장치가 바로 적용됨. 검증 메시지 0, `Clean exit`.
+- **남은 확인**: XR Play 동안 헤드셋 장치로 자동 전환되는지(그때 Link 가 잠들어 있어 세션을 만들지 못했음).

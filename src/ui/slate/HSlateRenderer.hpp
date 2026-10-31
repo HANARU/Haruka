@@ -18,8 +18,10 @@ public:
     // static_assert 로 확인합니다). record 의 frameIdx 로 슬롯별 정점 버퍼를 고릅니다.
     static constexpr uint32_t kFramesInFlight = 2;
 
+    // pushDescriptor 는 렌더러가 장치에서 받은 vkCmdPushDescriptorSetKHR 입니다(Renderer::pushDescriptorFn, DEF-97). UI 는
+    // 렌더러 헤더에 기대지 않는 별도 모듈이라 함수 포인터만 받습니다.
     void init(VkDevice device, VkPhysicalDevice physDevice,
-              VkFormat swapFormat,
+              VkFormat swapFormat, PFN_vkCmdPushDescriptorSetKHR pushDescriptor,
               CmdBeginFn beginCmd, CmdEndFn endCmd,
               const std::string& fontPath = "");
     void cleanup();
@@ -38,7 +40,9 @@ public:
     }
 
     // Per-frame: records UI render pass into cmd. Uses framebuffers_[imgIdx].
-    void record(VkCommandBuffer cmd, uint32_t imgIdx,
+    // UI 렌더 패스를 실제로 기록했으면 true 입니다. 그 패스의 finalLayout 이 스왑체인 이미지를 표시 레이아웃으로 바꾸므로,
+    // false 면(루트가 없거나 접힘, 프레임버퍼 없음, 그릴 것 없음) 렌더러가 대신 바꿔야 합니다(DEF-120).
+    bool record(VkCommandBuffer cmd, uint32_t imgIdx,
                 VkExtent2D extent, uint32_t frameIdx);
 
     // 배치만 다시 합니다. record 가 그리기 전에 부르고, 에디터가 입력을 보내기 전에도
@@ -58,6 +62,7 @@ private:
     VkDevice         device_     = VK_NULL_HANDLE;
     VkPhysicalDevice physDevice_ = VK_NULL_HANDLE;
     VkFormat         colorFmt_   = VK_FORMAT_UNDEFINED;
+    PFN_vkCmdPushDescriptorSetKHR pushDescriptorFn_ = nullptr;
 
     // UI-dedicated render pass (LOAD_OP_LOAD, finalLayout=PRESENT_SRC_KHR)
     VkRenderPass               uiRenderPass_ = VK_NULL_HANDLE;
@@ -101,7 +106,8 @@ private:
     void createBuffers(CmdBeginFn beginCmd, CmdEndFn endCmd);
     void createWhiteTexture(CmdBeginFn beginCmd, CmdEndFn endCmd);
 
-    void flush(VkCommandBuffer cmd, uint32_t imgIdx, VkExtent2D extent,
+    // 렌더 패스를 기록했으면 true(그릴 것이 없으면 열지 않음).
+    bool flush(VkCommandBuffer cmd, uint32_t imgIdx, VkExtent2D extent,
                std::vector<HDrawElement>& elements, uint32_t slot);
 
     void     pushDescriptor(VkCommandBuffer cmd, VkImageView view);

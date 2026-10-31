@@ -49,8 +49,8 @@ graph TD
         D6["onActorDestroyed 이벤트는 존재하나 구독자가 0곳<br/>틱 중 파괴 지연 큐는 이미 구현되어 있음"]
     end
 
-    subgraph S7["DEF-08~DEF-15 코어 인프라 결함 (5건 해결됨 · DEF-08 HIGH · DEF-12 MEDIUM · DEF-13 보류)"]
-        D7["해결: 멀티뷰 첫 단계 (DEF-09) · 셰이더 빌드 (DEF-11) · 셰이더 중복 선언 (DEF-14) · TAA 잔재 (DEF-15), 2026-10-04<br/>해결: 이중 상한을 Config/engine.ini 로 (DEF-10), 2026-10-14<br/>남음: 안드로이드 진입점 (DEF-08, HIGH) · 런타임 게임 루프 (DEF-12, MEDIUM)<br/>보류: FrameUBO.invViewProj (DEF-13, 첫 사용처가 생길 때)"]
+    subgraph S7["DEF-08~DEF-15 코어 인프라 결함 (6건 해결됨 · DEF-08 HIGH · DEF-13 보류)"]
+        D7["해결: 멀티뷰 첫 단계 (DEF-09) · 셰이더 빌드 (DEF-11) · 셰이더 중복 선언 (DEF-14) · TAA 잔재 (DEF-15), 2026-10-04<br/>해결: 이중 상한을 Config/engine.ini 로 (DEF-10), 2026-10-14<br/>해결: 런타임 게임 루프 (DEF-12, 엔진 앞단 + 게임 실행 파일), 2026-10-19<br/>남음: 안드로이드 진입점 (DEF-08, HIGH)<br/>보류: FrameUBO.invViewProj (DEF-13, 첫 사용처가 생길 때)"]
     end
 
     subgraph S8["DEF-16~DEF-22 Layer 2 경계 누출 (Layer_Architecture 4절, 전부 해결됨 2026-10-04 · 10-14)"]
@@ -210,6 +210,9 @@ graph TD
 #### 1) 현상 및 발생 메커니즘
 
 * **위치**: [`RenderContext.cpp:L167`](file:///e:/Haruka/src/renderer/RenderContext.cpp#L167), [`CullPass.cpp:L166`](file:///e:/Haruka/src/renderer/passes/CullPass.cpp#L166), [`CullPass.cpp:L194`](file:///e:/Haruka/src/renderer/passes/CullPass.cpp#L194), 디바이스 피처 요구는 [`Renderer.cpp:L599-L613`](file:///e:/Haruka/src/renderer/Renderer.cpp#L599-L613)
+* **[갱신 · 2026-10-19]** `CullPass.cpp` 는 2026-10-04 에 지웠습니다. 지금 직접 호출은 `RenderContext.cpp`(`transitionImage`) 한 곳과
+  `Renderer_render.cpp` 네 곳이고, 장치 기능 요구는 `Renderer::createLogicalDevice` 입니다. Quest 2 · Pro 의 현재 OS 는 Vulkan 1.1.295 이며
+  `VK_KHR_synchronization2` 확장은 있습니다([Packaging_Design.md](Packaging_Design.md) 2절).
 
 **[정정]** 이전 판은 호출 지점을 `RenderContext.cpp`의 `transitionImage` 한 곳으로만 적고 문제를 "호환 레이어 부재"로 뭉뚱그렸으나, 실제 호출 지점은 세 곳이며 실패는 DEF-03과 마찬가지로 디바이스 생성 단계에서 먼저 일어납니다.
 
@@ -293,6 +296,10 @@ graph TD
 * **위치**: [`Engine.cpp`](file:///e:/Haruka/src/core/Engine.cpp)의 `Engine::Engine`, [`CMakeLists.txt`](file:///e:/Haruka/CMakeLists.txt)의 `if(ANDROID)` 분기 (2026-10-14 갱신: 부팅 코드가 예전 `main.cpp:38` 에서 `Engine` 클래스로 옮겨졌습니다)
 * **문제점**: `Engine::Engine` 이 `GlfwWindow`를 조건 없이 생성합니다. 헤더 포함만 `#ifndef ANDROID` 로 막혀 있어 안드로이드에서는 컴파일되지 않습니다. `AndroidWindow`는 CMake 의 `if(ANDROID)` 분기에 들어 있지만 어디서도 인스턴스화되지 않고, `IWindow` 의 순수 가상 클립보드 함수 두 개를 구현하지 않아 추상 클래스이기도 합니다(DEF-103). 즉 Quest 런타임 진입점이 존재하지 않습니다.
 * **해결 사양**: `IWindow` 생성을 플랫폼 팩토리 뒤로 옮기고, 안드로이드용 별도 진입점을 두십시오. 이것은 [Layer_Architecture.md](Layer_Architecture.md) 6절 1단계의 첫 항목입니다.
+* **[정정 · 2026-10-19]** Quest 에는 화면 표면이 필요 없습니다. Khronos hello_xr · Meta OpenXR SDK 예제는 Android 에서 VkSurfaceKHR ·
+  VkSwapchainKHR 를 만들지 않고 XR 스왑체인에만 그리며, 창(ANativeWindow)은 수명주기에만 씁니다. 따라서 "AndroidWindow 로 표면을
+  만든다"가 아니라 창 없는 렌더 경로(빈 스왑체인), NativeActivity 진입, Khronos OpenXR 로더(`xrInitializeLoaderKHR`)가 해결 사양입니다.
+  런타임 분리(DEF-12)는 2026-10-19 에 끝나, Android 진입점은 게임 앞단 위에 얹으면 됩니다([Packaging_Design.md](Packaging_Design.md)).
 
 ---
 
@@ -333,7 +340,12 @@ graph TD
 
 ---
 
-### ⚠️ [DEF-12] [MEDIUM] `World::tick`이 에디터 Play 상태에서만 실행
+### ✅ [DEF-12] [해결됨 · 2026-10-19, 원래 MEDIUM] `World::tick`이 에디터 Play 상태에서만 실행
+
+* **[해결 · 2026-10-19 · 패키징 1단계]** 엔진(`Engine`)이 에디터를 직접 부르지 않고 앞단 인터페이스(`core/IEngineFrontend.hpp`)로만 부릅니다.
+  에디터를 뺀 엔진은 `HarukaRuntime` 라이브러리이고, 에디터 실행 파일(`EditorApp`)과 게임 실행 파일(`HarukaGame`, `game/GameFrontend.cpp`:
+  시작 씬을 열고 처음부터 Play)이 각각 링크합니다. 상세는 [Packaging_Design.md](Packaging_Design.md) 4-1절과
+  [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 "패키징 1단계 결과" 절.
 
 * **위치**: [`Engine.cpp`](file:///e:/Haruka/src/core/Engine.cpp)의 `Engine::run` Tick 블록 (2026-10-14 갱신: 예전 `main.cpp:115-119` 에서 옮겨졌습니다)
 * **문제점**: `World::tick`과 `ModuleManager::tickAll`이 에디터가 Play 상태일 때만 돕니다. 따라서 에디터를 걷어낸 런타임 빌드에는 게임 루프가 없습니다.
@@ -1299,7 +1311,7 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
 
 [1단계: VR 엔진으로서의 코어 완성 — 엔진의 정의에 해당합니다]
  ├── [ ] DEF-08. [HIGH]     Quest 런타임 진입점 (IWindow 팩토리, AndroidWindow 인스턴스화)
- ├── [ ] DEF-12. [MEDIUM]   런타임 게임 루프 (World::tick을 에디터 Play 상태에서 분리)
+ ├── [x] DEF-12. [해결됨]   런타임 게임 루프 (엔진 앞단 + 게임 실행 파일)  ✅ 2026-10-19
  ├── [x] DEF-09. [해결됨]   두 눈 렌더 첫 단계(눈마다 두 번 그리기)  ✅ 2026-10-04
  │                          (멀티뷰 viewMask · gl_ViewIndex · arrayLayers 는 Quest 이식 때)
  ├── [x] DEF-31. [해결됨]   두 눈 절두체를 각각 판정  ✅ 2026-10-04
@@ -1347,7 +1359,8 @@ DEF-36과 DEF-37을 고친 뒤에도 대비가 부족하여 **세 값을 한 세
 * **라이팅은 2026-08-25에 검증 가능한 상태가 되었습니다.** DEF-36의 섀도 샘플러 비교 규약 반전이 `Lo *= shadow`를 통해 모든 라이트의 기여를 0으로 만들고 있었고, DEF-37의 IBL 조도 과다가 앰비언트를 약 2.09배로 부풀리고 있었습니다. 두 결함이 겹쳐 있는 동안에는 라이팅과 관련된 어떤 변경도 결과를 확인할 방법이 없었으므로 **두 항목을 한 작업 단위로 처리했습니다.** DEF-36은 코드를 고치기 전에 2-E절의 지문 테스트로 확정했으며, 관찰된 지문(전역적인 검은 표면과 실루엣 가장자리의 흰 테두리)이 결함 메커니즘의 예측과 일치했습니다. 이어서 머티리얼 경로의 DEF-47과 DEF-48도 같은 날 해결하여, 이제 색이 들어간 머티리얼의 명암을 화면으로 판단할 수 있습니다. **남은 라이팅 항목은 DEF-38(라이트 종류와 방향의 직렬화)과 DEF-26(섀도 캐스터 슬롯 및 `Lo *= shadow` 범위)이며, 두 항목은 이제 결과를 눈으로 확인하면서 처리할 수 있습니다.**
 * Quest 실기에서는 `drawIndirectCount`와 `synchronization2`(DEF-03, DEF-04)의 피처 분리 없이는 `vkCreateDevice`부터 실패할 수 있으므로, VR 기능을 실기에서 검증하는 것 자체가 불가능합니다. Quest 포팅 전에는 힙 축소 시 Zone 오프셋이 조정되지 않는 DEF-42도 함께 처리해야 합니다.
 * HMD 포즈를 받아도 입력 계층(DEF-20)과 카메라 자세(DEF-21)가 오일러각 디지털 구조에 묶여 있으면 6DOF를 표현할 방법이 없습니다.
-* Quest 런타임 진입점(DEF-08)과 런타임 게임 루프(DEF-12)가 없으면 에디터 밖에서 엔진이 돌지 않습니다.
+* Quest 런타임 진입점(DEF-08)과 런타임 게임 루프(DEF-12)가 없으면 에디터 밖에서 엔진이 돌지 않습니다. **[갱신 · 2026-10-19]** DEF-12 는
+  해결되어 Windows 에서는 에디터 없이 게임 실행 파일이 돕니다. Quest 진입점(DEF-08)이 남았습니다.
 
 따라서 **VR 엔진 코어를 완성하기 이전에 위 결함들을 순차적으로 격파하여 Layer 1의 무결성을 확보하는 것**이 엔지니어링 관점에서 가장 필수적인 단계입니다. 우주 도메인(Layer 2)은 그 위의 4단계이며, 코어가 단단해진 뒤에 얹는 첫 번째 응용입니다.
 

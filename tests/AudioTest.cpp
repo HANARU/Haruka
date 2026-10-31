@@ -19,6 +19,10 @@
 #include "../src/core/World.hpp"
 #include "../src/core/Actor.hpp"
 #include "../src/core/ComponentFields.hpp"
+#include "../src/core/TextUtf.hpp"
+#include "../src/vfs/PakReader.hpp"
+#include "../src/vfs/PakWriter.hpp"
+#include "../src/vfs/Vfs.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -28,6 +32,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -364,6 +371,41 @@ int main() {
         }
     }
 
+    // 9-1. 묶음 파일(2026-10-24): 게임 실행 파일은 소리를 game.hpak 에서 읽습니다. 같은 음원을 메모리 묶음에 넣고 논리
+    // 경로로 불러, miniaudio 의 파일 콜백(가상 파일 시스템)을 거쳐 디코딩되는지 봅니다.
+    std::printf("\n== 9-1. 묶음 안 음원 ==\n");
+    {
+        const fs::path dir = fs::path(HARUKA_ASSET_DIR) / "audio";
+        std::vector<hpak::PakInput> inputs;
+        for (const char* name : { "Test_Chime.wav", "Test_NoiseLoop.ogg" }) {
+            hpak::PakInput in;
+            in.path = std::string("assets/audio/") + name;
+            std::ifstream f(dir / name, std::ios::binary);
+            in.data.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+            in.codec = hpak::Codec::Stored;
+            inputs.push_back(std::move(in));
+        }
+        std::stringstream ss(std::ios::in | std::ios::out | std::ios::binary);
+        std::string err;
+        const bool built = hpak::writePak(std::move(inputs), ss, err);
+        const std::string s = ss.str();
+        auto reader = std::make_unique<hpak::PakReader>();
+        const bool opened = built && reader->open(hpak::memorySource(std::vector<uint8_t>(s.begin(), s.end())), err);
+        hvfs::reset();
+        if (opened) hvfs::mountPack(std::move(reader), "audio_test.hpak", 0);
+        check(opened, "음원 둘을 담은 묶음을 마운트 " + err);
+        for (const char* name : { "Test_Chime.wav", "Test_NoiseLoop.ogg" }) {
+            AudioComponent* ac = spawnSound(world, name, fs::path("assets/audio") / name, {}, true, false);
+            sys.tick(kDt);
+            render(sys, 2400);
+            const double level = rms(render(sys, 24000).L);
+            check(ac->sound_ != nullptr && level > 0.01,
+                  std::string("묶음 안 ") + name + " 를 논리 경로로 불러와 소리가 난다(RMS " + std::to_string(level).substr(0, 6) + ")");
+            world.destroyActor(ac->owner);
+        }
+        hvfs::reset();
+    }
+
     // 10. Pause 상태에서 Stop: 그룹이 멈춘 채 남으면 다음 플레이가 통째로 무음이 됩니다.
     std::printf("\n== 10. 일시정지 중 플레이 종료 ==\n");
     {
@@ -469,6 +511,46 @@ int main() {
 
     std::error_code ec;
     fs::remove_all(tmp, ec);
+
+    // 13. 출력 장치 설정(2026-10-16): 장치 없는 엔진은 값만 기억합니다. 장치 ID · 이름 변환 도우미도 여기서 봅니다.
+    std::printf("\n== 13. 출력 장치 설정 ==\n");
+    {
+        AudioSystem hs(true);
+        hs.setOutputDevice("{0.0.0.00000000}.{abc}");
+        hs.startup();
+        check(hs.outputDevice() == "{0.0.0.00000000}.{abc}" && hs.outputOverride().empty(), "고른 장치를 기억(시작 전에 골라도)");
+        check(hs.outputDevices().empty() && hs.activeOutputName().empty(), "장치 없는 엔진은 장치 목록 · 이름이 비어 있음");
+        hs.setOutputOverride("{0.0.0.00000000}.{headset}");
+        check(hs.outputOverride() == "{0.0.0.00000000}.{headset}" && hs.outputDevice() == "{0.0.0.00000000}.{abc}",
+              "잠시 쓰는 장치(헤드셋)는 고른 장치를 바꾸지 않음");
+        hs.setOutputOverride("");
+        hs.setOutputDevice("");
+        check(hs.outputOverride().empty() && hs.outputDevice().empty(), "비우면 시스템 기본");
+        hs.shutdown();
+
+        const wchar_t endpoint[] = L"{0.0.0.00000000}.{BAFA3D4B-1578-4319-AE32-C07C0494152E}";
+        check(hutf::fromUtf16(endpoint) == "{0.0.0.00000000}.{BAFA3D4B-1578-4319-AE32-C07C0494152E}", "WASAPI 끝점 ID 를 UTF-8 로");
+        const char16_t korean[] = { 0xD5E4, 0xB4DC, 0xD3F0, 0 };   // 헤드폰
+        check(hutf::fromUtf16(korean) == "\xED\x97\xA4\xEB\x93\x9C\xED\x8F\xB0", "한글(3바이트 UTF-8)");
+        const char16_t pair[] = { 0xD83C, 0xDFA7, 0 };              // U+1F3A7(헤드폰 그림 문자)
+        check(hutf::fromUtf16(pair) == "\xF0\x9F\x8E\xA7", "서로게이트 쌍(4바이트 UTF-8)");
+        const char16_t lone[] = { 0x41, 0xD800, 0x42, 0 };
+        check(hutf::fromUtf16(lone) == "A\xEF\xBF\xBD" "B", "짝 없는 서로게이트는 U+FFFD");
+        const char16_t loneLow[] = { 0xDC00, 0x43, 0 };
+        check(hutf::fromUtf16(loneLow) == "\xEF\xBF\xBD" "C", "앞짝 없는 뒤 서로게이트도 U+FFFD");
+        check(hutf::equalsIgnoreCase("{0.0.0.00000000}.{bafa3d4b}", "{0.0.0.00000000}.{BAFA3D4B}") &&
+              hutf::equalsIgnoreCase("{0.0.0.00000000}.{BAFA3D4B}", "{0.0.0.00000000}.{bafa3d4b}") &&
+              !hutf::equalsIgnoreCase("{a}", "{b}"), "장치 ID 는 대소문자를 무시하고 비교(어느 쪽이 대문자여도)");
+
+        // 한국어 Windows 의 장치 이름: UI 는 ASCII 만 그리므로 한글을 빼고, 남은 글을 감싼 괄호를 벗깁니다.
+        const std::string headphones = hutf::fromUtf16(u"헤드폰(Oculus Virtual Audio Device)");
+        check(hutf::asciiLabel(headphones, "?") == "Oculus Virtual Audio Device", "\"헤드폰(Oculus Virtual Audio Device)\"");
+        const std::string speaker = hutf::fromUtf16(u"스피커(Realtek(R) Audio)");
+        check(hutf::asciiLabel(speaker, "?") == "Realtek(R) Audio", "안에 괄호가 있어도 바깥 괄호만 벗김");
+        check(hutf::asciiLabel("(A) (B)", "?") == "(A) (B)", "괄호가 둘로 나뉘면 그대로");
+        check(hutf::asciiLabel("Generic  Wireless Headset", "?") == "Generic Wireless Headset", "ASCII 이름은 공백만 정리");
+        check(hutf::asciiLabel(hutf::fromUtf16(u"스피커"), "Device 3") == "Device 3", "남는 글이 없으면 대신 쓸 이름");
+    }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
     return g_failed ? 1 : 0;

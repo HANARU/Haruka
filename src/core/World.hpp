@@ -32,7 +32,14 @@ public:
     HEvent<Actor*> onActorSpawned;
     HEvent<Actor*> onActorDestroyed;
 
+    // 화면을 그릴 카메라. 편집 중에는 에디터 카메라(정해져 있으면)이고, Play 중에는 씬의 primary 카메라(액터 순서상
+    // 첫 번째)를 먼저 고르고 없으면 에디터 카메라입니다(2026-10-15). 예전에는 늘 액터 순서상 첫 primary 카메라였는데,
+    // 에디터 카메라가 가장 먼저 생겨 씬 카메라(플레이어)가 Play 에서도 쓰이지 않았습니다.
     CameraComponent*                           getActiveCamera()  const;
+    // 에디터가 자기 카메라와 Play 여부를 알립니다. 에디터가 없으면 부르지 않으며, 그때는 첫 primary 카메라입니다.
+    void setEditorCamera(CameraComponent* cam) { editorCam_ = cam; }
+    void setPlaying(bool playing)              { playing_ = playing; }
+    bool isPlaying() const                     { return playing_; }
     std::vector<StaticMeshComponent*>          getVisibleMeshes() const;
     std::vector<LightComponent*>               getLights()        const;
     const std::vector<std::unique_ptr<Actor>>& getActors()        const { return actors; }
@@ -43,6 +50,8 @@ private:
     std::vector<Actor*>                  pendingDestroy_;
     uint64_t                             nextId_ = 1;
     bool                                 ticking_ = false;
+    CameraComponent*                     editorCam_ = nullptr;
+    bool                                 playing_   = false;
 
     void destroyImmediate(Actor* actor);
     void flushDestroyQueue();

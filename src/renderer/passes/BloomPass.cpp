@@ -194,7 +194,7 @@ void BloomPass::record(VkCommandBuffer cmd, VkImageView hdrView, VkSampler clamp
             bw[1].descriptorCount=1; bw[1].pImageInfo=&downI;
             nWrites = 2;
         }
-        vkCmdPushDescriptorSet(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout_, 0, nWrites, bw);
+        rc_->vk.push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout_, 0, nWrites, bw);
         float pc[4] = {threshold, 0.f, 0.f, 0.f};
         vkCmdPushConstants(cmd, pipeLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16, pc);
         vkCmdDraw(cmd, 3, 1, 0, 0);

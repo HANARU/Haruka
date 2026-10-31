@@ -65,6 +65,13 @@ public:
 
     const std::vector<std::unique_ptr<Component>>& getComponents() const { return components; }
 
+    // 이 컴포넌트를 지웁니다(템플릿판과 같은 순서: 끄기 → onDestroy → 해제). 에디터의 컴포넌트 제거 Undo 가
+    // 타입이 아니라 그 컴포넌트 하나를 지울 때 씁니다(2026-10-15). 없으면 false.
+    bool removeComponent(Component* c);
+    // 붙은 순서 안의 자리(없으면 -1)와, 그 자리로 옮기기. Undo 로 되살린 컴포넌트를 원래 순서로 돌립니다.
+    int  componentIndex(const Component* c) const;
+    void moveComponent(Component* c, size_t index);
+
     template<typename T>
     bool removeComponent() {
         componentCache_.erase(std::type_index(typeid(T)));
@@ -97,7 +104,12 @@ public:
     // attachTo/detach 는 조상 체인을 바꾸므로, 재부착 뒤 이 서브트리의 컴포넌트
     // 실효 활성(onEnable/onDisable)을 다시 맞춥니다.
     void attachTo(Actor* parent);
+    // index 는 부모의 자식 목록 안 자리입니다(-1 또는 범위 밖 = 끝). 같은 부모면 자리만 옮깁니다.
+    // 부모 변경 Undo 가 원래 형제 순서로 되돌릴 때 씁니다(2026-10-15).
+    void attachTo(Actor* parent, int index);
     void detach();
+    // 부모의 자식 목록 안 자리. 부모가 없으면 -1.
+    int  siblingIndex() const;
 
     Actor*                     getParent()   const { return parent_;   }
     const std::vector<Actor*>& getChildren() const { return children_; }

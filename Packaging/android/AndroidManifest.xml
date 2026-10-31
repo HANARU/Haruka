@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Haruka game for Meta Quest (native OpenXR + Vulkan, no Java code). Packaged without Gradle by package_apk.py.
+     Sources of each part: OpenXR loader permissions, <queries>, IMMERSIVE_HMD and singleTask from the Khronos loader
+     manifest and hello_xr; VR category, supportedDevices, headtracking and configChanges from Meta's native manifest
+     page. minSdk 32 / targetSdk 34 is Meta's current rule. debuggable comes from aapt2 debug mode.
+     configChanges also lists every other change that API 34 defines (language, font size and weight, color mode,
+     SIM country, ...; 2026-11-01 DEF-150). Android recreates the activity for a change that is not listed, and
+     android_main ends the process when its activity is destroyed, so such a change would close the game. Listed
+     changes only send APP_CMD_CONFIG_CHANGED, which the engine ignores. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.haruka.game"
+    android:versionCode="1"
+    android:versionName="0.1.0"
+    android:installLocation="auto">
+
+    <uses-sdk android:minSdkVersion="32" android:targetSdkVersion="34" />
+    <uses-feature android:name="android.hardware.vr.headtracking" android:required="true" android:version="1" />
+
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+    <queries>
+        <provider android:authorities="org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runtime_broker" />
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRRuntimeService" />
+        </intent>
+        <intent>
+            <action android:name="org.khronos.openxr.OpenXRApiLayerService" />
+        </intent>
+    </queries>
+
+    <application
+        android:label="Haruka"
+        android:hasCode="false"
+        android:extractNativeLibs="true">
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3|quest3s" />
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:resizeableActivity="false"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="colorMode|density|fontScale|fontWeightAdjustment|grammaticalGender|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode">
+            <meta-data android:name="android.app.lib_name" android:value="HarukaGame" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

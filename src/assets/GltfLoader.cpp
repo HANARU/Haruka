@@ -5,6 +5,11 @@
 
 #include "GltfLoader.hpp"
 #include "AssetLog.hpp"
+#include "../vfs/PakFormat.hpp"
+#include "../vfs/PathUtf8.hpp"
+#include "../vfs/Vfs.hpp"
+#include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <numeric>
 #include <cstring>
@@ -220,16 +225,95 @@ static void flattenNodes(const tinygltf::Model& model, int nodeIdx,
     for (int c : n.children) flattenNodes(model, c, w, out);
 }
 
+// ─── 파일 읽기 (2026-10-24) ──────────────────────────────────────────────────
+// glTF 는 가상 파일 시스템으로 읽습니다(에디터는 프로젝트 폴더, 게임은 묶음 파일). 본문은 메모리에서 파싱하고, .gltf 가
+// 가리키는 외부 파일(.bin · 텍스처)도 이 콜백으로 같은 곳에서 찾습니다. tinygltf 는 기준 폴더와 uri 를 '/' 로 잇습니다.
+
+// 이은 경로의 '.' · '..' 구성요소를 접습니다(DEF-125). 논리 경로는 '.' · '..' 를 받지 않으므로, uri 가 "../textures/a.png"
+// 이면 "assets/models/../textures/a.png" 를 "assets/textures/a.png" 로 바꿔야 찾습니다. 맨 앞 위로 올라가는 '..'(프로젝트 ·
+// 묶음 밖)는 빈 문자열로 거부합니다. 접은 결과는 논리 경로 규칙(hpak::normalizePath)을 통과해야 합니다. 그래야 tinygltf 가
+// 함께 시도하는 "./" + uri 후보가 "./C:/..." 같은 드라이브 문자 uri 를 절대 경로로 바꿔 마운트를 우회해 디스크에서 읽지
+// 못합니다(2026-10-31 검토). 그런 파일은 묶음에 들어가지 않아 다른 PC 에서만 빠집니다.
+static std::string foldLogicalPath(const std::string& p) {
+    std::vector<std::string> parts;
+    size_t i = 0;
+    for (;;) {
+        const size_t j = p.find_first_of("/\\", i);
+        const std::string part = p.substr(i, j == std::string::npos ? std::string::npos : j - i);
+        if (part == "..") {
+            if (parts.empty()) return {};
+            parts.pop_back();
+        } else if (!part.empty() && part != ".") {
+            parts.push_back(part);
+        }
+        if (j == std::string::npos) break;
+        i = j + 1;
+    }
+    std::string out, norm;
+    for (const auto& s : parts) { if (!out.empty()) out += '/'; out += s; }
+    return hpak::normalizePath(out, norm) ? norm : std::string();
+}
+
+// 콜백이 아는 것: glTF 파일 자체가 절대 경로로 열렸는지. 그때만(시험의 임시 파일 등) 이은 경로를 운영체제에 그대로 맡깁니다.
+// uri 가 절대 경로인지로 정하지 않습니다. 논리 경로의 glTF 가 가리키는 절대 uri 는 위 규칙으로 거부해야 하기 때문입니다.
+struct GltfFsContext {
+    bool absoluteBase = false;
+};
+
+static tinygltf::FsCallbacks vfsCallbacks(const GltfFsContext* ctx) {
+    tinygltf::FsCallbacks cb;
+    cb.FileExists = [](const std::string& p, void*) { return hvfs::exists(p); };
+    // tinygltf 는 이 결과로 FileExists · GetFileSizeInBytes · ReadWholeFile 을 모두 부르므로 접는 곳은 여기 하나입니다.
+    cb.ExpandFilePath = [](const std::string& p, void* user) {
+        const auto* c = static_cast<const GltfFsContext*>(user);
+        return (c && c->absoluteBase) ? p : foldLogicalPath(p);
+    };
+    cb.ReadWholeFile = [](std::vector<unsigned char>* out, std::string* err, const std::string& p, void*) {
+        std::vector<uint8_t> bytes;
+        std::string e;
+        if (!hvfs::readAll(p, bytes, &e)) { if (err) *err += e; return false; }
+        out->assign(bytes.begin(), bytes.end());
+        return true;
+    };
+    cb.WriteWholeFile = [](std::string* err, const std::string& p, const std::vector<unsigned char>&, void*) {
+        if (err) *err += "glTF loader does not write files (" + p + ")";
+        return false;
+    };
+    cb.GetFileSizeInBytes = [](size_t* size, std::string* err, const std::string& p, void*) {
+        hvfs::Stat st;
+        if (!hvfs::stat(p, st)) { if (err) *err += p + ": not found"; return false; }
+        *size = (size_t)st.size;
+        return true;
+    };
+    cb.user_data = const_cast<GltfFsContext*>(ctx);
+    return cb;
+}
+
 // ─── loadAll ─────────────────────────────────────────────────────────────────
 
 std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
     tinygltf::Model    model;
     tinygltf::TinyGLTF loader;
     std::string err, warn;
+    const size_t slash = path.find_last_of("/\\");
+    const std::string baseDir = slash == std::string::npos ? std::string() : path.substr(0, slash);
+    // 절대 경로 판정은 가상 파일 시스템과 같은 기준(fs::path::is_absolute)으로 합니다.
+    GltfFsContext fsCtx;
+    std::filesystem::path basePath;
+    fsCtx.absoluteBase = hpak::pathFromUtf8(baseDir, basePath) && basePath.is_absolute();
+    if (!loader.SetFsCallbacks(vfsCallbacks(&fsCtx), &err))
+        throw std::runtime_error("glTF loader setup failed: " + err);
+
+    std::vector<uint8_t> bytes;
+    std::string readErr;
+    if (!hvfs::readAll(path, bytes, &readErr)) throw std::runtime_error("glTF load failed: " + readErr);
+    if (bytes.size() > (std::numeric_limits<unsigned int>::max)())   // 괄호: windows.h 의 max 매크로 회피
+        throw std::runtime_error("glTF file is larger than 4 GiB: " + path);
 
     bool ok = (path.size() >= 4 && path.substr(path.size() - 4) == ".glb")
-        ? loader.LoadBinaryFromFile(&model, &err, &warn, path)
-        : loader.LoadASCIIFromFile(&model, &err, &warn, path);
+        ? loader.LoadBinaryFromMemory(&model, &err, &warn, bytes.data(), (unsigned int)bytes.size(), baseDir)
+        : loader.LoadASCIIFromString(&model, &err, &warn, reinterpret_cast<const char*>(bytes.data()),
+                                     (unsigned int)bytes.size(), baseDir);
 
     if (!warn.empty()) HLOG(LogAsset, Warning) << "glTF warning: " << warn;
     if (!ok)           throw std::runtime_error("glTF load failed: " + err);

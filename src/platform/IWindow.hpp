@@ -21,6 +21,8 @@ namespace HInput {
     constexpr int KEY_C = 67;
     constexpr int KEY_V = 86;
     constexpr int KEY_F = 70;
+    constexpr int KEY_N = 78;
+    constexpr int KEY_O = 79;
     constexpr int KEY_LEFT_CTRL   = 341;  // GLFW_KEY_LEFT_CONTROL
     constexpr int KEY_LEFT_SHIFT  = 340;  // GLFW_KEY_LEFT_SHIFT
     constexpr int KEY_RIGHT_CTRL  = 345;  // GLFW_KEY_RIGHT_CONTROL
@@ -42,6 +44,9 @@ public:
     virtual void cleanup() = 0;
 
     virtual bool shouldClose() const = 0;
+    // 닫기 요청을 되돌리거나(false) 직접 닫습니다(true). 저장하지 않은 씬이 있으면 에디터가 닫기를 미루고
+    // 확인 창을 띄운 뒤, 사용자가 고르면 다시 닫습니다(2026-10-15).
+    virtual void setShouldClose(bool close) = 0;
     virtual void pollEvents() = 0;
     virtual void waitEvents() = 0;
     
@@ -52,6 +57,10 @@ public:
     virtual bool wasResized() const = 0;
     virtual void resetResizedFlag() = 0;
 
+    // 이 창이 Vulkan 표면을 주는지(2026-10-31, 패키징 2단계). 거짓이면 createSurface 는 VK_NULL_HANDLE,
+    // getRequiredInstanceExtensions 는 빈 목록, getFramebufferSize 는 0x0 이고, 렌더러는 표면 · 스왑체인 없이 XR 스왑체인
+    // (또는 합성 눈)에만 그립니다. Quest 는 화면 표면을 만들지 않습니다(Khronos hello_xr · Meta 예제와 같음).
+    virtual bool providesSurface() const = 0;
     virtual VkSurfaceKHR createSurface(VkInstance instance) = 0;
     virtual std::vector<const char*> getRequiredInstanceExtensions() const = 0;
 

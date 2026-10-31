@@ -29,9 +29,9 @@ public:
     void rebuildPipelines() override;
 
     // viewIndex 는 눈 번호입니다. 눈마다 투영이 달라(비대칭 시야) invProj 를 눈별 UBO 에 둡니다.
+    // 깊이는 이 패스의 NEAREST 샘플러로 읽습니다(DEF-156, 예전에는 렌더러의 LINEAR clampSampler 를 받았음).
     void record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
-                VkImageView msaaDepthView, VkSampler clampSampler,
-                const CameraParams& cam);
+                VkImageView msaaDepthView, const CameraParams& cam);
 
     VkImageView ssaoView() const { return ssaoView_; }
 
@@ -70,5 +70,8 @@ private:
     // 4x4 노이즈를 화면에 타일링하는 REPEAT+NEAREST 전용 샘플러(D-3). clampSampler 로 읽으면
     // 회전이 상수가 되어 구조적 밴딩이 생깁니다.
     VkSampler        noiseSampler_ = VK_NULL_HANDLE;
+    // 깊이(MSAA 깊이 · R32_SFLOAT 선형 깊이)를 보간 없이(NEAREST, CLAMP_TO_EDGE) 읽는 샘플러(2026-11-01, DEF-156). R32_SFLOAT 의
+    // 선형 필터링은 선택 기능이라 Android 기준선과 Quest 의 Adreno 에는 없을 수 있고, 깊이를 실루엣 너머로 섞는 것도 틀립니다.
+    VkSampler        depthSampler_ = VK_NULL_HANDLE;
     HarukaAllocation noiseAlloc_;
 };

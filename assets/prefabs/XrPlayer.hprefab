@@ -1,0 +1,90 @@
+# Haruka Prefab v3
+# Standard player rig: XR origin on the floor, head camera, two hands that grab Grabbable actors.
+# Drop it into a scene; in Play it becomes the view camera (desktop: WASD + right-drag look, VR: sticks).
+ACTOR:XrPlayer
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:XrRigComponent
+enabled=1
+height=tracked
+eyeHeight=1.7
+END_COMPONENT
+COMPONENT:RigLocomotionComponent
+enabled=1
+moveSpeed=2
+snapTurn=45
+flying=0
+lookSensitivity=0.15
+END_COMPONENT
+END_ACTOR
+ACTOR:Head
+POS:0 1.7 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+PARENT:0
+COMPONENT:CameraComponent
+enabled=1
+fovY=75
+zNear=0.05
+zFar=1000
+primary=1
+END_COMPONENT
+COMPONENT:TrackedPoseComponent
+enabled=1
+source=head
+showDebug=0
+END_COMPONENT
+END_ACTOR
+ACTOR:LeftHand
+POS:-0.2 1.2 -0.3
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.06 0.06 0.06
+ACTIVE:1
+PARENT:0
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color E8C8A8FF 0 0.6
+END_COMPONENT
+COMPONENT:TrackedPoseComponent
+enabled=1
+source=left
+showDebug=1
+END_COMPONENT
+COMPONENT:GrabInteractorComponent
+enabled=1
+radius=0.12
+END_COMPONENT
+END_ACTOR
+ACTOR:RightHand
+POS:0.2 1.2 -0.3
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.06 0.06 0.06
+ACTIVE:1
+PARENT:0
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color E8C8A8FF 0 0.6
+END_COMPONENT
+COMPONENT:TrackedPoseComponent
+enabled=1
+source=right
+showDebug=1
+END_COMPONENT
+COMPONENT:GrabInteractorComponent
+enabled=1
+radius=0.12
+END_COMPONENT
+END_ACTOR

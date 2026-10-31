@@ -50,6 +50,10 @@ public:
     void      setAngularVelocity(const glm::vec3& w);
     glm::vec3 angularVelocity() const;
 
+    // Dynamic ↔ Kinematic 을 바디를 유지한 채 바꿉니다(VR 잡기, 2026-10-15). 바디가 아직 없으면 값만 바꿔 다음 틱에
+    // 그 종류로 만들어집니다. Static 과는 오가지 않습니다(false).
+    bool setMotionRuntime(EMotionType m);
+
     // 살아 있는 바디를 지워, 다음 물리 틱에 지금 값으로 다시 만들게 합니다. 게임 코드가
     // shape·motionType·halfExtent·mass 필드를 직접 바꿨다면 이것을 불러야 반영됩니다.
     void rebuildBody();

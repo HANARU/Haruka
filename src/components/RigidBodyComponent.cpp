@@ -51,6 +51,18 @@ glm::vec3 RigidBodyComponent::angularVelocity() const {
     return hasBody() ? physSys_->angularVelocity(bodyId_) : glm::vec3(0.f);
 }
 
+bool RigidBodyComponent::setMotionRuntime(EMotionType m) {
+    if (m == EMotionType::Static || motionType == EMotionType::Static) return false;
+    if (m == motionType) return true;
+    motionType = m;
+    if (hasBody()) {
+        physSys_->setMotionKinematic(bodyId_, m == EMotionType::Kinematic);
+        createdMotion_ = m;   // 바디를 다시 만들 이유가 아님
+        synced_        = false;   // 물리가 다음 틱에 쓴 자세부터 순간 이동 판정
+    }
+    return true;
+}
+
 void RigidBodyComponent::rebuildBody() {
     releaseBody();
     createFailed_ = false;

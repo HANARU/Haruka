@@ -31,6 +31,7 @@ VkFormat Renderer::findDepthFormat() {
 // 기본 패스(프레임 순서) → 렌더 확장(등록 순서). 셰이더 핫 리로드도 이 함수를 부릅니다(DEF-17).
 void Renderer::createAllPipelines() {
     passRegistry_.forEachForward([](HPass& p) { p.rebuildPipelines(); });
+    pipelineCacheDirty_ = true;   // 다음 프레임 끝에서 캐시 저장(DEF-153)
 }
 
 
@@ -98,8 +99,10 @@ VkExtent2D Renderer::desiredRenderExtent() const {
 }
 
 void Renderer::setViewportRect(int x, int y, int w, int h) {
-    // 스왑체인 범위로 클램프합니다. 폭/높이는 최소 1.
+    // 스왑체인 범위로 클램프합니다. 폭/높이는 최소 1. 스왑체인 크기가 0 이면 클램프 범위가 뒤집혀(하한 1 > 상한 0)
+    // 미정의 동작이므로 아무것도 하지 않습니다(창 없는 실행은 명목 크기라 평소에는 오지 않음, 2026-10-31).
     const int sw = (int)rc_.extent.width, sh = (int)rc_.extent.height;
+    if (sw <= 0 || sh <= 0) return;
     int cx = std::clamp(x, 0, std::max(0, sw - 1));
     int cy = std::clamp(y, 0, std::max(0, sh - 1));
     int cw = std::clamp(w, 1, sw - cx);
@@ -152,6 +155,7 @@ void Renderer::attachXrSwapchain(const std::vector<VkImage>& images, VkFormat fo
     xrFormat_    = format;
     xrEyeExtent_ = eyeExtent;
     xrActive_    = true;
+    pipelineCacheDirty_ = true;   // 이 포맷의 톤매핑 파이프라인을 새로 만들었을 수 있음(DEF-153)
     HLOG(LogRenderer, Log) << "XR output attached: " << images.size() << " images, "
                            << eyeExtent.width << "x" << eyeExtent.height << " per eye";
     const VkExtent2D newExt = desiredRenderExtent();
@@ -161,6 +165,7 @@ void Renderer::attachXrSwapchain(const std::vector<VkImage>& images, VkFormat fo
     }
 }
 
+// 창이 없으면 뗀 뒤의 크기 의존 타깃은 명목 크기(64x64)로 작게 다시 만들어집니다. 재연결은 드물어 따로 두지 않습니다.
 void Renderer::detachXrSwapchain(bool restoreTargets) {
     if (!xrActive_ && xrViews_.empty()) return;
     vkDeviceWaitIdle(device);
@@ -176,6 +181,107 @@ void Renderer::detachXrSwapchain(bool restoreTargets) {
         rc_.renderExtent = newExt;
         recreateRenderTargets();
     }
+}
+
+// ── 합성 눈 (--synthetic-eyes, 2026-10-31) ────────────────────────────────────
+// 헤드셋 없이 XR 프레임 경로(두 눈 · 배열 층 · 표시 없음)를 돌립니다. Quest 와 같은 경로를 PC 에서 창 없이 그리고, 마지막
+// 이미지를 PNG 로 남겨 고치기 전후를 비교합니다. 실제 XR 이미지는 읽기 용도가 없어 이 이미지만 TRANSFER_SRC 를 둡니다.
+bool Renderer::attachSyntheticEyes(VkExtent2D eyeExtent, uint32_t count) {
+    detachSyntheticEyes();
+    // 포맷은 창이 있든 없든 R8G8B8A8_SRGB 로 고정합니다. 캡처가 화소당 4바이트 RGBA 를 전제하고, 창 없는 실행과 창 있는
+    // 실행의 PNG 가 같아야 비교할 수 있습니다. 톤매핑 패스는 포맷마다 렌더 패스를 따로 둡니다(Quest 런타임의 선호 포맷과도 같음).
+    const VkFormat fmt = VK_FORMAT_R8G8B8A8_SRGB;
+    VkFormatProperties fp;
+    vkGetPhysicalDeviceFormatProperties(physDevice, fmt, &fp);
+    const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+    if ((fp.optimalTilingFeatures & need) != need) {
+        HLOG(LogRenderer, Warning) << "Synthetic eyes: format " << (int)fmt << " cannot be a color attachment and copy source";
+        return false;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        HarukaAllocation alloc;
+        synthImages_.push_back(rc_.createImage(eyeExtent.width, eyeExtent.height, 1, kMaxViews, VK_SAMPLE_COUNT_1_BIT, fmt,
+                                               VK_IMAGE_TILING_OPTIMAL,
+                                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, 0,
+                                               alloc));
+        synthAllocs_.push_back(alloc);
+    }
+    attachXrSwapchain(synthImages_, fmt, eyeExtent);
+    return true;
+}
+
+void Renderer::detachSyntheticEyes() {
+    if (synthImages_.empty()) return;
+    detachXrSwapchain(false);   // 장치가 쉬기를 기다린 뒤 뷰 · 프레임버퍼를 지움
+    for (size_t i = 0; i < synthImages_.size(); ++i) {
+        vkDestroyImage(device, synthImages_[i], nullptr);
+        if (synthAllocs_[i].isValid()) allocator.freeB(synthAllocs_[i]);
+    }
+    synthImages_.clear();
+    synthAllocs_.clear();
+}
+
+bool Renderer::captureXrEye(uint32_t image, uint32_t layer, std::vector<uint8_t>& rgba, VkExtent2D& extent) {
+    if (image >= synthImages_.size() || layer >= kMaxViews || !xrActive_) return false;
+    vkDeviceWaitIdle(device);
+    extent = xrEyeExtent_;
+    const VkDeviceSize bytes = (VkDeviceSize)extent.width * extent.height * 4;
+
+    VkBufferCreateInfo bi{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    bi.size        = bytes;
+    bi.usage       = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBuffer buf = VK_NULL_HANDLE;
+    if (vkCreateBuffer(device, &bi, nullptr, &buf) != VK_SUCCESS) return false;
+    VkMemoryRequirements reqs;
+    vkGetBufferMemoryRequirements(device, buf, &reqs);
+    HarukaAllocation alloc = allocator.allocB(reqs);
+    if (!alloc.isValid() || allocator.bind(buf, alloc) != VK_SUCCESS) {
+        vkDestroyBuffer(device, buf, nullptr);
+        if (alloc.isValid()) allocator.freeB(alloc);
+        return false;
+    }
+
+    // 개발용 읽기라 1.0 배리어를 그대로 씁니다(어느 장치에서도 유효). 톤매핑 패스가 남긴 COLOR_ATTACHMENT_OPTIMAL 에서
+    // 복사용으로 바꿨다가 되돌리고, 복사 결과가 호스트에 보이도록 HOST 단계까지 묶습니다.
+    const VkCommandBuffer cmd = beginOneTimeCmd();
+    VkImageMemoryBarrier ib{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    ib.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    ib.image               = synthImages_[image];
+    ib.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, layer, 1 };
+    ib.oldLayout           = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ib.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    ib.srcAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    ib.dstAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                         0, nullptr, 0, nullptr, 1, &ib);
+    VkBufferImageCopy region{};
+    region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1 };
+    region.imageExtent      = { extent.width, extent.height, 1 };
+    vkCmdCopyImageToBuffer(cmd, synthImages_[image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buf, 1, &region);
+    ib.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    ib.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ib.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    ib.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    VkMemoryBarrier hostRead{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+    hostRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    hostRead.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_HOST_BIT, 0,
+                         1, &hostRead, 0, nullptr, 1, &ib);
+    endOneTimeCmd(cmd);
+
+    rgba.resize((size_t)bytes);
+    std::memcpy(rgba.data(), alloc.mappedPtr, (size_t)bytes);
+    vkDestroyBuffer(device, buf, nullptr);
+    allocator.freeB(alloc);
+
+    // BGRA 포맷(창이 있을 때의 스왑체인 포맷)이면 RGBA 로 바꿉니다.
+    const VkFormat f = xrFormat_;
+    if (f == VK_FORMAT_B8G8R8A8_SRGB || f == VK_FORMAT_B8G8R8A8_UNORM)
+        for (size_t i = 0; i + 3 < rgba.size(); i += 4) std::swap(rgba[i], rgba[i + 2]);
+    return true;
 }
 
 void Renderer::setStereoEmulation(bool on) {

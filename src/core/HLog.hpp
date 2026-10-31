@@ -132,7 +132,8 @@ inline constexpr const char* kLevelOverridesPath = "Config/log_levels.txt";
 // 파일 형식: 한 줄에 "카테고리 수준" (예: "Input Verbose"). '#' 줄은 주석입니다.
 // 아직 등록되지 않은 이름은 보관해 두었다가, 그 카테고리가 등록되는 순간에 적용합니다
 // (카테고리는 첫 사용 시점에 등록되므로 부팅 시점에는 대부분 아직 없습니다).
-bool loadLevelOverrides(const std::string& path);
+// 파일은 UTF-8 이고, BOM 이 있는 UTF-8 · UTF-16 도 읽습니다(DEF-152). 없으면 false, 인코딩을 알 수 없으면 false 와 why.
+bool loadLevelOverrides(const std::string& path, std::string* why = nullptr);
 // 선언 기본값과 다른 수준만 씁니다. 이번 실행에서 한 번도 등록되지 않아 적용 대기 중인
 // 항목도 지우지 않고 그대로 보존합니다.
 bool saveLevelOverrides(const std::string& path);

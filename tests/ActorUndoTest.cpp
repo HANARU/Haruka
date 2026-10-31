@@ -124,8 +124,10 @@ int main() {
         check(fresh->id > idU && fresh->id > idG, "새로 만든 액터는 되살린 ID 와 겹치지 않는다");
     }
 
-    std::printf("\n== 2. 삭제 전 편집 이력은 걷히고(사용자 결정), 되살린 상태는 지운 순간의 상태다 ==\n");
+    std::printf("\n== 2. 삭제 전 편집 이력도 이어지고, 되살린 상태는 지운 순간의 상태다 ==\n");
     {
+        // 2026-10-15 부터 커맨드가 액터를 ID 로 기억합니다. 삭제를 되돌리면 원래 ID 로 되살아나, 그 앞의 이동도
+        // 다시 되돌릴 수 있어야 합니다(예전에는 지울 때 그 이력을 걷었습니다).
         World w;
         HCommandStack st;
         w.onActorDestroyed.add([&st](Actor* a) { st.purge(a); });
@@ -134,7 +136,7 @@ int main() {
         const uint64_t idA = A->id;
         Transform before = A->transform();
         A->setLocalPosition({ 5.f, 0.f, 0.f });
-        st.push(std::make_unique<SetTransformCmd>(A, before, A->transform()));
+        st.push(std::make_unique<SetTransformCmd>(w, A, before, A->transform()));
 
         auto cmd = makeCmd(ActorPresenceCmd::Kind::Delete, w, { idA });
         cmd->redo();
@@ -142,7 +144,13 @@ int main() {
         st.undo();
         Actor* a = w.findById(idA);
         check(a && a->transform().position().x == 5.f, "지운 순간의 위치로 돌아온다");
-        check(!st.canUndo(), "삭제 전의 이동 커맨드는 지울 때 걷혔다");
+        check(st.canUndo(), "삭제 전의 이동 커맨드가 남아 있다");
+        st.undo();
+        a = w.findById(idA);
+        check(a && a->transform().position().x == 0.f, "그 이동도 되돌린다(되살린 액터를 ID 로 찾음)");
+        st.redo();
+        st.redo();
+        check(!w.findById(idA), "다시 하기도 순서대로(이동 → 삭제)");
     }
 
     std::printf("\n== 3. 생성 커맨드: Undo 는 지우고 Redo 는 같은 ID 로 되살린다 ==\n");

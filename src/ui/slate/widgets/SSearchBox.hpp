@@ -23,6 +23,9 @@ public:
         { onClick_ = std::move(fn); return self(); }
     std::shared_ptr<SSearchBox> fontSize(float f)
         { fontSize_ = f; return self(); }
+    // icon(false): magnifier glyph off (name fields in dialogs).
+    std::shared_ptr<SSearchBox> icon(bool on)
+        { icon_ = on; return self(); }
 
     glm::vec2 computeDesiredSize() override { return { 0.f, 24.f }; }
     void onArrangeChildren(const HGeometry& allotted) override { cachedGeo_ = allotted; }
@@ -45,11 +48,11 @@ public:
         float iconSz  = 12.f * fs;
         float iconOff = (geo.size.y - iconSz) * 0.5f;
         HGeometry iconGeo = geo.makeChild({iconOff, iconOff}, {iconSz, iconSz});
-        ctx.drawText(iconGeo, "o", 9.f * fs, {0.38f, 0.38f, 0.42f, 1.f});
+        if (icon_) ctx.drawText(iconGeo, "o", 9.f * fs, {0.38f, 0.38f, 0.42f, 1.f});
 
         // Text / placeholder
         std::string disp  = text_.get();
-        float textX       = iconOff + iconSz + iconOff;
+        float textX       = icon_ ? iconOff + iconSz + iconOff : 6.f * fs;
         float textH       = 14.f * fs;
         float textY       = (geo.size.y - textH) * 0.5f;
         HGeometry textGeo = geo.makeChild({textX, textY}, {geo.size.x - textX - 4.f, textH});
@@ -101,6 +104,7 @@ private:
     AttrStr                   text_;
     std::string               placeholder_ = "Search...";
     float                     fontSize_    = 10.f;
+    bool                      icon_        = true;
     std::function<bool()>     isFocused_;
     std::function<bool()>     isSelectedAll_;
     std::function<void()>     onClick_;

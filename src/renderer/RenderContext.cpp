@@ -1,4 +1,5 @@
 #include "RenderContext.hpp"
+#include "RendererLog.hpp"
 
 VkShaderModule RenderContext::createShaderModule(const std::vector<char>& code) const {
     VkShaderModuleCreateInfo ci{};
@@ -15,7 +16,7 @@ VkImage RenderContext::createImage(uint32_t w, uint32_t h, uint32_t mips,
                                    uint32_t layers, VkSampleCountFlagBits samples,
                                    VkFormat fmt, VkImageTiling tiling,
                                    VkImageUsageFlags usage, VkImageCreateFlags flags,
-                                   HarukaAllocation& outAlloc) const {
+                                   HarukaAllocation& outAlloc, ImageMemory mem) const {
     VkImageCreateInfo ci{};
     ci.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ci.flags         = flags;
@@ -34,10 +35,26 @@ VkImage RenderContext::createImage(uint32_t w, uint32_t h, uint32_t mips,
         throw std::runtime_error("createImage failed!");
     VkMemoryRequirements reqs;
     vkGetImageMemoryRequirements(device, img, &reqs);
+    if (mem == ImageMemory::LazyPreferred) {
+        // 다른 용도의 이미지에는 지연 할당 타입이 memoryTypeBits 에 없어 조용히 Zone B 로 갑니다. 실수를 바로 알게 합니다.
+        if (!(usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT)) {
+            vkDestroyImage(device, img, nullptr);
+            throw std::runtime_error("createImage: lazily allocated memory needs a TRANSIENT attachment image");
+        }
+        outAlloc = allocator->allocLazyImage(img, reqs, "MSAA color");
+        if (outAlloc.isValid()) return img;
+    }
     outAlloc = allocator->allocB(reqs, ResourceType::Image);
-    if (!outAlloc.isValid()) throw std::runtime_error("Zone B: image alloc failed!");
-    if (allocator->bind(img, outAlloc) != VK_SUCCESS)
+    if (!outAlloc.isValid()) {
+        vkDestroyImage(device, img, nullptr);
+        throw std::runtime_error("Zone B: image alloc failed!");
+    }
+    if (allocator->bind(img, outAlloc) != VK_SUCCESS) {
+        vkDestroyImage(device, img, nullptr);
+        allocator->freeB(outAlloc);
+        outAlloc = {};
         throw std::runtime_error("Image bind failed!");
+    }
     return img;
 }
 
@@ -150,7 +167,7 @@ void RenderContext::transitionImage(VkCommandBuffer cmd, VkImage img,
                                     VkImageLayout oldLayout, VkImageLayout newLayout,
                                     VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
                                     VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess,
-                                    VkImageAspectFlags aspect, uint32_t mips, uint32_t layers) {
+                                    VkImageAspectFlags aspect, uint32_t mips, uint32_t layers) const {
     VkImageMemoryBarrier2 b{};
     b.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
     b.srcStageMask        = srcStage;  b.srcAccessMask = srcAccess;
@@ -164,7 +181,34 @@ void RenderContext::transitionImage(VkCommandBuffer cmd, VkImage img,
     di.sType                   = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
     di.imageMemoryBarrierCount = 1;
     di.pImageMemoryBarriers    = &b;
-    vkCmdPipelineBarrier2(cmd, &di);
+    pipelineBarrier(cmd, di);
+}
+
+void RenderContext::pipelineBarrier(VkCommandBuffer cmd, const VkDependencyInfo& di) const {
+    bool exact = true;
+    const hsync::ConvertError e = hsync::record(vk, cmd, di, &exact);
+    if (e != hsync::ConvertError::None)
+        throw std::runtime_error(std::string("Pipeline barrier not expressible in Vulkan 1.0: ") + hsync::toString(e));
+    // 표에 없는 단계 · 접근 비트를 넓혀 바꿨습니다. 동기화는 넓어질 뿐 틀리지 않지만, 새 비트를 쓰기 시작했다는 뜻이라 한 번 알립니다.
+    static bool warned = false;
+    if (!exact && !warned) {
+        warned = true;
+        HLOG(LogRenderer, Warning) << "A pipeline barrier used stage or access bits that Vulkan 1.0 cannot express exactly; "
+                                      "they were widened (ALL_COMMANDS / MEMORY_READ|WRITE)";
+    }
+}
+
+void RenderContext::memoryBarrier(VkCommandBuffer cmd, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
+                                  VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess) const {
+    VkMemoryBarrier2 mb{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    mb.srcStageMask  = srcStage;
+    mb.srcAccessMask = srcAccess;
+    mb.dstStageMask  = dstStage;
+    mb.dstAccessMask = dstAccess;
+    VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    di.memoryBarrierCount = 1;
+    di.pMemoryBarriers    = &mb;
+    pipelineBarrier(cmd, di);
 }
 
 VkCommandBuffer RenderContext::beginOneTimeCmd() const {

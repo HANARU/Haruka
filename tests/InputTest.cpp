@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -92,6 +93,79 @@ int main() {
 
         in.unsubscribe(h1); in.unsubscribe(h2); in.unsubscribe(h3);
         in.unbind("Jump");
+        in.setXrInput({});
+    }
+
+    // 키 · 마우스 축, 액션 눌림 조회, 설정 줄 바인딩, 햅틱(2026-10-15)
+    std::printf("\n== 키 · 마우스 축과 설정 줄 바인딩 ==\n");
+    {
+        in.clearBindings();
+        in.setXrInput({});
+        in.setLookDelta(0.f, 0.f);
+        in.bindKeyAxis("MoveY", 'W', 'S');
+        auto keys = [](std::vector<int> down) {
+            return [down](int k) { for (int d : down) if (d == k) return true; return false; };
+        };
+        in.update(0.f, keys({ 'W' }));
+        check(in.axis("MoveY") == 1.f, "W 는 +1");
+        in.update(0.f, keys({ 'S' }));
+        check(in.axis("MoveY") == -1.f, "S 는 -1");
+        in.update(0.f, keys({ 'W', 'S' }));
+        check(in.axis("MoveY") == 0.f, "둘 다면 0");
+        in.update(0.f, keys({ 'W' }), /*keyboardCaptured=*/true);
+        check(in.axis("MoveY") == 0.f, "텍스트 입력 중에는 0");
+
+        in.bindMouseAxis("LookX", HMouseAxis::X, 0.5f);
+        in.setLookDelta(10.f, -4.f);
+        check(in.axis("LookX") == 5.f, "마우스 이동량 × 배율");
+        in.setLookDelta(0.f, 0.f);
+        check(in.axis("LookX") == 0.f, "이동이 없으면 0");
+
+        std::string err;
+        check(in.applyBinding("input.axis.Walk", "keys:W/S, xr:left.stick.y", err), "축 줄을 읽음");
+        HXrInputState s;
+        s.focused = true;
+        s.hands[0].thumbstick = { 0.f, 0.5f };
+        in.setXrInput(s);
+        in.update(0.f, keys({ 'W' }));
+        check(std::fabs(in.axis("Walk") - 1.5f) < 1e-6f, "XR 축과 키 축은 더함(이동이 길이 1 로 자름)");
+        check(in.applyBinding("input.axis.Turn", "mouse:x*0.25", err), "마우스 배율");
+        in.setLookDelta(8.f, 0.f);
+        check(in.axis("Turn") == 2.f, "mouse:x*0.25");
+        in.setLookDelta(0.f, 0.f);
+
+        check(!in.applyBinding("input.axis.Walk", "keys:W", err) && !err.empty(), "슬래시 없는 키 쌍은 거부");
+        in.update(0.f, keys({ 'W' }));
+        check(std::fabs(in.axis("Walk") - 1.5f) < 1e-6f, "틀린 줄은 있던 바인딩을 바꾸지 않음");
+        check(!in.applyBinding("input.action.Jump", "key:NotAKey", err), "모르는 키 이름은 거부");
+        check(!in.applyBinding("input.button.Jump", "key:Space", err), "action · axis 가 아니면 거부");
+        check(!in.applyBinding("input.axis.Turn", "mouse:x*abc", err), "깨진 배율은 거부");
+
+        check(in.applyBinding("input.action.Grab", "xr:left.grip, key:F5", err), "액션 줄(XR 그립 · F 키)");
+        s.hands[0].squeeze = 0.7f;
+        in.setXrInput(s);
+        in.update(0.f, noKeys);
+        check(in.held("Grab"), "그립을 절반 넘게 쥐면 눌림");
+        s.hands[0].squeeze = 0.3f;
+        in.setXrInput(s);
+        in.update(0.f, noKeys);
+        check(!in.held("Grab"), "놓으면 뗌");
+        in.update(0.f, keys({ 294 }));   // GLFW F5
+        check(in.held("Grab"), "F5 키로도 눌림");
+
+        int ok = 0;
+        for (const auto& [k, v] : HInputSystem::defaultBindings()) ok += in.applyBinding(k, v, err) ? 1 : 0;
+        check(ok == (int)HInputSystem::defaultBindings().size(), "엔진 기본 바인딩은 모두 읽힘");
+
+        int   hHand = -1;
+        float hAmp = 0.f, hSec = 0.f;
+        in.setHapticSink([&](int hand, float amp, float sec) { hHand = hand; hAmp = amp; hSec = sec; });
+        in.haptic(1, 0.6f, 0.04f);
+        check(hHand == 1 && hAmp == 0.6f && hSec == 0.04f, "햅틱은 정해 둔 곳으로 보냄");
+        in.setHapticSink({});
+        in.haptic(0, 1.f, 1.f);
+        check(hHand == 1, "받는 곳이 없으면 아무 일도 없음");
+        in.clearBindings();
         in.setXrInput({});
     }
 

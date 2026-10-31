@@ -19,6 +19,7 @@ public:
     // 버퍼 + 디스크립터 풀/세트 + 커맨드 버퍼 + 동기화 객체
     // 프레임별 transform · 라이트 버퍼의 슬롯 수(DEF-10). createPerFrame 전에 정합니다.
     void setCapacities(uint32_t drawRows, uint32_t lights) { drawRows_ = drawRows; lights_ = lights; }
+    // swapImageCount 는 0 이어도 됩니다(창 없음, 2026-10-31). 그러면 이미지별 세마포어 · 펜스가 없습니다.
     void createPerFrame(RenderContext& rc, uint32_t swapImageCount);
 
     // 씬 세트(set 1) 할당 + 섀도/IBL 뷰 와이어링 — 해당 뷰 생성 후 1회 호출
@@ -51,7 +52,11 @@ public:
     void* lightPtr(uint32_t fi) const     { return lightAllocs_[fi].mappedPtr; }
 
     // ── 스왑체인 이미지별 ─────────────────────────────────────────────────────
-    VkSemaphore           renderDoneSem(uint32_t imgIdx) const { return semRenderDone_[imgIdx]; }
+    // 범위 밖이면 VK_NULL_HANDLE 입니다. 창이 없으면 이미지가 0장이라 늘 그렇고, 렌더러는 데스크톱 화면을 그린 프레임에서만
+    // 부릅니다(DEF-118: 예전에는 빈 목록을 그대로 읽었음).
+    VkSemaphore           renderDoneSem(uint32_t imgIdx) const {
+        return imgIdx < semRenderDone_.size() ? semRenderDone_[imgIdx] : VK_NULL_HANDLE;
+    }
     std::vector<VkFence>& imagesInFlight()                     { return imagesInFlight_; }
 
 private:

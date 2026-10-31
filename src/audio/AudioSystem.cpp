@@ -3,15 +3,21 @@
 
 #include "AudioSystem.hpp"
 #include "../components/AudioComponent.hpp"
-#include "../core/ProjectPaths.hpp"
 #include "../core/World.hpp"
+#include "../vfs/Vfs.hpp"
 #include "../core/Actor.hpp"
 #include "../components/CameraComponent.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 
+#include <algorithm>
+#include <cstring>
+#include <memory>
+#include <vector>
+
 #include "../core/HLog.hpp"
+#include "../core/TextUtf.hpp"
 
 static constinit HLogCategory LogAudio{ "Audio", ELogVerbosity::Log };
 
@@ -24,19 +30,183 @@ static ma_engine*      asEngine(void* p) { return static_cast<ma_engine*>(p); }
 static ma_sound*       asSound (void* p) { return static_cast<ma_sound*>(p); }
 static ma_sound_group* asGroup (void* p) { return static_cast<ma_sound_group*>(p); }
 
+// ── 파일 읽기 (2026-10-24) ───────────────────────────────────────────────────────
+// miniaudio 의 리소스 관리자가 소리 파일을 열 때 가상 파일 시스템을 거칩니다(에디터는 프로젝트 폴더, 게임은 묶음 파일).
+// 소리는 통째로 디코딩하므로(STREAM 플래그 없음) 열 때 파일 전체를 메모리로 읽어 둡니다. 리소스 관리자의 작업 스레드가
+// 부를 수 있고 hvfs 읽기는 여러 스레드에서 불러도 됩니다. 파일 하나는 한 스레드만 씁니다(miniaudio 규칙).
+namespace {
+
+struct VfsFile {
+    std::vector<uint8_t> data;
+    size_t               pos = 0;
+};
+
+// 이 콜백들은 miniaudio(C 코드)가 리소스 관리자의 잠금을 쥔 채 부릅니다. 예외가 이 경계를 넘으면 잠금이 풀리지 않은 채
+// 프로그램이 끝나므로(DEF-123), 여기서 모두 받아 오류 코드로 바꿉니다. hvfs 읽기는 던지지 않지만 할당은 던질 수 있습니다.
+ma_result vfsOpen(ma_vfs*, const char* path, ma_uint32 mode, ma_vfs_file* out) {
+    if (!out || !path) return MA_INVALID_ARGS;
+    *out = nullptr;
+    if (mode & MA_OPEN_MODE_WRITE) return MA_ACCESS_DENIED;
+    try {
+        auto f = std::make_unique<VfsFile>();
+        std::string err;
+        if (!hvfs::readAll(path, f->data, &err)) {
+            HLOG(LogAudio, Warning) << "Sound file not opened: " << err;
+            return MA_DOES_NOT_EXIST;
+        }
+        *out = f.release();
+        return MA_SUCCESS;
+    } catch (...) {
+        return MA_OUT_OF_MEMORY;
+    }
+}
+ma_result vfsOpenW(ma_vfs* vfs, const wchar_t* path, ma_uint32 mode, ma_vfs_file* out) {
+#ifdef _WIN32
+    try {
+        return vfsOpen(vfs, hutf::fromUtf16(path).c_str(), mode, out);   // Windows 의 wchar_t 는 UTF-16
+    } catch (...) {
+        return MA_OUT_OF_MEMORY;
+    }
+#else
+    (void)vfs; (void)path; (void)mode; (void)out;
+    return MA_NOT_IMPLEMENTED;
+#endif
+}
+ma_result vfsClose(ma_vfs*, ma_vfs_file file) {
+    delete static_cast<VfsFile*>(file);
+    return MA_SUCCESS;
+}
+ma_result vfsRead(ma_vfs*, ma_vfs_file file, void* dst, size_t bytes, size_t* read) {
+    auto* f = static_cast<VfsFile*>(file);
+    const size_t n = std::min(bytes, f->data.size() - f->pos);
+    if (n) std::memcpy(dst, f->data.data() + f->pos, n);
+    f->pos += n;
+    if (read) *read = n;
+    return (n == 0 && bytes > 0) ? MA_AT_END : MA_SUCCESS;
+}
+ma_result vfsWrite(ma_vfs*, ma_vfs_file, const void*, size_t, size_t* written) {
+    if (written) *written = 0;
+    return MA_ACCESS_DENIED;
+}
+ma_result vfsSeek(ma_vfs*, ma_vfs_file file, ma_int64 offset, ma_seek_origin origin) {
+    auto* f = static_cast<VfsFile*>(file);
+    const ma_int64 base = origin == ma_seek_origin_start ? 0
+                        : origin == ma_seek_origin_current ? (ma_int64)f->pos : (ma_int64)f->data.size();
+    const ma_int64 to = base + offset;
+    if (to < 0 || to > (ma_int64)f->data.size()) return MA_BAD_SEEK;
+    f->pos = (size_t)to;
+    return MA_SUCCESS;
+}
+ma_result vfsTell(ma_vfs*, ma_vfs_file file, ma_int64* cursor) {
+    *cursor = (ma_int64)static_cast<VfsFile*>(file)->pos;
+    return MA_SUCCESS;
+}
+ma_result vfsInfo(ma_vfs*, ma_vfs_file file, ma_file_info* info) {
+    info->sizeInBytes = static_cast<VfsFile*>(file)->data.size();
+    return MA_SUCCESS;
+}
+
+ma_vfs_callbacks g_vfs = { vfsOpen, vfsOpenW, vfsClose, vfsRead, vfsWrite, vfsSeek, vfsTell, vfsInfo };
+
+} // namespace
+
+// ── 출력 장치 (2026-10-16) ───────────────────────────────────────────────────────
+// 엔진이 장치를 직접 만들게 두지 않고(ma_engine_config::pDevice) 여기서 만든 장치에 연결합니다. 장치를 바꿀 때 엔진과
+// 사운드는 그대로 두고 장치만 닫았다 같은 자리에 다시 열면 되기 때문입니다. 장치 형식은 언제나 f32 · 2채널 · 48kHz 로
+// 열어(실제 장치 형식과 다르면 miniaudio 가 변환) 엔진이 처음 본 형식이 바뀌지 않게 합니다.
+namespace {
+struct OutputState {
+    ma_context  ctx{};
+    ma_device   dev{};
+    bool        devOk = false;
+    std::string activeId;     // 연 장치(빈 문자열 = 시스템 기본)
+    std::string activeName;
+};
+OutputState* asOut(void* p) { return static_cast<OutputState*>(p); }
+
+// WASAPI 는 끝점 ID(예: "{0.0.0.00000000}.{GUID}")가 장치를 정확히 가리키고, OpenXR 런타임이 알려 주는 헤드셋 장치 ID 와
+// 같은 형식입니다. 다른 백엔드는 장치 이름을 씁니다.
+std::string deviceIdString(const ma_context& ctx, const ma_device_info& info) {
+    if (ctx.backend == ma_backend_wasapi) return hutf::fromUtf16(info.id.wasapi);
+    return info.name;
+}
+
+void deviceData(ma_device* d, void* out, const void* /*in*/, ma_uint32 frames) {
+    ma_engine_read_pcm_frames(static_cast<ma_engine*>(d->pUserData), out, frames, nullptr);
+}
+
+// want 가 가리키는 장치를 엽니다(시작은 하지 않음). 비었거나 목록에 없으면 시스템 기본 장치이고, 없었으면 missing 이 참입니다.
+bool openDevice(OutputState& o, ma_engine* eng, const std::string& want, bool& missing) {
+    missing = false;
+    ma_device_id id{};
+    bool haveId = false;
+    if (!want.empty()) {
+        ma_device_info* infos = nullptr;
+        ma_uint32       count = 0;
+        if (ma_context_get_devices(&o.ctx, &infos, &count, nullptr, nullptr) == MA_SUCCESS)
+            for (ma_uint32 i = 0; i < count && !haveId; ++i)
+                if (hutf::equalsIgnoreCase(deviceIdString(o.ctx, infos[i]), want)) { id = infos[i].id; haveId = true; }
+        missing = !haveId;
+    }
+    ma_device_config dc = ma_device_config_init(ma_device_type_playback);
+    dc.playback.pDeviceID        = haveId ? &id : nullptr;
+    dc.playback.format           = ma_format_f32;
+    dc.playback.channels         = AudioSystem::kChannels;
+    dc.sampleRate                = AudioSystem::kSampleRate;
+    dc.dataCallback              = deviceData;
+    dc.pUserData                 = eng;
+    dc.noPreSilencedOutputBuffer = MA_TRUE;   // 콜백이 언제나 모든 프레임을 채웁니다(엔진 기본 장치와 같은 설정)
+    dc.noClip                    = MA_TRUE;   // 엔진이 직접 자릅니다
+    if (const ma_result r = ma_device_init(&o.ctx, &dc, &o.dev); r != MA_SUCCESS) {
+        HLOG(LogAudio, Error) << "Audio output device could not be opened: " << ma_result_description(r);
+        return false;
+    }
+    o.devOk      = true;
+    o.activeId   = haveId ? want : std::string();
+    o.activeName = o.dev.playback.name;
+    return true;
+}
+} // namespace
+
 void AudioSystem::startup() {
     auto* eng = new ma_engine();
     ma_engine_config cfg = ma_engine_config_init();
     cfg.channels   = kChannels;
     cfg.sampleRate = kSampleRate;
     cfg.noDevice   = headless_ ? MA_TRUE : MA_FALSE;
+    cfg.pResourceManagerVFS = &g_vfs;   // 소리 파일을 가상 파일 시스템으로 엶(2026-10-24)
+
+    OutputState* out = nullptr;
+    if (!headless_) {
+        out = new OutputState();
+        bool missing = false;
+        if (const ma_result r = ma_context_init(nullptr, 0, nullptr, &out->ctx); r != MA_SUCCESS) {
+            HLOG(LogAudio, Error) << "ma_context_init failed: " << ma_result_description(r);
+            delete out;
+            delete eng;
+            return;
+        }
+        if (!openDevice(*out, eng, overrideId_.empty() ? requestedId_ : overrideId_, missing)) {
+            ma_context_uninit(&out->ctx);
+            delete out;
+            delete eng;
+            return;
+        }
+        cfg.pDevice = &out->dev;   // 엔진이 이 장치를 시작합니다(noAutoStart 꺼짐)
+    }
 
     if (const ma_result r = ma_engine_init(&cfg, eng); r != MA_SUCCESS) {
         HLOG(LogAudio, Error) << "ma_engine_init failed: " << ma_result_description(r);
+        if (out) {
+            ma_device_uninit(&out->dev);
+            ma_context_uninit(&out->ctx);
+            delete out;
+        }
         delete eng;
         return;
     }
     engine_ = eng;
+    out_    = out;
 
     // 그룹은 기본으로 재생 상태이고 공간화가 꺼져 있어, 섞인 소리를 다시 감쇠하지 않습니다.
     // 피치도 끕니다(NO_PITCH). 켜 두면 그룹이 섞인 소리 전체를 배율 1 로 리샘플링하느라
@@ -52,10 +222,14 @@ void AudioSystem::startup() {
         group_ = grp;
     }
     HLOG(LogAudio, Log) << "miniaudio initialized (48 kHz stereo" << (headless_ ? ", no device" : "") << ")";
+    if (out) HLOG(LogAudio, Log) << "Audio output: " << out->activeName << (out->activeId.empty() ? " (system default)" : "");
 }
 
 void AudioSystem::shutdown() {
     if (!engine_) return;
+    // 장치 콜백(오디오 스레드)이 엔진을 읽지 않도록 먼저 멈춥니다.
+    OutputState* out = asOut(out_);
+    if (out && out->devOk) ma_device_stop(&out->dev);
     // 엔진보다 사운드를 먼저 정리합니다. World 는 Engine 이 소멸할 때 컴포넌트 onDestroy 없이
     // 해제되므로, 여기서 정리하지 않으면 해제된 엔진에 붙은 사운드와 사라질 이 객체를 가리키는
     // audioSys_ 가 컴포넌트에 남습니다.
@@ -65,10 +239,66 @@ void AudioSystem::shutdown() {
         delete asGroup(group_);
         group_ = nullptr;
     }
-    ma_engine_uninit(asEngine(engine_));
+    ma_engine_uninit(asEngine(engine_));   // 장치는 엔진 것이 아니므로 아래에서 직접 닫습니다
     delete asEngine(engine_);
     engine_ = nullptr;
+    if (out) {
+        if (out->devOk) ma_device_uninit(&out->dev);
+        ma_context_uninit(&out->ctx);
+        delete out;
+        out_ = nullptr;
+    }
     paused_ = false;
+}
+
+std::vector<AudioOutputDevice> AudioSystem::outputDevices() const {
+    std::vector<AudioOutputDevice> list;
+    OutputState* out = asOut(out_);
+    if (!out) return list;
+    ma_device_info* infos = nullptr;
+    ma_uint32       count = 0;
+    if (ma_context_get_devices(&out->ctx, &infos, &count, nullptr, nullptr) != MA_SUCCESS) return list;
+    for (ma_uint32 i = 0; i < count; ++i)
+        list.push_back({ deviceIdString(out->ctx, infos[i]), infos[i].name, infos[i].isDefault != 0 });
+    return list;
+}
+
+void AudioSystem::setOutputDevice(const std::string& id) {
+    requestedId_ = id;
+    reopenDevice();
+}
+
+void AudioSystem::setOutputOverride(const std::string& id) {
+    overrideId_ = id;
+    reopenDevice();
+}
+
+std::string AudioSystem::activeOutputName() const {
+    const OutputState* out = asOut(out_);
+    return (out && out->devOk) ? out->activeName : std::string();
+}
+
+void AudioSystem::reopenDevice() {
+    OutputState* out = asOut(out_);
+    if (!out || !engine_) return;   // headless 이거나 시작 전: 값만 기억했다가 시작할 때 엽니다
+    const std::string& want = overrideId_.empty() ? requestedId_ : overrideId_;
+    if (out->devOk && hutf::equalsIgnoreCase(out->activeId, want)) return;
+    // 같은 ma_device 자리를 닫고 다시 엽니다. 엔진은 이 주소를 들고 있고, 형식이 같으므로 엔진 · 사운드는 그대로입니다.
+    if (out->devOk) {
+        ma_device_uninit(&out->dev);
+        out->devOk = false;
+    }
+    bool missing = false;
+    if (!openDevice(*out, asEngine(engine_), want, missing)) {
+        HLOG(LogAudio, Error) << "No audio output (device could not be opened)";
+        return;
+    }
+    if (missing) HLOG(LogAudio, Warning) << "Audio output device not found: " << want << "; using the system default";
+    if (const ma_result r = ma_device_start(&out->dev); r != MA_SUCCESS)
+        HLOG(LogAudio, Error) << "Audio output device could not start: " << ma_result_description(r);
+    HLOG(LogAudio, Log) << "Audio output: " << out->activeName
+                        << (out->activeId.empty() ? " (system default)" : "")
+                        << (!overrideId_.empty() && !missing ? " (temporary)" : "");
 }
 
 void AudioSystem::releaseWorldSounds() {
@@ -180,8 +410,8 @@ bool AudioSystem::initSound(const char* filePath, bool loop, void** outSound) {
     auto* snd = new ma_sound();
     // ASYNC 여도 miniaudio 는 디코더를 초기화할 때까지 기다렸다가 돌아옵니다(WAIT_INIT 강제).
     // 그래서 없는 파일과 모르는 형식은 여기서 바로 실패하고, 디코딩은 믹싱 중에 합니다.
-    const std::string src = hproj::resolve(filePath);   // 컴포넌트에는 논리 경로가 남습니다
-    const ma_result r = ma_sound_init_from_file(asEngine(engine_), src.c_str(), MA_SOUND_FLAG_ASYNC,
+    // 논리 경로 그대로 넘깁니다. 리소스 관리자가 가상 파일 시스템으로 엽니다(위 g_vfs, 2026-10-24).
+    const ma_result r = ma_sound_init_from_file(asEngine(engine_), filePath, MA_SOUND_FLAG_ASYNC,
                                                 asGroup(group_), nullptr, snd);
     if (r != MA_SUCCESS) {
         HLOG(LogAudio, Error) << "failed to load '" << filePath << "': " << ma_result_description(r);

@@ -96,6 +96,7 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo [build] Done: %BUILD_DIR%\%CONFIG%\HarukaEngine.exe
+echo [build] Game: %BUILD_DIR%\%CONFIG%\HarukaGame.exe
 :: Set HARUKA_NO_PAUSE=1 to skip the pause when calling this from a script.
 if not defined HARUKA_NO_PAUSE pause
 endlocal & exit /b 0

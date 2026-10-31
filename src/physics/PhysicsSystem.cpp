@@ -259,6 +259,14 @@ void PhysicsSystem::setLinearVelocity(uint32_t body, const glm::vec3& v) {
     impl_->physics->GetBodyInterface().SetLinearVelocity(JPH::BodyID(body), toJ(v));
 }
 
+void PhysicsSystem::setMotionKinematic(uint32_t body, bool kinematic) {
+    if (!impl_ || body == 0xFFFFFFFFu) return;
+    auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::BodyID id(body);
+    if (!bi.IsAdded(id) || bi.GetMotionType(id) == JPH::EMotionType::Static) return;
+    bi.SetMotionType(id, kinematic ? JPH::EMotionType::Kinematic : JPH::EMotionType::Dynamic, JPH::EActivation::Activate);
+}
+
 glm::vec3 PhysicsSystem::linearVelocity(uint32_t body) const {
     if (!impl_ || body == 0xFFFFFFFFu) return glm::vec3(0.f);
     const auto& bi = impl_->physics->GetBodyInterface();
@@ -441,7 +449,8 @@ void PhysicsSystem::tick(float dt) {
         bcs.mFriction    = rb->friction;
         bcs.mRestitution = rb->restitution;
         bcs.mUserData    = a->id;   // 레이캐스트 · 겹침 질의에서 액터를 찾을 때 씁니다
-        if (mt == JPH::EMotionType::Dynamic) {
+        // Kinematic 으로 만든 바디도 질량을 지정해 둡니다. 잡기가 끝나 Dynamic 으로 바꾸면 그 질량을 씁니다(2026-10-15).
+        if (mt != JPH::EMotionType::Static) {
             bcs.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
             bcs.mMassPropertiesOverride.mMass = rb->mass;
         }

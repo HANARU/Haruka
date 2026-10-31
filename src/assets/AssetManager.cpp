@@ -1,6 +1,5 @@
 #include "AssetManager.hpp"
 #include "AssetLog.hpp"
-#include "../core/ProjectPaths.hpp"
 #include "../geometry/PrimitiveLog.hpp"
 #include "GltfLoader.hpp"
 #include "GassetCache.hpp"
@@ -16,8 +15,9 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
     auto it = cache.find(path);
     if (it != cache.end()) return it->second;
 
-    // 원본은 프로젝트 폴더의 실제 경로로 엽니다(hproj). 이 맵의 키와 컴포넌트 · 씬에 남는 값은 논리 경로 그대로입니다.
-    const std::string src = hproj::resolve(path);
+    // 원본은 논리 경로 그대로 가상 파일 시스템으로 엽니다(에디터는 프로젝트 폴더, 게임은 묶음 파일, 2026-10-24). 캐시 키도
+    // 논리 경로라 실행 형태 · 기기와 상관없이 같습니다. 이 맵의 키와 컴포넌트 · 씬에 남는 값도 논리 경로입니다.
+    const std::string& src = path;
     std::vector<MeshSourceData> meshes;
     try {
         if (GassetCache::isValid(src)) {

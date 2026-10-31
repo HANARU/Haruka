@@ -2,6 +2,7 @@
 #include "SlateLog.hpp"
 #include "HPaintContext.hpp"
 #include "HGeometry.hpp"
+#include "../../vfs/Vfs.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
@@ -20,13 +21,12 @@ uint32_t HSlateRenderer::findMemType(VkMemoryRequirements reqs,
 }
 
 VkShaderModule HSlateRenderer::loadSpv(const std::string& path) {
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f.is_open())
-        throw std::runtime_error("[HSlateRenderer] Cannot open shader: " + path);
-    size_t size = f.tellg();
-    f.seekg(0);
-    std::vector<char> buf(size);
-    f.read(buf.data(), size);
+    // 논리 경로로 가상 파일 시스템에서 읽습니다(실행 폴더의 낱개 파일 또는 묶음 파일, 2026-10-24).
+    std::vector<uint8_t> buf;
+    std::string err;
+    if (!hvfs::readAll(path, buf, &err))
+        throw std::runtime_error("[HSlateRenderer] Cannot open shader: " + err);
+    const size_t size = buf.size();
 
     VkShaderModuleCreateInfo ci{};
     ci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -39,13 +39,15 @@ VkShaderModule HSlateRenderer::loadSpv(const std::string& path) {
 
 // ── init ───────────────────────────────────────────────────────────────────────
 void HSlateRenderer::init(VkDevice device, VkPhysicalDevice physDevice,
-                          VkFormat swapFormat,
+                          VkFormat swapFormat, PFN_vkCmdPushDescriptorSetKHR pushDescriptor,
                           CmdBeginFn beginCmd, CmdEndFn endCmd,
                           const std::string& fontPath)
 {
-    device_     = device;
-    physDevice_ = physDevice;
-    colorFmt_   = swapFormat;
+    if (!pushDescriptor) throw std::runtime_error("HSlateRenderer needs vkCmdPushDescriptorSetKHR");
+    device_            = device;
+    physDevice_        = physDevice;
+    colorFmt_          = swapFormat;
+    pushDescriptorFn_  = pushDescriptor;
 
     createUIRenderPass();
     createPipeline();
@@ -424,10 +426,10 @@ void HSlateRenderer::createBuffers(CmdBeginFn /*beginCmd*/, CmdEndFn /*endCmd*/)
 }
 
 // ── record ─────────────────────────────────────────────────────────────────────
-void HSlateRenderer::record(VkCommandBuffer cmd, uint32_t imgIdx,
+bool HSlateRenderer::record(VkCommandBuffer cmd, uint32_t imgIdx,
                              VkExtent2D extent, uint32_t frameIdx) {
-    if (!root_ || root_->isCollapsed()) return;
-    if (imgIdx >= framebuffers_.size() || framebuffers_[imgIdx] == VK_NULL_HANDLE) return;
+    if (!root_ || root_->isCollapsed()) return false;
+    if (imgIdx >= framebuffers_.size() || framebuffers_[imgIdx] == VK_NULL_HANDLE) return false;
 
     HGeometry fullGeo;
     fullGeo.position = { 0.f, 0.f };
@@ -444,11 +446,11 @@ void HSlateRenderer::record(VkCommandBuffer cmd, uint32_t imgIdx,
             return a.layer < b.layer;
         });
 
-    flush(cmd, imgIdx, extent, ctx.elements, frameIdx % kFramesInFlight);
+    return flush(cmd, imgIdx, extent, ctx.elements, frameIdx % kFramesInFlight);
 }
 
 // ── flush ──────────────────────────────────────────────────────────────────────
-void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
+bool HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
                             VkExtent2D extent,
                             std::vector<HDrawElement>& elements, uint32_t slot) {
     // Expand Text elements into per-glyph Texture elements
@@ -491,7 +493,7 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
         }
     }
 
-    if (flat.empty()) return;
+    if (flat.empty()) return false;   // 렌더 패스를 열지 않음(표시 전환은 렌더러가 함, DEF-120)
 
     // 글리프 확장이 끝난 **뒤에** 업로드해야 합니다. 위에서 getGlyph 가 새 글리프를
     // 래스터라이즈하므로, 확장 전에 업로드하면 그 프레임에 처음 나온 글자가 빈 텍셀로 그려집니다.
@@ -581,6 +583,7 @@ void HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
     flushBatch();
 
     vkCmdEndRenderPass(cmd);
+    return true;
 }
 
 // ── pushDescriptor ─────────────────────────────────────────────────────────────
@@ -597,8 +600,8 @@ void HSlateRenderer::pushDescriptor(VkCommandBuffer cmd, VkImageView view) {
     write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write.pImageInfo      = &imgInfo;
 
-    vkCmdPushDescriptorSet(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           pipelineLayout_, 0, 1, &write);
+    pushDescriptorFn_(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipelineLayout_, 0, 1, &write);
 }
 
 // ── arrange ────────────────────────────────────────────────────────────────────

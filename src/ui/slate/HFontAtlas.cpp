@@ -3,7 +3,7 @@
 
 #include "HFontAtlas.hpp"
 #include "SlateLog.hpp"
-#include "../../core/ProjectPaths.hpp"
+#include "../../vfs/Vfs.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
@@ -25,12 +25,12 @@ const HFontAtlas* HFontAtlas::metrics() { return g_metricsFont; }
 // ── 폰트 파일 ─────────────────────────────────────────────────────────────────
 bool HFontAtlas::loadFont(const std::string& fontPath) {
     unloadFont();
+    // 논리 경로(assets/fonts/...)는 가상 파일 시스템(낱개 파일 · 묶음 파일)에서, 절대 경로(시스템 글꼴)는 그 파일을 직접
+    // 읽습니다(2026-10-24).
     auto tryLoad = [&](const std::string& path) -> bool {
-        std::ifstream f(hproj::resolve(path), std::ios::binary | std::ios::ate);
-        if (!f.is_open()) return false;
-        size_t sz = f.tellg(); f.seekg(0);
-        ttfData_.resize(sz);
-        f.read(reinterpret_cast<char*>(ttfData_.data()), sz);
+        std::vector<uint8_t> bytes;
+        if (!hvfs::readAll(path, bytes)) return false;
+        ttfData_ = std::move(bytes);
         return true;
     };
 

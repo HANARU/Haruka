@@ -17,6 +17,10 @@
 #include "../src/components/RigidBodyComponent.hpp"
 #include "../src/physics/PhysicsSystem.hpp"
 #include "../src/core/ComponentFields.hpp"
+#include "../src/components/XrComponents.hpp"
+#include "../src/components/CameraComponent.hpp"
+#include "../src/input/HInputSystem.hpp"
+#include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -44,6 +48,26 @@ void setProp(RigidBodyComponent* rb, const char* label, float v) {
     for (auto& pd : rb->buildProps())
         if (std::string(pd.label) == label && pd.setF) { pd.setF(v); return; }
     std::printf("  (no property '%s')\n", label);
+}
+
+// 로컬 바운드만 알리는 시험용 컴포넌트입니다. GPU 메시 없이 바닥 찾기(hxr::floorBelow)를 시험합니다.
+class BoundsOnly : public Component {
+public:
+    const char* typeName() const override { return "BoundsOnly"; }
+    bool localBounds(glm::vec3& lo, glm::vec3& hi) const override {
+        lo = glm::vec3(-0.5f);
+        hi = glm::vec3(0.5f);
+        return true;
+    }
+};
+
+// 위치 · 크기를 주면 단위 상자 바운드를 가진 액터를 만듭니다.
+Actor* boundsBox(World& w, const char* name, const glm::vec3& pos, const glm::vec3& scale) {
+    Actor* a = w.spawnActor(name);
+    a->setLocalPosition(pos);
+    a->setLocalScale(scale);
+    a->addComponent<BoundsOnly>();
+    return a;
 }
 
 // 바닥(정적 상자, 윗면 y=0.5)과 그 위의 상자(동적, 반높이 0.5)를 만듭니다.
@@ -462,6 +486,256 @@ int main() {
         check(flatRb->bodyId_ == kNoBody && flatRb->createFailed_, "두께 0 상자는 바디 없이 실패로 표시");
         check(dotRb->bodyId_ == kNoBody && dotRb->createFailed_, "반지름 0 구는 바디 없이 실패로 표시");
         ps.shutdown();
+    }
+
+    // ── 잡기 · 던지기 (2026-10-15) ────────────────────────────────────────────
+    {
+        std::printf("\n-- 잡기 · 던지기: Kinematic 으로 손을 따라가고, 놓으면 Dynamic + 손 속도 --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        ps.setGravity({ 0.f, 0.f, 0.f });   // 던진 속도만 보려고 중력을 끕니다
+
+        Actor* box = w.spawnActor("Box");
+        box->setLocalPosition({ 0.f, 1.f, 0.f });
+        box->setLocalScale({ 0.2f, 0.2f, 0.2f });
+        auto* rb = box->addComponent<RigidBodyComponent>();
+        rb->motionType = EMotionType::Dynamic;
+        auto* g = box->addComponent<GrabbableComponent>();
+
+        Actor* far = w.spawnActor("Far");
+        far->setLocalPosition({ 5.f, 1.f, 0.f });
+        far->addComponent<GrabbableComponent>();
+
+        Actor* handA = w.spawnActor("HandA");
+        auto*  ia    = handA->addComponent<GrabInteractorComponent>();
+        Actor* handB = w.spawnActor("HandB");
+        auto*  ib    = handB->addComponent<GrabInteractorComponent>();
+        run(ps, 2);
+        const uint32_t body = rb->bodyId_;
+        check(body != kNoBody, "(준비) 바디가 생김");
+
+        check(GrabInteractorComponent::pick({ 0.05f, 1.f, 0.f }, 0.12f) == g, "반지름 안의 가장 가까운 것을 고름");
+        check(GrabInteractorComponent::pick({ 2.5f, 1.f, 0.f }, 0.12f) == nullptr, "반지름 밖이면 없음");
+
+        const glm::vec3 hp{ 0.f, 1.2f, 0.f };
+        const glm::quat hr(1.f, 0.f, 0.f, 0.f);
+        ia->grab(g, hp, hr);
+        check(rb->motionType == EMotionType::Kinematic && rb->bodyId_ == body && g->holder() == ia,
+              "잡으면 같은 바디가 Kinematic 이 됨(다시 만들지 않음)");
+        rb->onPropsCommitted();   // Play 중 디테일 패널에서 다른 값을 확정한 경우
+        check(rb->bodyId_ == body, "잡은 동안 속성을 확정해도 바디를 다시 만들지 않음");
+        // 손을 x 로 1m 옮기고 90° 돌림: 물체는 손 기준 자리(손 아래 0.2m)를 지킵니다.
+        const glm::quat hr2 = glm::angleAxis(glm::radians(90.f), glm::vec3(0.f, 0.f, 1.f));
+        ia->follow({ 1.f, 1.2f, 0.f }, hr2);
+        const glm::vec3 want = glm::vec3(1.f, 1.2f, 0.f) + hr2 * glm::vec3(0.f, -0.2f, 0.f);
+        check(glm::length(box->worldPosition() - want) < 1e-4f, "손을 따라 손 기준 자리로 옮김");
+        run(ps, 1);
+        PhysicsSystem::BodyInfo info;
+        check(ps.queryBody(body, info) && glm::length(info.position - want) < 1e-3f, "Kinematic 바디가 그 자리로 감");
+
+        ib->grab(g, { 1.f, 1.2f, 0.f }, hr);
+        check(g->holder() == ib && ia->held() == nullptr, "다른 손이 잡으면 넘겨받음");
+
+        ib->release({ 3.f, 0.f, 0.f }, { 0.f, 0.f, 0.f }, true);
+        check(rb->motionType == EMotionType::Dynamic && rb->bodyId_ == body && g->holder() == nullptr,
+              "놓으면 같은 바디가 Dynamic 으로 돌아옴");
+        check(std::fabs(rb->linearVelocity().x - 3.f) < 1e-3f, "놓는 순간 손 속도를 받음");
+        const float x0 = box->worldPosition().x;
+        run(ps, 30);   // 0.5 초
+        const float dx = box->worldPosition().x - x0;
+        check(std::fabs(dx - 1.5f) < 0.05f, "던진 속도로 날아감 (0.5초에 " + std::to_string(dx) + " m)");
+
+        // 강체가 없는 소품: 따라가다 놓은 자리에 남습니다.
+        ia->grab(far->getComponent<GrabbableComponent>(), { 5.f, 1.f, 0.f }, hr);
+        ia->follow({ 6.f, 1.f, 0.f }, hr);
+        ia->release({ 9.f, 0.f, 0.f }, { 0.f, 0.f, 0.f }, true);
+        check(std::fabs(far->worldPosition().x - 6.f) < 1e-5f, "강체 없는 소품은 놓은 자리에 남음");
+
+        // 잡은 액터를 지우면 손이 놓습니다(해제된 컴포넌트를 가리키지 않음).
+        ia->grab(g, box->worldPosition(), hr);
+        w.destroyActor(box);
+        check(ia->held() == nullptr, "잡은 액터가 사라지면 손이 비워짐");
+        ia->follow({ 0.f, 0.f, 0.f }, hr);   // 아무 일도 없어야 함
+
+        // 잡힌 동안 잡기 컴포넌트를 끄면 손이 놓고, 강체는 Dynamic 으로 돌아옵니다.
+        Actor* box2 = w.spawnActor("Box2");
+        box2->setLocalPosition({ 0.f, 3.f, 0.f });
+        auto* rb2 = box2->addComponent<RigidBodyComponent>();
+        rb2->motionType = EMotionType::Dynamic;
+        auto* g2 = box2->addComponent<GrabbableComponent>();
+        run(ps, 1);
+        ia->grab(g2, box2->worldPosition(), hr);
+        g2->setEnabled(false);
+        check(ia->held() == nullptr && rb2->motionType == EMotionType::Dynamic, "잡힌 것을 끄면 손이 놓고 Dynamic 으로 돌아옴");
+
+        // 월드를 통째로 지우면 onDisable 없이 해제됩니다. 다른 월드의 손도 해제된 컴포넌트를 가리키지 않아야 합니다.
+        {
+            World w2;
+            Actor* toy = w2.spawnActor("Toy");
+            ia->grab(toy->addComponent<GrabbableComponent>(), { 0.f, 0.f, 0.f }, hr);
+        }
+        check(ia->held() == nullptr, "월드가 통째로 사라져도 손이 비워짐");
+        ps.shutdown();
+    }
+
+    // ── 리그 · 추적 자세 · 기본 이동 (2026-10-15) ─────────────────────────────
+    {
+        std::printf("\n-- 플레이어 리그: 추적 자세 · 스틱 이동 · 스냅 회전 · 데스크톱 둘러보기 · XR 원점 --\n");
+        HInputSystem& in = HInputSystem::get();
+        in.clearBindings();
+        std::string err;
+        for (const auto& [k, v] : HInputSystem::defaultBindings()) in.applyBinding(k, v, err);
+
+        World w;
+        Actor* rig  = w.spawnActor("Rig");
+        rig->addComponent<XrRigComponent>();
+        auto*  loco = rig->addComponent<RigLocomotionComponent>();
+        Actor* head = w.spawnActor("Head");
+        head->attachTo(rig);
+        head->setLocalPosition({ 0.f, 1.7f, 0.f });
+        auto* cam = head->addComponent<CameraComponent>();
+        head->addComponent<TrackedPoseComponent>()->source = ETrackedSource::Head;
+        check(RigLocomotionComponent::findHead(*rig) == head, "리그의 머리를 찾음");
+
+        // 추적 자세: 바닥 기준이면 그대로, 바닥 공간이 없으면 눈높이만큼 올림
+        HXrInputState s;
+        s.focused = true;
+        s.head.valid = true;
+        s.head.position = { 0.1f, 1.6f, 0.2f };
+        in.setXrInput(s);
+        head->getComponent<TrackedPoseComponent>()->tick(0.f);
+        check(glm::length(head->transform().position() - glm::vec3(0.1f, 1.6f, 0.2f)) < 1e-6f, "머리 자세를 로컬로 씀");
+        s.floorOffset = 1.7f;
+        s.head.position = { 0.f, 0.f, 0.f };
+        in.setXrInput(s);
+        head->getComponent<TrackedPoseComponent>()->tick(0.f);
+        check(std::fabs(head->transform().position().y - 1.7f) < 1e-6f, "바닥 공간이 없으면 눈높이만큼 올림");
+
+        // XR 원점: 리그면 리그 자세(+ 올림), 아니면 카메라 위치 + 요
+        rig->setLocalPosition({ 2.f, 0.f, 3.f });
+        cam->setXrRig(rig, 0.f);
+        check(glm::length(glm::vec3(cam->xrOrigin()[3]) - glm::vec3(2.f, 0.f, 3.f)) < 1e-6f, "원점은 리그 위치(바닥)");
+        cam->setXrRig(rig, 1.7f);
+        check(std::fabs(cam->xrOrigin()[3].y - 1.7f) < 1e-6f, "바닥 공간이 없으면 원점을 눈높이만큼 올림");
+        cam->setXrRig(nullptr, 0.f);
+        check(std::fabs(cam->xrOrigin()[3].y - head->worldPosition().y) < 1e-6f, "리그가 아니면 카메라 위치");
+        rig->setLocalPosition({ 0.f, 0.f, 0.f });
+        head->setLocalPosition({ 0.f, 1.7f, 0.f });
+        head->setLocalRotation(glm::quat(1.f, 0.f, 0.f, 0.f));
+
+        // VR 스틱 이동: 머리가 보는 방향(-Z)으로, 수평면 위로
+        s = HXrInputState{};
+        s.focused = true;
+        s.hands[0].thumbstick = { 0.f, 1.f };
+        in.setXrInput(s);
+        in.update(0.f, [](int) { return false; });
+        loco->tick(0.5f);
+        check(glm::length(rig->worldPosition() - glm::vec3(0.f, 0.f, -1.f)) < 1e-4f, "왼쪽 스틱 위 = 앞으로 2m/s × 0.5s");
+        // 아래를 보고 있어도 걷기는 수평
+        head->setLocalRotation(glm::angleAxis(glm::radians(-60.f), glm::vec3(1.f, 0.f, 0.f)));
+        loco->tick(0.5f);
+        check(std::fabs(rig->worldPosition().y) < 1e-5f && rig->worldPosition().z < -1.9f, "아래를 봐도 수평으로 걸음");
+        head->setLocalRotation(glm::quat(1.f, 0.f, 0.f, 0.f));
+
+        // 스냅 회전: 머리 자리를 지키며 45° 씩, 스틱을 돌려놓아야 다시 돎.
+        // 머리를 리그 중심에서 비켜 둡니다(놀이 공간 가장자리에 선 경우). 리그 중심으로 돌리면 머리가 옮겨집니다.
+        head->setLocalPosition({ 0.3f, 1.7f, 0.2f });
+        s.hands[0].thumbstick = { 0.f, 0.f };
+        s.hands[1].thumbstick = { 1.f, 0.f };
+        in.setXrInput(s);
+        const glm::vec3 headBefore = head->worldPosition();
+        loco->tick(0.016f);
+        const glm::vec3 fwd = head->worldRotation() * glm::vec3(0.f, 0.f, -1.f);
+        check(glm::length(head->worldPosition() - headBefore) < 1e-4f, "스냅 회전은 머리 자리에서 돎");
+        check(std::fabs(glm::degrees(std::atan2(fwd.x, -fwd.z)) - 45.f) < 0.1f, "오른쪽으로 45°");
+        loco->tick(0.016f);
+        loco->tick(0.016f);
+        const glm::vec3 fwd2 = head->worldRotation() * glm::vec3(0.f, 0.f, -1.f);
+        check(glm::length(fwd2 - fwd) < 1e-5f, "스틱을 그대로 두면 한 번만 돎");
+        s.hands[1].thumbstick = { 0.f, 0.f };
+        in.setXrInput(s);
+        loco->tick(0.016f);
+        s.hands[1].thumbstick = { -1.f, 0.f };
+        in.setXrInput(s);
+        loco->tick(0.016f);
+        const glm::vec3 fwd3 = head->worldRotation() * glm::vec3(0.f, 0.f, -1.f);
+        check(std::fabs(glm::degrees(std::atan2(fwd3.x, -fwd3.z))) < 0.1f, "돌려놓은 뒤 왼쪽으로 다시 45°");
+
+        // 데스크톱: 오른쪽 버튼 끌기 100px → 15° 회전, 아래로 끌면 머리를 숙임
+        in.setXrInput({});
+        in.setLookDelta(100.f, 0.f);
+        loco->tick(0.016f);
+        const glm::vec3 f4 = head->worldRotation() * glm::vec3(0.f, 0.f, -1.f);
+        check(std::fabs(glm::degrees(std::atan2(f4.x, -f4.z)) - 15.f) < 0.1f, "데스크톱 둘러보기: 100px × 0.15° = 15°");
+        in.setLookDelta(0.f, 100.f);
+        loco->tick(0.016f);
+        const glm::vec3 f5 = head->worldRotation() * glm::vec3(0.f, 0.f, -1.f);
+        check(f5.y < -0.2f, "아래로 끌면 머리를 숙임");
+        in.setLookDelta(0.f, 0.f);
+        in.clearBindings();
+    }
+
+    // ── 보이지 않는 리그 · 리그 높이 (2026-10-16) ─────────────────────────────────
+    {
+        std::printf("\n-- 보이지 않는 리그: 카메라 아래 바닥 찾기, 원점 높이, 리그 높이 값 --\n");
+        World w;
+        boundsBox(w, "Ground", { 0.f, -0.1f, 0.f }, { 20.f, 0.2f, 20.f });   // 윗면 y = 0
+        Actor* cam = w.spawnActor("Camera");
+        cam->setLocalPosition({ 0.f, 0.3f, 2.5f });
+        float y = -99.f;
+        check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y) < 1e-5f, "카메라(0.3m) 아래 바닥 윗면 y=0");
+
+        // 가까운 윗면이 먼저: 카메라 아래 탁자(윗면 0.8)
+        Actor* table = boundsBox(w, "Table", { 0.f, 0.4f, 2.5f }, { 1.f, 0.8f, 1.f });
+        cam->setLocalPosition({ 0.f, 1.5f, 2.5f });
+        check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y - 0.8f) < 1e-5f, "더 가까운 윗면(탁자 0.8m)을 고름");
+        // 시작점을 감싼 바운드(방 · 큰 물체 안)는 건너뜀
+        cam->setLocalPosition({ 0.f, 0.5f, 2.5f });   // 탁자 안
+        check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y) < 1e-5f, "카메라를 감싼 바운드는 건너뛰고 그 아래 바닥");
+        // 끈 액터는 보지 않음
+        table->setActive(false);
+        cam->setLocalPosition({ 0.f, 1.5f, 2.5f });
+        check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y) < 1e-5f, "끈 액터(탁자)는 바닥이 아님");
+        // 카메라 자신과 그 자식은 보지 않음
+        Actor* body = boundsBox(w, "CamBody", { 0.f, -0.5f, 0.f }, { 0.3f, 0.3f, 0.3f });
+        body->attachTo(cam);
+        check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y) < 1e-5f, "카메라의 자식은 바닥이 아님");
+        // 아래에 아무것도 없음(바닥 밖 · 바닥보다 아래)
+        check(!hxr::floorBelow(w, { 50.f, 1.f, 0.f }, nullptr, y), "바닥 밖이면 찾지 못함");
+        check(!hxr::floorBelow(w, { 0.f, -5.f, 0.f }, nullptr, y), "바닥보다 아래면 찾지 못함");
+
+        // 카메라 원점: 보이지 않는 리그는 카메라에서 drop 아래 + lift, 수평 위치 · 요는 카메라
+        auto* cc = cam->addComponent<CameraComponent>();
+        cam->setLocalPosition({ 1.f, 0.3f, 2.f });
+        cam->setLocalRotation(glm::angleAxis(glm::radians(30.f), glm::vec3(0.f, 1.f, 0.f)));
+        cc->setXrImplicitRig(0.3f, 0.f);
+        glm::mat4 o = cc->xrOrigin();
+        check(glm::length(glm::vec3(o[3]) - glm::vec3(1.f, 0.f, 2.f)) < 1e-5f, "바닥 기준 공간: 원점은 카메라 아래 바닥");
+        const glm::vec3 of = glm::mat3(o) * glm::vec3(0.f, 0.f, -1.f);
+        check(std::fabs(glm::degrees(std::atan2(-of.x, -of.z)) - 30.f) < 0.01f, "원점의 요는 카메라를 따름");
+        cc->setXrImplicitRig(0.3f, 1.2f);
+        check(std::fabs(cc->xrOrigin()[3].y - 1.2f) < 1e-5f, "고정 눈높이 1.2m: 원점(머리 기준 공간)은 바닥 + 1.2");
+        cc->setXrRig(nullptr, 0.f);
+        check(std::fabs(cc->xrOrigin()[3].y - 0.3f) < 1e-5f && !cc->hasImplicitXrRig(), "데스크톱으로 돌아오면 카메라 위치");
+
+        // 리그 높이 값: 직렬화와 범위
+        XrRigComponent rig;
+        check(rig.trackedHeight && rig.eyeHeight == 1.7f, "리그 기본값: 실제 키, 눈높이 1.7m");
+        rig.readField("height", "fixed");
+        rig.readField("eyeHeight", "1.3");
+        ComponentFieldWriter fw;
+        rig.writeFields(fw);
+        std::string fields;
+        for (const auto& [k, v] : fw.fields()) fields += k + "=" + v + ";";
+        check(!rig.trackedHeight && rig.eyeHeight == 1.3f && fields == "height=fixed;eyeHeight=1.3;", "height · eyeHeight 읽고 쓰기 (" + fields + ")");
+        rig.readField("height", "standing");
+        rig.readField("eyeHeight", "4");
+        check(!rig.trackedHeight && rig.eyeHeight == 1.3f, "모르는 모드 · 범위 밖 값은 무시");
+        for (auto& pd : rig.buildProps())
+            if (std::string(pd.label) == "Eye Height" && pd.setF) pd.setF(9.f);
+        check(rig.eyeHeight == 2.5f, "디테일 패널 값은 2.5m 로 자름");
     }
 
     if (g_failed) {

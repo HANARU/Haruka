@@ -203,7 +203,7 @@ void PostPass::recordTonemap(VkCommandBuffer cmd, const Output& out,
     ws[0].pImageInfo = &hdrI;
     ws[1].pImageInfo = &ssaoI;
     ws[2].pImageInfo = &blmI;
-    vkCmdPushDescriptorSet(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout_, 0, 3, ws);
+    rc_->vk.push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout_, 0, 3, ws);
 
     // Push constants: 강도 · 노출 · 플래그 · encodeSrgb · UV 범위 (post.frag 의 Params 와 같은 배치)
     struct PostPC { float aoStr, bloomStr, exposure, enableAO, enableBloom, encodeSrgb;

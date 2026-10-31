@@ -53,5 +53,20 @@ public:
     // XR 원점: 헤드셋 트래킹 공간을 월드에 놓는 자리입니다. 카메라 액터의 월드 위치와 요(yaw)만 씁니다.
     // 숙임 · 롤까지 넣으면 헤드셋 안의 지평선이 기울어 멀미가 납니다. 액터가 없으면 단위 행렬입니다.
     // 렌더러의 눈 자세와 VR 입력(HXrInputState) 자세가 모두 이 원점 기준입니다.
+    // 플레이어 리그(2026-10-15): 이 카메라가 리그의 머리라면 원점은 리그 액터(바닥)의 위치와 회전이고, 머리 기준 공간을
+    // 쓰는 경우(고정 눈높이, 바닥 공간이 없는 런타임)에는 lift 만큼 올립니다. 엔진이 매 프레임 setXrRig 로 알립니다.
+    // 보이지 않는 리그(2026-10-16): 리그가 없는 씬은 XR 동안 엔진이 setXrImplicitRig 로 카메라에서 drop 만큼 아래
+    // (카메라 아래 바닥)에 리그를 둡니다. 수평 위치와 요는 카메라를 따릅니다. 둘 다 아니면(데스크톱) 예전처럼
+    // 카메라 위치 + 요입니다.
     glm::mat4 xrOrigin() const;
+    void setXrRig(const Actor* rig, float lift) { xrRig_ = rig; xrRigLift_ = lift; implicitRig_ = false; }
+    void setXrImplicitRig(float drop, float lift) { xrRig_ = nullptr; xrRigLift_ = lift; implicitRig_ = true; implicitDrop_ = drop; }
+    const Actor* xrRig() const { return xrRig_; }
+    bool         hasImplicitXrRig() const { return implicitRig_; }
+
+private:
+    const Actor* xrRig_        = nullptr;
+    float        xrRigLift_    = 0.f;
+    bool         implicitRig_  = false;
+    float        implicitDrop_ = 0.f;
 };

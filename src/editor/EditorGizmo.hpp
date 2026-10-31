@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Transform.hpp"
 #include "../renderer/RenderTypes.hpp"
+#include <functional>
 #include <vector>
 #include <cmath>
 #define GLM_FORCE_RADIANS
@@ -115,6 +116,13 @@ public:
                     int mode, bool worldSpace, bool mouseInView);
 
     bool isDragging() const { return dragging_; }
+    // Selection wire box of an actor (mesh bounds, else a 1 m box). Used for non-primary actors of a multi-selection.
+    static void appendSelectionBox(const Actor* a, std::vector<LineVertex>& lines, const glm::vec4& color);
+    // 드래그를 시작할 때의 로컬 트랜스폼(드래그 중에만 의미 있음). 여러 액터를 함께 옮길 때 기준으로 씁니다.
+    const Transform& dragStartTransform() const { return undoSnap_; }
+    // 드래그가 끝나 트랜스폼이 바뀌었을 때 부릅니다(before = 시작, after = 끝). 정해 두면 기즈모가 커맨드를 직접
+    // 쌓지 않습니다. 에디터가 여러 액터의 변경을 한 커맨드로 묶으려고 씁니다(2026-10-15).
+    std::function<void(const Transform& before, const Transform& after)> onCommit;
 
     // 선택 삭제 등으로 드래그/호버 상태를 강제 해제
     void cancel() {

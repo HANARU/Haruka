@@ -20,11 +20,13 @@
 /Config/editor_layout.txt
 /Config/editor_log.txt
 /Config/log_levels.txt
+/Config/editor_state.txt
 
-# ── Scene saves (user data; run un-ignore if you want scenes versioned) ──
+# ── Scenes ──
+# 에디터는 씬을 프로젝트 폴더의 assets/scenes 아래(하위 폴더 포함)에 저장하고, 그 씬들은 저장소에 둡니다(2026-10-15).
+# 그 밖의 .hscene(예전 에디터가 실행 폴더에 남기던 scene.hscene 등)은 무시합니다.
 *.hscene
-# 엔진이 읽는 시작 씬은 저장소에 둡니다(DefaultGameModule::onStart).
-!/assets/scenes/*.hscene
+!/assets/scenes/**/*.hscene
 
 # ── Session handoff (transient working notes, paste-in convention) ──
 /SESSION_HANDOFF.md

@@ -1,11 +1,23 @@
 #include "XrSystem.hpp"
+#include "XrVersion.hpp"
 #include "../core/HLog.hpp"
 
 // Vulkan 연결 확장만 씁니다. Win32 전용 확장(XR_USE_PLATFORM_WIN32)은 쓰지 않으므로 windows.h 가
-// 필요 없습니다.
+// 필요 없습니다. Android(Quest)는 로더 초기화와 인스턴스 생성에 JavaVM · 액티비티를 넘기는 확장을 씁니다(2026-10-31).
 #define XR_USE_GRAPHICS_API_VULKAN
+#ifdef __ANDROID__
+#include <jni.h>
+#define XR_USE_PLATFORM_ANDROID
+#endif
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
+#include "../core/TextUtf.hpp"
+
+// 헤드셋 소리 장치(XR_OCULUS_audio_device_guid, 2026-10-16). openxr_platform.h 에서는 XR_USE_PLATFORM_WIN32 아래에 있어
+// windows.h 가 필요하므로, 확장 이름과 함수 모양만 같게 여기 둡니다(함수 주소는 런타임에서 받음).
+static constexpr const char* kOculusAudioGuidExt   = "XR_OCULUS_audio_device_guid";
+static constexpr uint32_t    kOculusAudioStrSize   = 128;   // XR_MAX_AUDIO_DEVICE_STR_SIZE_OCULUS
+using PfnGetAudioOutputDeviceGuid = XrResult(XRAPI_PTR*)(XrInstance, wchar_t*);
 
 #include <algorithm>
 #include <cstdio>
@@ -61,12 +73,21 @@ struct XrSystem::Impl {
     XrInstance     instance = XR_NULL_HANDLE;
     XrSystemId     systemId = XR_NULL_SYSTEM_ID;
     XrSession      session  = XR_NULL_HANDLE;
-    XrSpace        appSpace = XR_NULL_HANDLE;    // LOCAL
+    XrSpace        appSpace = XR_NULL_HANDLE;    // 이번 프레임의 기준 공간(localSpace 또는 floorSpace)
+    XrSpace        localSpace = XR_NULL_HANDLE;  // LOCAL
+    XrSpace        floorSpace = XR_NULL_HANDLE;  // LOCAL_FLOOR(XR_EXT_local_floor, 있을 때만)
+    bool           hasLocalFloor = false;
+    bool           hasAudioGuid  = false;        // XR_OCULUS_audio_device_guid
+    std::string    headsetAudioId;               // 헤드셋 소리 출력 장치(WASAPI 끝점 ID, UTF-8). 모르면 빈 문자열
+    bool           trackedHeight = true;         // 리그 높이 모드(엔진이 고름): 실제 키(바닥 공간) 또는 고정 눈높이
+    float          eyeHeight     = 1.7f;         // 머리 기준 공간일 때 원점(바닥)에 더하는 눈높이(m)
+    bool           spaceLogged   = false;        // 이 세션에서 고른 공간을 로그로 남겼는지
     XrSpace        headSpace = XR_NULL_HANDLE;   // VIEW
     XrSwapchain    swapchain = XR_NULL_HANDLE;
     XrSessionState state   = XR_SESSION_STATE_UNKNOWN;
     bool           running = false;
     bool           lost    = false;
+    XrSystem::LossReason lossReason = XrSystem::LossReason::None;   // lost 의 이유(createSession 이 지움)
     bool           exitRequested = false;   // requestExit 로 끝내는 중
     bool           hasRefreshRateExt = false;
     XrEnvironmentBlendMode blendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
@@ -84,11 +105,15 @@ struct XrSystem::Impl {
     XrAction    trigger = XR_NULL_HANDLE, squeeze = XR_NULL_HANDLE, thumbstick = XR_NULL_HANDLE;
     XrAction    primary = XR_NULL_HANDLE, secondary = XR_NULL_HANDLE;
     XrAction    stickClick = XR_NULL_HANDLE, menu = XR_NULL_HANDLE;
+    XrAction    haptic = XR_NULL_HANDLE;   // 진동 출력(2026-10-15)
     XrPath      handPath[2] = { XR_NULL_PATH, XR_NULL_PATH };
     XrSpace     gripSpace[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
     XrSpace     aimSpace[2]  = { XR_NULL_HANDLE, XR_NULL_HANDLE };
 
     PFN_xrGetVulkanGraphicsRequirements2KHR getRequirements = nullptr;
+    // 런타임이 받아들이는 Vulkan 범위(XrVersion 형식). 렌더러가 인스턴스 버전을 판정합니다(DEF-97).
+    uint64_t vkMinXr = 0, vkMaxXr = 0;
+    bool     vkRangeKnown = false;
     PFN_xrCreateVulkanInstanceKHR           createVkInstance = nullptr;
     PFN_xrGetVulkanGraphicsDevice2KHR       getVkDevice      = nullptr;
     PFN_xrCreateVulkanDeviceKHR             createVkDevice   = nullptr;
@@ -104,6 +129,16 @@ struct XrSystem::Impl {
     bool load(const char* name, Fn& out) const {
         return ok(xrGetInstanceProcAddr(instance, name, reinterpret_cast<PFN_xrVoidFunction*>(&out)), name);
     }
+    // 세션 · 인스턴스를 잃었다는 오류 코드면 lost 로 두고 이유를 정합니다(2026-11-01, DEF-155). 예전에는 프레임 함수가 이런
+    // 오류를 돌려줘도 실패 로그만 루프마다 남기고, 엔진의 손실 처리(끝내기 · 다시 열기)로 가지 않았습니다.
+    void markLostOnError(XrResult r) {
+        if (r == XR_ERROR_INSTANCE_LOST) {
+            running = false; lost = true; lossReason = XrSystem::LossReason::InstanceLost;
+        } else if (r == XR_ERROR_SESSION_LOST) {
+            running = false; lost = true;
+            if (lossReason != XrSystem::LossReason::InstanceLost) lossReason = XrSystem::LossReason::Disconnected;
+        }
+    }
 
     bool createActions();
     bool createSwapchain(VkFormat preferred);
@@ -117,21 +152,56 @@ bool XrSystem::hasSession() const { return impl_->session != XR_NULL_HANDLE; }
 bool XrSystem::sessionRunning() const { return impl_->running; }
 bool XrSystem::sessionLost() const { return impl_->lost; }
 bool XrSystem::exitRequested() const { return impl_->exitRequested; }
+XrSystem::LossReason XrSystem::lossReason() const { return impl_->lossReason; }
 const std::vector<VkImage>& XrSystem::swapchainImages() const { return impl_->images; }
+
+bool XrSystem::headsetAvailable() {
+    Impl& m = *impl_;
+    if (!m.instance || m.lossReason == LossReason::InstanceLost) return false;
+    XrSystemGetInfo sgi{ XR_TYPE_SYSTEM_GET_INFO };
+    sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+    XrSystemId id = XR_NULL_SYSTEM_ID;
+    const XrResult r = xrGetSystem(m.instance, &sgi, &id);
+    if (r == XR_ERROR_INSTANCE_LOST) m.markLostOnError(r);   // 다시 열기를 기다리는 동안 인스턴스를 잃음(DEF-155)
+    if (XR_FAILED(r)) return false;
+    m.systemId = id;
+    return true;
+}
 VkFormat   XrSystem::swapchainFormat() const { return impl_->format; }
 VkExtent2D XrSystem::eyeExtent() const { return impl_->eyeExtent; }
 
 // ── 1. 인스턴스 · 시스템 ──────────────────────────────────────────────────────
-bool XrSystem::init() {
+bool XrSystem::init(const PlatformContext& platform) {
     Impl& m = *impl_;
+    (void)platform;
+
+#ifdef __ANDROID__
+    // Android 로더는 런타임 브로커(콘텐츠 제공자)를 JNI 로 찾으므로, 다른 OpenXR 함수보다 먼저 JavaVM 과 액티비티를 받아야
+    // 합니다(xrInitializeLoaderKHR, Khronos hello_xr · Meta 예제와 같은 순서).
+    PFN_xrInitializeLoaderKHR initLoader = nullptr;
+    if (XR_SUCCEEDED(xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR",
+                                           reinterpret_cast<PFN_xrVoidFunction*>(&initLoader))) && initLoader) {
+        XrLoaderInitInfoAndroidKHR li{ XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR };
+        li.applicationVM      = platform.javaVM;
+        li.applicationContext = platform.activity;
+        const XrResult lr = initLoader(reinterpret_cast<const XrLoaderInitInfoBaseHeaderKHR*>(&li));
+        if (XR_FAILED(lr)) { HLOG(LogXR, Error) << "xrInitializeLoaderKHR failed: " << resultName(XR_NULL_HANDLE, lr); }
+    } else {
+        HLOG(LogXR, Error) << "The OpenXR loader has no xrInitializeLoaderKHR";
+    }
+#endif
 
     // 런타임이 없으면 로더가 여기서 실패합니다(XR_ERROR_RUNTIME_UNAVAILABLE 등).
     uint32_t extCount = 0;
     XrResult r = xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
     if (XR_FAILED(r)) {
+#ifdef __ANDROID__
+        HLOG(LogXR, Error) << "No OpenXR runtime is available (" << resultName(XR_NULL_HANDLE, r) << ")";
+#else
         HLOG(LogXR, Warning) << "No OpenXR runtime is available (" << resultName(XR_NULL_HANDLE, r)
                              << "). Install and start a PC VR runtime such as Meta Quest Link. "
                                 "Continuing in desktop mode.";
+#endif
         return false;
     }
     std::vector<XrExtensionProperties> exts(extCount, { XR_TYPE_EXTENSION_PROPERTIES });
@@ -148,8 +218,24 @@ bool XrSystem::init() {
     std::vector<const char*> enabled = { XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME };
     m.hasRefreshRateExt = has(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
     if (m.hasRefreshRateExt) enabled.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+    m.hasLocalFloor = has(XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
+    if (m.hasLocalFloor) enabled.push_back(XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
+    m.hasAudioGuid = has(kOculusAudioGuidExt);
+    if (m.hasAudioGuid) enabled.push_back(kOculusAudioGuidExt);
 
     XrInstanceCreateInfo ci{ XR_TYPE_INSTANCE_CREATE_INFO };
+#ifdef __ANDROID__
+    // Android 는 인스턴스를 만들 때 JavaVM · 액티비티를 함께 넘깁니다(XR_KHR_android_create_instance).
+    XrInstanceCreateInfoAndroidKHR aci{ XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR };
+    aci.applicationVM       = platform.javaVM;
+    aci.applicationActivity = platform.activity;
+    if (has(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME)) {
+        enabled.push_back(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME);
+        ci.next = &aci;
+    } else {
+        HLOG(LogXR, Warning) << "The OpenXR runtime does not list " << XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME;
+    }
+#endif
     copyName(ci.applicationInfo.applicationName, "HarukaEngine");
     copyName(ci.applicationInfo.engineName, "Haruka");
     ci.applicationInfo.applicationVersion = 1;
@@ -181,6 +267,14 @@ bool XrSystem::init() {
     XrSystemProperties sp{ XR_TYPE_SYSTEM_PROPERTIES };
     if (XR_SUCCEEDED(xrGetSystemProperties(m.instance, m.systemId, &sp)))
         HLOG(LogXR, Log) << "Headset: " << sp.systemName;
+    // 헤드셋 소리 장치. 런타임이 주는 ID 는 WASAPI 끝점 ID 와 같은 형식이라, 오디오 시스템이 XR Play 동안 그 장치로 내보낼
+    // 수 있습니다. 확장이 없는 런타임이면 비워 둡니다(소리는 고른 장치 그대로).
+    if (m.hasAudioGuid) {
+        PfnGetAudioOutputDeviceGuid getAudio = nullptr;
+        wchar_t buf[kOculusAudioStrSize] = {};
+        if (m.load("xrGetAudioOutputDeviceGuidOculus", getAudio) && m.ok(getAudio(m.instance, buf), "xrGetAudioOutputDeviceGuidOculus"))
+            m.headsetAudioId = hutf::fromUtf16(buf);
+    }
 
     bool loaded = m.load("xrGetVulkanGraphicsRequirements2KHR", m.getRequirements) &&
                   m.load("xrCreateVulkanInstanceKHR",           m.createVkInstance) &&
@@ -196,6 +290,18 @@ bool XrSystem::init() {
     HLOG(LogXR, Log) << "Runtime Vulkan API range: "
                      << XR_VERSION_MAJOR(req.minApiVersionSupported) << "." << XR_VERSION_MINOR(req.minApiVersionSupported)
                      << " to " << XR_VERSION_MAJOR(req.maxApiVersionSupported) << "." << XR_VERSION_MINOR(req.maxApiVersionSupported);
+    m.vkMinXr      = req.minApiVersionSupported;
+    m.vkMaxXr      = req.maxApiVersionSupported;
+    m.vkRangeKnown = true;
+    return true;
+}
+
+// XrVersion(major 16 · minor 16 · patch 32 비트)과 Vulkan 버전은 부호화가 달라 바꿔서 돌려줍니다(XrVersion.hpp).
+bool XrSystem::vulkanApiRange(uint32_t& minApi, uint32_t& maxApi) const {
+    const Impl& m = *impl_;
+    if (!m.vkRangeKnown) return false;
+    minApi = hxr::vkApiFromXrVersion(m.vkMinXr);
+    maxApi = hxr::vkApiFromXrVersion(m.vkMaxXr);
     return true;
 }
 
@@ -257,10 +363,18 @@ bool XrSystem::createSession(VkInstance instance, VkPhysicalDevice physicalDevic
     XrReferenceSpaceCreateInfo rs{ XR_TYPE_REFERENCE_SPACE_CREATE_INFO };
     rs.poseInReferenceSpace.orientation.w = 1.f;
     rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
-    if (!m.ok(xrCreateReferenceSpace(m.session, &rs, &m.appSpace), "xrCreateReferenceSpace(LOCAL)")) {
+    if (!m.ok(xrCreateReferenceSpace(m.session, &rs, &m.localSpace), "xrCreateReferenceSpace(LOCAL)")) {
         destroySession();
         return false;
     }
+    m.appSpace = m.localSpace;
+    if (m.hasLocalFloor) {
+        rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT;
+        if (!m.ok(xrCreateReferenceSpace(m.session, &rs, &m.floorSpace), "xrCreateReferenceSpace(LOCAL_FLOOR)"))
+            m.floorSpace = XR_NULL_HANDLE;
+    }
+    if (m.trackedHeight && m.floorSpace) m.appSpace = m.floorSpace;
+    m.spaceLogged = false;
     rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
     m.ok(xrCreateReferenceSpace(m.session, &rs, &m.headSpace), "xrCreateReferenceSpace(VIEW)");
 
@@ -279,7 +393,8 @@ bool XrSystem::createSession(VkInstance instance, VkPhysicalDevice physicalDevic
         destroySession();
         return false;
     }
-    m.lost = false;
+    m.lost       = false;
+    m.lossReason = LossReason::None;
     return true;
 }
 
@@ -353,7 +468,8 @@ bool XrSystem::Impl::createActions() {
         ci.subactionPaths      = handPath;
         return ok(xrCreateAction(actionSet, &ci, &out), name);
     };
-    if (!makeAction(gripPose,   XR_ACTION_TYPE_POSE_INPUT,     "grip_pose",        "Grip pose") ||
+    if (!makeAction(haptic,     XR_ACTION_TYPE_VIBRATION_OUTPUT, "haptic",         "Haptic") ||
+        !makeAction(gripPose,   XR_ACTION_TYPE_POSE_INPUT,     "grip_pose",        "Grip pose") ||
         !makeAction(aimPose,    XR_ACTION_TYPE_POSE_INPUT,     "aim_pose",         "Aim pose") ||
         !makeAction(trigger,    XR_ACTION_TYPE_FLOAT_INPUT,    "trigger",          "Trigger") ||
         !makeAction(squeeze,    XR_ACTION_TYPE_FLOAT_INPUT,    "squeeze",          "Squeeze") ||
@@ -393,6 +509,8 @@ bool XrSystem::Impl::createActions() {
         { stickClick, path("/user/hand/left/input/thumbstick/click") },
         { stickClick, path("/user/hand/right/input/thumbstick/click") },
         { menu,       path("/user/hand/left/input/menu/click") },
+        { haptic,     path("/user/hand/left/output/haptic") },
+        { haptic,     path("/user/hand/right/output/haptic") },
     });
     suggest("/interaction_profiles/khr/simple_controller", {
         { gripPose, path("/user/hand/left/input/grip/pose") },
@@ -403,6 +521,8 @@ bool XrSystem::Impl::createActions() {
         { trigger,  path("/user/hand/right/input/select/click") },
         { menu,     path("/user/hand/left/input/menu/click") },
         { menu,     path("/user/hand/right/input/menu/click") },
+        { haptic,   path("/user/hand/left/output/haptic") },
+        { haptic,   path("/user/hand/right/output/haptic") },
     });
 
     for (int h = 0; h < 2; ++h) {
@@ -429,11 +549,13 @@ void XrSystem::destroySession() {
     // 액션 세트를 지우면 그 액션도 함께 지워집니다.
     if (m.actionSet) { xrDestroyActionSet(m.actionSet); m.actionSet = XR_NULL_HANDLE; }
     m.gripPose = m.aimPose = m.trigger = m.squeeze = m.thumbstick = XR_NULL_HANDLE;
-    m.primary = m.secondary = m.stickClick = m.menu = XR_NULL_HANDLE;
+    m.primary = m.secondary = m.stickClick = m.menu = m.haptic = XR_NULL_HANDLE;
     if (m.swapchain) { xrDestroySwapchain(m.swapchain); m.swapchain = XR_NULL_HANDLE; }
     m.images.clear();
-    if (m.headSpace) { xrDestroySpace(m.headSpace); m.headSpace = XR_NULL_HANDLE; }
-    if (m.appSpace)  { xrDestroySpace(m.appSpace);  m.appSpace  = XR_NULL_HANDLE; }
+    if (m.headSpace)  { xrDestroySpace(m.headSpace);  m.headSpace  = XR_NULL_HANDLE; }
+    if (m.floorSpace) { xrDestroySpace(m.floorSpace); m.floorSpace = XR_NULL_HANDLE; }
+    if (m.localSpace) { xrDestroySpace(m.localSpace); m.localSpace = XR_NULL_HANDLE; }
+    m.appSpace = XR_NULL_HANDLE;
     if (m.session)   { xrDestroySession(m.session); m.session   = XR_NULL_HANDLE; }
     m.running       = false;
     m.exitRequested = false;
@@ -456,11 +578,14 @@ void XrSystem::shutdown() {
 }
 
 // ── 4. 매 프레임 ──────────────────────────────────────────────────────────────
+// 세션이 없을 때도 부릅니다(엔진이 다시 열기를 기다리는 동안 인스턴스 손실을 알도록, DEF-155). 그때 오는 지난 세션의 상태
+// 이벤트는 세션 핸들이 달라 무시됩니다. 인스턴스를 잃은 뒤에는 받을 것이 없습니다.
 void XrSystem::pollEvents() {
     Impl& m = *impl_;
-    if (!m.instance) return;
+    if (!m.instance || m.lossReason == LossReason::InstanceLost) return;
     XrEventDataBuffer ev{ XR_TYPE_EVENT_DATA_BUFFER };
-    while (xrPollEvent(m.instance, &ev) == XR_SUCCESS) {
+    XrResult pr = XR_SUCCESS;
+    while ((pr = xrPollEvent(m.instance, &ev)) == XR_SUCCESS) {
         switch (ev.type) {
         case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED: {
             const auto& e = *reinterpret_cast<XrEventDataSessionStateChanged*>(&ev);
@@ -470,20 +595,32 @@ void XrSystem::pollEvents() {
             if (e.state == XR_SESSION_STATE_READY) {
                 XrSessionBeginInfo bi{ XR_TYPE_SESSION_BEGIN_INFO };
                 bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-                m.running = m.ok(xrBeginSession(m.session, &bi), "xrBeginSession");
+                const XrResult br = xrBeginSession(m.session, &bi);
+                m.running = m.ok(br, "xrBeginSession");
+                if (!m.running) {
+                    // 시작하지 못한 세션은 잃은 것으로 둡니다(DEF-155). 예전에는 running=false 로 남고 다시 시도하는 곳이 없어,
+                    // 데스크톱 화면이 없는 Quest 는 빈 화면인 채 끝나지 않았습니다. 인스턴스를 잃었으면 InstanceLost, 그 밖에는
+                    // Disconnected 입니다(게임 실행 파일은 다시 열기를 시도하고, XR 이 필수이면 정해진 시간 뒤 끝냄).
+                    m.lost = true;
+                    if (br == XR_ERROR_INSTANCE_LOST) m.lossReason = LossReason::InstanceLost;
+                    else if (m.lossReason != LossReason::InstanceLost) m.lossReason = LossReason::Disconnected;
+                }
             } else if (e.state == XR_SESSION_STATE_STOPPING) {
                 m.ok(xrEndSession(m.session), "xrEndSession");
                 m.running = false;
             } else if (e.state == XR_SESSION_STATE_EXITING || e.state == XR_SESSION_STATE_LOSS_PENDING) {
                 m.running = false;
                 m.lost    = true;   // 엔진이 렌더러에서 스왑체인을 뗀 뒤 destroySession
+                if (m.lossReason != LossReason::InstanceLost)
+                    m.lossReason = e.state == XR_SESSION_STATE_EXITING ? LossReason::Exiting : LossReason::Disconnected;
             }
             break;
         }
         case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING:
             HLOG(LogXR, Warning) << "OpenXR instance loss pending; ending XR for this run";
-            m.running = false;
-            m.lost    = true;
+            m.running    = false;
+            m.lost       = true;
+            m.lossReason = LossReason::InstanceLost;
             break;
         case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED: {
             for (int h = 0; h < 2; ++h) {
@@ -502,6 +639,10 @@ void XrSystem::pollEvents() {
         }
         ev = { XR_TYPE_EVENT_DATA_BUFFER };
     }
+    if (pr == XR_ERROR_INSTANCE_LOST) {
+        HLOG(LogXR, Warning) << "OpenXR instance lost; ending XR for this run";
+        m.markLostOnError(pr);
+    }
 }
 
 bool XrSystem::beginFrame(FrameInfo& out) {
@@ -510,10 +651,12 @@ bool XrSystem::beginFrame(FrameInfo& out) {
     if (!m.running) return false;
     XrFrameWaitInfo wi{ XR_TYPE_FRAME_WAIT_INFO };
     XrFrameState    fs{ XR_TYPE_FRAME_STATE };
-    if (!m.ok(xrWaitFrame(m.session, &wi, &fs), "xrWaitFrame")) return false;
+    const XrResult wr = xrWaitFrame(m.session, &wi, &fs);
+    if (!m.ok(wr, "xrWaitFrame")) { m.markLostOnError(wr); return false; }
     XrFrameBeginInfo bi{ XR_TYPE_FRAME_BEGIN_INFO };
     // XR_FRAME_DISCARDED 도 성공 코드입니다(앞 프레임을 끝내지 못했을 때).
-    if (!m.ok(xrBeginFrame(m.session, &bi), "xrBeginFrame")) return false;
+    const XrResult br = xrBeginFrame(m.session, &bi);
+    if (!m.ok(br, "xrBeginFrame")) { m.markLostOnError(br); return false; }
     if (fs.predictedDisplayPeriod > 0) m.periodHz = 1e9f / (float)fs.predictedDisplayPeriod;
     out.shouldRender = fs.shouldRender == XR_TRUE;
     out.displayTime  = fs.predictedDisplayTime;
@@ -530,7 +673,10 @@ void XrSystem::syncInput(int64_t displayTime, HXrInputState& out) {
     si.countActiveActionSets = 1;
     si.activeActionSets      = &aas;
     if (XR_FAILED(xrSyncActions(m.session, &si))) return;
-    out.focused = true;
+    out.focused     = true;
+    out.floorSpace  = m.floorSpace && m.appSpace == m.floorSpace;
+    // 머리 기준 공간(LOCAL, 원점 = 시작할 때 머리)이면 리그(바닥) 위로 눈높이만큼 올려야 합니다.
+    out.floorOffset = out.floorSpace ? 0.f : m.eyeHeight;
 
     if (m.headSpace) {
         XrSpaceLocation loc{ XR_TYPE_SPACE_LOCATION };
@@ -659,6 +805,44 @@ void XrSystem::endFrame(int64_t displayTime, bool rendered) {
     ei.layerCount           = submit ? 1u : 0u;
     ei.layers               = submit ? layers : nullptr;
     m.ok(xrEndFrame(m.session, &ei), "xrEndFrame");
+}
+
+void XrSystem::setRigSpace(bool trackedHeight, float eyeHeight) {
+    Impl& m = *impl_;
+    const bool floor = trackedHeight && m.floorSpace;
+    if (!m.spaceLogged || m.trackedHeight != trackedHeight || m.eyeHeight != eyeHeight) {
+        char eye[32];
+        std::snprintf(eye, sizeof(eye), "%.2f", eyeHeight);
+        if (floor)              HLOG(LogXR, Log) << "Reference space: LOCAL_FLOOR (real height)";
+        else if (trackedHeight) HLOG(LogXR, Log) << "Reference space: LOCAL + " << eye << " m eye height (runtime has no LOCAL_FLOOR)";
+        else                    HLOG(LogXR, Log) << "Reference space: LOCAL + " << eye << " m fixed eye height";
+        m.spaceLogged = true;
+    }
+    m.trackedHeight = trackedHeight;
+    m.eyeHeight     = eyeHeight;
+    if (m.localSpace) m.appSpace = floor ? m.floorSpace : m.localSpace;
+}
+
+bool XrSystem::floorSpaceAvailable() const { return impl_->hasLocalFloor; }
+
+const std::string& XrSystem::headsetAudioOutputId() const { return impl_->headsetAudioId; }
+
+float XrSystem::rigLift() const {
+    const Impl& m = *impl_;
+    return (m.floorSpace && m.appSpace == m.floorSpace) ? 0.f : m.eyeHeight;
+}
+
+void XrSystem::applyHaptic(int hand, float amplitude, float seconds) {
+    Impl& m = *impl_;
+    if (!m.running || m.state != XR_SESSION_STATE_FOCUSED || !m.haptic || hand < 0 || hand > 1) return;
+    XrHapticVibration v{ XR_TYPE_HAPTIC_VIBRATION };
+    v.amplitude = std::clamp(amplitude, 0.f, 1.f);
+    v.duration  = (XrDuration)(std::max(seconds, 0.f) * 1e9f);
+    v.frequency = XR_FREQUENCY_UNSPECIFIED;
+    XrHapticActionInfo info{ XR_TYPE_HAPTIC_ACTION_INFO };
+    info.action        = m.haptic;
+    info.subactionPath = m.handPath[hand];
+    xrApplyHapticFeedback(m.session, &info, reinterpret_cast<const XrHapticBaseHeader*>(&v));
 }
 
 float XrSystem::displayRefreshRate() const {

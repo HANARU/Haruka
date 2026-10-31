@@ -1,6 +1,7 @@
 #include "EditorApp.hpp"
 #include "../core/ComponentRegistry.hpp"
 #include "../core/FrameTimings.hpp"
+#include "../core/AppPaths.hpp"
 #include "../core/ProjectPaths.hpp"
 #include "EditorCommands.hpp"
 #include "../renderer/Renderer.hpp"
@@ -17,6 +18,8 @@
 #include "../assets/SceneSerializer.hpp"
 #include "../platform/IWindow.hpp"
 #include "../input/HInputSystem.hpp"
+#include "../components/XrComponents.hpp"
+#include "../core/DebugDraw.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -81,35 +84,18 @@ static ENumberUnit toNumberUnit(PropUnit u) {
     }
 }
 
-struct PropsSnapshotCmd : ICommand {
-    // props 의 setF/getF 람다가 **컴포넌트 원시 포인터**를 캡처하므로, 그 컴포넌트가
-    // 사라지면 이 커맨드를 반드시 걷어내야 undo/redo 가 해제된 메모리를 만지지 않습니다.
-    // 사라지는 경로가 둘이라 연결 고리도 둘입니다.
-    //   1) 액터 파괴 → onActorDestroyed → purge(Actor*)      → refersTo
-    //   2) 컴포넌트만 제거(디테일 패널 x) → purgeComponent   → refersToComponent
-    // 2번은 액터가 살아남아 이벤트가 발화하지 않으므로 1번이 잡지 못합니다.
-    const Actor*          actor;
-    Component*            comp;
-    std::vector<PropDesc> props;
-    std::vector<float>    before, after;
-
-    PropsSnapshotCmd(const Actor* owner, Component* c, std::vector<PropDesc> p,
-                     std::vector<float> b, std::vector<float> a)
-        : actor(owner), comp(c), props(std::move(p)),
-          before(std::move(b)), after(std::move(a)) {}
-
-    // 되돌린 값도 편집 확정입니다. 세터는 값만 바꾸므로, 물리 바디 재생성 같은 후속 처리는
-    // 확정 훅이 합니다(DEF-43).
-    void undo() override {
-        size_t j=0; for (auto& pd : props) if (pd.setF) pd.setF(before[j++]);
-        comp->onPropsCommitted();
+// 콘텐츠 브라우저에서 소리 파일을 지정(2026-10-15). setFile 이 이전 소리를 놓아 주므로 값 문자열을 다시 읽는
+// 일반 경로(readField) 대신 이것으로 되돌립니다. 액터는 ID 로 찾습니다(EditorCommands.hpp 머리말).
+struct AudioFileCmd : ICommand {
+    World* world; uint64_t id; std::string before, after;
+    AudioFileCmd(World& w, const Actor* a, std::string b, std::string af)
+        : world(&w), id(a->id), before(std::move(b)), after(std::move(af)) {}
+    void set(const std::string& f) {
+        if (Actor* a = world->findById(id))
+            if (auto* ac = a->getComponent<AudioComponent>()) ac->setFile(f);
     }
-    void redo() override {
-        size_t j=0; for (auto& pd : props) if (pd.setF) pd.setF(after[j++]);
-        comp->onPropsCommitted();
-    }
-    bool refersTo(const Actor* a) const override { return actor == a; }
-    bool refersToComponent(const Component* c) const override { return comp == c; }
+    void undo() override { set(before); }
+    void redo() override { set(after); }
 };
 
 namespace fs = std::filesystem;
@@ -170,8 +156,9 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
             detailsActor_ = nullptr;
             detailsDirty_ = true;
         }
+        ctx_.selection.erase(std::remove(ctx_.selection.begin(), ctx_.selection.end(), a), ctx_.selection.end());
         if (ctx_.selected == a) {
-            ctx_.selected = nullptr;
+            ctx_.selected = ctx_.selection.empty() ? nullptr : ctx_.selection.back();
             // 리네임 중인 액터가 (조상 삭제로) 함께 사라질 수 있습니다. 여기서 끄지 않으면
             // 다음 Enter 가 tickRenameInput 에서 널 selected 를 역참조합니다.
             renaming_     = false;
@@ -184,12 +171,16 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
     editorCamActor_->setLocalPosition({ 0.f, 0.3f, 2.5f });
     editorCamActor_->setLocalRotation(CameraComponent::yawPitchRotation(editorYaw_, editorPitch_));
     editorCam_ = editorCamActor_->addComponent<CameraComponent>();
+    // World 가 편집 중에는 이 카메라를, Play 중에는 씬의 primary 카메라(플레이어)를 먼저 고릅니다(2026-10-15).
+    world.setEditorCamera(editorCam_);
+    // 기즈모 드래그가 끝나면 주 선택과 함께 움직인 액터들을 한 커맨드로 쌓습니다(2026-10-15).
+    gizmo_.onCommit = [this](const Transform& before, const Transform& after) { commitGizmoDrag(before, after); };
 
     auto beginCmd = [&renderer]() { return renderer.beginOneTimeCmd(); };
     auto endCmd   = [&renderer](VkCommandBuffer cmd) { renderer.endOneTimeCmd(cmd); };
 
     slateRenderer_.init(renderer.getDevice(), renderer.getPhysDevice(),
-                        renderer.getSwapFormat(), beginCmd, endCmd);
+                        renderer.getSwapFormat(), renderer.pushDescriptorFn(), beginCmd, endCmd);
 
     scanModelFiles();
     loadLogFilter();   // 첫 syncLogCategories 보다 먼저. 숨긴 카테고리는 등록되는 순간 적용됩니다
@@ -199,7 +190,7 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
     rebuildBottomPanel();
 
     renderer.setUIRenderer(&slateRenderer_);
-    hotReloader_.start("shaders", renderer);
+    hotReloader_.start(happ::inExeDir("shaders").string(), renderer);
     HLOG(LogEditor, Log) << "Ready. Press Play to run game simulation.";
 }
 
@@ -301,12 +292,16 @@ void EditorApp::tick(float dt) {
     tickEditorCamera(dt, scroll);
     tickRenameInput();
     tickShortcuts();
+    // 키로 누른 대화상자 버튼(Enter · Esc)과 단축키가 연 대화상자를 여기서 처리합니다. 위젯 디스패치 밖이라
+    // 바로 실행해도 됩니다. 마우스로 누른 것은 handleInput 끝(flushChromeRebuilds)에서 처리합니다.
+    flushModal();
 
     // Gizmo hotkeys Q/W/E/R (edge trigger, only when not in camera mode / not typing)
     // 드래그 중에는 모드를 바꾸지 않습니다. 바뀌면 UI 와 실제 조작이 어긋나고,
     // 크기 균등 핸들(axis_ == 3) 상태로 이동·회전 분기에 들어가 축 배열을 넘겨 읽습니다.
+    const bool drivingPlayer = ctx_.world && ctx_.world->getActiveCamera() != editorCam_;
     if (ctx_.window && currentFocus() == EFocusTarget::None && !gizmo_.isDragging() &&
-        !ctx_.window->isCameraModeActive()) {
+        !ctx_.window->isCameraModeActive() && !modal_ && !drivingPlayer) {
         IWindow& win = *ctx_.window;
         bool qNow = win.isKeyDown(HInput::KEY_Q);
         bool wNow = win.isKeyDown(HInput::KEY_W);
@@ -354,8 +349,16 @@ void EditorApp::tick(float dt) {
         gizmo_.setSnap(snap_);
         gizmo_.tick(gizmoTarget, *ctx_.world, wvp, s(18.f),
                     gizmoMode_, worldSpace_, inView, lines, tris);
+        // 주 선택이 아닌 선택 액터의 상자(조금 어둡게). 주 선택의 상자는 기즈모가 그립니다.
+        for (Actor* o : ctx_.selection)
+            if (o && o != ctx_.selected && o->activeInHierarchy())
+                EditorGizmo::appendSelectionBox(o, lines, { 0.85f, 0.65f, 0.15f, 1.f });
         buildEditorIcons(*ctx_.world, wvp, lines, tris);
-        appendXrControllerLines(*ctx_.world, lines);
+        // 손 추적 컴포넌트가 있으면 손 표시는 그쪽(디버그 선)이 그립니다. 없으면 예전처럼 카메라 원점 기준으로 그립니다.
+        if (TrackedPoseComponent::liveHands() == 0) appendXrControllerLines(*ctx_.world, lines);
+        // 컴포넌트 · 게임 코드가 모은 디버그 선(2026-10-15). 앞 프레임의 월드 틱이 모은 것을 그리고 비웁니다.
+        for (const hdebug::Line& l : hdebug::lines()) { lines.push_back({ l.a, l.color }); lines.push_back({ l.b, l.color }); }
+        hdebug::lines().clear();
         ctx_.renderer->setEditorLines(std::move(lines));
         ctx_.renderer->setGizmoTris(std::move(tris));
     }
@@ -486,6 +489,7 @@ void EditorApp::scanModelFiles() {
     } catch (...) {}
 
     prefabFiles_ = PrefabManager::scan();
+    scanSceneFiles();
 }
 
 // ── buildWidgetTree ────────────────────────────────────────────────────────────
@@ -659,6 +663,7 @@ void EditorApp::buildWidgetTree() {
     dockOverlay_   = HNew(SDockOverlay);
     menuPopupHost_ = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
     logPopupHost_  = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
+    modalHost_     = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
     // 위젯 트리를 새로 만들면 팝업이 붙어 있던 버튼도 사라지므로 팝업을 닫습니다.
     logPopupOpen_  = false;
     logPopupPanel_.reset();
@@ -676,6 +681,14 @@ void EditorApp::buildWidgetTree() {
                       ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
                   HR::ESizeRule::Fill, 1.f)
         ->addSlot(spacer(), HR::ESizeRule::Fixed, s(10.f))
+        // 지금 열린 씬(별표 = 저장하지 않은 변경). 제목 표시줄과 같은 문자열입니다.
+        ->addSlot(HNew(STextBlock)
+                      ->text(AttrStr([this]() -> std::string {
+                          return statusNarrow_ >= 2 ? std::string() : "Scene: " + sceneTitle(); }))
+                      ->fontSize(s(11.f))->color(kTextDim)
+                      ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
+                  HR::ESizeRule::Auto)
+        ->addSlot(spacer(), HR::ESizeRule::Fixed, s(14.f))
         ->addSlot(HNew(STextBlock)
                       ->text(AttrStr([this]() -> std::string { return statusFocusText(); }))
                       ->fontSize(s(11.f))->color(kTextDim)
@@ -698,10 +711,14 @@ void EditorApp::buildWidgetTree() {
     root->addSlot(logPopupHost_);
     root->addSlot(menuPopupHost_);
     root->addSlot(dockOverlay_);
+    outlinerDropOverlay_ = HNew(SDockOverlay);
+    root->addSlot(outlinerDropOverlay_);
+    root->addSlot(modalHost_);   // 맨 위: 대화상자가 떠 있으면 모든 누름을 받습니다
     slateRenderer_.setRootWidget(root);
 
     rebuildDockArea();
     rebuildMenuPopup();
+    rebuildModal();
 }
 
 // ── buildDefaultDockLayout ───────────────────────────────────────────────────────
@@ -1156,8 +1173,8 @@ void EditorApp::collapseEmptyLeaf(DockNode* leaf) {
 void EditorApp::saveDockLayout() const {
     if (!dockRoot_) return;
     std::error_code ec;
-    fs::create_directories("Config", ec);           // 없으면 생성(실패해도 아래 open 이 처리)
-    std::ofstream f("Config/editor_layout.txt");
+    fs::create_directories(happ::inWriteRoot("Config"), ec);   // 없으면 생성(실패해도 아래 open 이 처리)
+    std::ofstream f(happ::inWriteRoot("Config/editor_layout.txt"));
     if (!f) { HLOG(LogEditor, Error) << "Layout save failed"; return; }
     std::ostringstream oss;
     oss << "# Haruka Dock Layout v1\n";
@@ -1166,7 +1183,7 @@ void EditorApp::saveDockLayout() const {
 }
 
 bool EditorApp::loadDockLayout() {
-    std::ifstream f("Config/editor_layout.txt");
+    std::ifstream f(happ::inWriteRoot("Config/editor_layout.txt"));
     if (!f) return false;
     // '#' 주석 줄을 걷어내고 나머지를 토큰 스트림으로 파싱합니다.
     std::string body, line;
@@ -1193,47 +1210,40 @@ bool EditorApp::loadDockLayout() {
 void EditorApp::buildMenus() {
     menus_.clear();
     menus_.push_back({ "File", {
-        { "New Scene",  [this]{ deserializeWorld(""); cmdStack_.clear(); } },  // 카메라만 남기고 비움
-        { "Save Scene", [this]{ saveScene(); } },
-        { "Load Scene", [this]{ loadScene(); } },
+        { "New Scene        Ctrl+N",       [this]{ newScene(); } },   // 카메라만 남기고 비움
+        { "Open Scene...    Ctrl+O",       [this]{ openSceneDialog(); } },
+        { "Save Scene       Ctrl+S",       [this]{ saveScene(); } },
+        { "Save Scene As... Ctrl+Shift+S", [this]{ saveSceneAs(); } },
     }, 0.f });
     menus_.push_back({ "Edit", {
-        { "Undo", [this]{ undo(); } },
-        { "Redo", [this]{ redo(); } },
-        { "Delete Selected", [this]{ deleteSelectedActor(); } },
+        { "Undo             Ctrl+Z", [this]{ undo(); } },
+        { "Redo             Ctrl+Y", [this]{ redo(); } },
+        { "Copy             Ctrl+C", [this]{ copySelection(); } },
+        { "Paste            Ctrl+V", [this]{ pasteClipboard(); } },
+        { "Duplicate        Ctrl+D", [this]{ duplicateSelection(); } },
+        { "Delete           Del",    [this]{ deleteSelection(); } },
+        { "Frame Selected   F",      [this]{ frameSelection(); } },
+        { "Audio Output...",         [this]{ openAudioOutputDialog(); } },
     }, 0.f });
     menus_.push_back({ "Actor", {
         { "Add Empty", [this]{
             if (!ctx_.world) return;
-            ctx_.selected = ctx_.world->spawnActor("Actor_" + std::to_string(actorCounter_++));
+            selectOnly(ctx_.world->spawnActor("Actor_" + std::to_string(actorCounter_++)));
             recordActorCreation({ ctx_.selected });
         } },
-        // 계층을 만들 수단이 지금은 씬 역직렬화뿐이라, 아웃라이너 트리를 실기로 확인할
-        // 방법이 없습니다. 재부모화 드래그&드롭은 아직 계획에 없으므로 메뉴로 노출합니다.
-        // 부모는 "직전에 선택했던 액터", 자식은 "지금 선택한 액터"입니다.
+        // 부모 바꾸기는 아웃라이너에서 행을 끌어 놓는 것이 기본이고(2026-10-15), 메뉴도 남겨 둡니다. 둘 다 월드 자세를
+        // 유지하고 Undo 됩니다. 부모는 "직전에 선택했던 액터", 자식은 "지금 선택한 액터"입니다.
         { "Attach To Prev Selected", [this]{
             Actor* child  = ctx_.selected;
             Actor* parent = prevSelected2_;
             if (!child || !parent || child == parent) return;
-            if (child == editorCamActor_ || parent == editorCamActor_) return;
-            // attachTo 는 사이클을 Scene 카테고리 경고로만 알리고 조용히 무시합니다(반환값 없음).
-            // 호출 전에 조상 체인을 직접 확인해야 UI 가 성공한 줄 착각하지 않습니다.
-            for (Actor* p = parent; p; p = p->getParent())
-                if (p == child) return;
-            child->attachTo(parent);
-            // 선택 액터는 그대로라 tick 의 selChanged 자동 노출이 걸리지 않습니다. 새 부모와
-            // 그 조상을 모두 펼치고 결과 행으로 스크롤해, 조작 결과가 반드시 보이게 합니다.
-            outlinerCollapsed_.erase(parent->id);
-            revealActor(child);
-            outlinerRevealSel_ = true;
-            outlinerDirty_     = true;
+            if (!reparentUndoable(child, parent))
+                HLOG(LogEditor, Warning) << "Cannot attach '" << child->name << "' under '" << parent->name
+                                         << "' (an actor cannot go under itself or its child)";
         } },
         { "Detach Selected", [this]{
             if (!ctx_.selected || ctx_.selected == editorCamActor_) return;
-            ctx_.selected->detach();
-            // 루트로 올라가면 id 순 정렬에서 자리가 크게 바뀌므로 그 행으로 스크롤합니다.
-            outlinerRevealSel_ = true;
-            outlinerDirty_     = true;
+            reparentUndoable(ctx_.selected, nullptr);
         } },
     }, 0.f });
     menus_.push_back({ "View", {
@@ -1408,7 +1418,7 @@ void EditorApp::rebuildToolbar() {
         toolbarBox_->addSlot(spacer(), HR::ESizeRule::Fixed, s(2.f));
     };
     sceneBtn("Save",    [this]{ saveScene(); });
-    sceneBtn("Load",    [this]{ loadScene(); });
+    sceneBtn("Open",    [this]{ openSceneDialog(); });
     sceneBtn("Refresh", [this]{ scanModelFiles(); rebuildBottomPanel(); });
 
     toolbarBox_->addSlot(spacer(), HR::ESizeRule::Fill);
@@ -1673,6 +1683,8 @@ void EditorApp::beginPlay() {
     if (playState_ == EPlayState::Playing) return;
     if (playState_ == EPlayState::Editor) {
         worldSnapshot_ = serializeWorld();
+        doc_.beginPlay(cmdStack_.stateToken());
+        ctx_.world->setPlaying(true);
         HLOG(LogEditor, Log) << "Play";
     } else {
         HLOG(LogEditor, Log) << "Resume";
@@ -1695,9 +1707,11 @@ void EditorApp::pausePlay() {
 void EditorApp::stopPlay() {
     if (playState_ == EPlayState::Editor) return;
     playState_ = EPlayState::Editor;
+    ctx_.world->setPlaying(false);
     deserializeWorld(worldSnapshot_);
     worldSnapshot_.clear();
     cmdStack_.clear();
+    doc_.endPlay(cmdStack_.stateToken());
     HLOG(LogEditor, Log) << "Stopped - world restored";
     toolbarDirty_ = true;
 }
@@ -1715,7 +1729,7 @@ void EditorApp::deserializeWorld(const std::string& data) {
     for (auto& ap : ctx_.world->getActors())
         if (ap.get() != editorCamActor_)
             toDestroy.push_back(ap.get());
-    ctx_.selected = nullptr;
+    selectOnly(nullptr);
     for (Actor* a : toDestroy) ctx_.world->destroyActor(a);
 
     SceneSerializer::readScene(data, *ctx_.world, *ctx_.assets);
@@ -1737,22 +1751,6 @@ void EditorApp::deserializeWorld(const std::string& data) {
             catch (...) {}
         }
     }
-}
-
-void EditorApp::saveScene() {
-    std::ofstream f("scene.hscene");
-    if (!f) { HLOG(LogEditor, Error) << "Save failed"; return; }
-    f << serializeWorld();
-    HLOG(LogEditor, Log) << "Scene saved to scene.hscene";
-}
-
-void EditorApp::loadScene() {
-    std::ifstream f("scene.hscene");
-    if (!f) { HLOG(LogEditor, Error) << "Load failed: scene.hscene not found"; return; }
-    std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    deserializeWorld(data);
-    cmdStack_.clear();
-    HLOG(LogEditor, Log) << "Scene loaded from scene.hscene";
 }
 
 // ── 아웃라이너 계층 헬퍼 (Phase 3) ─────────────────────────────────────────────
@@ -1897,6 +1895,7 @@ void EditorApp::flushDetailsRebuild() {
 // 실제 포커스는 세 플래그에서 유도합니다. 숫자 필드는 위젯이 소유한 정적 상태라
 // 여기서 진입시킬 수 없으므로, 그것이 잡혀 있으면 언제나 최우선으로 봅니다.
 EditorApp::EFocusTarget EditorApp::currentFocus() const {
+    if (dialogFocused_)               return EFocusTarget::Dialog;
     if (SNumberField::focusedField()) return EFocusTarget::NumberField;
     if (renaming_)                    return EFocusTarget::Rename;
     if (outlinerSearchFocused_)       return EFocusTarget::Search;
@@ -1919,6 +1918,8 @@ void EditorApp::setTextFocus(EFocusTarget t) {
         outlinerSearchFocused_ = false; searchSelAll_ = false;
     } else if (prev == EFocusTarget::LogSearch) {
         logSearchFocused_ = false; logSearchSelAll_ = false; logViewDirty_ = true;
+    } else if (prev == EFocusTarget::Dialog) {
+        dialogFocused_ = false; dialogSelAll_ = false;
     }
 
     if (t == EFocusTarget::Rename) {
@@ -1931,6 +1932,11 @@ void EditorApp::setTextFocus(EFocusTarget t) {
     } else if (t == EFocusTarget::Search) {
         outlinerSearchFocused_ = true;
         searchSelAll_          = !outlinerSearch_.empty();
+    } else if (t == EFocusTarget::Dialog) {
+        if (modal_ && modal_->hasInput) {
+            dialogFocused_ = true;
+            dialogSelAll_  = !dialogText_.empty();
+        }
     } else if (t == EFocusTarget::LogSearch) {
         logSearchFocused_ = true;
         logSearchSelAll_  = !logSearch_.empty();
@@ -1979,6 +1985,8 @@ bool EditorApp::focusWidgetContains(float x, float y) const {
         case EFocusTarget::Rename:
             // 리네임 행 위젯은 리빌드마다 새로 만들어지므로 목록 전체를 기준으로 봅니다.
             return outlinerList_ && outlinerList_->cachedGeometry().contains(p);
+        case EFocusTarget::Dialog:
+            return dialogBox_ && dialogBox_->cachedGeometry().contains(p);
         default:
             return false;
     }
@@ -2065,6 +2073,9 @@ void EditorApp::flushChromeRebuilds() {
     // 로그 행은 위젯을 만들지 않고 문자열만 바꾸므로 콜백 안에서 불려도 안전하지만, 필터
     // 토글을 여러 번 누른 프레임에 한 번만 계산하려고 같은 소진 지점에 둡니다.
     if (logViewDirty_ && bottomTab_ == 1 && logRowsBox_) { logViewDirty_ = false; refreshLogView(); }
+    // 대화상자 버튼은 맨 마지막에 실행합니다. 그 동작이 씬을 바꿔 아웃라이너 · 디테일을 다시 만들 수 있습니다.
+    flushModal();
+    if (bottomDirty_) { bottomDirty_ = false; rebuildBottomPanel(); }
 }
 
 // 행 하나를 조립합니다. 슬롯은 SHorizontalBox 가 penX 를 단조 누적하므로 서로 겹치지
@@ -2073,7 +2084,7 @@ void EditorApp::flushChromeRebuilds() {
 void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
     Actor* const   a         = r.actor;
     const uint64_t id        = r.id;
-    const bool     sel       = (a == ctx_.selected);
+    const bool     sel       = isSelected(a);
     const bool     ren       = sel && renaming_;
     const bool     renAll    = ren && renameSelAll_;
     const bool     filtering = !outlinerSearch_.empty();
@@ -2088,11 +2099,19 @@ void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
     if (listW - fixed < s(kOutMinLabelW)) { fixed -= indent; indent = 0.f; }
     const float nameW = std::max(s(kOutMinLabelW), listW - fixed) - s(18.f);   // 버튼 padding 보정
 
-    // 같은 행을 다시 누르면 선택이 풀리는 것은 개편 전부터의 동작이라 그대로 둡니다.
+    // Ctrl+클릭은 선택에 넣고 빼기, Shift+클릭은 주 선택부터 이 행까지(2026-10-15). 하나만 선택된 행을 다시 누르면
+    // 선택이 풀리는 것은 개편 전부터의 동작이라 그대로 둡니다.
     auto selectRow = [this, id] {
         renaming_ = false;
-        if (Actor* t = ctx_.world->findById(id))
-            ctx_.selected = (ctx_.selected == t) ? nullptr : t;
+        Actor* t = ctx_.world->findById(id);
+        if (!t) return;
+        const bool ctrl  = ctx_.window && ctx_.window->isCtrlDown();
+        const bool shift = ctx_.window && ctx_.window->isShiftDown();
+        if (ctrl)       toggleSelect(t);
+        else if (shift) selectRange(t);
+        else if (ctx_.selection.size() == 1 && ctx_.selected == t) selectOnly(nullptr);
+        else            selectOnly(t);
+        outlinerDirty_ = true;   // 여러 행의 강조가 바뀔 수 있음
     };
 
     glm::vec4   typeCol;
@@ -2150,7 +2169,9 @@ void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
             // 에디터 카메라를 끄면 getActiveCamera 가 비어 뷰포트·기즈모·픽이 전부
             // 죽습니다. 아웃라이너에 노출하지 않지만 여기서도 이중으로 막습니다.
             if (!t || t == editorCamActor_) return;
-            t->setActive(!t->activeSelf());
+            const bool before = t->activeSelf();
+            t->setActive(!before);
+            cmdStack_.push(std::make_unique<SetActiveCmd>(*ctx_.world, t, before, !before));
             outlinerDirty_ = true;
         });
 
@@ -2189,22 +2210,21 @@ void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
                           Actor* t = ctx_.world ? ctx_.world->findById(id) : nullptr;
                           if (!t || t == editorCamActor_) return;
                           if (ctx_.selected == t) {
-                              ctx_.selected = nullptr;
-                              renaming_     = false;
+                              renaming_ = false;
                               gizmo_.cancel();
                           }
-                          // Ctrl+Z 로 되살릴 수 있게 지웁니다. 이 액터를 포인터로 붙잡던
-                          // 커맨드는 onActorDestroyed 구독이 정밀 제거합니다(무관한 이력은 보존).
+                          // Ctrl+Z 로 되살릴 수 있게 지웁니다. 선택 목록에서는 파괴 감시가 뺍니다.
                           deleteActorUndoable(t);
                       }),
            SHorizontalBox::ESizeRule::Fixed, s(kOutDelW));
 
     // 선택 하이라이트는 행 전체에 깔되, SBorder 는 자식에게 이벤트를 그대로 넘기므로
     // 히트테스트에 개입하지 않습니다.
-    outlinerList_->addSlot(
-        HNew(SBorder)->background(sel ? kSelected : glm::vec4{0.f, 0.f, 0.f, 0.f})
-            ->content(row),
-        SVerticalBox::ESizeRule::Fixed, s(kOutRowH));
+    // 끌어 놓기 판정(tickOutlinerDrag)이 쓸 행 위젯을 기록합니다.
+    auto rowBorder = HNew(SBorder)->background(sel ? kSelected : glm::vec4{0.f, 0.f, 0.f, 0.f})
+        ->content(row);
+    outlinerRowHits_.push_back({ id, rowBorder });
+    outlinerList_->addSlot(rowBorder, SVerticalBox::ESizeRule::Fixed, s(kOutRowH));
 }
 
 // ── rebuildOutliner ────────────────────────────────────────────────────────────
@@ -2214,6 +2234,7 @@ void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
 void EditorApp::rebuildOutliner() {
     if (!outlinerList_ || !ctx_.world) return;
     outlinerList_->clearSlots();
+    outlinerRowHits_.clear();
 
     // + Add Empty Actor button
     outlinerList_->addSlot(
@@ -2223,7 +2244,7 @@ void EditorApp::rebuildOutliner() {
                            {0.18f, 0.18f, 0.22f, 1.f}, {0.28f, 0.28f, 0.35f, 1.f},
                            [this]{
                                std::string nm = "Actor_" + std::to_string(actorCounter_++);
-                               ctx_.selected = ctx_.world->spawnActor(nm);
+                               selectOnly(ctx_.world->spawnActor(nm));
                                recordActorCreation({ ctx_.selected });
                            })),
         SVerticalBox::ESizeRule::Fixed, s(kOutHeaderH));
@@ -2307,6 +2328,15 @@ void EditorApp::rebuildDetails() {
 
     if (!ctx_.selected) return;
 
+    // 여러 액터를 고른 경우 디테일은 주 선택(마지막에 고른 것) 하나만 보여 줍니다(2026-10-15).
+    if (ctx_.selection.size() > 1)
+        detailsList_->addSlot(
+            HNew(SBorder)->background({0.07f, 0.20f, 0.33f, 1.f})->padding({s(8.f), s(3.f)})
+                ->content(HNew(STextBlock)
+                    ->text(std::to_string(ctx_.selection.size()) + " actors selected (showing the last one)")
+                    ->fontSize(s(12.f))->color(kTextBody)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
+            SVerticalBox::ESizeRule::Fixed, s(24.f));
+
     detailsList_->addSlot(HNew(SBorder)->background(kBorder), SVerticalBox::ESizeRule::Fixed, 1.f);
 
     static constexpr glm::vec4 kRed  {0.9f, 0.3f, 0.3f, 1.f};
@@ -2342,7 +2372,7 @@ void EditorApp::rebuildDetails() {
     // ── Transform (collapsible) ───────────────────────────────────────────────
     auto txBegin = [this, sel]{ undoSnapshot_ = sel->transform(); };
     auto txEnd   = [this, sel]{
-        cmdStack_.push(std::make_unique<SetTransformCmd>(sel, undoSnapshot_, sel->transform()));
+        cmdStack_.push(std::make_unique<SetTransformCmd>(*ctx_.world, sel, undoSnapshot_, sel->transform()));
         sel->notifyTransformCommitted();   // 물리 바디 등이 편집 결과를 따라오게
     };
 
@@ -2449,27 +2479,13 @@ void EditorApp::rebuildDetails() {
 
         detailsList_->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(8.f));
 
-        // Remove callback — type dispatch.
-        // 제거 **전에** 그 컴포넌트를 참조하는 커맨드를 걷어냅니다. 프로퍼티 스냅샷의
-        // 값 접근자가 컴포넌트 포인터를 붙잡고 있어서, 걷어내지 않으면 다음 Ctrl+Z 가
-        // 해제된 메모리에 씁니다. 대상은 removeComponent 와 같은 기준(첫 매치)으로 얻습니다.
-        auto dropCmds = [this](const Component* c) { if (c) cmdStack_.purgeComponent(c); };
-        std::function<void()> removeFn;
-        if (dynamic_cast<StaticMeshComponent*>(comp))
-            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<StaticMeshComponent>());
-                sel->removeComponent<StaticMeshComponent>(); detailsDirty_ = true; };
-        else if (dynamic_cast<LightComponent*>(comp))
-            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<LightComponent>());
-                sel->removeComponent<LightComponent>(); detailsDirty_ = true; };
-        else if (dynamic_cast<CameraComponent*>(comp))
-            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<CameraComponent>());
-                sel->removeComponent<CameraComponent>(); detailsDirty_ = true; };
-        else if (dynamic_cast<AudioComponent*>(comp))
-            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<AudioComponent>());
-                sel->removeComponent<AudioComponent>(); detailsDirty_ = true; };
-        else if (dynamic_cast<RigidBodyComponent*>(comp))
-            removeFn = [this, sel, dropCmds]{ dropCmds(sel->getComponent<RigidBodyComponent>());
-                sel->removeComponent<RigidBodyComponent>(); detailsDirty_ = true; };
+        // 컴포넌트 제거(Undo 가능, 2026-10-15). 지우는 순간의 값을 떠 두었다가 원래 자리로 되살립니다.
+        std::function<void()> removeFn = [this, sel, comp] {
+            auto cmd = std::make_unique<ComponentPresenceCmd>(ComponentPresenceCmd::Kind::Remove, *ctx_.world, sel, comp,
+                                                              ComponentLoadContext{ ctx_.assets }, [this] { detailsDirty_ = true; });
+            cmd->redo();
+            cmdStack_.push(std::move(cmd));
+        };
 
         // Component header row
         bool en = comp->isEnabled();
@@ -2486,7 +2502,12 @@ void EditorApp::rebuildDetails() {
                                        en ? glm::vec4{0.18f,0.50f,0.22f,1.f}
                                           : glm::vec4{0.38f,0.18f,0.18f,1.f},
                                        {0.35f, 0.35f, 0.40f, 1.f},
-                                       [this, comp]{ comp->setEnabled(!comp->isEnabled()); detailsDirty_ = true; }),
+                                       [this, sel, comp]{
+                                           const bool before = comp->isEnabled();
+                                           comp->setEnabled(!before);
+                                           cmdStack_.push(std::make_unique<ComponentEnabledCmd>(*ctx_.world, sel, comp, before, !before));
+                                           detailsDirty_ = true;
+                                       }),
                             SHorizontalBox::ESizeRule::Fixed, s(42.f))
                         ->addSlot(spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f))
                         ->addSlot(
@@ -2498,23 +2519,24 @@ void EditorApp::rebuildDetails() {
 
         // ── Generic property rows via buildProps() ────────────────────────────
         auto props      = std::make_shared<std::vector<PropDesc>>(comp->buildProps());
-        auto snapBefore = std::make_shared<std::vector<float>>();
+        auto snapBefore = std::make_shared<hcmd::PropValues>();
 
-        auto compBegin = [props, snapBefore] {
-            snapBefore->clear();
-            for (auto& pd : *props)
-                if (pd.getF) snapBefore->push_back(pd.getF());
-        };
-        auto compEnd = [this, sel, comp, props, snapBefore] {
-            std::vector<float> after;
-            after.reserve(props->size());
-            for (auto& pd : *props)
-                if (pd.getF) after.push_back(pd.getF());
-            // 소유 액터와 대상 컴포넌트를 함께 넘겨, 둘 중 어느 쪽이 사라지든 커맨드가
-            // 걷히게 합니다. compEnd 는 패널이 살아있는 동안만 호출되므로 둘 다 유효합니다.
-            cmdStack_.push(std::make_unique<PropsSnapshotCmd>(sel, comp, *props,
-                                                             *snapBefore, std::move(after)));
+        // 숫자 칸은 드래그 · 입력을 시작할 때와 확정할 때의 값을 떠서 한 커맨드로 쌓습니다. 커맨드는 컴포넌트를
+        // 포인터가 아니라 액터 ID · 타입 · 순번으로 기억합니다(EditorCommands.hpp). 토글 · 열거도 이제 되돌립니다.
+        auto compBegin = [comp, snapBefore] { *snapBefore = hcmd::captureProps(*comp); };
+        auto compEnd = [this, sel, comp, snapBefore] {
+            hcmd::PropValues after = hcmd::captureProps(*comp);
+            if (after != *snapBefore)
+                cmdStack_.push(std::make_unique<ComponentPropsCmd>(*ctx_.world, sel, comp, *snapBefore, std::move(after)));
             comp->onPropsCommitted();
+        };
+        auto commitClick = [this, sel, comp](const std::function<void()>& change) {
+            hcmd::PropValues before = hcmd::captureProps(*comp);
+            change();
+            comp->onPropsCommitted();
+            hcmd::PropValues after = hcmd::captureProps(*comp);
+            if (after != before)
+                cmdStack_.push(std::make_unique<ComponentPropsCmd>(*ctx_.world, sel, comp, std::move(before), std::move(after)));
         };
 
         // 열거·토글 칸은 클릭 한 번이 곧 확정이라 세터 직후에 확정 훅을 부릅니다.
@@ -2525,10 +2547,10 @@ void EditorApp::rebuildDetails() {
                     pd.step, toNumberUnit(pd.unit), compBegin, compEnd);
             else if (pd.kind == PropDesc::Toggle)
                 addBoolRow(pd.label, pd.getB,
-                           [comp, setB = pd.setB](bool v){ setB(v); comp->onPropsCommitted(); });
+                           [commitClick, setB = pd.setB](bool v){ commitClick([&]{ setB(v); }); });
             else if (pd.kind == PropDesc::Enum)
                 addEnumRow(pd.label, pd.options, pd.getI,
-                           [comp, setI = pd.setI](int v){ setI(v); comp->onPropsCommitted(); });
+                           [commitClick, setI = pd.setI](int v){ commitClick([&]{ setI(v); }); });
         }
 
         std::string info = comp->readOnlyInfo();
@@ -2580,7 +2602,10 @@ void EditorApp::rebuildDetails() {
         if (entry.editorLabel.empty() || entry.find(*sel)) continue;
         auto add = entry.add;
         addCompBtn("+ " + entry.editorLabel, [this, sel, add]{
-            add(*sel);
+            if (Component* c = add(*sel))
+                cmdStack_.push(std::make_unique<ComponentPresenceCmd>(ComponentPresenceCmd::Kind::Add, *ctx_.world, sel, c,
+                                                                      ComponentLoadContext{ ctx_.assets },
+                                                                      [this] { detailsDirty_ = true; }));
             detailsDirty_ = true;
         });
     }
@@ -2680,7 +2705,7 @@ static constexpr ELogVerbosity kLogSeverities[] = { ELogVerbosity::Error, ELogVe
                                                     ELogVerbosity::Log,   ELogVerbosity::Verbose };
 
 void EditorApp::loadLogFilter() {
-    std::ifstream f(kLogFilterPath);
+    std::ifstream f(happ::inWriteRoot(kLogFilterPath));
     if (!f) return;   // 첫 실행: 기본값(전부 표시)을 그대로 씁니다
     std::string line;
     while (std::getline(f, line)) {
@@ -2700,8 +2725,8 @@ void EditorApp::loadLogFilter() {
 
 void EditorApp::saveLogFilter() const {
     std::error_code ec;
-    fs::create_directories("Config", ec);   // 없으면 생성(실패해도 아래 open 이 처리)
-    std::ofstream f(kLogFilterPath, std::ios::trunc);
+    fs::create_directories(happ::inWriteRoot("Config"), ec);   // 없으면 생성(실패해도 아래 open 이 처리)
+    std::ofstream f(happ::inWriteRoot(kLogFilterPath), std::ios::trunc);
     if (!f) { HLOG(LogEditor, Warning) << "Output Log filter save failed (" << kLogFilterPath << ")"; return; }
     f << "# Haruka Output Log display filter v1. Search text is not saved.\n";
     for (ELogVerbosity v : kLogSeverities)
@@ -2711,7 +2736,7 @@ void EditorApp::saveLogFilter() const {
 }
 
 void EditorApp::saveLogLevels() const {
-    if (!HLog::saveLevelOverrides(HLog::kLevelOverridesPath))
+    if (!HLog::saveLevelOverrides(happ::inWriteRoot(HLog::kLevelOverridesPath).string()))
         HLOG(LogEditor, Warning) << "log level save failed (" << HLog::kLevelOverridesPath << ")";
 }
 
@@ -3045,6 +3070,36 @@ void EditorApp::rebuildBottomPanel() {
     }
 
     if (bottomTab_ == 0) {
+        // Content Browser — Scenes(2026-10-15). 누르면 그 씬을 엽니다(저장하지 않은 변경이 있으면 먼저 묻습니다).
+        // 이 버튼은 하단 패널 안에 있으므로, 패널을 다시 만드는 일은 프레임 끝으로 미룹니다(bottomDirty_).
+        if (!sceneFiles_.empty()) {
+            bottomContent_->addSlot(
+                sectionHeader("SCENES", kTextDim),
+                SVerticalBox::ESizeRule::Fixed, s(22.f));
+            for (const auto& path : sceneFiles_) {
+                const std::string display = path.substr(std::string("assets/scenes/").size());
+                const bool current = (path == doc_.path());
+                bottomContent_->addSlot(
+                    HNew(SButton)
+                        ->normalColor (current ? glm::vec4{0.07f, 0.20f, 0.33f, 1.f} : glm::vec4{0.f, 0.f, 0.f, 0.f})
+                        ->hoveredColor({0.20f, 0.20f, 0.25f, 1.f})
+                        ->pressedColor({0.07f, 0.33f, 0.58f, 1.f})
+                        ->padding({s(8.f), s(3.f)})
+                        ->hAlign(EHAlign::Fill)
+                        ->onClick([this, path]{
+                            if (path == doc_.path() || blockedDuringPlay("opening a scene")) return;
+                            guardUnsaved("opening another scene", [this, path]{ openScene(path); });
+                        })
+                        ->content(HNew(SHorizontalBox)
+                            ->addSlot(HNew(STextBlock)->text("[S]")->fontSize(s(12.f))->color({0.55f, 0.75f, 1.f, 1.f})
+                                ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fixed, s(30.f))
+                            ->addSlot(HNew(STextBlock)->text(display)->fontSize(s(13.f))->color(kTextBody)
+                                ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)),
+                    SVerticalBox::ESizeRule::Fixed, s(28.f));
+            }
+            bottomContent_->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
+        }
+
         // Content Browser — Models
         if (!modelFiles_.empty()) {
             bottomContent_->addSlot(
@@ -3079,7 +3134,7 @@ void EditorApp::rebuildBottomPanel() {
                                     if (!first) first = a;
                                     made.push_back(a);
                                 }
-                                ctx_.selected = first;
+                                selectOnly(first);
                                 // 메시가 여럿인 모델은 한 번의 클릭이 액터 여럿을 만들므로 한 커맨드로 쌓습니다.
                                 recordActorCreation(made);
                             } catch (const std::exception& ex) {
@@ -3118,9 +3173,20 @@ void EditorApp::rebuildBottomPanel() {
                                 HLOG(LogEditor, Warning) << "select an actor first to assign '" << stem << "'";
                                 return;
                             }
-                            auto* ac = sel->getComponent<AudioComponent>();
-                            if (!ac) ac = sel->addComponent<AudioComponent>();
-                            ac->setFile(fullPath);
+                            // Undo 가능(2026-10-15): 컴포넌트를 새로 붙였으면 "붙임"(되살릴 때 파일까지), 있던
+                            // 컴포넌트면 파일만 바꾼 것으로 쌓습니다.
+                            if (auto* ac = sel->getComponent<AudioComponent>()) {
+                                const std::string before = ac->filePath;
+                                ac->setFile(fullPath);
+                                if (before != fullPath)
+                                    cmdStack_.push(std::make_unique<AudioFileCmd>(*ctx_.world, sel, before, fullPath));
+                            } else {
+                                ac = sel->addComponent<AudioComponent>();
+                                ac->setFile(fullPath);
+                                cmdStack_.push(std::make_unique<ComponentPresenceCmd>(ComponentPresenceCmd::Kind::Add, *ctx_.world, sel, ac,
+                                                                                      ComponentLoadContext{ ctx_.assets },
+                                                                                      [this] { detailsDirty_ = true; }));
+                            }
                             detailsDirty_ = true;
                         })
                         ->content(HNew(SHorizontalBox)
@@ -3152,7 +3218,7 @@ void EditorApp::rebuildBottomPanel() {
                             if (!ctx_.world || !ctx_.assets) return;
                             Actor* a = PrefabManager::spawn(path, *ctx_.world, *ctx_.assets);
                             if (a) {
-                                ctx_.selected = a;
+                                selectOnly(a);
                                 recordActorCreation({ a });
                             }
                         })
@@ -3165,7 +3231,7 @@ void EditorApp::rebuildBottomPanel() {
             }
         }
 
-        if (modelFiles_.empty() && audioFiles_.empty() && prefabFiles_.empty()) {
+        if (sceneFiles_.empty() && modelFiles_.empty() && audioFiles_.empty() && prefabFiles_.empty()) {
             bottomContent_->addSlot(
                 HNew(SBorder)->background({0,0,0,0})->padding({s(12.f), s(8.f)})
                     ->content(HNew(STextBlock)->text("No assets found")
@@ -3346,12 +3412,18 @@ void EditorApp::undo() {
     if (!cmdStack_.canUndo() || gizmo_.isDragging()) return;
     cmdStack_.undo();
     syncEulerCache();
+    // 토글 · 열거 · 켜기 칸의 글자와 아웃라이너 이름 · 계층은 만들 때 정해지므로 다시 만듭니다(지연 리빌드).
+    detailsDirty_  = true;
+    outlinerDirty_ = true;
 }
 
 void EditorApp::redo() {
     if (!cmdStack_.canRedo() || gizmo_.isDragging()) return;
     cmdStack_.redo();
     syncEulerCache();
+    // 토글 · 열거 · 켜기 칸의 글자와 아웃라이너 이름 · 계층은 만들 때 정해지므로 다시 만듭니다(지연 리빌드).
+    detailsDirty_  = true;
+    outlinerDirty_ = true;
 }
 
 // ── tickShortcuts ──────────────────────────────────────────────────────────────
@@ -3364,19 +3436,34 @@ void EditorApp::tickShortcuts() {
     bool yNow = win.isKeyDown(HInput::KEY_Y);
     bool sNow = win.isKeyDown(HInput::KEY_S);
     bool fNow = win.isKeyDown(HInput::KEY_F);
+    bool oNow = win.isKeyDown(HInput::KEY_O);
+    bool nNow = win.isKeyDown(HInput::KEY_N);
+    bool dNow = win.isKeyDown(HInput::KEY_D);
+    bool dEdge = dNow && !prevDDown_;
+    prevDDown_ = dNow;
     bool zEdge = zNow && !prevZDown_;
     bool yEdge = yNow && !prevYDown_;
     bool sEdge = sNow && !prevSDown_;
     bool fEdge = fNow && !prevFDown_;
+    bool oEdge = oNow && !prevODown_;
+    bool nEdge = nNow && !prevNDown_;
     prevZDown_ = zNow;
     prevYDown_ = yNow;
     prevSDown_ = sNow;
     prevFDown_ = fNow;
+    prevODown_ = oNow;
+    prevNDown_ = nNow;
 
+    if (modal_) return;                                   // 대화상자가 떠 있으면 단축키를 받지 않습니다
     if (win.isCameraModeActive()) return;                 // WASD 비행 중 충돌 방지
+    // F — 선택 대상으로 화면 맞추기(Ctrl+F 는 아웃라이너 검색)
+    if (fEdge && !win.isCtrlDown() && currentFocus() == EFocusTarget::None) { frameSelection(); return; }
     if (!win.isCtrlDown()) return;
+    if (dEdge && currentFocus() == EFocusTarget::None) { duplicateSelection(); return; }
 
-    if (sEdge) { saveScene(); return; }
+    if (sEdge) { if (win.isShiftDown()) saveSceneAs(); else saveScene(); return; }
+    if (oEdge) { openSceneDialog(); return; }
+    if (nEdge) { newScene(); return; }
 
     // Ctrl+F → 아웃라이너 검색창 포커스 (기존 검색어는 전체 선택 → 바로 교체 가능). 아웃라이너가
     // 닫혀 있거나 가려진 탭이면 먼저 앞으로 꺼냅니다. 그러지 않으면 보이지 않는 검색창으로 타이핑이 들어갑니다.
@@ -3427,6 +3514,8 @@ void EditorApp::handleInput(float mouseX, float mouseY,
 
     // 아웃라이너 목록 리빌드 보류(DEF-83)는 버튼을 떼면 풉니다. 거는 곳은 아래 UI 디스패치입니다.
     if (!leftDown) outlinerPressHeld_ = false;
+    // 아웃라이너 행 끌어 놓기(부모 바꾸기). 누른 행 버튼의 클릭과 함께 돕니다.
+    tickOutlinerDrag(mouseX, mouseY, leftDown);
 
     // 편집 중에 다른 곳을 누르면 편집을 끝냅니다. 이 처리가 스플리터·탭·기즈모의 조기
     // return 보다 **앞**에 있어야 합니다. 뒤에 있으면 그 경로들이 커밋을 건너뛰어 편집
@@ -3466,7 +3555,7 @@ void EditorApp::handleInput(float mouseX, float mouseY,
     // UI 가 먼저 받아야 합니다. 예전에는 File > Load Scene 행의 왼쪽 끝을 누르면 그 밑의 Outliner
     // 탭이 클릭을 가져가 메뉴가 열린 채로 남았습니다(DEF-64 의 우회 경로).
     const bool overPopup =
-        openMenu_ >= 0 ||
+        modal_ != nullptr || openMenu_ >= 0 ||
         (logPopupOpen_ && logPopupPanel_ &&
          logPopupPanel_->cachedGeometry().contains(glm::vec2{ mouseX, mouseY }));
 
@@ -3659,6 +3748,9 @@ void EditorApp::handleInput(float mouseX, float mouseY,
     // 끝나는 프레임에 캐시를 맞춰 주지 않으면 패널 값이 낡은 채로 남습니다.
     {
         const bool dragNow = gizmo_.isDragging();
+        // 여러 액터를 함께 움직입니다(2026-10-15). 시작한 프레임에 다른 루트의 자세를 떠 두고 매 프레임 따라가게 합니다.
+        if (dragNow) { if (!prevGizmoDragging_) beginGroupDrag(); updateGroupDrag(); }
+        else if (prevGizmoDragging_) groupDrag_.clear();
         // 회전 드래그에만 맞춥니다. 이동·크기 뒤에도 갱신하면 회전은 그대로인데 표시만
         // 다른 오일러 표현으로 튀어(같은 회전을 나타내는 값이 여러 개라) 값이 바뀐 것처럼 보입니다.
         if (prevGizmoDragging_ && !dragNow && gizmoMode_ == 2) syncEulerCache();
@@ -3720,7 +3812,7 @@ void EditorApp::buildEditorIcons(World& world, const WorldViewport& /*wvp*/,
         const glm::vec3 pos  = a->worldPosition();
         const float     dist = glm::length(camPos - pos);
         const float     ssz  = std::max(0.02f, dist * 0.03f);   // 화면 고정 크기
-        const bool      sel  = (ctx_.selected == a);
+        const bool      sel  = isSelected(a);
         const glm::vec4 col  = sel ? glm::vec4(1.f, 1.f, 1.f, 1.f) : color;
 
         // 카메라를 향하는 사각형(빌보드)
@@ -3793,6 +3885,8 @@ bool EditorApp::inViewport(float mx, float my, float winW, float winH) const {
     // 하는데, 이 판정을 쓰는 기즈모·RMB 카메라 모드·휠이 UI 디스패치보다 먼저 돌아 클릭을
     // 가져갔습니다(DEF-64 의 우회 경로).
     if (openMenu_ >= 0) return false;
+    // 대화상자가 떠 있으면 뷰포트는 없는 것으로 봅니다(픽 · 기즈모 · 카메라 모드 · 휠).
+    if (modal_) return false;
     // 히트테스트도 프레임버퍼 공간으로 통일합니다. 마우스(윈도 픽셀)를 fb 로 변환해
     // 뷰포트 위젯의 실측 fb rect 와 비교하므로, 도킹·리사이즈·HiDPI 와 무관하게 정확합니다.
     const glm::vec2 fb = mouseToFb(mx, my, winW, winH);
@@ -3822,11 +3916,7 @@ HViewportRect EditorApp::viewportToolbarFbRect() const {
 
 // ── deleteSelectedActor ────────────────────────────────────────────────────────
 void EditorApp::deleteSelectedActor() {
-    if (!ctx_.selected || ctx_.selected == editorCamActor_) return;
-    gizmo_.cancel();
-    deleteActorUndoable(ctx_.selected);
-    ctx_.selected = nullptr;
-    renaming_     = false;
+    deleteSelection();   // 고른 루트 전부를 한 커맨드로(2026-10-15)
 }
 
 std::unique_ptr<ICommand> EditorApp::makePresenceCmd(bool create, std::vector<uint64_t> rootIds) {
@@ -3839,7 +3929,7 @@ std::unique_ptr<ICommand> EditorApp::makePresenceCmd(bool create, std::vector<ui
     };
     // 되살린 액터를 선택하고 그 행이 보이게 합니다(UE 도 되살린 액터를 선택함).
     auto restored = [this](Actor* root) {
-        ctx_.selected = root;
+        addSelect(root);
         revealActor(root);
         outlinerRevealSel_ = true;
         outlinerDirty_     = true;
@@ -3852,8 +3942,8 @@ std::unique_ptr<ICommand> EditorApp::makePresenceCmd(bool create, std::vector<ui
 
 void EditorApp::deleteActorUndoable(Actor* root) {
     if (!root || root == editorCamActor_ || !ctx_.world || !ctx_.assets) return;
-    // 지우는 순간 이 액터(와 자손)를 포인터로 붙잡던 커맨드는 onActorDestroyed 구독이 걷어냅니다.
-    // 삭제 커맨드는 ID 로 기억하므로 걷히지 않고, 쌓은 뒤 Ctrl+Z 로 되살립니다.
+    // 커맨드는 모두 액터를 ID 로 기억하므로(EditorCommands.hpp) 지워도 걷히지 않습니다. 삭제를 되돌리면 원래 ID 로
+    // 되살아나 그 액터의 앞선 편집 이력도 다시 이어집니다(2026-10-15).
     auto cmd = makePresenceCmd(false, { root->id });
     cmd->redo();
     cmdStack_.push(std::move(cmd));
@@ -3915,6 +4005,35 @@ void EditorApp::tickRenameInput() {
     prevEscapeDown_    = escNow;
 
     const EFocusTarget focus = currentFocus();
+
+    // ── 대화상자 ─────────────────────────────────────────────────────────────
+    // 떠 있는 동안에는 다른 칸 · 단축키(F2 · Delete)가 받지 않습니다. Enter 는 기본 버튼, Esc 는 취소입니다.
+    if (modal_) {
+        if (focus == EFocusTarget::Dialog) {
+            auto clearIfSelAll = [&] { if (dialogSelAll_) { dialogText_.clear(); dialogSelAll_ = false; } };
+            if (selAllEdge && !dialogText_.empty()) dialogSelAll_ = true;
+            std::vector<unsigned int> chars;
+            win.drainCharQueue(chars);
+            for (unsigned int cp : chars)
+                if (cp >= 32 && cp < 127) { clearIfSelAll(); dialogText_ += (char)cp; }
+            if (pasteEdge) {
+                clearIfSelAll();
+                for (char c : win.getClipboardText())
+                    if (c >= 32 && c < 127) dialogText_ += c;
+            }
+            if (copyEdge) win.setClipboardText(dialogText_);
+            for (int i = 0; i < bsCount && !dialogText_.empty(); ++i) {
+                if (dialogSelAll_) clearIfSelAll();
+                else               dialogText_.pop_back();
+            }
+        } else {
+            std::vector<unsigned int> junk;
+            win.drainCharQueue(junk);
+        }
+        if (enterEdge)    triggerModalDefault();
+        else if (escEdge) triggerModalCancel();
+        return;
+    }
 
     // Esc — 무엇을 편집하고 있든 취소하고 빠져나옵니다(숫자 필드는 값을 확정).
     if (escEdge && focus != EFocusTarget::None) {
@@ -3990,8 +4109,10 @@ void EditorApp::tickRenameInput() {
         if (enterEdge) {
             // 빈 이름은 적용하지 않되 편집은 끝냅니다. 예전에는 버퍼가 비면 Enter 가
             // 아무 일도 하지 않아 확정도 탈출도 못 하는 상태에 갇혔습니다.
-            if (isRename && !buf.empty() && ctx_.selected)
+            if (isRename && !buf.empty() && ctx_.selected && ctx_.selected->name != buf) {
+                cmdStack_.push(std::make_unique<RenameActorCmd>(*ctx_.world, ctx_.selected, ctx_.selected->name, buf));
                 ctx_.selected->name = buf;
+            }
             setTextFocus(EFocusTarget::None);
             return;
         }
@@ -4001,8 +4122,9 @@ void EditorApp::tickRenameInput() {
     }
 
     // ── 포커스 없음 ───────────────────────────────────────────────────────────
-    if (delEdge && ctx_.selected && ctx_.selected != editorCamActor_)
-        deleteSelectedActor();
+    if (delEdge) deleteSelection();
+    if (copyEdge)  copySelection();
+    if (pasteEdge) pasteClipboard();
 
     // 아무도 받지 않는 문자는 버립니다. 쌓아 두면 다음에 입력창을 여는 순간
     // 그동안 누른 글자가 한꺼번에 쏟아집니다.
@@ -4014,6 +4136,29 @@ void EditorApp::tickRenameInput() {
 void EditorApp::tickEditorCamera(float dt, float scroll) {
     if (!editorCam_ || !editorCamActor_ || !ctx_.window) return;
     IWindow& win = *ctx_.window;
+
+    // Play 중 씬 카메라(플레이어)가 화면이면 에디터 카메라는 움직이지 않습니다. 오른쪽 버튼을 누른 채 끈 양은 게임의
+    // 시선 축(LookX · LookY)으로 넘기고, 이동 키는 게임 입력(MoveX · MoveY)이 받습니다(2026-10-15).
+    if (ctx_.world && ctx_.world->getActiveCamera() != editorCam_) {
+        float rx = 0.f, ry = 0.f, lx = 0.f, ly = 0.f;
+        win.getRightMouseDelta(rx, ry);
+        win.getMouseDelta(lx, ly);   // 쌓이지 않게 비움(DEF-79)
+        HInputSystem::get().setLookDelta(rx, ry);
+        focusAnim_ = false;
+        return;
+    }
+
+    // F 로 시작한 화면 맞추기(0.25초, 부드럽게). 비행 · 끌기를 시작하면 그 자리에서 멈춥니다.
+    if (focusAnim_) {
+        if (win.isCameraModeActive() || lmbOrbit_) {
+            focusAnim_ = false;
+        } else {
+            focusT_ = std::min(1.f, focusT_ + dt / 0.25f);
+            const float t = focusT_ * focusT_ * (3.f - 2.f * focusT_);
+            editorCamActor_->setLocalPosition(glm::mix(focusFrom_, focusTo_, t));
+            if (focusT_ >= 1.f) focusAnim_ = false;
+        }
+    }
 
     const glm::vec3 fwd = editorCam_->forward();
     const glm::vec3 rgt = glm::normalize(glm::cross(fwd, glm::vec3(0.f, 1.f, 0.f)));
@@ -4076,6 +4221,13 @@ void EditorApp::pickActor(float mx, float my, float winW, float winH) {
     glm::vec3 rayO, rayD;
     if (!wvp.ray(vp, rayO, rayD)) return;
 
+    // Ctrl+클릭은 선택에 넣고 빼기(빈 곳이면 그대로), 그냥 클릭은 그것 하나만(빈 곳이면 비움).
+    const bool ctrl = ctx_.window && ctx_.window->isCtrlDown();
+    auto pick = [&](Actor* a) {
+        if (ctrl) { if (a) toggleSelect(a); }
+        else      selectOnly(a);
+    };
+
     // ── 아이콘 픽 우선 ────────────────────────────────────────────────────────
     // 라이트·카메라·오디오는 작고 명시적인 아이콘 타깃이라, 뒤의 솔리드 바운드보다
     // 먼저 화면 원판으로 판정합니다. 좌표는 wvp(프레임버퍼 기준)를 그대로 씁니다.
@@ -4095,7 +4247,7 @@ void EditorApp::pickActor(float mx, float my, float winW, float winH) {
             float d = glm::length(toFb(a->worldPosition()) - wvp.mouseFb);
             if (d < iconBestD) { iconBestD = d; iconBest = a; }
         }
-        if (iconBest) { ctx_.selected = iconBest; return; }
+        if (iconBest) { pick(iconBest); return; }
     }
 
     // 컴포넌트 종류를 분기하지 않고, 각 컴포넌트가 알리는 로컬 바운드(localBounds)에
@@ -4147,5 +4299,5 @@ void EditorApp::pickActor(float mx, float my, float winW, float winH) {
         if (worldT < bestT) { bestT = worldT; best = a; }
     }
 
-    ctx_.selected = best;
+    pick(best);
 }

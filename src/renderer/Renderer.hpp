@@ -30,6 +30,7 @@
 #include "../platform/IWindow.hpp"
 #include "../memory/HarukaAllocator.hpp"
 #include "VulkanDeviceHooks.hpp"
+#include "VulkanBaseline.hpp"
 #include "RenderExtensionRegistry.hpp"
 #include "../core/EngineSettings.hpp"
 
@@ -40,21 +41,13 @@ struct TexSourceData;
 inline const std::vector<const char*> kValidationLayers = {
     "VK_LAYER_KHRONOS_validation"
 };
-inline const std::vector<const char*> kDeviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-    VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
-};
+// 장치 확장 목록은 장치마다 hvk::planDevice 가 정합니다(VulkanBaseline.hpp, 2026-10-31). 창이 없으면 VK_KHR_swapchain 을
+// 켜지 않습니다.
 #ifdef NDEBUG
     constexpr bool kEnableValidation = false;
 #else
     constexpr bool kEnableValidation = true;
 #endif
-
-struct QueueFamilyIndices {
-    std::optional<uint32_t> graphics;
-    std::optional<uint32_t> present;
-    bool isComplete() const { return graphics.has_value() && present.has_value(); }
-};
 
 struct SwapChainSupport {
     VkSurfaceCapabilitiesKHR        caps;
@@ -88,6 +81,11 @@ public:
     // 창에 그릴 수 없으면 직접 고르고 xrCompatible() 이 false 가 됩니다.
     // 그리기 행 · 라이트 상한(DEF-10, Config/engine.ini). init 전에 부릅니다. 부르지 않으면 기본값입니다.
     void setLimits(uint32_t maxDrawRows, uint32_t maxLights) { maxDrawRows_ = maxDrawRows; maxLights_ = maxLights; }
+    // --vk-no-sync2: 장치가 synchronization2 를 지원해도 1.0 배리어로 기록합니다(Quest 의 대체 경로를 PC 에서 시험, DEF-04).
+    // init 전에 부릅니다.
+    void setForceNoSync2(bool on) { forceNoSync2_ = on; }
+    // --vk-dedicated-msaa: MSAA 컬러를 핵심 힙 밖 별도 할당으로(지연 할당 타입이 없는 데스크톱에서 DEF-06 경로 시험).
+    void setForceDedicatedMsaa(bool on) { forceDedicatedMsaa_ = on; }
     void init(IWindow* window, IVulkanDeviceHooks* deviceHooks = nullptr);
     void cleanup();
     // xr 이 있으면 두 눈을 XR 스왑체인의 두 층에 그리고, 에디터 뷰포트에는 왼쪽 눈을 비춥니다.
@@ -97,7 +95,8 @@ public:
     // ── XR 연결 ───────────────────────────────────────────────────────────────
     bool             xrCompatible() const     { return xrCompatible_; }
     VkInstance       getInstance() const      { return instance; }
-    uint32_t         graphicsQueueFamily()    { return findQueueFamilies(physDevice).graphics.value(); }
+    // 장치를 고를 때 한 번 정한 값입니다. 표면 조회를 다시 하지 않습니다(창이 없으면 표면 함수를 부를 수 없음).
+    uint32_t         graphicsQueueFamily() const { return queueFamilies_.graphics.value(); }
     // XR 스왑체인(두 층 배열)의 이미지를 렌더 대상으로 붙입니다. 세션을 만든 뒤 한 번. 씬 타깃을
     // 눈 크기로 다시 만듭니다.
     void attachXrSwapchain(const std::vector<VkImage>& images, VkFormat format, VkExtent2D eyeExtent);
@@ -105,6 +104,21 @@ public:
     // XR 스왑체인을 지워도 됩니다.
     void detachXrSwapchain(bool restoreTargets = true);
     bool xrAttached() const { return xrActive_; }
+
+    // ── 창 없는 실행 (2026-10-31, 패키징 2단계) ───────────────────────────────
+    // 창이 표면을 주지 않으면(--headless · Quest) 스왑체인 없이 XR 이미지에만 그립니다.
+    bool headless() const { return headless_; }
+    // 검증 레이어가 보고한 ERROR 수(Debug 빌드에서만 메신저가 있어 Release 는 늘 0). 창 없는 실행의 종료 코드에 씁니다.
+    static uint32_t validationErrorCount();
+    // 마지막 drawFrame 이 데스크톱 창에 그렸는지.
+    bool lastFrameDesktop() const { return lastFrameDesktop_; }
+    // 헤드셋 없이 XR 프레임 경로를 돌리는 합성 눈(--synthetic-eyes). 눈 크기 · 두 층 이미지 count 장을 만들어 XR 스왑체인처럼
+    // 붙입니다. 엔진은 이 이미지 번호와 hxr::syntheticEyes 의 두 눈으로 drawFrame 을 부릅니다. XR 세션과 함께 쓰지 않습니다.
+    bool     attachSyntheticEyes(VkExtent2D eyeExtent, uint32_t count = 3);
+    void     detachSyntheticEyes();
+    uint32_t syntheticImageCount() const { return (uint32_t)synthImages_.size(); }
+    // 합성 눈 이미지 하나의 눈 층을 RGBA8 로 읽어 옵니다(장치가 쉬기를 기다림). 실제 XR 이미지는 읽을 수 없습니다.
+    bool     captureXrEye(uint32_t image, uint32_t layer, std::vector<uint8_t>& rgba, VkExtent2D& extent);
 
     // Hot-reload shaders
     void reloadPipelines();
@@ -128,6 +142,9 @@ public:
     IWindow* getWindow()     const { return window;     }
     VkDevice getDevice()     const { return device;     }
     VkPhysicalDevice getPhysDevice() const { return physDevice; }
+    // 장치에서 받은 vkCmdPushDescriptorSetKHR(DEF-97). 렌더러 밖의 UI(HSlateRenderer)가 씁니다.
+    PFN_vkCmdPushDescriptorSetKHR pushDescriptorFn() const { return rc_.vk.push; }
+    // 창이 없으면 빈 스왑체인의 명목 포맷(R8G8B8A8_SRGB)입니다. XR 세션의 선호 포맷으로도 씁니다.
     VkFormat getSwapFormat() const { return swapchain_->format(); }
 
     void setUIRenderer(HSlateRenderer* r);
@@ -172,10 +189,24 @@ private:
     VkPhysicalDevice         physDevice     = VK_NULL_HANDLE;
     VkDevice                 device         = VK_NULL_HANDLE;
     VkQueue                  graphicsQueue  = VK_NULL_HANDLE;
-    VkQueue                  presentQueue   = VK_NULL_HANDLE;
+    VkQueue                  presentQueue   = VK_NULL_HANDLE;   // 창이 없으면 VK_NULL_HANDLE
+
+    // ── 장치 계획 (VulkanBaseline.hpp, 2026-10-31) ────────────────────────────
+    bool               headless_ = false;   // 창이 표면을 주지 않음
+    bool               forceNoSync2_ = false;   // --vk-no-sync2
+    bool               forceDedicatedMsaa_ = false;   // --vk-dedicated-msaa
+    hvk::DeviceCaps    deviceCaps_;         // 고른 장치에서 읽은 값
+    hvk::DevicePlan    devicePlan_;         // 켤 확장 · 기능(장치 생성과 샘플러가 함께 읽음)
+    hvk::QueueFamilies queueFamilies_;      // 고를 때 한 번 정함
 
     // ── Swapchain (platform-abstracted) ──────────────────────────────────────
     std::unique_ptr<ISwapchain> swapchain_;
+    bool lastFrameDesktop_   = false;
+    bool nothingToDrawLogged_ = false;   // 창도 XR 대상도 없음(한 번만 알림)
+
+    // ── 합성 눈 (--synthetic-eyes) ────────────────────────────────────────────
+    std::vector<VkImage>          synthImages_;
+    std::vector<HarukaAllocation> synthAllocs_;
 
     // ── MSAA 샘플 수 (rc_로 전파) ─────────────────────────────────────────────
     VkSampleCountFlagBits msaaSamples_ = VK_SAMPLE_COUNT_4_BIT;
@@ -254,7 +285,11 @@ private:
     FrameResources frames_;
 
     // ── Pipeline cache + timestamp ────────────────────────────────────────────
+    static constexpr const char* kPipelineCacheFile = "pipeline_cache.bin";   // 쓰기 루트 기준
     VkPipelineCache pipelineCache_   = VK_NULL_HANDLE;
+    // 파이프라인을 새로 만들었음(처음 · 핫 리로드 · XR 출력 연결). 다음 프레임 끝에서 캐시를 저장합니다(DEF-153).
+    bool            pipelineCacheDirty_     = true;
+    uint64_t        pipelineCacheSavedHash_ = 0;   // 마지막으로 읽거나 쓴 캐시 데이터의 XXH3-64(같으면 쓰지 않음)
     // 프레임당 타임스탬프 슬롯 수입니다. 배치는 Renderer_render.cpp 의 drawFrame 참조.
     //   0 frame start / 1 shadow / 눈 v 마다 2+4v main · 3+4v AO · 4+4v Bloom · 5+4v tonemap /
     //   마지막 UI. 그리지 않은 눈의 칸은 같은 시점에 연달아 찍어 0ms 가 됩니다.
@@ -381,7 +416,7 @@ private:
                          VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess,
                          VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT,
                          uint32_t mips = 1, uint32_t layers = 1) {
-        RenderContext::transitionImage(cmd, img, oldLayout, newLayout,
+        rc_.transitionImage(cmd, img, oldLayout, newLayout,
                                        srcStage, srcAccess, dstStage, dstAccess,
                                        aspect, mips, layers);
     }
@@ -393,9 +428,10 @@ private:
 
     bool                     checkValidationLayerSupport();
     std::vector<const char*> getRequiredExtensions();
-    bool                     isDeviceSuitable(VkPhysicalDevice dev);
-    bool                     checkDeviceExtensionSupport(VkPhysicalDevice dev);
-    QueueFamilyIndices       findQueueFamilies(VkPhysicalDevice dev);
+    hvk::DeviceCaps          queryDeviceCaps(VkPhysicalDevice dev);
+    // 맞으면 true 이고 plan 을 채웁니다. 아니면 why 에 이유를 적습니다.
+    bool                     isDeviceSuitable(VkPhysicalDevice dev, bool xrDevice, hvk::DevicePlan& plan, std::string& why);
+    hvk::QueueFamilies       findQueueFamilies(VkPhysicalDevice dev);
     SwapChainSupport         querySwapChainSupport(VkPhysicalDevice dev);
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT,

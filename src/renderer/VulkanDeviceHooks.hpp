@@ -11,6 +11,9 @@ class IVulkanDeviceHooks {
 public:
     virtual ~IVulkanDeviceHooks() = default;
 
+    // 런타임이 받아들이는 Vulkan 버전 범위(VK_MAKE_API_VERSION 형식). 모르면 false 입니다(2026-10-31, DEF-97).
+    virtual bool vulkanApiRange(uint32_t& /*minApi*/, uint32_t& /*maxApi*/) const { return false; }
+
     // ci 로 인스턴스를 만듭니다. 런타임이 자기 확장을 덧붙입니다.
     virtual VkResult createVulkanInstance(const VkInstanceCreateInfo& ci, VkInstance& out) = 0;
 

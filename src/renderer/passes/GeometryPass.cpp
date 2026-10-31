@@ -7,7 +7,8 @@
 #include <stdexcept>
 
 // ── Helper: push material descriptor (set 3) ─────────────────────────────────
-static void pushMaterialDesc(VkCommandBuffer cmd, VkPipelineLayout layout,
+// push 는 장치에서 받은 vkCmdPushDescriptorSetKHR 입니다(rc.vk.push, DEF-97). static 헬퍼라 인자로 받습니다.
+static void pushMaterialDesc(PFN_vkCmdPushDescriptorSetKHR push, VkCommandBuffer cmd, VkPipelineLayout layout,
                               const MaterialHandle* mat,
                               VkSampler texS, VkSampler clampS) {
     VkDescriptorImageInfo imgs[5] = {
@@ -24,7 +25,7 @@ static void pushMaterialDesc(VkCommandBuffer cmd, VkPipelineLayout layout,
         ws[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         ws[i].descriptorCount = 1; ws[i].pImageInfo = &imgs[i];
     }
-    vkCmdPushDescriptorSet(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 3, 5, ws);
+    push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 3, 5, ws);
 }
 
 // PBR opaque/transparent 공용 PSO 빌더
@@ -241,20 +242,18 @@ void GeometryPass::acquireSizeDependent() {
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         0, depthAlloc_);
     depthView_ = rc_->createImageView(depthImage_, rc_->depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+    // 깊이는 따로 레이아웃을 바꾸지 않습니다. 메인 패스의 깊이 첨부가 UNDEFINED 에서 CLEAR 로 시작하고, 깊이를 읽는 AO 와
+    // AfterScene 확장은 메인 패스 뒤에만 돕니다. 예전의 한 번짜리 전환은 하는 일이 없이 크기를 바꿀 때마다 큐 대기만
+    // 일으켰고, 깊이 포맷이 스텐실을 가지면 DEPTH 단독 전환이 규칙 위반이었습니다(2026-10-31 결정, DEF-04 와 함께 지움).
 
-    auto cmd = rc_->beginOneTimeCmd();
-    RenderContext::transitionImage(cmd, depthImage_,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
-        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-        VK_IMAGE_ASPECT_DEPTH_BIT);
-    rc_->endOneTimeCmd(cmd);
-
-    // MSAA color (transient)
+    // MSAA color (transient). 타일 안에서만 쓰고 resolve 뒤 버립니다(CLEAR / DONT_CARE). 지연 할당 타입이 있으면 Zone B
+    // 밖 별도 할당(DEF-06, Quest), 없으면 Zone B 입니다. 첨부 말고 다른 용도(복사 · 샘플 · 지우기)로 쓰면 깨집니다.
+    // 위의 MSAA 깊이는 지연 할당할 수 없습니다: SAMPLED 이고 STORE 하며 최종 레이아웃이 READ_ONLY 입니다. AO 의 linDepth 와
+    // 렌더 확장 AfterScene 이 읽습니다. 깊이 resolve 나 SSAO 끄기를 넣을 때 다시 판단합니다.
     msaaImage_ = rc_->createImage(w, h, 1, 1, rc_->msaaSamples,
         hdrFmt, VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
-        0, msaaAlloc_);
+        0, msaaAlloc_, ImageMemory::LazyPreferred);
     msaaView_ = rc_->createImageView(msaaImage_, hdrFmt, VK_IMAGE_ASPECT_COLOR_BIT);
 
     // HDR resolve targets (per frame-in-flight)
@@ -592,7 +591,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
     if (in.opaqueItems) {
         for (const auto& item : *in.opaqueItems) {
             if (!item.material) continue;
-            pushMaterialDesc(cmd, pbrLayout_, item.material,
+            pushMaterialDesc(rc_->vk.push, cmd, pbrLayout_, item.material,
                              in.textureSampler, in.clampSampler);
             vkCmdDrawIndexed(cmd, item.indexCount, item.instanceCount, item.firstIndex,
                              item.vertexOffset, item.firstInstance);
@@ -631,7 +630,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
             for (const auto& item : *in.transparentItems) {
                 assert(item.material && "DrawItem without material");
                 if (!item.material) continue;
-                pushMaterialDesc(cmd, pbrLayout_, item.material,
+                pushMaterialDesc(rc_->vk.push, cmd, pbrLayout_, item.material,
                                  in.textureSampler, in.clampSampler);
                 vkCmdDrawIndexed(cmd, item.indexCount, item.instanceCount, item.firstIndex,
                                  item.vertexOffset, item.firstInstance);
