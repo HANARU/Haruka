@@ -27,6 +27,9 @@ struct EngineOptions {
     std::string capturePath;             // --capture=path : 끝낼 때 합성 눈 왼쪽 층을 PNG 로 저장
     bool        vkNoSync2     = false;   // --vk-no-sync2 : synchronization2 가 있어도 1.0 배리어로 기록(DEF-04 대체 경로 시험)
     bool        vkDedicatedMsaa = false; // --vk-dedicated-msaa : MSAA 컬러를 핵심 힙 밖 별도 할당으로(DEF-06 경로 시험)
+    // --ssao · --no-ssao : 화면 공간 AO 를 켜거나 끔(AO 를 뺀 비교 실측 · 끔 경로 시험). 없으면 프로젝트 설정
+    // render.ao. 진단용이라 프로젝트 설정을 덮어씁니다.
+    std::optional<bool> ssao;
 
     // ── 플랫폼 진입점이 정하는 것 (명령줄 아님, 2026-10-31 패키징 3단계) ────────────────────────────
     PlatformContext platform;            // Android: android_app · JavaVM · 액티비티

@@ -63,6 +63,8 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (a == "--synthetic-eyes") o.syntheticEyes = true;
         else if (a == "--vk-no-sync2")    o.vkNoSync2     = true;
         else if (a == "--vk-dedicated-msaa") o.vkDedicatedMsaa = true;
+        else if (a == "--ssao")           o.ssao          = true;
+        else if (a == "--no-ssao")        o.ssao          = false;
         else if (valueOf(a, "--synthetic-eyes", v)) {
             if (parseSize(v, o.syntheticEyeW, o.syntheticEyeH)) o.syntheticEyes = true;
             else unknown.push_back(a);

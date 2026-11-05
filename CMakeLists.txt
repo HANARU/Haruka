@@ -131,7 +131,7 @@ set(GLSL_SHADERS
     post.vert
     brdf_lut.frag
     linDepth.frag
-    ssao.frag
+    ssao.frag   ssao_blur.frag
     bloom_threshold.frag
     bloom_downsample.frag
     bloom_upsample.frag

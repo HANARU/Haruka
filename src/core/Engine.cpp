@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -255,6 +256,15 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     renderer_->setLimits(limits.maxDrawRows, limits.maxLights);
     renderer_->setForceNoSync2(options.vkNoSync2);
     renderer_->setForceDedicatedMsaa(options.vkDedicatedMsaa);
+    // 후처리 패스 켬/끔(프로젝트 설정 render.ao · render.bloom). --ssao · --no-ssao 가 AO 를 덮어씁니다.
+    renderer_->setPostFeatures(project_.renderAo, project_.renderBloom);
+    if (options.ssao.has_value()) renderer_->setAoEnabled(*options.ssao);
+    if (!renderer_->aoEnabled() || !renderer_->bloomEnabled()) {
+        HLOG(LogEngine, Log) << "Post:" << (renderer_->aoEnabled() ? "" : " AO off")
+                             << (renderer_->bloomEnabled() ? "" : " Bloom off") << " ("
+                             << (options.ssao.has_value() && !*options.ssao ? "--no-ssao, " : "")
+                             << ProjectSettings::kPath << ")";
+    }
     renderer_->init(window_.get(), xr_.get());
     if (xr_) {
         // 세션은 Play 때 만듭니다(syncXrWithPlay). 인스턴스는 쓸 수 없어도 남겨 둡니다. 렌더러의 Vulkan
@@ -796,6 +806,14 @@ int Engine::finishRun() {
                           std::to_string(ext.width) + "x" + std::to_string(ext.height) + (blank ? ", blank" : "") + ")";
             if (!ok) blank = true;
         }
+    }
+    // GPU 구간 시간(타임스탬프, 지수 이동 평균). 요약 줄의 형식은 그대로 두고 따로 남깁니다(패스 비용 비교용).
+    {
+        const Renderer::GpuTimings t = renderer_->getTimings();
+        char buf[192];
+        std::snprintf(buf, sizeof(buf), "GPU ms: shadow %.3f, main %.3f, ao %.3f, bloom %.3f, tonemap %.3f, total %.3f",
+                      t.shadowMs, t.mainMs, t.aoMs, t.bloomMs, t.tonemapMs, t.totalMs);
+        HLOG(LogEngine, Log) << buf;
     }
     const uint32_t errors = Renderer::validationErrorCount();
     const int      code   = hopt::headlessExitCode(drawnFrames_, options_.frames, timedOut_, errors, blank);

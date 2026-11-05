@@ -15,6 +15,9 @@ struct AssetPair {
     MaterialHandle* material  = nullptr;
     std::string     name;
     bool            isBlend   = false;
+    bool            doubleSided = false;   // glTF material.doubleSided(소비자는 아직 없음)
+    bool            alphaMask   = false;   // glTF alphaMode MASK(소비자는 아직 없음)
+    float           alphaCutoff = 0.5f;    // glTF alphaCutoff(MASK 일 때만 의미)
     int             vertCount = 0;
     int             triCount  = 0;
 };

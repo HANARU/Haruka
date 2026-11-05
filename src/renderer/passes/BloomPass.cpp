@@ -16,16 +16,25 @@ void BloomPass::create(RenderContext& rc) {
         VkSubpassDescription sp{};
         sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         sp.colorAttachmentCount = 1; sp.pColorAttachments = &ref;
-        VkSubpassDependency dep{};
-        dep.srcSubpass = VK_SUBPASS_EXTERNAL; dep.dstSubpass = 0;
-        dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dep.srcAccessMask = 0; dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        // 레벨마다 앞 레벨이 쓴 이미지를 다음 레벨이(마지막 up 은 톤매핑이) 프래그먼트 셰이더로
+        // 읽습니다. 들어올 때는 앞선 읽기 · 쓰기 뒤에 쓰고(WAR · WAW), 나갈 때는 이 패스의 쓰기를
+        // 뒤 패스의 셰이더 읽기에 보이게 합니다(RAW). AOPass 와 같은 모양입니다.
+        VkSubpassDependency deps[2] = {};
+        deps[0].srcSubpass = VK_SUBPASS_EXTERNAL; deps[0].dstSubpass = 0;
+        deps[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        deps[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        deps[1].srcSubpass = 0; deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+        deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
         VkRenderPassCreateInfo rpci{};
         rpci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         rpci.attachmentCount = 1; rpci.pAttachments = &att;
         rpci.subpassCount = 1; rpci.pSubpasses = &sp;
-        rpci.dependencyCount = 1; rpci.pDependencies = &dep;
+        rpci.dependencyCount = 2; rpci.pDependencies = deps;
         if (vkCreateRenderPass(rc.device, &rpci, nullptr, &pass_) != VK_SUCCESS)
             throw std::runtime_error("Failed to create bloom render pass!");
     }
@@ -166,7 +175,8 @@ void BloomPass::destroy() {
 // 1. Threshold: HDR → Down[0]
 // 2. Downsample: Down[k-1] → Down[k]
 // 3. Upsample:   Down[N-1] → Up[0] → Up[1] → ... → Up[N-2]
-void BloomPass::record(VkCommandBuffer cmd, VkImageView hdrView, VkSampler clampSampler) {
+void BloomPass::record(VkCommandBuffer cmd, VkImageView hdrView, VkSampler clampSampler,
+                       float bloomThreshold) {
     // downView 가 주어지면 binding 1 로 함께 푸시합니다(업샘플 스킵-커넥션, D-4).
     // threshold/downsample 은 downView 없이 binding 0 만 씁니다.
     auto runPass = [&](VkPipeline pipe, VkImageView srcView, VkFramebuffer fb,
@@ -202,7 +212,7 @@ void BloomPass::record(VkCommandBuffer cmd, VkImageView hdrView, VkSampler clamp
     };
 
     // Threshold → Down[0]
-    runPass(threshPipe_, hdrView, framebufs_[0], extents_[0], 1.0f);
+    runPass(threshPipe_, hdrView, framebufs_[0], extents_[0], bloomThreshold);
 
     // Downsample chain
     for (int k = 1; k < kBloomLevels; k++)

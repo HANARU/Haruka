@@ -14,6 +14,13 @@ layout(set = 2, binding = 0) readonly buffer TransformBuffer {
     GpuTransform transforms[];
 };
 
+// 깊이 프리패스(LESS · 깊이 쓰기)와 불투명 색 서브패스(LESS_OR_EQUAL · 쓰기 끔)가 같은 깊이를 내야
+// 같은 표면이 비교를 통과합니다. invariant 와 글자 그대로 같은 식으로 이를 보장합니다.
+// 위치 식을 바꿀 때는 pbr.vert 와 같이 바꿉니다.
+invariant gl_Position;
+
 void main() {
-    gl_Position = ubo.viewProj[HARUKA_VIEW_INDEX] * transforms[gl_InstanceIndex].model * vec4(inPosition, 1.0);
+    mat4 model   = transforms[gl_InstanceIndex].model;
+    vec4 worldPos = model * vec4(inPosition, 1.0);
+    gl_Position = ubo.viewProj[HARUKA_VIEW_INDEX] * worldPos;
 }

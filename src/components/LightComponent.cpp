@@ -1,4 +1,5 @@
 #include "LightComponent.hpp"
+#include "CameraComponent.hpp"
 #include "../core/Actor.hpp"
 #include "../core/Reflect.hpp"
 #include "../core/ComponentFields.hpp"
@@ -85,6 +86,34 @@ glm::vec3 LightComponent::worldDirection() const {
                     ? glm::normalize(direction) : glm::vec3(0.f, -1.f, 0.f);
     if (!owner) return local;
     return glm::normalize(owner->worldRotation() * local);
+}
+
+glm::vec3 LightComponent::emitDirection() const {
+    const glm::vec3 w = worldDirection();   // 다시 정규화하지 않습니다(부호 반전은 비트까지 정확)
+    return lightType == LightType::Directional ? -w : w;
+}
+
+static bool finite3(const glm::vec3& v) {
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+// 요 · 피치를 직접 구해 CameraComponent 와 같은 회전 규약(정면 (cos p · sin y, -sin p, -cos p · cos y))으로
+// 만듭니다. 최단호 쿼터니언은 롤이 생기고 정반대 벡터를 따로 처리해야 해서 쓰지 않습니다. 피치는 atan2 로
+// 구하고(asin 은 천정 근처에서 정밀도를 잃음), 요는 수평 성분이 정확히 0 일 때만 0 으로 둡니다.
+glm::quat LightComponent::rotationForEmitDirection(const glm::vec3& e) {
+    if (!finite3(e) || !(glm::dot(e, e) > 1e-8f)) return glm::quat(1.f, 0.f, 0.f, 0.f);
+    const glm::vec3 n = glm::normalize(e);
+    const float h     = std::sqrt(n.x * n.x + n.z * n.z);
+    const float pitch = std::atan2(-n.y, h);
+    const float yaw   = (h > 0.f) ? std::atan2(n.x, -n.z) : 0.f;
+    return CameraComponent::yawPitchRotation(yaw, pitch);
+}
+
+std::optional<glm::vec3> LightComponent::legacyEmitDirection(LightType t, const glm::vec3& d) {
+    if (t == LightType::Point) return std::nullopt;
+    if (!finite3(d) || !(glm::dot(d, d) > 1e-8f)) return std::nullopt;
+    const glm::vec3 n = glm::normalize(d);
+    return t == LightType::Directional ? -n : n;
 }
 
 glm::vec3 LightComponent::effectiveColor() const {

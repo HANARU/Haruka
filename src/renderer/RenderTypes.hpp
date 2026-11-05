@@ -38,12 +38,14 @@ using hgpu::GpuLight;
 constexpr uint32_t kMaxViews = HARUKA_MAX_VIEWS;
 
 // C++ 배치가 셰이더(std140/std430) 배치와 같은지 컴파일할 때 확인합니다.
-static_assert(sizeof(FrameUBO) == 272,                   "FrameUBO layout changed: update shaders/include/haruka_shared.h rules");
+static_assert(sizeof(FrameUBO) == 304,                   "FrameUBO layout changed: update shaders/include/haruka_shared.h rules");
 static_assert(offsetof(FrameUBO, lightViewProj) == 128,  "FrameUBO.lightViewProj offset");
 static_assert(offsetof(FrameUBO, eyePos)        == 192,  "FrameUBO.eyePos offset");
 static_assert(offsetof(FrameUBO, screenParams)  == 224,  "FrameUBO.screenParams offset");
 static_assert(offsetof(FrameUBO, timeParams)    == 240,  "FrameUBO.timeParams offset");
 static_assert(offsetof(FrameUBO, miscParams)    == 256,  "FrameUBO.miscParams offset");
+static_assert(offsetof(FrameUBO, shadowParams)  == 272,  "FrameUBO.shadowParams offset");
+static_assert(offsetof(FrameUBO, shadowFade)    == 288,  "FrameUBO.shadowFade offset");
 static_assert(sizeof(GpuTransform) == 64,                "GpuTransform must be one mat4");
 static_assert(sizeof(GpuLight)     == 64,                "GpuLight must be four vec4");
 

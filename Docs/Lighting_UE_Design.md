@@ -74,18 +74,18 @@ Haruka 라이팅의 성격은 **All-Movable · 무단위(Unitless) · 하드튜�
 ### 감쇠·소스
 | UE 용어 | 정의 | Haruka | 채택 |
 |---|---|---|---|
-| Attenuation Radius | 도달 반경·컬링 경계 | `range`(감쇠식에 섞임) | now(개명) |
-| Inverse Square Falloff | 물리 1/d² + 윈도잉 | 비물리 `(1-d/r)²` | soon |
-| Inner/Outer Cone Angle | 스팟 콘·페이드 | spotInner/OuterDeg | now(개명) |
+| Attenuation Radius | 도달 반경·컬링 경계 | `attenuationRadius`(최솟값 0.01m). 창 함수 `(1-(d/r)^4)^2` 로 꼬리를 자르며 반경 안쪽도 깎음 | now(개명) |
+| Inverse Square Falloff | 물리 1/d² + 윈도잉 | 역제곱 + 창 함수, 1cm 바닥(2026-10-04). 끄는 옵션 없음 | soon |
+| Inner/Outer Cone Angle | 스팟 콘·페이드 | innerConeAngle · outerConeAngle(반각, 도). 업로드할 때 inner = min(inner, outer) 로 보고, scale = 1/max(cosI − cosO, 0.001) 과 offset = −cosO·scale 을 CPU 가 계산(SpotCone.hpp). 곡선은 cos 선형(제곱 · smoothstep 은 결정 대기) | now(개명) |
 | Source Radius/Length | 소프트섀도·면적 스페큘러 | 없음 | advanced |
 
 ### 그림자
 | UE 용어 | 정의 | Haruka | 채택 |
 |---|---|---|---|
 | Cast Shadows(per-light) | 라이트별 그림자 토글 | 없음(방향광 1개 고정) | now(정확성 선행) |
-| Constant/Slope Bias | 깊이 오프셋 | 있음(0.0004/1.75) | now(명칭화) |
-| Shadow Resolution | 섀도맵 해상도 | 고정 2048²+PCF3×3 | now |
-| Cascaded Shadow Maps(CSM) | 카메라 추종 다단 섀도 | 없음(단일 40m ortho) | soon |
+| Constant/Slope Bias | 깊이 오프셋 | 있음(코드 상수, 2026-11-02: 뒷면 컬링 + 리시버 1텍셀 · 경사 2.0(상한 4텍셀) · 노멀 오프셋 1.5텍셀) | now(명칭화) |
+| Shadow Resolution | 섀도맵 해상도 | 고정 PC 4096² · Quest 2048² + PCF3×3 | now |
+| Cascaded Shadow Maps(CSM) | 카메라 추종 다단 섀도 | 없음(단일 맵, 머리 중심 반지름 20m 추종 · 텍셀 스냅 · 페이드) | soon |
 | Contact Shadows | 화면공간 접촉 그림자 | 없음 | soon |
 | Distance Field/VSM | SDF·가상 섀도맵 | 없음 | skip |
 
@@ -171,7 +171,7 @@ LightComponent (UE 어휘):
 - **Phase 4 — 물리 단위·감쇠(soon, 한 묶음)**: Inverse Square Falloff 도입 → Attenuation Radius 를 순수
   윈도잉으로 분리, Candela/Lumen/Lux 활성화. **태양/하늘/노출 세트 + bloom/ssao/taa 상수 전부 동시 재보정**
   (R16F 상한 65504 고려).
-- **Phase 5 — 그림자 확장(soon)**: 단일 40m ortho → CSM(2~3 캐스케이드, 카메라 추종), Dynamic Shadow
+- **Phase 5 — 그림자 확장(soon)**: 단일 머리 중심 맵(반지름 20m, 2026-11-02) → CSM(2~3 캐스케이드, 카메라 추종), Dynamic Shadow
   Distance. Quest 는 2 캐스케이드로 시작. 필요 시 방향광 Contact Shadows.
 - **Phase 6 — 고급/예약(advanced, 수요 시)**: Rect Light(LTC)+Source Radius, IES, Reflection Capture,
   Exponential Height Fog, 축소형 Sky Atmosphere, 정적 Light Function.

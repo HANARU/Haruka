@@ -174,6 +174,19 @@ int main() {
         check(force.suitable && !force.sync2 && !has(force.extensions, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME),
               "A10 --vk-no-sync2 면 지원해도 sync2 끔, 확장도 켜지 않음");
 
+        hvk::DeviceCaps clampOn = questPro();
+        clampOn.featDepthBiasClamp = true;
+        const hvk::DevicePlan pa12 = hvk::planDevice(clampOn, true, false);
+        check(pa12.suitable && pa12.depthBiasClamp, "A12 depthBiasClamp 를 지원하면 켬(섀도 경사 바이어스 상한)");
+        const hvk::DevicePlan pa12b = hvk::planDevice(questPro(), true, false);
+        check(pa12b.suitable && !pa12b.depthBiasClamp, "A12 지원하지 않으면 거부하지 않고 끔");
+
+        hvk::DeviceCaps dcOn = questPro();
+        dcOn.featDepthClamp = true;
+        check(hvk::planDevice(dcOn, true, false).depthClamp, "A13 depthClamp 를 지원하면 켬(섀도 캐스터 pancaking)");
+        check(hvk::planDevice(questPro(), true, false).suitable && !hvk::planDevice(questPro(), true, false).depthClamp,
+              "A13 지원하지 않으면 거부하지 않고 끔(투영 near 를 늘려 대신)");
+
         hvk::DeviceCaps both = questPro();
         both.extPushDescriptor = false;
         both.apiVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
@@ -205,6 +218,20 @@ int main() {
         check(n == 1 && s2 && !core, "B1 sync2 를 켜면 sync2 구조체 정확히 하나(synchronization2 = VK_TRUE)");
         check(fc.core.samplerAnisotropy == VK_TRUE && fc.core.shaderStorageImageMultisample == VK_TRUE,
               "B1 기본 기능이 계획과 같음(이방성 · MS 저장)");
+        check(fc.core.depthBiasClamp == VK_FALSE, "B1 depthBiasClamp 를 지원하지 않는 계획이면 VK_FALSE");
+        hvk::DeviceCaps clampCaps = questPro();
+        clampCaps.featDepthBiasClamp = true;
+        hvk::FeatureChain fcClamp;
+        hvk::buildFeatureChain(hvk::planDevice(clampCaps, true, false), fcClamp);
+        check(fcClamp.core.depthBiasClamp == VK_TRUE, "B1 depthBiasClamp 계획이면 기본 기능에 VK_TRUE");
+        check(fc.core.depthClamp == VK_FALSE && fcClamp.core.depthClamp == VK_FALSE,
+              "B1 depthClamp 를 지원하지 않는 계획이면 VK_FALSE");
+        hvk::DeviceCaps dcCaps = questPro();
+        dcCaps.featDepthClamp = true;
+        hvk::FeatureChain fcDc;
+        hvk::buildFeatureChain(hvk::planDevice(dcCaps, true, false), fcDc);
+        check(fcDc.core.depthClamp == VK_TRUE && fcDc.core.depthBiasClamp == VK_FALSE,
+              "B1 depthClamp 계획이면 기본 기능에 VK_TRUE(depthBiasClamp 와 따로)");
 
         hvk::DeviceCaps noExt = questPro();
         noExt.extSync2 = false;
@@ -236,6 +263,17 @@ int main() {
               "C1 KHR 이름 두 개만 물음");
         check(!asked("vkCmdPushDescriptorSet") && !asked("vkCmdPipelineBarrier2") && !asked("vkCmdPipelineBarrier"),
               "C1 코어 이름(1.4 push · 1.3 barrier2 · 1.0 barrier)은 묻지 않음");
+        check(!fns.depthBiasClamp, "C1 depthBiasClamp 는 계획을 따름(끔)");
+        hvk::DeviceCaps clampFn = questPro();
+        clampFn.featDepthBiasClamp = true;
+        hvk::DeviceFns fnsClamp;
+        hvk::loadDeviceFns(dev, &fakeGetDeviceProcAddr, &fakeBarrier1, hvk::planDevice(clampFn, true, false), fnsClamp, &err);
+        check(fnsClamp.depthBiasClamp, "C1 depthBiasClamp 는 계획을 따름(켬, 섀도 패스가 rc.vk 로 읽음)");
+        hvk::DeviceCaps dcFn = questPro();
+        dcFn.featDepthClamp = true;
+        hvk::DeviceFns fnsDc;
+        hvk::loadDeviceFns(dev, &fakeGetDeviceProcAddr, &fakeBarrier1, hvk::planDevice(dcFn, true, false), fnsDc, &err);
+        check(fnsDc.depthClamp && !fnsClamp.depthClamp, "C1 depthClamp 는 계획을 따름(섀도 패스 · 맞춤이 rc.vk 로 읽음)");
 
         g_asked.clear();
         hvk::DeviceCaps noExt = questPro();
@@ -290,6 +328,25 @@ int main() {
         const uint32_t bigMinor = hxr::vkApiFromXrVersion((1ull << 48) | (0x500ull << 32));
         check(VK_API_VERSION_MAJOR(bigMinor) == 1 && VK_API_VERSION_MINOR(bigMinor) == 0x3FF,
               "D8 minor 만 큰 값(1.1280)은 major 1 을 지키고 minor 를 1023 으로 자름");
+
+        // XR 경로의 인스턴스 버전(DEF-164): 런타임 최댓값까지 올리되 로더를 넘지 않고 기준선 아래로 내리지 않음.
+        const uint32_t base = hvk::kVulkanApiVersion, v14 = VK_API_VERSION_1_4;
+        check(hvk::xrInstanceApiVersion(base, v12, v14) == v12, "D9 Quest Link(1.0 ~ 1.2, 로더 1.4) 는 1.2");
+        check(hvk::checkApiRange(hvk::xrInstanceApiVersion(base, v12, v14), v10, v12) == hvk::ApiRange::InRange,
+              "D9 올린 값도 런타임 범위 안");
+        check(hvk::xrInstanceApiVersion(base, v11, v14) == v11, "D10 최댓값이 1.1 이면 1.1");
+        check(hvk::xrInstanceApiVersion(base, v10, v14) == base, "D10 최댓값이 기준선보다 낮아도 기준선 아래로 내리지 않음");
+        check(hvk::xrInstanceApiVersion(base, v13, v12) == v12, "D11 로더가 1.2 면 런타임 최댓값 1.3 대신 1.2");
+        check(hvk::xrInstanceApiVersion(base, v12, v10) == base, "D11 로더가 기준선보다 낮아도 기준선(생성 실패는 로더가 알림)");
+        check(hvk::xrInstanceApiVersion(base, 0, v14) == base, "D12 범위를 모르면 기준선 그대로");
+        check(hvk::xrInstanceApiVersion(base, VK_MAKE_API_VERSION(0, 1, 2, 295), VK_MAKE_API_VERSION(0, 1, 4, 341)) == v12,
+              "D13 patch 는 0 으로(1.2.295 → 1.2.0)");
+        check(hvk::xrInstanceApiVersion(base, huge, VK_MAKE_API_VERSION(0, 1, 3, 250)) == v13,
+              "D13 제한 없는 최댓값은 로더 버전(1.3.250 → 1.3.0)");
+        check(hvk::checkApiRange(hvk::xrInstanceApiVersion(base, v13, v14), v12, v13) == hvk::ApiRange::InRange,
+              "D14 런타임 범위가 1.2 ~ 1.3 이어도 XR 을 끄지 않음(예전 1.1 고정은 최솟값 미만)");
+        static_assert(hvk::xrInstanceApiVersion(hvk::kVulkanApiVersion, 0, 0) == hvk::kVulkanApiVersion,
+                      "XR range unknown keeps the baseline");
     }
 
     std::printf("\n== E. 기준선 잠금 ==\n");
@@ -340,6 +397,32 @@ int main() {
 
         const hvk::QueueFamilies two = hvk::selectQueueFamilies({ fam(C), fam(G), fam(G) }, {}, false);
         check(two.graphics == 1u, "F7 표시가 필요 없으면 첫 그래픽 계열에서 멈춤");
+    }
+
+    std::printf("\n== G. 섀도맵 깊이 형식 ==\n");
+    {
+        const VkFormatFeatureFlags A = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        const VkFormatFeatureFlags S = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+        const VkFormatFeatureFlags L = VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+        auto table = [](VkFormatFeatureFlags d32, VkFormatFeatureFlags d16, VkFormatFeatureFlags x8d24) {
+            return [=](VkFormat f) -> VkFormatFeatureFlags {
+                if (f == VK_FORMAT_D32_SFLOAT)          return d32;
+                if (f == VK_FORMAT_D16_UNORM)           return d16;
+                if (f == VK_FORMAT_X8_D24_UNORM_PACK32) return x8d24;
+                return 0;
+            };
+        };
+        auto is = [](hvk::ShadowFormatChoice c, VkFormat f, bool lin) { return c.format == f && c.linearCompare == lin; };
+
+        check(is(hvk::chooseShadowFormat(table(A | S | L, A | S | L, A | S | L)), VK_FORMAT_D32_SFLOAT, true),
+              "G1 PC 형(세 형식 모두 어태치먼트 + 샘플 + LINEAR) → D32, LINEAR");
+        check(is(hvk::chooseShadowFormat(table(S, A | S, 0)), VK_FORMAT_D16_UNORM, false),
+              "G2 Quest 형 기준선(D32 샘플만, D16 LINEAR 없음, X8_D24 없음) → D16, LINEAR 아님");
+        check(is(hvk::chooseShadowFormat(table(A | S, A | S | L, 0)), VK_FORMAT_D16_UNORM, true),
+              "G3 D32 는 LINEAR 없음, D16 은 LINEAR 있음 → LINEAR 가 되는 D16");
+        check(is(hvk::chooseShadowFormat(table(A | S, A | S, 0)), VK_FORMAT_D32_SFLOAT, false),
+              "G4 Quest 형 형식 프로필(D32 · D16 모두 LINEAR 없음) → D32, LINEAR 아님");
+        check(hvk::chooseShadowFormat(table(0, 0, 0)).format == VK_FORMAT_UNDEFINED, "G5 맞는 형식이 없으면 UNDEFINED");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

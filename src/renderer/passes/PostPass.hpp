@@ -31,10 +31,20 @@ public:
         float         uvScale[2]  = { 1.f, 1.f };   // HDR 에서 읽을 부분(거울 화면 자르기)
         float         uvOffset[2] = { 0.f, 0.f };
     };
+    // 합성 값. 프레임 단위 값이고, 두 눈과 XR 거울 화면이 같은 값을 씁니다(블룸 이미지 한 벌을 두
+    // 눈이 함께 쓰므로 눈마다 다르게 두지 않음). 렌더러가 프레임마다 한 번 채웁니다.
+    // aoOn · bloomOn 이 false 면 그 패스를 기록하지 않은 것이므로, 해당 바인딩에 HDR 뷰를 대신 묶습니다.
+    struct Params {
+        float aoStrength;
+        float bloomStrength;
+        float exposure;
+        bool  aoOn    = true;
+        bool  bloomOn = true;
+    };
     // overlay 가 있으면 톤매핑을 그린 뒤 같은 렌더 패스 안에서 부릅니다(렌더 확장의 AfterTonemap, DEF-17).
     // 인자는 지금 열린 렌더 패스입니다. 뷰포트 · 시저는 out.rect 로 설정되어 있습니다.
     using OverlayHook = std::function<void(VkRenderPass renderPass)>;
-    void recordTonemap(VkCommandBuffer cmd, const Output& out,
+    void recordTonemap(VkCommandBuffer cmd, const Output& out, const Params& params,
                        VkImageView hdrView, VkImageView ssaoView,
                        VkImageView bloomView, VkSampler clampSampler,
                        const OverlayHook* overlay = nullptr);

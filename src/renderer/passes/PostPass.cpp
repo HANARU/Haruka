@@ -166,7 +166,7 @@ void PostPass::destroy() {
 }
 
 // ── recordTonemap ──────────────────────────────────────────────────────────────
-void PostPass::recordTonemap(VkCommandBuffer cmd, const Output& out,
+void PostPass::recordTonemap(VkCommandBuffer cmd, const Output& out, const Params& params,
                              VkImageView hdrView, VkImageView ssaoView,
                              VkImageView bloomView, VkSampler clampSampler,
                              const OverlayHook* overlay) {
@@ -189,9 +189,15 @@ void PostPass::recordTonemap(VkCommandBuffer cmd, const Output& out,
     vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &out.rect);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, v.pipeline);
 
+    // 끈 패스의 바인딩에는 HDR 뷰를 대신 묶습니다. 한 번도 기록하지 않은 AO · 블룸 이미지는 UNDEFINED
+    // 레이아웃이라(AOPass · BloomPass 렌더 패스의 initialLayout) SHADER_READ_ONLY_OPTIMAL 로 묶으면 검증
+    // 오류가 납니다. 디스크립터는 셰이더가 분기로 읽지 않아도 정적 사용으로 잡힙니다. HDR 은 이미 읽기
+    // 레이아웃이고, post.frag 는 enable 이 0 이면 그 바인딩을 샘플하지 않습니다.
+    const VkImageView aoBind    = params.aoOn    ? ssaoView  : hdrView;
+    const VkImageView bloomBind = params.bloomOn ? bloomView : hdrView;
     VkDescriptorImageInfo hdrI  { clampSampler, hdrView,   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-    VkDescriptorImageInfo ssaoI { clampSampler, ssaoView,  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-    VkDescriptorImageInfo blmI  { clampSampler, bloomView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkDescriptorImageInfo ssaoI { clampSampler, aoBind,    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkDescriptorImageInfo blmI  { clampSampler, bloomBind, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
 
     VkWriteDescriptorSet ws[3] = {};
     for (int i = 0; i < 3; i++) {
@@ -212,13 +218,9 @@ void PostPass::recordTonemap(VkCommandBuffer cmd, const Output& out,
     // sRGB 이미지면 GPU 가 저장할 때 선형 → sRGB 로 바꿉니다. 그때 셰이더가 또 바꾸면 두 번 들어가
     // 화면이 밝고 흐려졌습니다(DEF-96). UNORM 이미지에서만 셰이더가 곡선을 적용합니다.
     const float encodeSrgb = isSrgbFormat(out.format) ? 0.f : 1.f;
-    // exposure 는 1.0 이었다. 태양 0.85 + 하늘 1.0 배 조합에서 흰 표면의 선형값이
-    // 0.72 여서 ACES 숄더에 얹혀 있었고, 코드값 221 부근에 몰려 평탄해 보였다.
-    // 태양 3.0 / 하늘 0.30 배에 맞춘 값이 0.4 였고, 이때 평면이 코드값 169 로 중간톤에 앉았다.
-    // 다만 그 0.4 는 감마가 두 번 들어간 화면을 보며 맞춘 값이었다(DEF-96). 감마를 바로잡은 뒤
-    // 같은 목표(흰 평면이 중간톤)로 돌아가는 값이 약 1.0 이라 1.0 으로 둔다(2026-10-04 사용자 결정).
-    // 태양·하늘·노출은 한 세트라서 따로 움직이면 대비가 다시 죽는다.
-    PostPC ppc{ 0.8f, 0.04f, 1.0f, 1.f, 1.f, encodeSrgb,
+    // 값은 렌더러가 프레임마다 채웁니다(Renderer::postParams, 기준값은 LightingCalibration.hpp).
+    PostPC ppc{ params.aoStrength, params.bloomStrength, params.exposure,
+                params.aoOn ? 1.f : 0.f, params.bloomOn ? 1.f : 0.f, encodeSrgb,
                 { out.uvScale[0], out.uvScale[1] }, { out.uvOffset[0], out.uvOffset[1] } };
     vkCmdPushConstants(cmd, pipeLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PostPC), &ppc);
 

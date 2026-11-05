@@ -145,6 +145,12 @@ int main() {
         check(!o.vkNoSync2 && !o.vkDedicatedMsaa, "기본은 sync2 를 쓰고 MSAA 컬러는 보통 경로");
         o = parse({ "--vk-dedicated-msaa" }, u);
         check(o.vkDedicatedMsaa && u.empty(), "--vk-dedicated-msaa(별도 할당 경로)");
+        o = parse({}, u);
+        check(!o.ssao.has_value(), "SSAO 옵션이 없으면 프로젝트 설정을 따름");
+        o = parse({ "--no-ssao" }, u);
+        check(o.ssao == false && u.empty(), "--no-ssao(AO 끔 경로)");
+        o = parse({ "--ssao" }, u);
+        check(o.ssao == true && u.empty(), "--ssao(AO 켬)");
         o = parse({ "--headless", "--no-xr", "--synthetic-eyes", "--frames=120", "--capture=out/x.png", "--bogus" }, u);
         check(o.headless && o.xr == false && o.syntheticEyes && o.frames == 120 && o.capturePath == "out/x.png" &&
               u.size() == 1 && u[0] == "--bogus",

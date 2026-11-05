@@ -1,5 +1,6 @@
 #include "AOPass.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <random>
 #include <stdexcept>
@@ -14,8 +15,11 @@ struct SSAOData {
     float     bias;
     float     power;
     float     zFar;       // ssao.frag 의 배경 조기 탈출용
-    float     pad[2];
+    float     pad[2];     // 아래 proj 가 std140 정렬 위치(1120)에서 시작하도록 채움. 지우지 않습니다
+    glm::mat4 proj;       // 샘플 투영 행렬(ssao.frag 의 data.proj)
 };
+static_assert(sizeof(SSAOData) == 1184, "SSAOData must match ssao.frag std140 block (1184 bytes)");
+static_assert(offsetof(SSAOData, proj) == 1120, "SSAOData.proj offset must match ssao.frag");
 
 // 단일 컬러 어태치먼트 + shader-read 종료 렌더패스 (linDepth/SSAO 공통 형태)
 static VkRenderPass makeColorPass(VkDevice device, VkFormat fmt) {
@@ -28,16 +32,25 @@ static VkRenderPass makeColorPass(VkDevice device, VkFormat fmt) {
     VkSubpassDescription sp{};
     sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sp.colorAttachmentCount = 1; sp.pColorAttachments = &ref;
-    VkSubpassDependency dep{};
-    dep.srcSubpass = VK_SUBPASS_EXTERNAL; dep.dstSubpass = 0;
-    dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dep.srcAccessMask = 0; dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    // 두 이미지(linDepth · SSAO)는 프레임 · 눈 사이에 한 장을 같이 쓰고, 뒤 패스(SSAO · 톤매핑)가
+    // 프래그먼트 셰이더로 읽습니다. 들어올 때는 앞선 읽기 · 쓰기 뒤에 쓰고(WAR · WAW), 나갈 때는 이
+    // 패스의 쓰기를 뒤 패스의 셰이더 읽기에 보이게 합니다(RAW). 같은 모양의 선례는 ShadowPass 입니다.
+    VkSubpassDependency deps[2] = {};
+    deps[0].srcSubpass = VK_SUBPASS_EXTERNAL; deps[0].dstSubpass = 0;
+    deps[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].srcSubpass = 0; deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     VkRenderPassCreateInfo rpci{};
     rpci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     rpci.attachmentCount = 1; rpci.pAttachments = &att;
     rpci.subpassCount = 1; rpci.pSubpasses = &sp;
-    rpci.dependencyCount = 1; rpci.pDependencies = &dep;
+    rpci.dependencyCount = 2; rpci.pDependencies = deps;
     VkRenderPass rp;
     if (vkCreateRenderPass(device, &rpci, nullptr, &rp) != VK_SUCCESS)
         throw std::runtime_error("Failed to create AO render pass!");
@@ -92,6 +105,21 @@ void AOPass::create(RenderContext& rc) {
             throw std::runtime_error("Failed to create SSAO desc layout!");
     }
 
+    // 블러 set layout: 0=블러 전 AO, 1=linDepth (둘 다 texelFetch)
+    {
+        VkDescriptorSetLayoutBinding bindings[2] = {};
+        for (uint32_t i = 0; i < 2; ++i) {
+            bindings[i].binding = i; bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            bindings[i].descriptorCount = 1; bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        }
+        VkDescriptorSetLayoutCreateInfo dslci{};
+        dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        dslci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+        dslci.bindingCount = 2; dslci.pBindings = bindings;
+        if (vkCreateDescriptorSetLayout(rc.device, &dslci, nullptr, &blurSetLayout_) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create SSAO blur desc layout!");
+    }
+
     // Pipeline layouts (PSO와 분리 — 핫리로드 시 재생성 안 함)
     {
         VkPushConstantRange pcr{};
@@ -109,6 +137,16 @@ void AOPass::create(RenderContext& rc) {
         pli.setLayoutCount = 1; pli.pSetLayouts = &ssaoSetLayout_;
         if (vkCreatePipelineLayout(rc.device, &pli, nullptr, &ssaoPipeLayout_) != VK_SUCCESS)
             throw std::runtime_error("Failed to create SSAO pipeline layout!");
+    }
+    {
+        VkPushConstantRange pcr{};
+        pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; pcr.offset = 0; pcr.size = 8;   // ssao_blur.frag Params
+        VkPipelineLayoutCreateInfo pli{};
+        pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pli.setLayoutCount = 1; pli.pSetLayouts = &blurSetLayout_;
+        pli.pushConstantRangeCount = 1; pli.pPushConstantRanges = &pcr;
+        if (vkCreatePipelineLayout(rc.device, &pli, nullptr, &blurPipeLayout_) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create SSAO blur pipeline layout!");
     }
 
     createDataBuffers();
@@ -134,6 +172,13 @@ void AOPass::acquireSizeDependent() {
         0, ssaoAlloc_);
     ssaoView_     = rc_->createImageView(ssaoImage_, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
     ssaoFramebuf_ = makeFramebuffer(rc_->device, ssaoPass_, ssaoView_, w, h);
+
+    blurImage_ = rc_->createImage(w, h, 1, 1, VK_SAMPLE_COUNT_1_BIT,
+        VK_FORMAT_R8_UNORM, VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        0, blurAlloc_);
+    blurView_     = rc_->createImageView(blurImage_, VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
+    blurFramebuf_ = makeFramebuffer(rc_->device, ssaoPass_, blurView_, w, h);
 }
 
 void AOPass::releaseSizeDependent() {
@@ -143,6 +188,8 @@ void AOPass::releaseSizeDependent() {
         if (img)  { vkDestroyImage(rc_->device, img, nullptr);      img  = VK_NULL_HANDLE; }
         if (alloc.isValid()) { rc_->allocator->freeB(alloc); alloc = {}; }
     };
+    if (blurFramebuf_)     { vkDestroyFramebuffer(rc_->device, blurFramebuf_, nullptr);     blurFramebuf_     = VK_NULL_HANDLE; }
+    freeSlot(blurImage_, blurView_, blurAlloc_);
     if (ssaoFramebuf_)     { vkDestroyFramebuffer(rc_->device, ssaoFramebuf_, nullptr);     ssaoFramebuf_     = VK_NULL_HANDLE; }
     freeSlot(ssaoImage_, ssaoView_, ssaoAlloc_);
     if (linDepthFramebuf_) { vkDestroyFramebuffer(rc_->device, linDepthFramebuf_, nullptr); linDepthFramebuf_ = VK_NULL_HANDLE; }
@@ -256,27 +303,31 @@ void AOPass::createPipelines() {
         "shaders/linDepth.frag.spv", linDepthPipeLayout_);
     ssaoPipeline_ = rc_->createFullscreenPipeline(ssaoPass_, 0,
         "shaders/ssao.frag.spv", ssaoPipeLayout_);
+    blurPipeline_ = rc_->createFullscreenPipeline(ssaoPass_, 0,
+        "shaders/ssao_blur.frag.spv", blurPipeLayout_);
 }
 
 void AOPass::destroyPipelines() {
     if (!rc_) return;
     if (linDepthPipeline_) { vkDestroyPipeline(rc_->device, linDepthPipeline_, nullptr); linDepthPipeline_ = VK_NULL_HANDLE; }
     if (ssaoPipeline_)     { vkDestroyPipeline(rc_->device, ssaoPipeline_, nullptr);     ssaoPipeline_     = VK_NULL_HANDLE; }
+    if (blurPipeline_)     { vkDestroyPipeline(rc_->device, blurPipeline_, nullptr);     blurPipeline_     = VK_NULL_HANDLE; }
 }
 
 void AOPass::rebuildPipelines() {
     // 새 파이프라인을 다 만든 뒤에만 옛 것을 지웁니다. 하나라도 실패하면 새로 만든 것만 지우고
     // 옛 것을 되돌려, 핫 리로드가 실패해도 이전 파이프라인으로 계속 그립니다.
-    const VkPipeline oldLin = linDepthPipeline_, oldSsao = ssaoPipeline_;
-    linDepthPipeline_ = ssaoPipeline_ = VK_NULL_HANDLE;
+    const VkPipeline oldLin = linDepthPipeline_, oldSsao = ssaoPipeline_, oldBlur = blurPipeline_;
+    linDepthPipeline_ = ssaoPipeline_ = blurPipeline_ = VK_NULL_HANDLE;
     try { createPipelines(); }
     catch (...) {
         destroyPipelines();
-        linDepthPipeline_ = oldLin; ssaoPipeline_ = oldSsao;
+        linDepthPipeline_ = oldLin; ssaoPipeline_ = oldSsao; blurPipeline_ = oldBlur;
         throw;
     }
     if (oldLin)  vkDestroyPipeline(rc_->device, oldLin,  nullptr);
     if (oldSsao) vkDestroyPipeline(rc_->device, oldSsao, nullptr);
+    if (oldBlur) vkDestroyPipeline(rc_->device, oldBlur, nullptr);
 }
 
 void AOPass::destroy() {
@@ -304,6 +355,8 @@ void AOPass::destroy() {
     if (linDepthPass_)       { vkDestroyRenderPass(rc_->device, linDepthPass_, nullptr); linDepthPass_ = VK_NULL_HANDLE; }
     if (ssaoPipeLayout_)     { vkDestroyPipelineLayout(rc_->device, ssaoPipeLayout_, nullptr); ssaoPipeLayout_ = VK_NULL_HANDLE; }
     if (ssaoSetLayout_)      { vkDestroyDescriptorSetLayout(rc_->device, ssaoSetLayout_, nullptr); ssaoSetLayout_ = VK_NULL_HANDLE; }
+    if (blurPipeLayout_)     { vkDestroyPipelineLayout(rc_->device, blurPipeLayout_, nullptr); blurPipeLayout_ = VK_NULL_HANDLE; }
+    if (blurSetLayout_)      { vkDestroyDescriptorSetLayout(rc_->device, blurSetLayout_, nullptr); blurSetLayout_ = VK_NULL_HANDLE; }
     if (ssaoPass_)           { vkDestroyRenderPass(rc_->device, ssaoPass_, nullptr); ssaoPass_ = VK_NULL_HANDLE; }
 }
 
@@ -350,6 +403,7 @@ void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
         if (cam.valid) {
             SSAOData* ubo = static_cast<SSAOData*>(dataAllocs_[dataIdx].mappedPtr);
             ubo->invProj    = cam.invProj;
+            ubo->proj       = cam.proj;
             ubo->zFar       = cam.zFar;
             // half-res SSAO 타깃 기준으로 스케일합니다(hw=renderExtent/2). 4x4 노이즈가
             // half-res 4픽셀마다 한 번 반복되어(REPEAT) 픽셀당 회전이 제대로 흩어집니다.
@@ -376,6 +430,39 @@ void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
         ws[2].dstBinding=2; ws[2].descriptorType=VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;         ws[2].descriptorCount=1; ws[2].pBufferInfo=&ubI;
         rc_->vk.push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             ssaoPipeLayout_, 0, 3, ws);
+
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        vkCmdEndRenderPass(cmd);
+    }
+
+    // ── 블러: 4x4 깊이 인식 평균 → 톤매핑이 읽는 AO(DEF-163) ─────────────────
+    // SSAO 패스의 나가는 의존성이 이 패스의 셰이더 읽기를 덮고, 같은 렌더 패스(ssaoPass_)의 들어오는 의존성이
+    // 앞 눈 · 앞 프레임 톤매핑의 읽기 뒤에 쓰게 합니다.
+    {
+        VkRenderPassBeginInfo rpbi{};
+        rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpbi.renderPass = ssaoPass_; rpbi.framebuffer = blurFramebuf_;
+        rpbi.renderArea = {{0,0},{hw, hh}};
+        vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+
+        VkViewport lvp{0,0,(float)hw,(float)hh,0.f,1.f}; VkRect2D lsc{{0,0},{hw,hh}};
+        vkCmdSetViewport(cmd, 0, 1, &lvp); vkCmdSetScissor(cmd, 0, 1, &lsc);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blurPipeline_);
+
+        VkDescriptorImageInfo aoI{ depthSampler_, ssaoView_,     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkDescriptorImageInfo ldI{ depthSampler_, linDepthView_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkWriteDescriptorSet ws[2] = {};
+        for (int i = 0; i < 2; ++i) {
+            ws[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            ws[i].dstBinding = (uint32_t)i; ws[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            ws[i].descriptorCount = 1;
+        }
+        ws[0].pImageInfo = &aoI; ws[1].pImageInfo = &ldI;
+        rc_->vk.push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, blurPipeLayout_, 0, 2, ws);
+
+        struct BlurPC { float zFar, relTol; };
+        const BlurPC bpc{ cam.zFar, kBlurRelDepthTol };
+        vkCmdPushConstants(cmd, blurPipeLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(BlurPC), &bpc);
 
         vkCmdDraw(cmd, 3, 1, 0, 0);
         vkCmdEndRenderPass(cmd);

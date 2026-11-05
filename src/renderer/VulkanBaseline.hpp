@@ -5,9 +5,10 @@
 // 고쳐도 다른 곳이 옛 이름을 부릅니다(예전에는 push descriptor 를 부르는 6곳이 모두 1.4 코어 이름을 썼습니다).
 //
 // 규칙:
-//   · 인스턴스 · 장치 모두 Vulkan 1.1 입니다. Quest 2 · Pro 는 1.1.295 이고(Quest 3 · 3S 는 1.3), Android 의 libvulkan 은
-//     vkCmdPipelineBarrier2 를 API 33, vkCmdPushDescriptorSet 을 API 36 부터 내보냅니다. 장치 버전이 높아도 코어 경로를
-//     고르지 않습니다(같은 계획이 나옵니다).
+//   · 엔진 코드는 인스턴스 · 장치 모두 Vulkan 1.1 로 씁니다. Quest 2 · Pro 는 1.1.295 이고(Quest 3 · 3S 는 1.3), Android 의
+//     libvulkan 은 vkCmdPipelineBarrier2 를 API 33, vkCmdPushDescriptorSet 을 API 36 부터 내보냅니다. 장치 버전이 높아도
+//     코어 경로를 고르지 않습니다(같은 계획이 나옵니다). XR 경로만 인스턴스 버전을 런타임 최댓값까지 올립니다(DEF-164,
+//     xrInstanceApiVersion). 그래도 엔진이 묻고 부르는 함수는 같습니다.
 //   · VK_KHR_push_descriptor 는 필수, VK_KHR_synchronization2 는 선택입니다(없으면 1.0 배리어, BarrierCompat.hpp).
 //     둘 다 1.1 에 기댑니다(vk.xml depends). push descriptor 확장에는 기능 구조체가 없습니다.
 //   · 기능 체인에는 sync2 구조체 하나만 잇습니다. Vulkan11~14Features 는 잇지 않습니다(1.1 장치에는 없는 구조체이고,
@@ -50,6 +51,8 @@ struct DeviceCaps {
     bool         featSync2                   = false;   // VkPhysicalDeviceSynchronization2FeaturesKHR
     bool         featSamplerAnisotropy       = false;
     bool         featStorageImageMultisample = false;
+    bool         featDepthBiasClamp          = false;   // 섀도 경사 바이어스 상한(ShadowPass)
+    bool         featDepthClamp              = false;   // 섀도 캐스터 pancaking(ShadowPass, ShadowFit.hpp)
     uint32_t     maxPushDescriptors          = 0;       // 로그용(규격 최솟값 32)
     VkDeviceSize maxMemoryAllocationSize     = 0;       // 0 = 모름(Maintenance3, 할당자에 넘김)
 };
@@ -61,6 +64,8 @@ struct DevicePlan {
     bool                     sync2                   = false;
     bool                     samplerAnisotropy       = false;
     bool                     storageImageMultisample = false;
+    bool                     depthBiasClamp          = false;
+    bool                     depthClamp              = false;
 };
 
 // needSwapchain 은 창이 표면을 줄 때만 참입니다(창 없는 경로 · Quest 는 거짓). forceNoSync2 는 1.0 배리어 경로를
@@ -83,6 +88,10 @@ inline DevicePlan planDevice(const DeviceCaps& caps, bool needSwapchain, bool xr
     if (p.sync2) p.extensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
     p.samplerAnisotropy       = caps.featSamplerAnisotropy;
     p.storageImageMultisample = xrDevice && caps.featStorageImageMultisample;
+    // 없으면 거부하지 않고 끕니다. 섀도 패스는 상한 없이 경사 바이어스를 씁니다(ShadowPass::rebuildPipelines).
+    p.depthBiasClamp          = caps.featDepthBiasClamp;
+    // 없으면 거부하지 않고 끕니다. 섀도 투영의 near 를 빛 쪽으로 늘려 대신합니다(ShadowFit.hpp).
+    p.depthClamp              = caps.featDepthClamp;
     return p;
 }
 
@@ -96,6 +105,8 @@ inline const void* buildFeatureChain(const DevicePlan& plan, FeatureChain& out) 
     out = FeatureChain{};
     out.core.samplerAnisotropy             = plan.samplerAnisotropy ? VK_TRUE : VK_FALSE;
     out.core.shaderStorageImageMultisample = plan.storageImageMultisample ? VK_TRUE : VK_FALSE;
+    out.core.depthBiasClamp                = plan.depthBiasClamp ? VK_TRUE : VK_FALSE;
+    out.core.depthClamp                    = plan.depthClamp ? VK_TRUE : VK_FALSE;
     if (!plan.sync2) return nullptr;
     out.sync2.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR;
     out.sync2.pNext            = nullptr;
@@ -131,6 +142,8 @@ struct DeviceFns {
     PFN_vkCmdPipelineBarrier      barrier1   = nullptr;   // 1.0 코어(&vkCmdPipelineBarrier)
     bool                          sync2      = false;     // barrier2 로 기록하는지
     bool                          anisotropy = false;
+    bool                          depthBiasClamp = false; // 파이프라인의 depthBiasClamp 에 0 이 아닌 값을 써도 되는지
+    bool                          depthClamp     = false; // 파이프라인의 depthClampEnable 을 켜도 되는지
 };
 
 // 묻는 이름은 "vkCmdPushDescriptorSetKHR" 와(sync2 계획일 때만) "vkCmdPipelineBarrier2KHR" 둘뿐입니다. barrier1 은
@@ -141,6 +154,8 @@ inline bool loadDeviceFns(VkDevice dev, PFN_vkGetDeviceProcAddr getDeviceProcAdd
     out = DeviceFns{};
     out.barrier1   = barrier1;
     out.anisotropy = plan.samplerAnisotropy;
+    out.depthBiasClamp = plan.depthBiasClamp;
+    out.depthClamp     = plan.depthClamp;
     auto fail = [&](const char* what) {
         if (err) *err = what;
         return false;
@@ -166,6 +181,51 @@ constexpr ApiRange checkApiRange(uint32_t api, uint32_t minVk, uint32_t maxVk) {
     if (majorMinor(api) < majorMinor(minVk)) return ApiRange::BelowMin;
     if (majorMinor(api) > majorMinor(maxVk)) return ApiRange::AboveMax;
     return ApiRange::InRange;
+}
+
+// XR 경로의 인스턴스 버전(DEF-164, 2026-11-02). 런타임은 엔진의 장치를 함께 쓰며 자기 Vulkan 호출을 하는데, 그때 1.2
+// 코어 이름을 쓸 수 있습니다(Oculus PC 런타임은 타임라인 세마포어 대기를 vkWaitSemaphores 로만 찾습니다). 1.1 장치에서는
+// 그 이름이 null 이라 Stop 때 런타임이 주소 0 을 불렀습니다. 그래서 런타임이 알려 준 최댓값까지 올리되, 로더가 지원하는
+// 버전을 넘지 않고 엔진 기준선 아래로는 내리지 않습니다. 범위를 모르면(0) 기준선 그대로입니다. patch 는 0 으로 둡니다.
+// 엔진 코드는 이 값과 상관없이 1.1 코어 + KHR 이름만 씁니다(위 규칙).
+constexpr uint32_t xrInstanceApiVersion(uint32_t baseline, uint32_t runtimeMax, uint32_t loaderVersion) {
+    uint32_t want = baseline;
+    if (runtimeMax != 0 && majorMinor(runtimeMax) > majorMinor(want)) want = runtimeMax;
+    if (loaderVersion != 0 && majorMinor(loaderVersion) < majorMinor(want)) want = loaderVersion;
+    if (majorMinor(want) < majorMinor(baseline)) want = baseline;
+    return VK_MAKE_API_VERSION(0, VK_API_VERSION_MAJOR(want), VK_API_VERSION_MINOR(want), 0);
+}
+
+// 섀도맵 깊이 형식 고르기. 섀도맵은 깊이 어태치먼트이면서 sampler2DShadow 로 읽으므로 두 기능이 다 필요하고,
+// 하드웨어 2x2 PCF 가중치(LINEAR 비교 필터)가 보장되는 형식을 먼저 고릅니다. 그런 형식 사이에서는 D32 가
+// 앞입니다. Quest 형 기준선은 D32 의 어태치먼트를 보장하지 않으므로 조회 없이 D32 를 쓰면 안 됩니다.
+// optimalFeatures(VkFormat) 은 그 형식의 optimalTilingFeatures 를 돌려줍니다(장치 없이 시험하려고 함수로 받음).
+struct ShadowFormatChoice {
+    VkFormat format        = VK_FORMAT_UNDEFINED;
+    bool     linearCompare = false;   // SAMPLED_IMAGE_FILTER_LINEAR 가 있어 비교 + LINEAR 결과가 정의됨
+};
+
+inline constexpr VkFormat kShadowFormatOrder[] = {
+    VK_FORMAT_D32_SFLOAT, VK_FORMAT_D16_UNORM, VK_FORMAT_X8_D24_UNORM_PACK32 };
+
+template <class F>
+ShadowFormatChoice chooseShadowFormat(F optimalFeatures) {
+    const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+    const VkFormatFeatureFlags lin  = need | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    for (VkFormat f : kShadowFormatOrder)
+        if ((optimalFeatures(f) & lin) == lin) return { f, true };
+    for (VkFormat f : kShadowFormatOrder)
+        if ((optimalFeatures(f) & need) == need) return { f, false };
+    return {};
+}
+
+inline const char* shadowFormatName(VkFormat f) {
+    switch (f) {
+        case VK_FORMAT_D32_SFLOAT:          return "D32_SFLOAT";
+        case VK_FORMAT_D16_UNORM:           return "D16_UNORM";
+        case VK_FORMAT_X8_D24_UNORM_PACK32: return "X8_D24_UNORM_PACK32";
+        default:                            return "UNDEFINED";
+    }
 }
 
 } // namespace hvk

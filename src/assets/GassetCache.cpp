@@ -16,7 +16,9 @@ static constexpr uint32_t kMagic   = 0x47415354u; // "GAST"
 //    버전 2 이하 캐시는 다시 만듭니다.
 // 4: 내용은 3 과 같습니다. 버전 3 은 uri 에 "../" · "./" 가 든 텍스처를 찾지 못한 채(DEF-125) 텍스처 없이 저장했을 수
 //    있어 다시 만듭니다(2026-10-31).
-static constexpr uint32_t kVersion = 4u;
+// 5: 메시마다 isBlend 다음에 doubleSided(u8)를 둡니다. 버전 4 이하 캐시는 다시 만듭니다(2026-11-01).
+// 6: 5 다음에 alphaMask(u8) · alphaCutoff(f32)를 둡니다. 버전 5 이하 캐시는 다시 만듭니다(2026-11-02).
+static constexpr uint32_t kVersion = 6u;
 // 머리: magic(4) version(4) mtime(8) size(8) hash(8) meshCount(4)
 static constexpr std::streamoff kMtimeOffset = 8;
 
@@ -88,6 +90,7 @@ bool GassetCache::isValid(const std::string& srcPath) {
 static void wU8 (std::ofstream& f, uint8_t  v) { f.write((const char*)&v, 1); }
 static void wU32(std::ofstream& f, uint32_t v) { f.write((const char*)&v, 4); }
 static void wU64(std::ofstream& f, uint64_t v) { f.write((const char*)&v, 8); }
+static void wF32(std::ofstream& f, float    v) { f.write((const char*)&v, 4); }
 
 static void wStr(std::ofstream& f, const std::string& s) {
     wU32(f, (uint32_t)s.size());
@@ -125,6 +128,9 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
         for (const auto& m : meshes) {
             wStr(f, m.name);
             wU8 (f, m.isBlend ? 1u : 0u);
+            wU8 (f, m.doubleSided ? 1u : 0u);   // 버전 5. load 와 같은 순서
+            wU8 (f, m.alphaMask ? 1u : 0u);     // 버전 6. load 와 같은 순서
+            wF32(f, m.alphaCutoff);
             wU32(f, (uint32_t)m.vertices.size());
             wU32(f, (uint32_t)m.indices.size());
             wTex(f, m.albedo);
@@ -158,6 +164,7 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
 static uint8_t  rU8 (std::ifstream& f) { uint8_t  v; f.read((char*)&v, 1); return v; }
 static uint32_t rU32(std::ifstream& f) { uint32_t v; f.read((char*)&v, 4); return v; }
 static uint64_t rU64(std::ifstream& f) { uint64_t v; f.read((char*)&v, 8); return v; }
+static float    rF32(std::ifstream& f) { float    v; f.read((char*)&v, 4); return v; }
 
 static std::string rStr(std::ifstream& f) {
     uint32_t len = rU32(f);
@@ -193,6 +200,9 @@ std::vector<MeshSourceData> GassetCache::load(const std::string& srcPath) {
         MeshSourceData m;
         m.name    = rStr(f);
         m.isBlend = (rU8(f) != 0);
+        m.doubleSided = (rU8(f) != 0);   // 버전 5. save 와 같은 순서
+        m.alphaMask   = (rU8(f) != 0);   // 버전 6. save 와 같은 순서
+        m.alphaCutoff = rF32(f);
         uint32_t vc = rU32(f);
         uint32_t ic = rU32(f);
         m.albedo     = rTex(f);

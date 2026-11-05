@@ -27,6 +27,13 @@ struct ProjectSettings {
     // 게임 실행 파일을 VR 로 시작할지(2026-10-19 사용자 결정, UE 의 Start in VR · Unity 의 Initialize XR on Startup 자리).
     //   xr.startInVr = true | false   명령줄 --xr · --no-xr 이 이 값을 덮어씁니다. 에디터는 이 값을 보지 않고 --xr 로만 켭니다.
     bool  xrStartInVr     = false;
+    // 후처리 패스 켬/끔(2026-11-01).
+    //   render.ao    = true | false   화면 공간 AO(SSAO). 머티리얼 occlusion 텍스처는 그대로입니다.
+    //   render.bloom = true | false   블룸.
+    // 켜면 지금 화면, 끄면 그 패스를 기록하지 않습니다(GPU 시간을 아낌). 시작할 때 한 번 읽습니다. 플랫폼별 값
+    // (.android 접미사)은 아직 없습니다. 명령줄 --ssao · --no-ssao 가 render.ao 를 덮어씁니다.
+    bool  renderAo        = true;
+    bool  renderBloom     = true;
 };
 
 // 리그 눈높이의 허용 범위(m). 프로젝트 설정과 XR Rig 컴포넌트가 함께 씁니다.
@@ -88,6 +95,11 @@ inline ProjectSettings parse(const std::string& text, std::vector<std::string>& 
             if      (value == "true")  s.xrStartInVr = true;
             else if (value == "false") s.xrStartInVr = false;
             else messages.push_back("'xr.startInVr' must be true or false (got '" + value + "'); using false");
+        } else if (key == "render.ao" || key == "render.bloom") {
+            bool& dst = (key == "render.ao") ? s.renderAo : s.renderBloom;
+            if      (value == "true")  dst = true;
+            else if (value == "false") dst = false;
+            else { dst = true; messages.push_back("'" + key + "' must be true or false (got '" + value + "'); using true"); }
         } else {
             messages.push_back("unknown setting '" + key + "'; skipped");
         }

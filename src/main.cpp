@@ -71,6 +71,8 @@ static bool redirectStdioIfHeadless() {
 //   --capture=path         끝낼 때 합성 눈 왼쪽 층을 PNG 로 남깁니다. 종료 코드 3 = 검증 오류(Debug), 4 = 빈 화면.
 //   --vk-no-sync2          synchronization2 가 있어도 Vulkan 1.0 배리어로 기록합니다(Quest 의 대체 경로 시험, DEF-04).
 //   --vk-dedicated-msaa    MSAA 컬러를 핵심 힙 밖 별도 할당으로 둡니다(Quest 의 지연 할당 경로를 PC 에서 시험, DEF-06).
+//   --ssao · --no-ssao     화면 공간 AO 를 켜거나 끕니다(AO 를 뺀 비교 · 끔 경로 시험). 프로젝트 설정 render.ao 를
+//                          덮어씁니다. 머티리얼 occlusion 텍스처는 그대로입니다.
 
 int main(int argc, char** argv) {
     // 앞단(에디터 또는 게임)을 먼저 정합니다. 쓰기 루트(설정 · 로그 · 캐시를 둘 폴더)가 앞단 정책에 달려 있어,

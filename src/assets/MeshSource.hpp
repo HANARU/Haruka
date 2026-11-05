@@ -28,6 +28,9 @@ struct MeshSourceVertex {
 struct MeshSourceData {
     std::string                   name;
     bool                          isBlend = false;  // alphaMode == "BLEND"
+    bool                          doubleSided = false;  // glTF material.doubleSided. 지금은 에셋 계층까지만 전달하고 렌더러는 아직 쓰지 않음
+    bool                          alphaMask   = false;  // alphaMode == "MASK". 지금은 에셋 계층까지만 전달(컷아웃 미구현)
+    float                         alphaCutoff = 0.5f;   // glTF material.alphaCutoff(MASK 일 때만 의미, 기본 0.5)
     std::vector<MeshSourceVertex> vertices;
     std::vector<uint32_t>         indices;
     TexSourceData albedo;

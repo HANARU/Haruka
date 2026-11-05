@@ -3828,6 +3828,23 @@ void EditorApp::buildEditorIcons(World& world, const WorldViewport& /*wvp*/,
             lines.push_back({p2,oc}); lines.push_back({p3,oc});
             lines.push_back({p3,oc}); lines.push_back({p0,oc});
         }
+
+        // 라이트 방향 화살표(Directional · Spot). 빛이 나아가는 방향(emitDirection)으로 빌보드 가장자리에서
+        // 뻗습니다. 길이 · 촉 크기는 빌보드와 같은 화면 고정 크기를 따릅니다. 한 액터에 라이트가 여럿이면 각각 그립니다.
+        for (const auto& comp : a->getComponents()) {
+            const auto* lc = dynamic_cast<const LightComponent*>(comp.get());
+            if (!lc || lc->lightType == LightType::Point) continue;
+            const glm::vec3 e     = lc->emitDirection();
+            const glm::vec3 start = pos + e * ssz;
+            const glm::vec3 tip   = pos + e * (ssz * 8.f);
+            const glm::vec3 back  = tip - e * (ssz * 2.f);
+            // 촉의 옆 방향: 화살표와 시선에 수직. 시선과 평행하거나 카메라가 아이콘 위에 있으면 화면 오른쪽으로.
+            glm::vec3 side = glm::cross(e, camPos - pos);
+            side = (glm::dot(side, side) > 1e-12f) ? glm::normalize(side) : right;
+            lines.push_back({start, col});            lines.push_back({tip, col});
+            lines.push_back({tip, col});              lines.push_back({back + side * ssz, col});
+            lines.push_back({tip, col});              lines.push_back({back - side * ssz, col});
+        }
     }
 }
 

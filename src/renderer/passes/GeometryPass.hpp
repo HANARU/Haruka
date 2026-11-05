@@ -64,6 +64,10 @@ public:
     // 꺼져 있어 물체에 가려지지 않고 항상 잡을 수 있습니다.
     void setGizmoTris(std::vector<LineVertex> tris) { pendingTris_ = std::move(tris); }
 
+    // pbr.frag 섀도 커널 등급(HARUKA_SHADOW_FILTER_*, 특수화 상수). create 전에 부릅니다. 실행 중에 바꾸면
+    // rebuildPipelines 를 불러야 반영됩니다. 지금은 부르는 곳이 없습니다(프로젝트 설정 연결은 뒤 단계).
+    void setShadowFilter(int32_t v) { shadowFilter_ = v; }
+
     VkRenderPass mainPass() const          { return pass_; }   // 렌더 확장의 파이프라인 호환용
     VkImageView depthView() const          { return depthView_; }
     VkImageView hdrView(uint32_t i) const  { return hdrView_[i]; }
@@ -100,6 +104,7 @@ private:
     // A1: 투명 볼록 메시 2패스 — 뒷면 먼저(CULL_FRONT), 앞면 나중(CULL_BACK). subpass 2.
     VkPipeline transparentBackPipeline_  = VK_NULL_HANDLE;
     VkPipeline transparentFrontPipeline_ = VK_NULL_HANDLE;
+    int32_t    shadowFilter_ = HARUKA_SHADOW_FILTER_LEGACY9;   // 위 세 PBR 파이프라인의 특수화 상수
 
     // Line overlay. 정점 버퍼는 프레임 슬롯마다 따로 둡니다. 하나를 같이 쓰면, 렌더 루프는
     // 지금 슬롯의 펜스만 기다리므로 직전 프레임이 아직 읽는 버퍼를 덮어씁니다(DEF-40).

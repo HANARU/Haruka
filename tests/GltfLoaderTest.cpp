@@ -14,6 +14,7 @@
 
 #include "stb_image_write.h"   // 구현은 GltfLoader.cpp 에 있습니다
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -185,6 +186,64 @@ int main() {
         hvfs::reset();
         hvfs::mountPack(std::move(reader), "game.hpak", 20);
         check(loadsTriangleWithTexture("assets/models/up.gltf", why), "묶음 안에서도 '../' uri 의 버퍼 · 텍스처를 찾음 " + why);
+    }
+
+    // ── 3. 머티리얼 doubleSided(2026-11-01) ─────────────────────────────────────
+    // 에셋 계층까지만 전달합니다(그림자 · 컬링 소비자는 아직 없음). 값이 없으면 glTF 기본값 false 입니다.
+    std::printf("\n== 3. 머티리얼 doubleSided ==\n");
+    {
+        std::string ds = same;
+        const std::string key = "\"materials\":[{";
+        const size_t at = ds.find(key);
+        check(at != std::string::npos, "시험 JSON 에 머티리얼이 있음");
+        if (at != std::string::npos) ds.insert(at + key.size(), "\"doubleSided\":true,");
+        writeFile(root / "assets/models/ds.gltf", bytesOf(ds));
+        hvfs::reset();
+        hvfs::mountDirectory(root, "", 0);
+        auto doubleSidedOf = [](const std::string& path, int& out) {
+            try {
+                const std::vector<MeshSourceData> all = GltfLoader::loadAll(path);
+                if (all.size() != 1) return false;
+                out = all[0].doubleSided ? 1 : 0;
+                return true;
+            } catch (const std::exception&) { return false; }
+        };
+        int v = -1;
+        check(doubleSidedOf("assets/models/same.gltf", v) && v == 0, "doubleSided 가 없으면 false");
+        v = -1;
+        check(doubleSidedOf("assets/models/ds.gltf", v) && v == 1, "\"doubleSided\":true 면 true");
+    }
+
+    // ── 4. 머티리얼 alphaMode · alphaCutoff(2026-11-02) ─────────────────────────
+    // MASK 와 cutoff 를 에셋 계층까지만 전달합니다(컷아웃 소비자는 아직 없음). 3절이 마운트해 둔 폴더를 그대로 씁니다.
+    std::printf("\n== 4. 머티리얼 alphaMode · alphaCutoff ==\n");
+    {
+        const std::string key = "\"materials\":[{";
+        auto withMaterial = [&](const std::string& extra) {
+            std::string s = same;
+            const size_t at = s.find(key);
+            if (at != std::string::npos) s.insert(at + key.size(), extra);
+            return s;
+        };
+        writeFile(root / "assets/models/mask.gltf", bytesOf(withMaterial("\"alphaMode\":\"MASK\",\"alphaCutoff\":0.3,")));
+        writeFile(root / "assets/models/blend.gltf", bytesOf(withMaterial("\"alphaMode\":\"BLEND\",")));
+        struct Alpha { bool mask = false, blend = false; float cutoff = -1.f; };
+        auto alphaOf = [](const std::string& path, Alpha& out) {
+            try {
+                const std::vector<MeshSourceData> all = GltfLoader::loadAll(path);
+                if (all.size() != 1) return false;
+                out = { all[0].alphaMask, all[0].isBlend, all[0].alphaCutoff };
+                return true;
+            } catch (const std::exception&) { return false; }
+        };
+        Alpha a;
+        check(alphaOf("assets/models/mask.gltf", a) && a.mask && !a.blend && std::fabs(a.cutoff - 0.3f) < 1e-6f,
+              "MASK · cutoff 0.3 → alphaMask, isBlend 아님, cutoff 0.3");
+        a = {};
+        check(alphaOf("assets/models/same.gltf", a) && !a.mask && !a.blend && a.cutoff == 0.5f,
+              "alphaMode 가 없으면(OPAQUE) alphaMask 아님, cutoff 기본 0.5");
+        a = {};
+        check(alphaOf("assets/models/blend.gltf", a) && a.blend && !a.mask, "BLEND 는 isBlend, alphaMask 아님");
     }
 
     hvfs::reset();

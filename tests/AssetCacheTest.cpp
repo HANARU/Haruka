@@ -91,6 +91,9 @@ int main() {
     m.vertices.resize(3);
     for (int i = 0; i < 3; ++i) m.vertices[i] = { { (float)i, 0.f, 0.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f }, { 1.f, 0.f, 0.f, 1.f } };
     m.indices = { 0, 1, 2 };
+    m.doubleSided = true;
+    m.alphaMask   = true;
+    m.alphaCutoff = 0.25f;
     GassetCache::save(src, { m });
 
     std::printf("\n== 1. 그대로 ==\n");
@@ -98,6 +101,8 @@ int main() {
     const auto loaded = GassetCache::load(src);
     check(loaded.size() == 1 && loaded[0].name == "Cube" && loaded[0].indices.size() == 3 &&
           loaded[0].vertices[2].pos[0] == 2.f, "읽은 메시가 저장한 것과 같음");
+    check(loaded.size() == 1 && loaded[0].doubleSided && !loaded[0].isBlend, "doubleSided 왕복(버전 6, isBlend 와 섞이지 않음)");
+    check(loaded.size() == 1 && loaded[0].alphaMask && loaded[0].alphaCutoff == 0.25f, "alphaMask · alphaCutoff 왕복(버전 6)");
 
     std::printf("\n== 2. 수정 시각만 바뀜(빌드의 에셋 복사) ==\n");
     const uint64_t before = storedMtime(src);
@@ -127,6 +132,10 @@ int main() {
     check(!GassetCache::isValid(src), "버전 2 캐시(실제 경로 키 · FNV 해시)도 다시 만듦");
     setVersion(3);
     check(!GassetCache::isValid(src), "버전 3 캐시(uri 의 '../' 텍스처를 놓쳤을 수 있음, DEF-125)도 다시 만듦");
+    setVersion(4);
+    check(!GassetCache::isValid(src), "버전 4 캐시(doubleSided 없음)도 다시 만듦");
+    setVersion(5);
+    check(!GassetCache::isValid(src), "버전 5 캐시(alphaMask 없음)도 다시 만듦");
 
     // 캐시 키(2026-10-24): 실제 경로의 std::hash 대신 정규화한 논리 경로라, 표기가 달라도 · 마운트 위치가 달라도 같습니다.
     std::printf("\n== 5. 키 ==\n");

@@ -86,6 +86,13 @@ public:
     void setForceNoSync2(bool on) { forceNoSync2_ = on; }
     // --vk-dedicated-msaa: MSAA 컬러를 핵심 힙 밖 별도 할당으로(지연 할당 타입이 없는 데스크톱에서 DEF-06 경로 시험).
     void setForceDedicatedMsaa(bool on) { forceDedicatedMsaa_ = on; }
+    // 후처리 패스 켬/끔(project.ini render.ao · render.bloom, --ssao · --no-ssao). 끈 패스는 기록하지 않습니다.
+    // 프레임마다 읽으므로 init 앞뒤 어느 때 불러도 됩니다. 프레임 단위 값입니다(블룸 이미지 한 벌을 두 눈이
+    // 함께 쓰므로 눈마다 다르게 두지 않음).
+    void setPostFeatures(bool ao, bool bloom) { aoOn_ = ao; bloomOn_ = bloom; }
+    void setAoEnabled(bool on) { aoOn_ = on; }
+    bool aoEnabled() const     { return aoOn_; }
+    bool bloomEnabled() const  { return bloomOn_; }
     void init(IWindow* window, IVulkanDeviceHooks* deviceHooks = nullptr);
     void cleanup();
     // xr 이 있으면 두 눈을 XR 스왑체인의 두 층에 그리고, 에디터 뷰포트에는 왼쪽 눈을 비춥니다.
@@ -195,6 +202,11 @@ private:
     bool               headless_ = false;   // 창이 표면을 주지 않음
     bool               forceNoSync2_ = false;   // --vk-no-sync2
     bool               forceDedicatedMsaa_ = false;   // --vk-dedicated-msaa
+    // SSAO · 블룸 켜기의 유일한 출처. postParams() 가 PostPass push 상수와 FrameUBO(screenParams.w ·
+    // miscParams.z)에 같은 값을 넣습니다.
+    bool               aoOn_    = true;
+    bool               bloomOn_ = true;
+    PostPass::Params   postParams() const;   // 이번 프레임의 합성 값(세기 · 노출 · 켬/끔)
     hvk::DeviceCaps    deviceCaps_;         // 고른 장치에서 읽은 값
     hvk::DevicePlan    devicePlan_;         // 켤 확장 · 기능(장치 생성과 샘플러가 함께 읽음)
     hvk::QueueFamilies queueFamilies_;      // 고를 때 한 번 정함
@@ -317,6 +329,9 @@ private:
     // 만들어, 선택 지점과 채우기 지점이 어긋날 수 없습니다. 캐스터가 없으면 -1.
     int           shadowCasterSlot_ = -1;
     glm::vec3     shadowCasterDir_  = {0.f, -1.f, 0.f};
+    glm::vec3     viewCenter_{ 0.f };      // 두 눈 위치 평균(단안이면 카메라, 없으면 원점). 라이트 선택 · LOD · 투명 정렬 공용
+    glm::mat4     lightViewProj_{ 1.f };   // 섀도 VP. 캐스터가 없는 프레임은 이전 값을 유지(예전 파일 전역 static)
+    glm::mat4     lightCullViewProj_{ 1.f };   // 섀도 캐스터 컬링 VP(near 를 빛 쪽으로 늘림, ShadowFit.hpp). 갱신 규칙은 위와 같음
 
     // ── UI overlay ────────────────────────────────────────────────────────────
     HSlateRenderer* uiRenderer_ = nullptr;

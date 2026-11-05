@@ -8,6 +8,9 @@
 #include "RendererLog.hpp"
 #include "DrawBatching.hpp"
 #include "LightSelection.hpp"
+#include "SpotCone.hpp"
+#include "ShadowFit.hpp"
+#include "LightingCalibration.hpp"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
 #define GLM_FORCE_RADIANS
@@ -22,9 +25,6 @@
 #include <cassert>
 #include <random>
 #include <functional>
-
-// Cross-frame state for shadow VP
-static glm::mat4 sCurLightViewProj{ 1.f };
 
 // ── createCommandPool ─────────────────────────────────────────────────────────
 
@@ -94,16 +94,11 @@ uint32_t Renderer::updateLightSSBO(World& world) {
         lightCands.push_back(c);
     }
     std::array<std::array<FrustumPlane, 6>, kMaxViews> lightViewPlanes{};
-    glm::vec3 eyeCenter(0.f);
-    if (hasCamera_) {
-        for (uint32_t i = 0; i < viewCount_; ++i) {
+    if (hasCamera_)
+        for (uint32_t i = 0; i < viewCount_; ++i)
             lightViewPlanes[i] = extractFrustumPlanes(views_[i].proj * views_[i].view);
-            eyeCenter += views_[i].pos;
-        }
-        eyeCenter /= (float)viewCount_;
-    }
     const hlight::Result chosen = hlight::select(lightCands, hasCamera_ ? lightViewPlanes.data() : nullptr,
-                                                 hasCamera_ ? viewCount_ : 0, eyeCenter, maxLights_);
+                                                 hasCamera_ ? viewCount_ : 0, viewCenter_, maxLights_);
     if (chosen.overBudget && !lightBudgetWarned_) {
         lightBudgetWarned_ = true;
         HLOG(LogRenderer, Warning) << "Light budget render.maxLights=" << maxLights_ << " exceeded: "
@@ -120,13 +115,14 @@ uint32_t Renderer::updateLightSSBO(World& world) {
         // 같은 루프 안이라 슬롯 번호가 어긋날 수 없습니다(DEF-26). 캐스터가 없으면 -1 로 남습니다.
         if (lc->lightType == LightType::Directional && lc->castShadows && shadowCasterSlot_ < 0) {
             shadowCasterSlot_ = (int)slot;
-            shadowCasterDir_  = lc->worldDirection();
+            shadowCasterDir_  = -lc->emitDirection();   // 빛을 향하는 벡터(표면 → 태양)
         }
         if (lc->lightType == LightType::Directional) {
-            glm::vec3 dir = lc->worldDirection();   // 액터 회전 반영
-            gl.posOrDir  = glm::vec4(-dir, 0.f);   // w=0 → directional
+            // 방향의 부호는 emitDirection()(발광 방향) 하나로 정합니다. 저장 형식은 그대로입니다.
+            const glm::vec3 toLight = -lc->emitDirection();   // 액터 회전 반영
+            gl.posOrDir  = glm::vec4(-toLight, 0.f);   // w=0 → directional. 셰이더가 다시 뒤집어 L = toLight 로 읽음
             gl.colorRange= glm::vec4(col, 0.f);
-            gl.spotDir   = glm::vec4(dir, 0.f);
+            gl.spotDir   = glm::vec4(toLight, 0.f);    // Directional 에서는 셰이더가 읽지 않음(SSBO 바이트 유지)
             gl.spotParams= glm::vec4(0.f);
         } else if (lc->lightType == LightType::Point) {
             glm::vec3 pos = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
@@ -136,14 +132,12 @@ uint32_t Renderer::updateLightSSBO(World& world) {
             gl.spotParams= glm::vec4(0.f);
         } else { // Spot
             glm::vec3 pos = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
-            glm::vec3 dir = lc->worldDirection();   // 액터 회전 반영
+            const glm::vec3 emit = lc->emitDirection();   // 발광 방향(액터 회전 반영)
             gl.posOrDir  = glm::vec4(pos, 2.f);    // w=2 → spot
             gl.colorRange= glm::vec4(col, std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius));
-            gl.spotDir   = glm::vec4(dir, 0.f);
-            gl.spotParams= glm::vec4(
-                std::cos(glm::radians(lc->innerConeAngle)),
-                std::cos(glm::radians(lc->outerConeAngle)),
-                0.f, 0.f);
+            gl.spotDir   = glm::vec4(emit, 0.f);   // pbr.frag 가 dot(-L, spotDir) 로 읽음
+            const glm::vec2 cone = hlight::spotConeParams(lc->innerConeAngle, lc->outerConeAngle);
+            gl.spotParams= glm::vec4(cone.x, cone.y, 0.f, 0.f);
         }
     }
     frameStats_.lights      = count;
@@ -153,8 +147,18 @@ uint32_t Renderer::updateLightSSBO(World& world) {
 
 // ── updateUBO ─────────────────────────────────────────────────────────────────
 
+// 이번 프레임의 합성 값. 프로젝트 · 씬 · 카메라 EV 와 배율은 여기서 곱합니다(exposure_wiring-4 · 5 · 6 · 8).
+PostPass::Params Renderer::postParams() const {
+    PostPass::Params p{ lighting_calibration::kBaseAoStrength, lighting_calibration::kBaseBloomStrength,
+                        lighting_calibration::kBaseExposure };
+    p.aoOn    = aoOn_;
+    p.bloomOn = bloomOn_;
+    return p;
+}
+
 void Renderer::updateUBO(World& /*world*/, uint32_t lightCount) {
     FrameUBO ubo{};
+    const PostPass::Params post = postParams();
 
     // 눈별 행렬과 위치(DEF-09). 단안이면 [1] 에 [0] 을 그대로 둡니다. 카메라가 없으면 views_ 가
     // 단위 행렬 · 원점이라 예전과 같습니다.
@@ -164,27 +168,39 @@ void Renderer::updateUBO(World& /*world*/, uint32_t lightCount) {
         ubo.eyePos[i]   = glm::vec4(v.pos, v.zNear);
     }
     ubo.screenParams = glm::vec4((float)rc_.renderExtent.width, (float)rc_.renderExtent.height,
-                                 views_[0].zFar, 0.8f);
+                                 views_[0].zFar, post.aoStrength);
 
-    // Directional light shadow camera (fixed 40m×40m orthographic).
+    // Directional light shadow camera: 머리(viewCenter_) 중심 반지름 kRadius 구를 덮는 정사영(ShadowFit.hpp, 2026-11-02).
     // 캐스터 선택은 updateLightSSBO 가 이미 끝냈습니다(shadowCasterSlot_/Dir_). 여기서 다시
     // 고르지 않으므로 선택 기준이 갈릴 여지가 없습니다(DEF-26). 캐스터가 없으면 이전 VP 를 유지.
-    if (shadowCasterSlot_ >= 0) {
-        glm::vec3 dir = shadowCasterDir_;             // 액터 회전 반영 → Sun 을 돌리면 그림자도 회전
-        glm::vec3 up  = (std::abs(dir.y) < 0.99f) ? glm::vec3(0,1,0) : glm::vec3(1,0,0);
-        glm::mat4 lv  = glm::lookAt(dir * 25.f, glm::vec3(0.f), up);
-        glm::mat4 lp  = glm::ortho(-20.f, 20.f, -20.f, 20.f, 0.1f, 50.f);
-        lp[1][1]     *= -1.f; // Vulkan Y flip
-        sCurLightViewProj = lp * lv;
+    // 행렬 계산과 단위 시험은 ShadowFit.hpp · HarukaLightTest 6절에 있습니다.
+    if (shadowCasterSlot_ >= 0) {  // 액터 회전 반영 → Sun 을 돌리면 그림자도 회전
+        const hshadow::DirectionalFit fit = hshadow::fitDirectional(viewCenter_, shadowCasterDir_, hshadow::kRadius,
+                                                                    shadow_.resolution(), rc_.vk.depthClamp);
+        lightViewProj_     = fit.viewProj;
+        lightCullViewProj_ = fit.cullViewProj;
     }
-    ubo.lightViewProj = sCurLightViewProj;
+    ubo.lightViewProj = lightViewProj_;
+    // 캐스터가 없어도 늘 채웁니다(셰이더는 miscParams.w < 0 이면 섀도맵을 읽지 않음). 값은 반지름 · 해상도 ·
+    // depthClamp 로만 정해지므로 fitDirectional 의 결과와 같습니다.
+    const float shadowRes        = (float)shadow_.resolution();
+    const float shadowTexelWorld = 2.f * hshadow::kRadius / shadowRes;
+    const float shadowDepthRange = hshadow::depthRangeFor(hshadow::kRadius, rc_.vk.depthClamp);
+    ubo.shadowParams = glm::vec4(shadowTexelWorld, 1.f / shadowRes,
+                                 hshadow::receiverBiasNdc(ShadowPass::kReceiverBiasTexels * shadowTexelWorld, shadowDepthRange),
+                                 ShadowPass::kNormalOffsetTexels * shadowTexelWorld);
+    ubo.shadowFade = glm::vec4(hshadow::kFadeStartFrac * hshadow::kRadius,
+                               hshadow::kRadius - hshadow::kFadeEndTexels * shadowTexelWorld, 0.f, 0.f);
 
-    ubo.timeParams  = glm::vec4(time_, (float)frameNum_, 1.0f, 1.0f);
+    ubo.timeParams  = glm::vec4(time_, (float)frameNum_, lighting_calibration::kBloomThreshold,
+                                post.exposure);
     // lights 개수는 updateLightSSBO가 실제로 채운 수를 쓴다(범위 밖 읽기 방지).
     // miscParams.w 는 이제 **섀도 캐스터의 슬롯 번호**다(<0 이면 섀도 없음). 셰이더가 슬롯 0 을
     // 가정하지 않고, 그 라이트의 기여에만 그림자를 곱하도록 바뀌었다(DEF-26).
     const int shadowSlot = (shadowCasterSlot_ >= 0 && shadow_.valid()) ? shadowCasterSlot_ : -1;
-    ubo.miscParams  = glm::ivec4((int)lightCount, (int)frameNum_, 1, shadowSlot);
+    // screenParams.w(AO 세기) · miscParams.z(AO 켜기)는 지금 셰이더가 읽지 않습니다. 간접광에 AO 를
+    // 적용할 때(ssao_place-7) pbr.frag 가 읽을 자리라 PostPass 와 같은 값을 채워 둡니다.
+    ubo.miscParams  = glm::ivec4((int)lightCount, (int)frameNum_, post.aoOn ? 1 : 0, shadowSlot);
 
     memcpy(frames_.uboPtr(frameIdx), &ubo, sizeof(FrameUBO));
 }
@@ -207,13 +223,16 @@ void Renderer::buildDrawCommands(World& world,
         for (uint32_t i = 0; i < viewCount_; ++i)
             planes[i] = extractFrustumPlanes(views_[i].proj * views_[i].view);
 
-    // 섀도(라이트) 프러스텀 — 캐스터가 있을 때만. sCurLightViewProj 는 updateUBO 가 이미
+    // 섀도(라이트) 프러스텀 — 캐스터가 있을 때만. lightCullViewProj_ 는 updateUBO 가 이미
     // 채웠다(호출 순서: updateLightSSBO→updateUBO→buildDrawCommands). 이 ortho 박스로 캐스터를
     // 걸러, 카메라 밖이지만 라이트 안에 있는 오브젝트도 그림자를 던지게 한다(DEF-27).
+    // 컬링 near 는 투영과 달리 늘 빛 쪽으로 100 m 넓어져 있어(hshadow::kCasterReach) 그림자 구보다 높은
+    // 캐스터도 그림자를 던진다(depthClamp 가 있으면 깊이 0 에 눌러 담김). near 평면을 빼지 않고 늘린 이유는
+    // depthClamp 가 없을 때 투영도 같은 near 를 써서 둘이 같아야 하기 때문입니다.
     const bool hasShadow = (shadowCasterSlot_ >= 0) && shadow_.valid();
     std::array<FrustumPlane, 6> lightPlanes{};
     if (hasShadow)
-        lightPlanes = extractFrustumPlanes(sCurLightViewProj);
+        lightPlanes = extractFrustumPlanes(lightCullViewProj_);
 
     auto* tfData = static_cast<GpuTransform*>(frames_.transformPtr(frameIdx));
 
@@ -222,11 +241,7 @@ void Renderer::buildDrawCommands(World& world,
 
     // LOD 와 투명 정렬의 기준점은 두 눈의 가운데입니다. 눈마다 다르게 고르면 두 눈이 다른 LOD 나
     // 다른 그리기 순서를 보게 됩니다. 단안이면 카메라 위치 그대로입니다.
-    glm::vec3 camPos(0.f);
-    if (hasCam) {
-        for (uint32_t i = 0; i < viewCount_; ++i) camPos += views_[i].pos;
-        camPos /= (float)viewCount_;
-    }
+    const glm::vec3 camPos = viewCenter_;
 
     opaqueOut.clear();
     transpOut.clear();
@@ -416,6 +431,12 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
 
     // 이번 프레임의 눈을 먼저 정합니다. 아래 UBO · 컬링 · AO 가 모두 이 한 벌을 씁니다.
     gatherViews(world, xr);
+    // 두 눈의 가운데(단안이면 카메라 위치, 카메라가 없으면 원점). 라이트 선택 · LOD · 투명 정렬이 함께 씁니다.
+    viewCenter_ = glm::vec3(0.f);
+    if (hasCamera_) {
+        for (uint32_t i = 0; i < viewCount_; ++i) viewCenter_ += views_[i].pos;
+        viewCenter_ /= (float)viewCount_;
+    }
 
     // 순서 주의: 라이트 SSBO를 먼저 채워 실제 개수를 확정한 뒤 UBO에 싣는다.
     const uint32_t lightCount = updateLightSSBO(world);
@@ -428,6 +449,7 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
             v.aoCam[i].zNear   = views_[i].zNear;
             v.aoCam[i].zFar    = views_[i].zFar;
             v.aoCam[i].invProj = glm::inverse(views_[i].proj);
+            v.aoCam[i].proj    = views_[i].proj;
             v.aoCam[i].valid   = true;
         }
     }
@@ -590,10 +612,11 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     // 목록이다(DEF-27). 불투명·투명을 모두 담고(투명은 알파 무시·실루엣 근사), firstInstance
     // 는 메인 패스와 공유하는 transform SSBO 의 유효한 행이라 그대로 그려진다. 카메라 밖·
     // 라이트 안의 캐스터도 여기 포함되므로 카메라를 돌려도 그림자가 사라지지 않는다.
+    // 캐스터 라이트가 있으면 목록이 비어도 맵을 비워 기록한다(앞 프레임 그림자가 남지 않게).
     shadow_.record(cmd,
         { frames_.frameSet(fi), frames_.sceneSet(fi), frames_.transformSet(fi),
           scene_.vertexBuffer(), scene_.indexBuffer() },
-        view.shadowDraws);
+        view.shadowDraws, shadowCasterSlot_ >= 0);
 
     // Timestamp 1: after shadow
     if (timestampPool_)
@@ -647,6 +670,9 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
                           passRegistry_.any(HRenderStage::TransparentEnd);
     const bool extScene = passRegistry_.any(HRenderStage::AfterScene);
     const bool extPost  = passRegistry_.any(HRenderStage::AfterTonemap);
+    // 합성 값은 프레임에 한 번 정합니다. 두 눈과 XR 거울 화면이 같은 값을 씁니다.
+    const PostPass::Params post        = postParams();
+    const float            bloomThresh = lighting_calibration::kBloomThreshold;
     auto stageCtx = [&](HRenderStage stage, uint32_t v) {
         HRenderStageContext c;
         c.stage      = stage;
@@ -708,12 +734,15 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
         }
 
         // ── AO (linDepth + SSAO, half-res) ───────────────────────────────────
-        ao_.record(cmd, fi, v, geometry_.depthView(), view.aoCam[v]);
+        // 끈 패스는 기록하지 않습니다. 타임스탬프는 조건 밖에서 늘 씁니다(비우면 결과 읽기가 VK_NOT_READY).
+        if (post.aoOn)
+            ao_.record(cmd, fi, v, geometry_.depthView(), view.aoCam[v]);
         if (timestampPool_)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 1);
 
         // ── Bloom passes (threshold → down ×4 → up ×4) ───────────────────────
-        bloom_.record(cmd, geometry_.hdrView(fi), clampSampler_);
+        if (post.bloomOn)
+            bloom_.record(cmd, geometry_.hdrView(fi), clampSampler_, bloomThresh);
         if (timestampPool_)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 2);
 
@@ -731,7 +760,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
                 c.rect        = out.rect;
                 passRegistry_.dispatch(c);
             };
-        post_.recordTonemap(cmd, out, geometry_.hdrView(fi), ao_.ssaoView(),
+        post_.recordTonemap(cmd, out, post, geometry_.hdrView(fi), ao_.ssaoView(),
                             bloom_.resultView(), clampSampler_, extPost ? &postHook : nullptr);
         if (timestampPool_)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 3);
@@ -769,7 +798,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
                 c.rect        = mirror.rect;
                 passRegistry_.dispatch(c);
             };
-        post_.recordTonemap(cmd, mirror, geometry_.hdrView(fi), ao_.ssaoView(),
+        post_.recordTonemap(cmd, mirror, post, geometry_.hdrView(fi), ao_.ssaoView(),
                             bloom_.resultView(), clampSampler_, extPost ? &mirrorHook : nullptr);
     }
 

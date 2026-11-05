@@ -7,10 +7,11 @@
 #include "../RenderTypes.hpp"
 
 // ── AOPass ────────────────────────────────────────────────────────────────────
-// 2-스테이지 앰비언트 오클루전:
+// 3-스테이지 앰비언트 오클루전(눈마다):
 //   1) linDepth — MSAA 깊이를 half-res R32F 선형 깊이로 변환
 //   2) SSAO    — 선형 깊이 + 노이즈 + 헤미스피어 커널로 half-res AO 생성
-// 결과는 ssaoView()로 PostPass가 합성한다.
+//   3) 블러    — 4x4 깊이 인식 블러로 노이즈 타일 무늬를 지움(2026-11-02, DEF-163, ssao_blur.frag)
+// 결과(블러 뒤)는 ssaoView()로 PostPass가 합성한다.
 class AOPass : public HPass {
 public:
     static constexpr int kFramesInFlight = 2;   // == MAX_FRAMES
@@ -19,6 +20,7 @@ public:
     struct CameraParams {
         float     zNear = 0.1f, zFar = 100.f;
         glm::mat4 invProj{1.f};
+        glm::mat4 proj{1.f};      // SSAO 샘플을 화면으로 투영(예전에는 셰이더가 픽셀마다 inverse(invProj) 를 계산)
         bool      valid = false;
     };
 
@@ -33,7 +35,11 @@ public:
     void record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
                 VkImageView msaaDepthView, const CameraParams& cam);
 
-    VkImageView ssaoView() const { return ssaoView_; }
+    // 톤매핑이 읽는 AO(블러 결과). 블러 전 이미지는 이 패스 안에서만 씁니다.
+    VkImageView ssaoView() const { return blurView_; }
+
+    // 블러의 깊이 허용치(예측 깊이와의 차이 / 중심 깊이). 크면 윤곽 너머로 AO 가 번지고, 작으면 비스듬한 바닥에 무늬가 남습니다.
+    static constexpr float kBlurRelDepthTol = 0.04f;
 
 private:
     void createPipelines();
@@ -61,6 +67,16 @@ private:
     VkPipeline       ssaoPipeline_   = VK_NULL_HANDLE;
     VkPipelineLayout ssaoPipeLayout_ = VK_NULL_HANDLE;
     VkDescriptorSetLayout ssaoSetLayout_ = VK_NULL_HANDLE;
+
+    // 블러(위 SSAO 결과 → 같은 크기 · 형식의 다른 이미지. 읽는 이미지에 쓸 수 없어 한 장 더 둡니다). 렌더 패스는
+    // 같은 형식이라 ssaoPass_ 를 함께 씁니다.
+    VkImage          blurImage_      = VK_NULL_HANDLE;
+    VkImageView      blurView_       = VK_NULL_HANDLE;
+    HarukaAllocation blurAlloc_;
+    VkFramebuffer    blurFramebuf_   = VK_NULL_HANDLE;
+    VkPipeline       blurPipeline_   = VK_NULL_HANDLE;
+    VkPipelineLayout blurPipeLayout_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout blurSetLayout_ = VK_NULL_HANDLE;
 
     static constexpr int kDataBufs = kFramesInFlight * (int)kMaxViews;   // 프레임 슬롯 × 눈
     VkBuffer         dataBufs_[kDataBufs]   = {};

@@ -173,6 +173,15 @@ int main() {
         msg.clear();
         ProjectSettings vb = project_settings::parse("xr.startInVr = yes\n", msg);
         check(!vb.xrStartInVr && msg.size() == 1, "xr.startInVr 의 true · false 밖 값은 경고하고 끔");
+
+        // 후처리 패스 켬/끔(2026-11-01): 기본은 켬, true · false 만 받음
+        check(d.renderAo && d.renderBloom, "render.ao · render.bloom 기본값: 켬");
+        msg.clear();
+        ProjectSettings pf = project_settings::parse("render.ao = false\nrender.bloom = false\n", msg);
+        check(!pf.renderAo && !pf.renderBloom && msg.empty(), "render.ao = false · render.bloom = false");
+        msg.clear();
+        ProjectSettings pb = project_settings::parse("render.ao = off\n", msg);
+        check(pb.renderAo && pb.renderBloom && msg.size() == 1, "render.ao 의 true · false 밖 값은 경고하고 켬");
     }
 
     std::printf("\n== 4. 원자적 저장 ==\n");

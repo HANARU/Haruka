@@ -1,6 +1,7 @@
 #include "GeometryPass.hpp"
 #include "../Vertex.hpp"
 #include "../MaterialHandle.hpp"
+#include "../SpecConstants.hpp"
 #include <cassert>
 #include <cstring>
 #include <iterator>
@@ -33,12 +34,14 @@ static VkPipeline buildPBRPipeline(VkDevice device, VkPipelineCache cache,
                                    VkPipelineLayout layout, VkRenderPass rp, uint32_t subpass,
                                    VkSampleCountFlagBits msaa, bool transparent,
                                    VkShaderModule vert, VkShaderModule frag,
+                                   const VkSpecializationInfo* fragSpec,
                                    VkCullModeFlags cullOverride = VK_CULL_MODE_FLAG_BITS_MAX_ENUM) {
     VkPipelineShaderStageCreateInfo stages[2] = {};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT; stages[0].module = vert; stages[0].pName = "main";
     stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module = frag; stages[1].pName = "main";
+    stages[1].pSpecializationInfo = fragSpec;   // pbr.frag 특수화 상수(섀도 커널 등급 등)
 
     auto binding    = Vertex::bindingDescription();
     auto attributes = Vertex::attributeDescriptions();
@@ -167,25 +170,34 @@ void GeometryPass::create(RenderContext& rc, VkPipelineLayout pbrLayout,
     deps[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     deps[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     deps[0].srcAccessMask = 0; deps[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    // 깊이(att[1])는 서브패스 0 에서 쓰고, 0 → 1 에서 읽기 전용 레이아웃으로 바뀐 뒤, 마지막 사용
+    // 서브패스(2)가 끝날 때 storeOp STORE 로 저장됩니다. 저장은 LATE_FRAGMENT_TESTS 단계의 깊이
+    // 쓰기라서, 레이아웃 전환(쓰기)과의 순서를 0 → 1 → 2 의존성으로 이어 둡니다. 예전에는 두 의존성이
+    // 깊이 쓰기를 포함하지 않아 동기화 검증이 WRITE_AFTER_WRITE 를 보고했습니다(2026-11-01).
+    constexpr VkPipelineStageFlags kDepthStages =
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    constexpr VkAccessFlags kDepthRW =
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     // Subpass 0 → 1: depth pre-pass done
     deps[1].srcSubpass = 0; deps[1].dstSubpass = 1;
-    deps[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    deps[1].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].srcStageMask = kDepthStages;
+    deps[1].dstStageMask = kDepthStages | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     deps[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    deps[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].dstAccessMask = kDepthRW | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     deps[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-    // Subpass 1 → 2: opaque done, continue transparent
+    // Subpass 1 → 2: opaque done, continue transparent (깊이는 위 사슬을 이어 저장까지 닿게 함)
     deps[2].srcSubpass = 1; deps[2].dstSubpass = 2;
-    deps[2].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    deps[2].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[2].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | kDepthStages;
+    deps[2].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | kDepthStages;
     deps[2].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    deps[2].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[2].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | kDepthRW;
     deps[2].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-    // Subpass 2 → External: HDR resolve ready for post pass
+    // Subpass 2 → External: HDR resolve 는 톤매핑 · 블룸이, 저장된 깊이는 AO 의 linDepth 가
+    // 프래그먼트 셰이더에서 읽습니다. 깊이 저장(LATE_FRAGMENT_TESTS 쓰기)도 그 읽기에 보이게 합니다.
     deps[3].srcSubpass = 2; deps[3].dstSubpass = VK_SUBPASS_EXTERNAL;
-    deps[3].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[3].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | kDepthStages;
     deps[3].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    deps[3].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[3].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     deps[3].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
     VkRenderPassCreateInfo rpci{};
@@ -365,13 +377,19 @@ void GeometryPass::createPipelines() {
     {
         auto vert = rc_->createShaderModule(readFile("shaders/pbr.vert.spv"));
         auto frag = rc_->createShaderModule(readFile("shaders/pbr.frag.spv"));
+        // 특수화 상수는 세 파이프라인이 같은 값을 씁니다. sc 는 vkCreateGraphicsPipelines 가 끝날 때까지
+        // 살아 있어야 합니다(si 가 sc 의 배열을 가리킴). 핫 리로드(rebuildPipelines)도 이 함수를 다시 부르므로
+        // 같은 shadowFilter_ 가 쓰입니다.
+        SpecConstants sc;
+        sc.addInt(HARUKA_SPEC_SHADOW_FILTER, shadowFilter_);
+        const VkSpecializationInfo si = sc.info();
         opaquePipeline_ = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                           pass_, 1, rc_->msaaSamples, false, vert, frag);
+                                           pass_, 1, rc_->msaaSamples, false, vert, frag, &si);
         transparentBackPipeline_  = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                                pass_, 2, rc_->msaaSamples, true, vert, frag,
+                                                pass_, 2, rc_->msaaSamples, true, vert, frag, &si,
                                                 VK_CULL_MODE_FRONT_BIT);   // 뒷면 먼저
         transparentFrontPipeline_ = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                                pass_, 2, rc_->msaaSamples, true, vert, frag,
+                                                pass_, 2, rc_->msaaSamples, true, vert, frag, &si,
                                                 VK_CULL_MODE_BACK_BIT);    // 앞면 나중
         vkDestroyShaderModule(rc_->device, vert, nullptr);
         vkDestroyShaderModule(rc_->device, frag, nullptr);

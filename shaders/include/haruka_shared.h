@@ -20,6 +20,15 @@ using mat4  = glm::mat4;
 // 한 프레임에 그리는 뷰(눈)의 최대 수. 단안은 0 번만, 스테레오는 0=왼쪽 · 1=오른쪽입니다.
 #define HARUKA_MAX_VIEWS 2
 
+// 특수화 상수(specialization constant) 번호(2026-11-01). 셰이더의 layout(constant_id = …) 와 C++ 의
+// SpecConstants::addInt 가 이 번호를 함께 씁니다. 겹치지 않도록 새 항목은 여기에 다음 번호(1, 2 …)로 더합니다.
+// 값은 모두 4바이트 정수입니다(SpecConstants.hpp).
+#define HARUKA_SPEC_SHADOW_FILTER     0   // pbr.frag 섀도 커널 등급(GeometryPass::setShadowFilter)
+
+// 섀도 커널 등급(HARUKA_SPEC_SHADOW_FILTER 의 값). Low · Medium 커널의 번호는 커널을 정할 때 더합니다.
+#define HARUKA_SHADOW_FILTER_LEGACY9  0   // 하드웨어 쌍선형 비교 9탭(3x3), 기본
+#define HARUKA_SHADOW_FILTER_HARD     1   // 하드웨어 쌍선형 비교 1탭
+
 // 프레임 상수 (set 0, binding 0). 셰이더에서는 블록 안의 ubo 로 둡니다.
 // 눈마다 다른 값(행렬 · 눈 위치)은 처음부터 [HARUKA_MAX_VIEWS] 로 둡니다(DEF-09). 멀티뷰로 옮길 때
 // 셰이더는 뷰 번호만 gl_ViewIndex 로 바꾸면 됩니다. 단안이면 [1] 은 [0] 과 같은 값입니다.
@@ -32,6 +41,13 @@ struct FrameUBO {
     vec4  screenParams;    // xy=눈 하나의 렌더 크기, z=farPlane, w=aoStrength
     vec4  timeParams;      // x=time, y=frame, z=bloomThreshold, w=exposure
     ivec4 miscParams;      // x=lightCount, y=frame, z=ssaoEnabled, w=shadowLightIndex(<0=none)
+    // 섀도맵 상수(2026-11-01). x=텍셀 하나의 월드 크기(m), y=1/해상도(텍셀 하나의 UV 크기, 정사각 맵),
+    // z=리시버 상수 깊이 바이어스(섀도 NDC, sampleShadow 가 proj.z 에서 뺌),
+    // w=리시버 노멀 오프셋의 월드 길이(m, pbr.vert 가 sinθ 를 곱해 섀도 조회 위치를 옮김, 2026-11-02).
+    vec4  shadowParams;
+    // 그림자 거리 페이드(2026-11-02, ShadowFit.hpp). 머리(eyePos[0] · [1] 의 가운데)에서 화소까지의 거리로
+    // x=페이드 시작(m), y=페이드 끝(m, 여기부터 섀도맵을 읽지 않음), zw=예약(0). 더 필요한 값은 이 뒤에 붙입니다.
+    vec4  shadowFade;
 };
 
 // 메시마다 월드 행렬 (set 2, binding 0). 행 번호 = gl_InstanceIndex.
@@ -43,8 +59,8 @@ struct GpuTransform {
 struct GpuLight {
     vec4 posOrDir;    // xyz=pos or dir, w=type (0=dir, 1=point, 2=spot)
     vec4 colorRange;  // xyz=effectiveColor*intensity, w=attenuationRadius (항상 > 0)
-    vec4 spotDir;     // xyz=spot forward direction
-    vec4 spotParams;  // x=cosInner, y=cosOuter, zw=reserved
+    vec4 spotDir;     // xyz=spot forward direction (단위 길이, CPU 가 정규화)
+    vec4 spotParams;  // x=cosScale, y=cosOffset (스팟 원뿔 계수, SpotCone.hpp), zw=reserved
 };
 
 #ifdef __cplusplus

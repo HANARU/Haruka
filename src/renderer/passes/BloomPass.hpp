@@ -17,7 +17,10 @@ public:
     void acquireSizeDependent() override;
     void rebuildPipelines() override;
 
-    void record(VkCommandBuffer cmd, VkImageView hdrView, VkSampler clampSampler);
+    // threshold: HDR 휘도가 이 값을 넘는 부분만 블룸에 들어갑니다(knee 0, 하드 컷).
+    // 나중에 노출 E 를 블룸에 반영하면 '임계 T/E' 와 '세기 ×E' 를 반드시 한 쌍으로 넣어야 하고,
+    // soft knee 를 켜면 knee 도 1/E 로 줄여야 합니다.
+    void record(VkCommandBuffer cmd, VkImageView hdrView, VkSampler clampSampler, float threshold);
 
     VkImageView resultView() const { return upViews_[kBloomLevels - 2]; }
 

@@ -18,6 +18,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -258,6 +259,228 @@ int main() {
         check(!transform_text::parseQuat("0.1 0.2 x 1", junk) && junk.w == 1.f && !transform_text::parseQuat("0 0 0", junk),
               "깨진 QUAT 는 읽지 않음(ROT 로 대체)");
         check(transform_text::quatText(glm::quat(1.f, -0.f, 0.f, 0.5f)) == "-0 0 0.5 1", "-0 성분은 -0 으로 씀");
+    }
+
+    std::printf("\n== 9. 발광 방향(emitDirection) ==\n");
+    {
+        Actor a;
+        auto* l = a.addComponent<LightComponent>();
+        l->lightType = LightType::Directional; l->direction = { 0.f, 1.f, 0.f };
+        check(near3(l->emitDirection(), { 0.f, -1.f, 0.f }), "Directional(태양 쪽 +Y) 의 발광 방향은 -Y");
+        l->lightType = LightType::Spot; l->direction = { 0.f, -1.f, 0.f };
+        check(near3(l->emitDirection(), { 0.f, -1.f, 0.f }), "Spot(조사 방향 -Y) 의 발광 방향은 -Y");
+
+        a.setLocalRotation(glm::angleAxis(1.5707964f, glm::vec3(0.f, 1.f, 0.f)));
+        l->lightType = LightType::Directional; l->direction = { 0.f, 0.f, 1.f };
+        const glm::vec3 dEmit = l->emitDirection();
+        l->lightType = LightType::Spot; l->direction = { 0.f, 0.f, -1.f };
+        const glm::vec3 sEmit = l->emitDirection();
+        auto near3e = [](glm::vec3 p, glm::vec3 q) { return glm::length(p - q) < 1e-5f; };
+        check(near3e(dEmit, { -1.f, 0.f, 0.f }) && near3e(sEmit, { -1.f, 0.f, 0.f }), "Y 축 90° 회전: 둘 다 -X(회전의 -Z 와 같은 축)");
+
+        l->lightType = LightType::Directional; l->direction = { 1.f, 2.f, 1.5f };
+        check(l->emitDirection() == -l->worldDirection(), "Directional 은 -worldDirection() 과 비트까지 같음(화면 바이트 동일의 근거)");
+
+        LightComponent free;
+        free.lightType = LightType::Directional; free.direction = { 0.f, 0.f, 0.f };
+        check(near3(free.emitDirection(), { 0.f, 1.f, 0.f }), "owner 없음 · direction 0 이면 예전 대체값(-Y 의 반대) 유지");
+    }
+
+    std::printf("\n== 10. 옛 direction 접기 회전(연결 전 검산) ==\n");
+    {
+        // (a) 기하: 로컬 -Z 가 e 로 가고 롤이 0(로컬 +X 가 수평)
+        std::vector<glm::vec3> es = {
+            { 0.f, 0.f, -1.f }, { 0.f, 0.f, 1.f }, { 1.f, 0.f, 0.f }, { -1.f, 0.f, 0.f },
+            { 0.f, 1.f, 0.f }, { 0.f, -1.f, 0.f }, { -0.37139067f, -0.74278134f, -0.557086f },
+            glm::normalize(glm::vec3(1e-4f, -1.f, 0.f)) };
+        uint32_t seed = 12345u;
+        auto rnd = [&seed]() { seed = seed * 1664525u + 1013904223u; return (float)(seed >> 8) / 16777216.f * 2.f - 1.f; };
+        while (es.size() < 8 + 64) {
+            const glm::vec3 v{ rnd(), rnd(), rnd() };
+            const float l2 = glm::dot(v, v);
+            if (l2 > 1e-2f && l2 <= 1.f) es.push_back(glm::normalize(v));
+        }
+        int geoBad = 0, rollBad = 0;
+        for (const glm::vec3& e : es) {
+            const glm::quat q = LightComponent::rotationForEmitDirection(e);
+            if (!near3(q * glm::vec3(0.f, 0.f, -1.f), e)) ++geoBad;
+            if (!(std::fabs((q * glm::vec3(1.f, 0.f, 0.f)).y) < 1e-6f)) ++rollBad;
+        }
+        check(geoBad == 0, "(a) 72개 방향 모두 회전 x (0,0,-1) = e (1e-6)");
+        check(rollBad == 0, "(a) 72개 방향 모두 롤 0(로컬 +X 의 y 성분 0)");
+        const glm::quat qi = LightComponent::rotationForEmitDirection({ 0.f, 0.f, -1.f });
+        check(qi.w == 1.f && qi.x == 0.f && qi.y == 0.f && qi.z == 0.f, "(a) e = (0,0,-1) 이면 정확히 항등");
+
+        // (b) 저장소 Sun: 요 -33.69° · 피치 47.97°(보고서 손계산, 소수 둘째 자리라 1e-3)
+        const glm::quat qs = LightComponent::rotationForEmitDirection({ -0.37139067f, -0.74278134f, -0.557086f });
+        const glm::quat qr = CameraComponent::yawPitchRotation(glm::radians(-33.69f), glm::radians(47.97f));
+        check(std::fabs(std::fabs(glm::dot(qs, qr)) - 1.f) < 1e-3f, "(b) Sun 발광 방향의 회전 = 요 -33.69° · 피치 47.97°");
+
+        // (c) 규칙
+        const glm::vec3 d0{ 1.f, 2.f, 1.5f };
+        const auto ld = LightComponent::legacyEmitDirection(LightType::Directional, d0);
+        const auto ls = LightComponent::legacyEmitDirection(LightType::Spot, d0);
+        check(ld && near3(*ld, -glm::normalize(d0)) && ls && near3(*ls, glm::normalize(d0)),
+              "(c) Directional 은 -normalize(d), Spot 은 +normalize(d)");
+        const float inf = std::numeric_limits<float>::infinity();
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        check(!LightComponent::legacyEmitDirection(LightType::Point, d0) &&
+              !LightComponent::legacyEmitDirection(LightType::Directional, { 0.f, 0.f, 0.f }) &&
+              !LightComponent::legacyEmitDirection(LightType::Spot, { nan, 0.f, 1.f }) &&
+              !LightComponent::legacyEmitDirection(LightType::Directional, { inf, 0.f, 0.f }),
+              "(c) Point · 0 벡터 · NaN · 무한은 nullopt(처리 방향은 호출자가 정함)");
+        const glm::quat qz = LightComponent::rotationForEmitDirection({ 0.f, 0.f, 0.f });
+        const glm::quat qn = LightComponent::rotationForEmitDirection({ nan, 1.f, 0.f });
+        check(qz == glm::quat(1.f, 0.f, 0.f, 0.f) && qn == glm::quat(1.f, 0.f, 0.f, 0.f), "(c) 0 · NaN 의 회전은 항등");
+
+        // (d) 지금 렌더 경로 그대로: 옛 액터(회전 R, direction d)와 접은 액터(회전 R x 접기, 정규값 direction)가
+        //     부모 회전과 상관없이 같은 월드 발광 방향을 냄
+        const LightType types[] = { LightType::Directional, LightType::Spot };
+        const glm::vec3 ds[] = { { 1.f, 2.f, 1.5f }, { 0.f, 0.f, -1.f }, { 0.f, 0.f, 1.f }, { 0.3f, -0.9f, 0.2f }, { 0.f, 1.f, 0.f } };
+        const glm::quat ps[] = { glm::quat(1.f, 0.f, 0.f, 0.f), glm::angleAxis(0.7f, glm::normalize(glm::vec3(1.f, 1.f, 0.f))) };
+        const glm::quat rs[] = { glm::quat(1.f, 0.f, 0.f, 0.f), CameraComponent::yawPitchRotation(-2.5f, 0.4f) };
+        int combos = 0, endBad = 0;
+        for (LightType t : types)
+            for (const glm::vec3& d : ds)
+                for (const glm::quat& P : ps)
+                    for (const glm::quat& R : rs) {
+                        Actor parentA, A, parentB, B;
+                        A.attachTo(&parentA);
+                        B.attachTo(&parentB);
+                        parentA.setLocalRotation(P);
+                        parentB.setLocalRotation(P);
+                        A.setLocalRotation(R);
+                        auto* la = A.addComponent<LightComponent>();
+                        la->lightType = t; la->direction = d;
+                        const glm::vec3 e = *LightComponent::legacyEmitDirection(t, d);
+                        B.setLocalRotation(R * LightComponent::rotationForEmitDirection(e));
+                        auto* lb = B.addComponent<LightComponent>();
+                        lb->lightType = t;
+                        lb->direction = (t == LightType::Directional) ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(0.f, 0.f, -1.f);
+                        ++combos;
+                        if (!near3(la->emitDirection(), lb->emitDirection())) ++endBad;
+                    }
+        check(combos == 40 && endBad == 0,
+              "(d) 40개 조합(2 종류 x 5 d x 2 부모 x 2 로컬)에서 접은 액터와 옛 액터의 발광 방향이 같음(1e-6)");
+    }
+
+    std::printf("\n== 11. 옛 direction 불러오기 결과 고정(-Z 통일 전후 공통) ==\n");
+    {
+        // 이 절은 light_dir-4(-Z 통일) 뒤에도 고치지 않고 통과해야 합니다. 기대값은 LightComponent 내부가 아니라
+        // 옛 의미(Directional = -d, Spot = +d)를 glm 으로 직접 계산합니다. 0 벡터 · NaN 의 방향, 다시 쓴 텍스트의
+        // direction 키 유무는 결정 대기라 넣지 않습니다.
+        auto oldEmit = [](LightType t, const glm::quat& W, const glm::vec3& d) {
+            const glm::vec3 w = W * glm::normalize(d);
+            return t == LightType::Directional ? -w : w;
+        };
+        const glm::quat R = CameraComponent::yawPitchRotation(-2.5f, 0.4f);
+
+        // (a) 저장소 LightingProbe 의 Sun 블록(글자 그대로)
+        Actor sun;
+        ComponentSerializer::spawn(sun, parse(
+            "COMPONENT:LightComponent\nenabled=1\ntype=directional\ncolor=1 1 1\nintensity=3\nattenuationRadius=10\n"
+            "innerConeAngle=15\nouterConeAngle=30\ndirection=0.37139067 0.74278134 0.557086\nuseTemperature=0\n"
+            "temperatureK=6500\ncastShadows=1\nEND_COMPONENT\n"), ctx);
+        auto* ls = sun.getComponent<LightComponent>();
+        check(ls != nullptr, "(a) LightingProbe Sun 블록을 읽음");
+        check(ls && near3(ls->emitDirection(), { -0.37139067f, -0.74278134f, -0.557086f }),
+              "(a) Sun 의 발광 방향 = -(0.371, 0.743, 0.557)");
+
+        // (b) 회전한 Spot(direction 이 type 보다 앞), 회전 없는 Directional 정반대 사례
+        Actor spot;
+        spot.setLocalRotation(R);
+        ComponentSerializer::spawn(spot, parse("COMPONENT:LightComponent\ndirection=0.3 -0.9 0.2\ntype=spot\nEND_COMPONENT\n"), ctx);
+        auto* lp = spot.getComponent<LightComponent>();
+        check(lp && near3(lp->emitDirection(), oldEmit(LightType::Spot, R, { 0.3f, -0.9f, 0.2f })),
+              "(b) 회전한 액터의 Spot(블록 안에서 direction 이 type 앞): 옛 의미 그대로");
+        Actor back;
+        ComponentSerializer::spawn(back, parse("COMPONENT:LightComponent\ndirection=0 0 -1\ntype=directional\nEND_COMPONENT\n"), ctx);
+        auto* lb = back.getComponent<LightComponent>();
+        check(lb && near3(lb->emitDirection(), { 0.f, 0.f, 1.f }), "(b) direction (0,0,-1) 의 Directional 은 +Z 로 비춤");
+
+        // (c) 부모 회전 아래. 부모를 먼저 붙인 경우와 씬 읽기 순서(로컬 회전 → 컴포넌트 → 부모 연결) 둘 다
+        const glm::quat P = glm::angleAxis(0.7f, glm::normalize(glm::vec3(1.f, 1.f, 0.f)));
+        const std::string dirBlock = "COMPONENT:LightComponent\ntype=directional\ndirection=1 2 1.5\nEND_COMPONENT\n";
+        const glm::vec3 expectC = oldEmit(LightType::Directional, P * R, { 1.f, 2.f, 1.5f });
+        Actor parent1, child1;
+        parent1.setLocalRotation(P);
+        child1.attachTo(&parent1);
+        child1.setLocalRotation(R);
+        ComponentSerializer::spawn(child1, parse(dirBlock), ctx);
+        auto* lc1 = child1.getComponent<LightComponent>();
+        check(lc1 && near3(lc1->emitDirection(), expectC), "(c1) 부모에 먼저 붙인 뒤 읽음: 부모 x 로컬 회전 아래 옛 의미");
+        Actor parent2, child2;
+        parent2.setLocalRotation(P);
+        child2.setLocalRotation(R);
+        ComponentSerializer::spawn(child2, parse(dirBlock), ctx);
+        child2.attachTo(&parent2);
+        auto* lc2 = child2.getComponent<LightComponent>();
+        check(lc2 && near3(lc2->emitDirection(), expectC), "(c2) 읽은 뒤 부모에 붙임(씬 읽기 순서): 같은 방향");
+
+        // (d) 왕복: 다시 쓴 텍스트를 같은 회전의 새 액터에 읽어도 발광 방향이 같음
+        for (Actor* src : { &sun, &spot }) {
+            Actor dst;
+            dst.setLocalRotation(src->transform().rotation());
+            ComponentSerializer::spawn(dst, parse(writeOf(*src)), ctx);
+            auto* a = src->getComponent<LightComponent>();
+            auto* b = dst.getComponent<LightComponent>();
+            check(a && b && near3(a->emitDirection(), b->emitDirection()),
+                  std::string("(d) 다시 쓴 텍스트를 읽어도 같은 발광 방향(") + (src == &sun ? "Sun" : "Spot") + ")");
+        }
+
+        // (e) 멱등: 읽은 뒤 onFieldsLoaded 를 다시 불러도 회전 · 발광 방향이 그대로
+        if (lp) {
+            const glm::quat r0 = spot.transform().rotation();   // 값 복사(참조면 늘 참)
+            const glm::vec3 e0 = lp->emitDirection();
+            lp->onFieldsLoaded(ctx);
+            check(spot.transform().rotation() == r0 && near3(lp->emitDirection(), e0),
+                  "(e) onFieldsLoaded 를 다시 불러도 회전 · 발광 방향 그대로");
+        }
+
+        // (f) Point 는 접지 않음: 액터 회전이 정확히 그대로
+        Actor point;
+        point.setLocalRotation(R);
+        ComponentSerializer::spawn(point, parse("COMPONENT:LightComponent\ntype=point\ndirection=0 0 1\nattenuationRadius=5\nEND_COMPONENT\n"), ctx);
+        check(point.transform().rotation() == R, "(f) Point 를 읽어도 액터 회전은 정확히 그대로");
+    }
+
+    std::printf("\n== 12. 스팟 발광 방향은 단위 길이(pbr.frag 가 spotDir 을 다시 정규화하지 않음) ==\n");
+    {
+        // light_dir-4 가 direction 필드를 없애면 (a) · (c) · (d) 는 회전으로 바꿔 쓰되, 회전 사슬 아래 길이 1 검사는
+        // 남깁니다(-Z 구현이 normalize 를 빼면 쿼터니언 오차로 길이가 1 에서 벗어날 수 있음).
+        auto unit = [](const glm::vec3& v) { return std::fabs(glm::length(v) - 1.f) < 1e-5f; };
+
+        LightComponent lone;
+        lone.lightType = LightType::Spot;
+        lone.direction = { 0.f, -3.f, 0.f };
+        check(near3(lone.emitDirection(), { 0.f, -1.f, 0.f }), "(a) owner 없음 · 길이 3 인 direction 도 단위 발광 방향");
+        lone.direction = { 0.f, 0.f, 0.f };
+        check(unit(lone.emitDirection()), "(b) owner 없음 · direction 0 이어도 발광 방향은 단위 길이");
+
+        Actor a;
+        auto* l = a.addComponent<LightComponent>();
+        l->lightType = LightType::Spot;
+        l->direction = { 1.f, 2.f, 1.5f };
+        a.setLocalRotation(glm::angleAxis(glm::radians(37.f), glm::normalize(glm::vec3(1.f, 0.3f, 0.f))));
+        check(unit(l->emitDirection()), "(c) 회전한 액터 · 정규화하지 않은 direction(1, 2, 1.5): 길이 1");
+
+        Actor parent, child;
+        parent.setLocalRotation(glm::angleAxis(glm::radians(120.f), glm::normalize(glm::vec3(0.2f, 1.f, -0.4f))));
+        child.attachTo(&parent);
+        child.setLocalRotation(glm::angleAxis(glm::radians(-63.f), glm::normalize(glm::vec3(0.f, 0.5f, 1.f))));
+        auto* lc = child.addComponent<LightComponent>();
+        lc->lightType = LightType::Spot;
+        const float sizes[] = { 0.01f, 1.f, 100.f };
+        int bad = 0, n = 0;
+        for (int yi = 0; yi < 12; ++yi)
+            for (int pi = 0; pi < 6; ++pi)
+                for (float s : sizes) {
+                    const float y = glm::radians(30.f * (float)yi), p = glm::radians(-75.f + 30.f * (float)pi);
+                    lc->direction = s * glm::vec3(std::cos(p) * std::sin(y), std::sin(p), std::cos(p) * std::cos(y));
+                    ++n;
+                    if (!unit(lc->emitDirection())) ++bad;
+                }
+        check(n == 216 && bad == 0, "(d) 부모 · 자식 회전 아래 216개 direction(크기 0.01 · 1 · 100): 모두 길이 1(1e-5)");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

@@ -453,6 +453,14 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
                 d.ao         = extractTexture(model, mat.occlusionTexture.index);
                 d.emissive   = extractTexture(model, mat.emissiveTexture.index);
                 d.isBlend    = (mat.alphaMode == "BLEND");
+                d.doubleSided = mat.doubleSided;   // glTF 기본값 false. 소비자(그림자 · 컬링)는 아직 없음
+                // MASK · alphaCutoff(glTF 기본 0.5, tinygltf 도 같은 기본값). 소비자(컷아웃 그림자 · 프리패스)는 아직 없고,
+                // AssetManager 가 MASK 를 쓰는 파일에 경고를 남깁니다. 범위 밖 · NaN 값은 [0, 1] 로 자릅니다.
+                d.alphaMask   = (mat.alphaMode == "MASK");
+                {
+                    const float cut = (float)mat.alphaCutoff;
+                    d.alphaCutoff = (cut >= 0.f && cut <= 1.f) ? cut : (cut > 1.f ? 1.f : 0.f);
+                }
 
                 // 스칼라 팩터를 픽셀에 적용한다. 텍스처가 없으면 팩터만으로 1x1을 만든다.
                 // tinygltf가 파일에 값이 없을 때 glTF 규약 기본값을 채워 주므로 그대로 쓴다
@@ -470,7 +478,10 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
                                         << " normal="      << (d.normalMap.hasData ? "Y" : "-")
                                         << " mr="          << (d.metalRough.hasData ? "Y" : "-")
                                         << " ao="          << (d.ao.hasData ? "Y" : "-")
-                                        << " emis="        << (d.emissive.hasData ? "Y" : "-") << "]";
+                                        << " emis="        << (d.emissive.hasData ? "Y" : "-") << "]"
+                                        << "  doubleSided=" << (mat.doubleSided ? "Y" : "-")
+                                        << (d.alphaMask ? "  alphaMode=MASK cutoff=" + std::to_string(d.alphaCutoff)
+                                                        : std::string());
 
                 // 머티리얼이 사실상 비어 있는지 판정한다. 텍스처가 하나도 없고 모든 팩터가
                 // glTF 기본값이면, 제작 도구에서 머티리얼을 만들기만 하고 아무 값도 지정하지

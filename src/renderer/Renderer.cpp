@@ -1,4 +1,6 @@
 #include "Renderer.hpp"
+#include "LightingCalibration.hpp"
+#include "SkyIbl.hpp"
 #include "../core/World.hpp"
 #include "../core/AppPaths.hpp"
 #include "../ui/slate/HSlateRenderer.hpp"
@@ -15,7 +17,7 @@
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
-#include <random>
+#include <chrono>
 #include <atomic>
 
 #ifndef ANDROID
@@ -121,7 +123,7 @@ void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
     // Allocating these before swapchain images ensures that on every resize,
     // all freed swapchain images coalesce into one large contiguous block
     // rather than being split around the permanent allocations.
-    shadow_.create(rc_, frames_.pbrLayout());  // 16 MB, fixed-size — no swapchain dependency
+    shadow_.create(rc_, frames_.pbrLayout());  // 해상도 · 형식에 따라 다름(PC 4096² D32 64 MB, Quest 2048² D32 16 MB · D16 8 MB), no swapchain dependency
     scene_.create(rc_);                        // 192 MB mega buffers (128 vert + 64 idx)
     ao_.create(rc_);               // 노이즈 텍스처/커널 UBO 등 영구 자원만
     generateBRDFLUT();             // ~1 MB — needs cmdPool + pipelineCache only
@@ -295,19 +297,13 @@ void Renderer::generateBRDFLUT() {
     vkDestroyFramebuffer(device, tmpFb, nullptr);
     vkDestroyRenderPass(device, tmpRp, nullptr);
 
-    HLOG(LogRenderer, Log) << "BRDF LUT generated (512x512 R16G16)";
+    HLOG(LogRenderer, Log) << "BRDF LUT generated (" << kSize << "x" << kSize << " R16G16)";
 }
 
 // ── IBL cubemap generation (CPU sky gradient) ─────────────────────────────────
 
-// 하늘 복사휘도 배율. 이 함수가 돌려주던 원래 값의 평균은 0.6017 이고, 셰이더가
-// 쓰는 단위로 환산한 등가 조도는 pi * 0.6017 = 1.890 이다. 태양이 0.85 였으므로
-// 하늘이 2.2 배 밝았고, 그래서 법선이 기울어도 픽셀이 4/255 밖에 움직이지 않았다.
-//
-// 0.30 배면 등가 조도가 0.567 이 되어, 태양 3.0 과 함께 5.3 : 1 이 된다.
-// 이 함수는 IBL 큐브맵 두 장을 만드는 데에만 쓰이고 뷰포트 배경색은 GeometryPass
-// 의 clear value 라서, 이 배율은 조명만 바꾸고 배경은 건드리지 않는다.
-static constexpr float kSkyRadianceScale = 0.30f;
+// 하늘 복사휘도 배율과 근거는 LightingCalibration.hpp 에 있습니다.
+using lighting_calibration::kSkyRadianceScale;
 
 static glm::vec3 skyColor(glm::vec3 dir) {
     dir = glm::normalize(dir);
@@ -320,29 +316,14 @@ static glm::vec3 skyColor(glm::vec3 dir) {
     return c * kSkyRadianceScale;
 }
 
-// Cubemap face direction and UV → world-space direction
-static glm::vec3 cubeDir(int face, float u, float v) {
-    // u, v in [-1, 1]
-    switch (face) {
-        case 0: return { 1.f, -v, -u };  // +X
-        case 1: return {-1.f, -v,  u };  // -X
-        case 2: return {  u,  1.f,  v };  // +Y
-        case 3: return {  u, -1.f, -v };  // -Y
-        case 4: return {  u, -v,  1.f };  // +Z
-        case 5: return { -u, -v, -1.f };  // -Z
-        default: return {0,0,1};
-    }
-}
+using hibl::cubeDir;   // 큐브맵 면 · UV → 월드 방향(SkyIbl.hpp)
 
 void Renderer::generateIBLCubemaps() {
     // ── Irradiance: 32×32 per face, 1 mip ────────────────────────────────────
     constexpr uint32_t kIrrSize = 32;
     constexpr uint32_t kPrefSize = 64;
     constexpr uint32_t kPrefMips = 5;
-
-    // Generate irradiance data on CPU (Monte Carlo hemisphere integration)
-    std::mt19937 rng(42);
-    std::uniform_real_distribution<float> dist(0.f, 1.f);
+    constexpr uint32_t kPrefSamples = 64;   // GGX 프리필터 샘플 수(4096 샘플 기준과 상대 RMS 1% 이내, 시험 7절)
 
     // IEEE 반정밀도로 바꿉니다. 예전의 비트 조작은 지수 범위를 처리하지 않아 아주 작거나 큰
     // 값이 엉뚱한 수가 됐고, float 를 정수 포인터로 읽어 aliasing 규칙도 어겼습니다(DEF-86).
@@ -352,7 +333,9 @@ void Renderer::generateIBLCubemaps() {
         return glm::packHalf1x16(std::min(f, 65504.f));
     };
 
-    // Generate irradiance cubemap data
+    // Generate irradiance cubemap data (SH9 투영 → 평가, SkyIbl.hpp)
+    const auto bakeStart = std::chrono::steady_clock::now();
+    const hibl::SH9Rgb sh = hibl::projectSH9(skyColor, 32);
     std::vector<uint16_t> irrData(kIrrSize * kIrrSize * 6 * 4);
     for (int face = 0; face < 6; face++) {
         for (uint32_t iy = 0; iy < kIrrSize; iy++) {
@@ -361,33 +344,13 @@ void Renderer::generateIBLCubemaps() {
                 float v = (iy + 0.5f) / kIrrSize * 2.f - 1.f;
                 glm::vec3 N = glm::normalize(cubeDir(face, u, v));
 
-                // Monte Carlo hemisphere integration
-                glm::vec3 irr{0.f};
-                constexpr int kSamples = 64;
-                for (int s = 0; s < kSamples; s++) {
-                    float r1 = dist(rng), r2 = dist(rng);
-                    float theta = std::acos(std::sqrt(1.f - r1));
-                    float phi   = 2.f * 3.14159265f * r2;
-                    glm::vec3 L_local{ std::sin(theta) * std::cos(phi),
-                                       std::sin(theta) * std::sin(phi),
-                                       std::cos(theta) };
-                    // Transform to world space
-                    glm::vec3 up  = std::abs(N.z) < 0.999f ? glm::vec3(0,0,1) : glm::vec3(1,0,0);
-                    glm::vec3 T   = glm::normalize(glm::cross(up, N));
-                    glm::vec3 B   = glm::cross(N, T);
-                    glm::vec3 L   = glm::normalize(T * L_local.x + B * L_local.y + N * L_local.z);
-                    // 코사인 가중 샘플링이므로 pdf = cos(theta)/PI 이고, 추정기는 (PI/N) * sum(L) 이다.
-                    // 즉 cos 항은 pdf에 이미 흡수되어 있으므로 여기서 다시 곱하면 안 된다.
-                    // 이전 판은 dot(N,L)을 한 번 더 곱해 실질적으로 integral(L * cos^2) 을 구했고,
-                    // 균일 휘도에서 integral(cos^2 dw) = 2*PI/3 = 2.094 이므로 결과가 약 2.09배
-                    // 과다했다. 앰비언트가 직접광의 네 배를 넘어 방향광이 묻혔다. (DEF-37)
-                    irr += skyColor(L);
-                }
+                // SH 대역 가중 π · 2π/3 · π/4 를 곱한 뒤 π 로 나눠 평균 복사휘도로 둔다. 예전 몬테카를로
+                // 64샘플은 텍셀 노이즈 2.7%(최대 10%)였다(그 전에는 cos 를 두 번 곱해 2.09배 과다, DEF-37).
                 // PI 를 곱하지 않는다. 저장되는 값의 의미를 "그 방향에서 오는 평균 복사휘도 L"로
                 // 두면 pbr.frag 의 `kD * irradiance * albedo` 를 그대로 쓸 수 있다.
                 // PI/N 로 두면 조도가 되어 셰이더에서 PI 로 나눠야 하고, 그러면 프리필터
                 // 큐브맵과 스페큘러 IBL 경로까지 함께 맞춰야 한다.
-                irr = irr * (1.f / kSamples);
+                glm::vec3 irr = hibl::shMeanRadiance(sh, N);
 
                 size_t idx = ((face * kIrrSize + iy) * kIrrSize + ix) * 4;
                 irrData[idx+0] = genHalfFloat(irr.r);
@@ -398,7 +361,9 @@ void Renderer::generateIBLCubemaps() {
         }
     }
 
-    // Generate prefilter data (roughness-based sky blur)
+    const auto irrDone = std::chrono::steady_clock::now();
+
+    // Generate prefilter data (GGX prefilter)
     VkDeviceSize prefBytes = 0;
     for (uint32_t m = 0; m < kPrefMips; m++) {
         uint32_t sz = kPrefSize >> m;
@@ -406,6 +371,7 @@ void Renderer::generateIBLCubemaps() {
     }
     std::vector<uint8_t> prefData(prefBytes);
     VkDeviceSize prefOff = 0;
+    // pbr.frag 는 textureQueryLevels 로 mip 수를 읽으므로 kPrefMips 만 바꾸면 됩니다.
     for (uint32_t mip = 0; mip < kPrefMips; mip++) {
         float roughness = (float)mip / (kPrefMips - 1);
         uint32_t sz = kPrefSize >> mip;
@@ -416,14 +382,11 @@ void Renderer::generateIBLCubemaps() {
                     float v = (iy + 0.5f) / sz * 2.f - 1.f;
                     glm::vec3 R = glm::normalize(cubeDir(face, u, v));
 
-                    // At low roughness: sky color from the reflection direction
-                    // At high roughness: average sky color (irradiance approximation)
-                    // 이 평균 앰비언트 상수도 kSkyRadianceScale 을 함께 받아야 한다.
-                    // 그러지 않으면 거칠기가 높은 밉에서 예전 하늘 밝기가 스페큘러 IBL
-                    // 로 그대로 들어와, 방금 걷어낸 평탄한 항이 되살아난다.
-                    glm::vec3 col = glm::mix(skyColor(R),
-                        glm::vec3(0.60f, 0.57f, 0.52f) * kSkyRadianceScale,
-                        roughness * 0.85f);
+                    // GGX(α = roughness²) 적분, N = V = R 가정. mip 0 은 정확히 skyColor(R) 입니다(배경을 이
+                    // 값으로 그릴 수 있음). 예전에는 skyColor 와 연결되지 않은 평균색 상수와 섞어, 거친 mip 의
+                    // 위쪽 반사가 붉게(R +40%, B -7 ~ -27%), 아래쪽 반사가 12% 밝게 치우쳤습니다.
+                    glm::vec3 col = (mip == 0) ? skyColor(R)
+                                               : hibl::prefilterGGX(skyColor, R, roughness, kPrefSamples);
 
                     uint16_t* px = reinterpret_cast<uint16_t*>(prefData.data() + prefOff);
                     px[0] = genHalfFloat(col.r);
@@ -434,6 +397,12 @@ void Renderer::generateIBLCubemaps() {
                 }
             }
         }
+    }
+    {
+        using ms = std::chrono::duration<double, std::milli>;
+        const auto prefDone = std::chrono::steady_clock::now();
+        HLOG(LogRenderer, Log) << "IBL bake on CPU: SH9 irradiance " << ms(irrDone - bakeStart).count()
+                               << " ms, GGX prefilter (" << kPrefSamples << " samples) " << ms(prefDone - irrDone).count() << " ms";
     }
 
     // Upload irradiance cubemap
@@ -549,7 +518,8 @@ void Renderer::createInstance() {
     ai.pEngineName      = "Haruka";
     ai.engineVersion    = VK_MAKE_VERSION(0, 1, 0);
     // Vulkan 1.1 기준선(DEF-97). PC 와 Quest 가 같은 경로(1.1 코어 + 확장)를 탑니다. Quest 2 · Pro 는 1.1 이고, Quest Link
-    // 런타임은 1.0 ~ 1.2 를 알려 줍니다. 1.2 이상 코어 기능은 쓰지 않습니다(VulkanBaseline.hpp).
+    // 런타임은 1.0 ~ 1.2 를 알려 줍니다. 1.2 이상 코어 기능은 쓰지 않습니다(VulkanBaseline.hpp). XR 이면 아래에서 런타임
+    // 최댓값까지 올립니다(DEF-164).
     ai.apiVersion       = hvk::kVulkanApiVersion;
     auto exts = getRequiredExtensions();
     VkInstanceCreateInfo ci{};
@@ -576,6 +546,11 @@ void Renderer::createInstance() {
     // 런타임이 알려 준 범위 밖이면: 최솟값보다 낮으면 XR 을 끄고, 최댓값보다 높으면 경고만 합니다(사용자 결정 2026-10-31).
     uint32_t xrMin = 0, xrMax = 0;
     if (deviceHooks_ && deviceHooks_->vulkanApiRange(xrMin, xrMax)) {
+        // 런타임이 엔진 장치에서 1.2 코어 이름(vkWaitSemaphores)을 찾을 수 있게 인스턴스를 런타임 최댓값까지 올립니다
+        // (DEF-164). 1.1 이면 그 이름이 null 이라 Stop 때 런타임이 주소 0 을 불렀습니다. 엔진 코드는 그대로 1.1 경로입니다.
+        uint32_t loader = VK_API_VERSION_1_0;
+        if (vkEnumerateInstanceVersion(&loader) != VK_SUCCESS) loader = VK_API_VERSION_1_0;
+        ai.apiVersion = hvk::xrInstanceApiVersion(hvk::kVulkanApiVersion, xrMax, loader);
         const std::string range = hvk::versionString(xrMin) + " to " + hvk::versionString(xrMax);
         switch (hvk::checkApiRange(ai.apiVersion, xrMin, xrMax)) {
             case hvk::ApiRange::BelowMin:
@@ -601,7 +576,10 @@ void Renderer::createInstance() {
             deviceHooks_ = nullptr;
         }
     }
-    if (!deviceHooks_) r = vkCreateInstance(&ci, nullptr, &instance);
+    if (!deviceHooks_) {
+        ai.apiVersion = hvk::kVulkanApiVersion;   // XR 없이 만들면 기준선 그대로(위에서 올렸어도)
+        r = vkCreateInstance(&ci, nullptr, &instance);
+    }
     if (r != VK_SUCCESS)
         throw std::runtime_error("Failed to create Vulkan instance!");
 }
@@ -671,7 +649,9 @@ void Renderer::pickPhysicalDevice() {
         std::string exts;
         for (const char* e : devicePlan_.extensions) exts += std::string(exts.empty() ? "" : ", ") + e;
         HLOG(LogRenderer, Log) << "Vulkan device " << hvk::versionString(deviceCaps_.apiVersion) << "; extensions: " << exts
-                               << "; anisotropy " << (devicePlan_.samplerAnisotropy ? "on" : "off");
+                               << "; anisotropy " << (devicePlan_.samplerAnisotropy ? "on" : "off")
+                               << "; depth bias clamp " << (devicePlan_.depthBiasClamp ? "on" : "off")
+                               << "; depth clamp " << (devicePlan_.depthClamp ? "on" : "off");
     }
     VkSampleCountFlags counts = p.limits.framebufferColorSampleCounts &
                                 p.limits.framebufferDepthSampleCounts;
@@ -790,6 +770,8 @@ hvk::DeviceCaps Renderer::queryDeviceCaps(VkPhysicalDevice dev) {
     vkGetPhysicalDeviceFeatures(dev, &base);
     c.featSamplerAnisotropy       = base.samplerAnisotropy == VK_TRUE;
     c.featStorageImageMultisample = base.shaderStorageImageMultisample == VK_TRUE;
+    c.featDepthBiasClamp          = base.depthBiasClamp == VK_TRUE;
+    c.featDepthClamp              = base.depthClamp == VK_TRUE;
     if (hvk::majorMinor(c.apiVersion) < hvk::majorMinor(VK_API_VERSION_1_1)) return c;
 
     VkPhysicalDeviceSynchronization2FeaturesKHR s2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR };

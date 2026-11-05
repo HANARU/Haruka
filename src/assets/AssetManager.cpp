@@ -41,6 +41,8 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
 
     std::vector<AssetPair> pairs;
     pairs.reserve(meshes.size());
+    int   maskMeshes = 0;      // glTF alphaMode MASK 를 쓰는 메시 수(아래 경고용)
+    float firstCutoff = 0.5f;
 
     for (auto& data : meshes) {
         std::vector<Vertex> verts;
@@ -60,9 +62,22 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
             data.albedo, data.normalMap, data.metalRough, data.ao, data.emissive);
         p.name      = std::move(data.name);
         p.isBlend   = data.isBlend;
+        p.doubleSided = data.doubleSided;
+        p.alphaMask   = data.alphaMask;
+        p.alphaCutoff = data.alphaCutoff;
+        if (data.alphaMask && maskMeshes++ == 0) firstCutoff = data.alphaCutoff;
         p.vertCount = (int)data.vertices.size();
         p.triCount  = (int)(data.indices.size() / 3);
         pairs.push_back(std::move(p));
+    }
+
+    // MASK(컷아웃)는 아직 그리지 못합니다. 잎 · 철망을 들인 사용자가 왜 불투명 판으로 보이는지 알 수 있게 파일마다 한 번
+    // 알립니다(이름은 위 루프에서 옮겨져 path 를 씀). 컷아웃 프리패스 · 그림자 소비자가 생기면 이 문구도 고칩니다.
+    if (maskMeshes > 0) {
+        char cut[32];
+        std::snprintf(cut, sizeof(cut), "%.3g", firstCutoff);
+        HLOG(LogAsset, Warning) << path << ": " << maskMeshes << " mesh(es) use glTF alphaMode MASK (first cutoff "
+                                << cut << "); cutout is not supported yet, drawn opaque with an opaque shadow";
     }
 
     cache[path] = pairs;
@@ -131,6 +146,8 @@ AssetPair AssetManager::acquirePrimitive(const PrimitiveDesc& descIn) {
     p.material  = defaultPrimitiveMaterial();
     p.name      = key;
     p.isBlend   = false;
+    p.doubleSided = false;   // Plane 의 그림자 양면 여부는 소비자(shadow_bias-4)가 정함
+    p.alphaMask   = false;
     p.vertCount = (int)verts.size();
     p.triCount  = (int)(src.indices.size() / 3);
 
