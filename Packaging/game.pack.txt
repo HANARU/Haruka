@@ -18,5 +18,8 @@ map ${SHADER_DIR} shaders
 exclude assets/cache/** **/*.tmp **/.* **/.*/** Thumbs.db desktop.ini
 exclude shaders/*.d
 
+# External reference assets kept on this machine only (2026-11-06, also in .gitignore). Never ship them.
+exclude assets/models/_reference/** assets/scenes/_reference/**
+
 stored *.ogg *.mp3 *.flac *.opus *.wav *.png *.jpg *.jpeg *.ktx2 *.basis *.webp *.zip
 text *.hscene *.hprefab *.ini *.txt

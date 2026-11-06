@@ -7,6 +7,7 @@
 // 실행: build/Release/HarukaRenderExtTest.exe
 
 #include "../src/renderer/RenderExtensionRegistry.hpp"
+#include "../src/renderer/MipChain.hpp"
 
 #include <cstdio>
 #include <string>
@@ -127,6 +128,39 @@ int main() {
         check(joined() == "vign.destroy sky.destroy post.destroy geometry.destroy shadow.destroy",
               "확장(나중 것부터) → 기본 패스(뒤에서부터) 순서로 파괴: " + joined());
         check(reg.extensionCount() == 0, "확장 목록이 비어 다시 파괴되지 않음");
+    }
+
+    // DEF-165: 텍스처 밉 사슬. 단계 수가 하나라도 모자라면 가장 작은 밉이 1x1 이 아니고, 넘치면 이미지 생성이 실패합니다.
+    std::printf("\n== 6. 텍스처 밉 사슬(DEF-165) ==\n");
+    {
+        check(hmip::levelCount(1, 1) == 1, "1x1 은 1단계");
+        check(hmip::levelCount(0, 0) == 1, "0 은 1단계로 봄");
+        check(hmip::levelCount(2, 2) == 2, "2x2 는 2단계");
+        check(hmip::levelCount(256, 256) == 9, "256² 은 9단계");
+        check(hmip::levelCount(2048, 2048) == 12, "2048² 은 12단계");
+        check(hmip::levelCount(1024, 512) == 11, "1024x512 는 큰 변 기준 11단계");
+        check(hmip::levelCount(3, 1000) == 10, "3x1000 은 10단계(2의 거듭제곱이 아니어도)");
+        check(hmip::levelCount(1, 4096) == 13, "1x4096 은 13단계");
+
+        // 마지막 단계는 두 변 모두 1, 그 앞 단계는 1 보다 큰 변이 있어야 합니다.
+        bool lastIsOne = true, prevIsBigger = true;
+        const uint32_t sizes[][2] = { {1024, 512}, {3, 1000}, {2048, 2048}, {7, 5}, {1, 4096} };
+        for (const auto& s : sizes) {
+            const uint32_t n = hmip::levelCount(s[0], s[1]);
+            lastIsOne    = lastIsOne && hmip::extent(s[0], n - 1) == 1 && hmip::extent(s[1], n - 1) == 1;
+            prevIsBigger = prevIsBigger && (hmip::extent(s[0], n - 2) > 1 || hmip::extent(s[1], n - 2) > 1);
+        }
+        check(lastIsOne, "마지막 단계는 1x1");
+        check(prevIsBigger, "마지막 바로 앞 단계는 1x1 이 아님(단계가 남지 않음)");
+        check(hmip::extent(1000, 3) == 125 && hmip::extent(1000, 9) == 1 && hmip::extent(3, 1) == 1 && hmip::extent(5, 40) == 1,
+              "단계 크기는 max(1, base >> level)");
+
+        constexpr VkFormatFeatureFlags all = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+                                             VK_FORMAT_FEATURE_BLIT_DST_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+        check(hmip::canBlitMips(all), "블릿 원본 · 대상 · 선형 필터가 있으면 블릿");
+        check(!hmip::canBlitMips(all & ~VK_FORMAT_FEATURE_BLIT_DST_BIT), "블릿 대상이 없으면 1단계");
+        check(!hmip::canBlitMips(all & ~VK_FORMAT_FEATURE_BLIT_SRC_BIT), "블릿 원본이 없으면 1단계");
+        check(!hmip::canBlitMips(all & ~VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT), "선형 필터가 없으면 1단계");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

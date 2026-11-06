@@ -28,6 +28,12 @@
 *.hscene
 !/assets/scenes/**/*.hscene
 
+# ── 외부 참고 에셋(2026-11-06) ──
+# 분석용으로 들여온 외부 게임 에셋과 그 참고 씬은 이 기계에만 둡니다. 저장소와 배포 묶음(Packaging/game.pack.txt 의
+# exclude)에 넣지 않습니다. 위의 씬 예외(!/assets/scenes/**)보다 뒤에 두어야 폴더째 빠집니다.
+/assets/models/_reference/
+/assets/scenes/_reference/
+
 # ── Session handoff (transient working notes, paste-in convention) ──
 /SESSION_HANDOFF.md
 

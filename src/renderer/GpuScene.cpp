@@ -1,4 +1,5 @@
 #include "GpuScene.hpp"
+#include "MipChain.hpp"
 #include "RendererLog.hpp"
 #include "../assets/GltfLoader.hpp"
 
@@ -151,32 +152,91 @@ TexSlot GpuScene::uploadTexture(const uint8_t* pixels, int w, int h, VkFormat fm
     rc_->allocator->bind(stagingBuf, stagingAlloc);
     memcpy(stagingAlloc.mappedPtr, pixels, imageSize);
 
-    slot.image = rc_->createImage(w, h, 1, 1, VK_SAMPLE_COUNT_1_BIT,
-        fmt, VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        0, slot.alloc);
+    // 밉 사슬(DEF-165, MipChain.hpp). 0단계는 스테이징에서 복사하고, 나머지는 바로 위 단계에서 선형 블릿으로 줄입니다.
+    const uint32_t mips = (w > 1 || h > 1) && canBlitMips(fmt) ? hmip::levelCount((uint32_t)w, (uint32_t)h) : 1u;
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    if (mips > 1) usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    slot.image = rc_->createImage(w, h, mips, 1, VK_SAMPLE_COUNT_1_BIT,
+        fmt, VK_IMAGE_TILING_OPTIMAL, usage, 0, slot.alloc);
+
+    // 한 단계만 옮기는 배리어. transitionImage 는 0단계부터 세므로 단계를 고르려면 직접 만듭니다.
+    auto levelBarrier = [&](VkCommandBuffer c, uint32_t level,
+                            VkImageLayout oldL, VkImageLayout newL,
+                            VkPipelineStageFlags2 srcS, VkAccessFlags2 srcA,
+                            VkPipelineStageFlags2 dstS, VkAccessFlags2 dstA) {
+        VkImageMemoryBarrier2 b{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+        b.srcStageMask        = srcS;  b.srcAccessMask = srcA;
+        b.dstStageMask        = dstS;  b.dstAccessMask = dstA;
+        b.oldLayout           = oldL;  b.newLayout     = newL;
+        b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image               = slot.image;
+        b.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0, 1 };
+        VkDependencyInfo di{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        di.imageMemoryBarrierCount = 1;
+        di.pImageMemoryBarriers    = &b;
+        rc_->pipelineBarrier(c, di);
+    };
 
     auto cmd = rc_->beginOneTimeCmd();
     rc_->transitionImage(cmd, slot.image,
         VK_IMAGE_LAYOUT_UNDEFINED,                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_PIPELINE_STAGE_2_NONE,                 VK_ACCESS_2_NONE,
-        VK_PIPELINE_STAGE_2_COPY_BIT,             VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT, mips);
     VkBufferImageCopy region{};
     region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     region.imageExtent      = { (uint32_t)w, (uint32_t)h, 1 };
     vkCmdCopyBufferToImage(cmd, stagingBuf, slot.image,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    rc_->transitionImage(cmd, slot.image,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        VK_PIPELINE_STAGE_2_COPY_BIT,               VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,    VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+    for (uint32_t i = 1; i < mips; ++i) {
+        // 위 단계(i-1): 방금 쓴 것(복사 또는 블릿)을 읽을 수 있게 TRANSFER_SRC 로.
+        levelBarrier(cmd, i - 1,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+
+        VkImageBlit blit{};
+        blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0, 1 };
+        blit.srcOffsets[1]  = { (int32_t)hmip::extent((uint32_t)w, i - 1), (int32_t)hmip::extent((uint32_t)h, i - 1), 1 };
+        blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1 };
+        blit.dstOffsets[1]  = { (int32_t)hmip::extent((uint32_t)w, i), (int32_t)hmip::extent((uint32_t)h, i), 1 };
+        vkCmdBlitImage(cmd, slot.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       slot.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+
+        // 다 읽은 위 단계는 셰이더가 읽는 배치로.
+        levelBarrier(cmd, i - 1,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    }
+    // 마지막 단계(밉이 없으면 0단계)는 쓰기만 했으므로 TRANSFER_DST 에서 바로 옮깁니다.
+    levelBarrier(cmd, mips - 1,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
     rc_->endOneTimeCmd(cmd);
 
     vkDestroyBuffer(rc_->device, stagingBuf, nullptr);
     rc_->allocator->freeB(stagingAlloc);
 
-    slot.imageView = rc_->createImageView(slot.image, fmt, VK_IMAGE_ASPECT_COLOR_BIT);
+    slot.imageView = rc_->createImageView(slot.image, fmt, VK_IMAGE_ASPECT_COLOR_BIT, mips, 1);
     return slot;
+}
+
+bool GpuScene::canBlitMips(VkFormat fmt) {
+    for (const auto& s : blitSupport_)
+        if (s.fmt == fmt) return s.ok;
+    VkFormatProperties fp{};
+    vkGetPhysicalDeviceFormatProperties(rc_->physDev, fmt, &fp);
+    const bool ok = hmip::canBlitMips(fp.optimalTilingFeatures);
+    blitSupport_.push_back({ fmt, ok });
+    // 형식마다 한 번 남깁니다. 지원하지 않으면 텍스처가 밉 없이 올라가 멀리서 반짝일 수 있습니다.
+    if (ok) HLOG(LogRenderer, Log)     << "Texture mipmaps: GPU blit chain for format " << (int)fmt;
+    else    HLOG(LogRenderer, Warning) << "Texture mipmaps: format " << (int)fmt
+                                       << " cannot be blitted with linear filtering; uploading a single level";
+    return ok;
 }
 
 void GpuScene::freeTexSlot(TexSlot slot) {

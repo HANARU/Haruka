@@ -40,6 +40,7 @@ public:
         const TexSourceData& emissive);
     void freeMaterial(MaterialHandle* h);
 
+    // 1x1 보다 크면 GPU 블릿으로 밉 사슬을 만듭니다(DEF-165, MipChain.hpp). 형식이 블릿을 받지 않으면 1단계로 올립니다.
     TexSlot uploadTexture(const uint8_t* pixels, int w, int h,
                           VkFormat fmt = VK_FORMAT_R8G8B8A8_SRGB);
     void    freeTexSlot(TexSlot slot);
@@ -49,6 +50,11 @@ public:
 
 private:
     RenderContext* rc_ = nullptr;
+
+    // 형식마다 밉 블릿 가능 여부를 한 번만 묻습니다(DEF-165). 텍스처는 SRGB · UNORM 두 형식뿐입니다.
+    bool canBlitMips(VkFormat fmt);
+    struct BlitSupport { VkFormat fmt; bool ok; };
+    std::vector<BlitSupport> blitSupport_;
 
     VkBuffer         megaVertBuf_   = VK_NULL_HANDLE;
     HarukaAllocation megaVertAlloc_;
