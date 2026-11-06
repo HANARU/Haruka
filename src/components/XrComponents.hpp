@@ -55,6 +55,21 @@ bool floorBelow(const World& world, const glm::vec3& from, const Actor* skip, fl
 
 enum class ETrackedSource { Head = 0, LeftHand = 1, RightHand = 2 };
 
+namespace hxr {
+// 화면 카메라의 XR 원점을 무엇으로 정하는지(2026-11-06, DEF-144). Unity 의 Tracked Pose Driver · UE 의 카메라처럼, 머리
+// 추적(TrackedPose Head)이 붙은 카메라는 부모가 추적 원점입니다. 머리 추적이 카메라 액터를 이미 움직이므로, 카메라 위치를
+// 원점으로 쓰면 머리 이동 · 요 · 높이가 두 번 적용됩니다(30° 돌면 60°).
+//   SceneRig      부모가 XrRigComponent(씬 리그). actor = 리그
+//   TrackedParent 머리 추적이 켜져 있지만 부모가 리그가 아님. actor = 부모(null 이면 월드 원점)
+//   CameraOnly    머리 추적이 없거나 꺼짐. XR 동안 엔진이 보이지 않는 리그를 붙이고, 데스크톱은 카메라 위치 + 요
+enum class EXrOrigin { SceneRig, TrackedParent, CameraOnly };
+struct XrOriginChoice {
+    EXrOrigin    kind  = EXrOrigin::CameraOnly;
+    const Actor* actor = nullptr;
+};
+XrOriginChoice chooseOrigin(const Actor* cameraActor);
+} // namespace hxr
+
 // 헤드셋 · 컨트롤러의 자세를 이 액터의 로컬 트랜스폼으로 씁니다(부모 = 리그). XR 세션이 입력을 받을 때만 바꾸고,
 // 아니면(데스크톱 Play) 손대지 않습니다. 손은 쥐는 자세(grip)를 쓰고, showDebug 면 축과 가리키는 선을 그립니다
 // (트리거를 당기면 노래지고 그립을 쥐면 길어짐. 예전에 에디터가 그리던 표시를 손 액터로 옮김).

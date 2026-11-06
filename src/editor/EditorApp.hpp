@@ -436,6 +436,7 @@ private:
 
     bool      prevLeftDown_   = false;
     Actor*    prevSelected_   = nullptr;
+    uint64_t  prevSelSig_     = 0;   // 앞 프레임 선택 집합의 서명(DEF-135)
     int       prevActorCount_ = -1;
     glm::vec3 cachedEuler_    {0.f, 0.f, 0.f};
     Transform undoSnapshot_;
@@ -600,6 +601,7 @@ private:
     bool                          outDragActive_ = false;
     std::shared_ptr<SDockOverlay> outlinerDropOverlay_;
     void tickOutlinerDrag(float mx, float my, bool leftDown);
+    void cancelOutlinerDrag();
     bool prevDDown_    = false;   // Ctrl+D 엣지
     // 액터 서브트리 생성 · 삭제를 Undo 로 되돌릴 수 있게 합니다(ActorPresenceCmd, 2026-10-15).
     // deleteActorUndoable 은 지우고 커맨드를 쌓고, recordActorCreation 은 이미 만든 루트들을 쌓습니다.
@@ -610,6 +612,8 @@ private:
     void tickShortcuts();
     void undo();
     void redo();
+    // 기즈모나 숫자 칸을 끄는 중인지. 그동안 저장 · 복제 · 붙여넣기 · 열기 단축키를 막습니다(DEF-132 · 133).
+    bool editDragActive() const;
     void syncEulerCache();
 
     std::string serializeWorld();
@@ -647,7 +651,8 @@ private:
     // ── 모달 대화상자 (2026-10-15) ───────────────────────────────────────────
     // 화면 전체를 덮는 캐처 위에 가운데 패널을 띄웁니다. 열린 동안에는 다른 패널 · 뷰포트 · 단축키가
     // 입력을 받지 않습니다. 버튼 콜백은 위젯 디스패치 도중이라 바로 실행하지 않고, 프레임 끝
-    // (flushChromeRebuilds)에서 대화상자를 닫은 뒤 실행합니다. 그 동작이 다른 대화상자를 열 수 있습니다.
+    // (flushChromeRebuilds 의 맨 앞)에서 대화상자를 닫은 뒤 실행합니다. 그 동작이 다른 대화상자를 열 수 있고, 씬을 바꾸면
+    // 같은 소진에서 아웃라이너 · 디테일을 다시 만듭니다(DEF-130).
     struct ModalButton {
         std::string           label;
         std::function<void()> action;
@@ -679,6 +684,10 @@ private:
     void triggerModalCancel();
     void rebuildModal();
     void flushModal();
+    // 떠 있는 대화상자를 지금 취소로 닫습니다(취소 버튼의 동작을 실행). 창 닫기 요청이 닫기와 관계없는 대화상자를 치울 때
+    // 씁니다(DEF-137). 위젯 처리 밖에서만 부릅니다.
+    void cancelModalNow();
+    bool closeFlow_ = false;   // 창 닫기 흐름(Unsaved Changes → Save As → Replace Scene)의 대화상자가 떠 있음
 
     // UE5-style dark theme
     static constexpr glm::vec4 kBgPanel   { 0.105f, 0.105f, 0.11f,  1.f };

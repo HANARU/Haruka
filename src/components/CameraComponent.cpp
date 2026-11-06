@@ -59,6 +59,8 @@ glm::mat4 CameraComponent::xrOrigin() const {
         return glm::translate(glm::mat4(1.f), xrRig_->worldPosition() + r * glm::vec3(0.f, xrRigLift_, 0.f)) *
                glm::mat4_cast(r);
     }
+    // 부모 없는 머리 추적 카메라(DEF-144): 추적 자세가 곧 월드 자세이므로 원점은 월드 원점입니다.
+    if (worldOrigin_) return glm::translate(glm::mat4(1.f), glm::vec3(0.f, xrRigLift_, 0.f));
     // 정면을 수평면에 내린 방향의 요입니다. 똑바로 위 · 아래를 보면 요가 정해지지 않아 0 으로 둡니다.
     const glm::vec3 f = forward();
     const float yaw = (f.x * f.x + f.z * f.z > 1e-8f) ? std::atan2(-f.x, -f.z) : 0.f;

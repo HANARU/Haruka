@@ -58,9 +58,16 @@ public:
     // 보이지 않는 리그(2026-10-16): 리그가 없는 씬은 XR 동안 엔진이 setXrImplicitRig 로 카메라에서 drop 만큼 아래
     // (카메라 아래 바닥)에 리그를 둡니다. 수평 위치와 요는 카메라를 따릅니다. 둘 다 아니면(데스크톱) 예전처럼
     // 카메라 위치 + 요입니다.
+    // 머리 추적 카메라의 부모가 리그가 아니면(2026-11-06, DEF-144) 엔진이 setXrTrackedParent 로 그 부모를 리그처럼 원점으로
+    // 씁니다. 부모가 없으면 월드 원점(+ lift)입니다(hxr::chooseOrigin).
     glm::mat4 xrOrigin() const;
-    void setXrRig(const Actor* rig, float lift) { xrRig_ = rig; xrRigLift_ = lift; implicitRig_ = false; }
-    void setXrImplicitRig(float drop, float lift) { xrRig_ = nullptr; xrRigLift_ = lift; implicitRig_ = true; implicitDrop_ = drop; }
+    void setXrRig(const Actor* rig, float lift) { xrRig_ = rig; xrRigLift_ = lift; implicitRig_ = false; worldOrigin_ = false; }
+    void setXrImplicitRig(float drop, float lift) {
+        xrRig_ = nullptr; xrRigLift_ = lift; implicitRig_ = true; implicitDrop_ = drop; worldOrigin_ = false;
+    }
+    void setXrTrackedParent(const Actor* parent, float lift) {
+        xrRig_ = parent; xrRigLift_ = lift; implicitRig_ = false; worldOrigin_ = (parent == nullptr);
+    }
     const Actor* xrRig() const { return xrRig_; }
     bool         hasImplicitXrRig() const { return implicitRig_; }
 
@@ -69,4 +76,5 @@ private:
     float        xrRigLift_    = 0.f;
     bool         implicitRig_  = false;
     float        implicitDrop_ = 0.f;
+    bool         worldOrigin_  = false;   // 부모 없는 머리 추적 카메라: 원점은 월드 원점
 };

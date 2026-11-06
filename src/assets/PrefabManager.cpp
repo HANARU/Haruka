@@ -1,4 +1,5 @@
 #include "PrefabManager.hpp"
+#include "PrefabRules.hpp"
 #include "AssetLog.hpp"
 #include "SceneSerializer.hpp"
 #include "../core/Actor.hpp"
@@ -44,8 +45,14 @@ Actor* PrefabManager::spawn(const std::string& path, World& world, AssetManager&
     std::string text;
     if (!hvfs::readText(path, text)) { HLOG(LogAsset, Error) << "Prefab not found: " << path; return nullptr; }
 
-    if (text.rfind("# Haruka Prefab v3", 0) == 0) {
+    // BOM 을 떼고, 머리 줄 앞의 빈 줄 · 주석을 건너뛰어 v3 를 판별합니다(DEF-142).
+    if (hprefab::stripBomAndDetectV3(text)) {
         const std::vector<Actor*> slots = SceneSerializer::readScene(text, world, assets);
+        // 루트 · 중간 블록이 실패해 서브트리 밖에 남은 액터는 지웁니다(DEF-141). 루트가 없으면 꺼낸 것을 모두 지웁니다.
+        if (const int n = hprefab::discardOrphans(world, slots); n > 0) {
+            HLOG(LogAsset, Warning) << "Prefab " << path << ": removed " << n
+                                    << " actor subtree(s) left outside the root after a failed block";
+        }
         if (slots.empty() || !slots[0]) { HLOG(LogAsset, Error) << "Prefab has no root actor: " << path; return nullptr; }
         HLOG(LogAsset, Log) << "Prefab spawned: " << slots[0]->name << " from " << path << " (" << slots.size() << " actors)";
         return slots[0];

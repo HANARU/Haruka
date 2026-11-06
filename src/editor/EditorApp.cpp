@@ -15,6 +15,7 @@
 #include "../components/RigidBodyComponent.hpp"
 #include "../assets/AssetManager.hpp"
 #include "../assets/PrefabManager.hpp"
+#include "../assets/PrefabRules.hpp"
 #include "../assets/SceneSerializer.hpp"
 #include "../platform/IWindow.hpp"
 #include "../input/HInputSystem.hpp"
@@ -365,6 +366,18 @@ void EditorApp::tick(float dt) {
 
     int  actorCount    = (int)ctx_.world->getActors().size();
     bool selChanged    = (ctx_.selected != prevSelected_);
+
+    // 주 선택은 그대로인데 선택 집합만 바뀌면(뷰포트 Ctrl+클릭, 아웃라이너 Ctrl · Shift+클릭) 아웃라이너 강조와 디테일의
+    // "N actors selected" 배지가 낡습니다. 선택 집합의 서명(개수 + ID)을 앞 프레임과 비교해 다시 만듭니다(DEF-135).
+    {
+        uint64_t sig = 1469598103934665603ull ^ ctx_.selection.size();
+        for (const Actor* s : ctx_.selection) sig = (sig ^ (s ? s->id : 0)) * 1099511628211ull;
+        if (sig != prevSelSig_) {
+            prevSelSig_    = sig;
+            outlinerDirty_ = true;
+            if (!selChanged) detailsDirty_ = true;   // 주 선택이 바뀌면 아래에서 어차피 다시 만듭니다
+        }
+    }
 
     // 리네임 해제를 리빌드 **앞**으로 옮깁니다. 뒤에 두면 선택이 바뀌는 프레임에 새 행이
     // 직전 액터의 renameBuffer_ 를 한 프레임 그대로 보여 줍니다.
@@ -2065,6 +2078,11 @@ std::string EditorApp::statusFocusText() const {
 // 한 번에 처리합니다. 아웃라이너보다 뒤에 두어, 메뉴 항목이 도크 변형을 요청한 경우
 // 도크 쪽이 먼저 정리되게 합니다.
 void EditorApp::flushChromeRebuilds() {
+    // 마우스로 누른 대화상자 버튼은 맨 먼저 실행합니다. 그 동작(씬 열기 · 새 씬)은 액터를 바로 파괴하므로, 아웃라이너 ·
+    // 디테일을 그 뒤에 다시 만들어야 이번 프레임의 그리기가 해제된 액터 · 컴포넌트를 읽지 않습니다(DEF-130). 예전에는
+    // 대화상자 동작이 맨 끝이라 디테일이 낡은 채로 한 프레임 그려졌습니다. 디테일 칸은 액터 포인터를 붙잡습니다.
+    flushModal();
+    flushOutlinerRebuild();
     if (menuBarDirty_)   { menuBarDirty_   = false; rebuildMenuBar();   }
     if (menuPopupDirty_) { menuPopupDirty_ = false; rebuildMenuPopup(); }
     if (toolbarDirty_)   { toolbarDirty_   = false; rebuildToolbar();   }
@@ -2073,8 +2091,6 @@ void EditorApp::flushChromeRebuilds() {
     // 로그 행은 위젯을 만들지 않고 문자열만 바꾸므로 콜백 안에서 불려도 안전하지만, 필터
     // 토글을 여러 번 누른 프레임에 한 번만 계산하려고 같은 소진 지점에 둡니다.
     if (logViewDirty_ && bottomTab_ == 1 && logRowsBox_) { logViewDirty_ = false; refreshLogView(); }
-    // 대화상자 버튼은 맨 마지막에 실행합니다. 그 동작이 씬을 바꿔 아웃라이너 · 디테일을 다시 만들 수 있습니다.
-    flushModal();
     if (bottomDirty_) { bottomDirty_ = false; rebuildBottomPanel(); }
 }
 
@@ -2085,7 +2101,9 @@ void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
     Actor* const   a         = r.actor;
     const uint64_t id        = r.id;
     const bool     sel       = isSelected(a);
-    const bool     ren       = sel && renaming_;
+    // 이름이 바뀌는 것은 주 선택 하나이므로 이름 칸도 그 행에만 보입니다. 예전에는 선택된 모든 행이 주 선택의 이름
+    // 칸을 보여 주었습니다(DEF-134).
+    const bool     ren       = a == ctx_.selected && renaming_;
     const bool     renAll    = ren && renameSelAll_;
     const bool     filtering = !outlinerSearch_.empty();
 
@@ -2621,6 +2639,13 @@ void EditorApp::rebuildDetails() {
                     textButton("Save as Prefab", 12.f, kTextDim, {7.f, 4.f},
                                {0.14f, 0.14f, 0.18f, 1.f}, {0.26f, 0.26f, 0.32f, 1.f},
                                [this, sel]{
+                                   // 액터 이름이 파일 이름이 됩니다. 폴더 구분자 · 금지 글자 · '..' 이 있으면 저장하지 않습니다(DEF-140).
+                                   std::string why;
+                                   if (!hprefab::isValidName(sel->name, &why)) {
+                                       HLOG(LogEditor, Warning) << "Save as Prefab: '" << sel->name << "' cannot be a prefab file name ("
+                                                                << why << "). Rename the actor (F2) and try again.";
+                                       return;
+                                   }
                                    std::string p = std::string(PrefabManager::kDir) + "/" + sel->name + PrefabManager::kExt;
                                    PrefabManager::save(sel, p);
                                    prefabFiles_ = PrefabManager::scan();
@@ -3426,6 +3451,8 @@ void EditorApp::redo() {
     outlinerDirty_ = true;
 }
 
+bool EditorApp::editDragActive() const { return gizmo_.isDragging() || SNumberField::anyPressed(); }
+
 // ── tickShortcuts ──────────────────────────────────────────────────────────────
 // 표준 단축키: Ctrl+Z(undo) / Ctrl+Y·Ctrl+Shift+Z(redo) / Ctrl+S(씬 저장)
 void EditorApp::tickShortcuts() {
@@ -3459,6 +3486,15 @@ void EditorApp::tickShortcuts() {
     // F — 선택 대상으로 화면 맞추기(Ctrl+F 는 아웃라이너 검색)
     if (fEdge && !win.isCtrlDown() && currentFocus() == EFocusTarget::None) { frameSelection(); return; }
     if (!win.isCtrlDown()) return;
+    // 기즈모 · 숫자 칸을 끄는 동안에는 씬을 바꾸거나 저장하는 단축키를 받지 않습니다(Undo · Redo 와 같은 규칙). Ctrl+D 는
+    // 주 선택을 새 액터로 바꿔 끄기 결과가 새 액터의 커맨드로 쌓이고(DEF-132), Ctrl+S 는 끄기 중간 값을 파일에 넣어 저장
+    // 표지가 어긋납니다(DEF-133). 열기 · 새 씬도 끄는 대상을 없애므로 함께 막습니다.
+    if (editDragActive()) {
+        if (sEdge || dEdge || oEdge || nEdge) {
+            HLOG(LogEditor, Log) << "Finish the drag first (shortcut ignored while dragging a gizmo or a value)";
+        }
+        return;
+    }
     if (dEdge && currentFocus() == EFocusTarget::None) { duplicateSelection(); return; }
 
     if (sEdge) { if (win.isShiftDown()) saveSceneAs(); else saveScene(); return; }
@@ -3576,6 +3612,9 @@ void EditorApp::handleInput(float mouseX, float mouseY,
                 if (!hit) continue;
                 cursorShape = h.vertical ? 2 : 1;   // 2 = 상하(↕), 1 = 좌우(↔)
                 if (leftDown && !prevLeftDown_ && h.node) {
+                    // 잡기 존이 아웃라이너 행 오른쪽 끝과 겹칩니다. 같은 누름으로 시작된 아웃라이너 끌기를 지워, 크기 조절이
+                    // 부모 바꾸기로 이어지지 않게 합니다(DEF-139).
+                    cancelOutlinerDrag();
                     dockDragNode_        = h.node;
                     dockDragIndex_       = h.index;
                     dockDragVertical_    = h.vertical;
@@ -3637,12 +3676,14 @@ void EditorApp::handleInput(float mouseX, float mouseY,
                 if (!t.row || !t.row->cachedGeometry().contains(m)) continue;
                 // 탭의 x 는 버튼처럼 다룹니다. 누른 x 위에서 뗄 때만 닫고, 끌어도 재도킹하지 않습니다.
                 if (t.close && t.close->cachedGeometry().contains(m)) {
+                    cancelOutlinerDrag();   // DEF-139
                     tabCloseWidget_ = t.close;
                     tabCloseRow_    = t.row;
                     tabClosePanel_  = t.panelId;
                     break;
                 }
                 if (t.widget && t.widget->cachedGeometry().contains(m)) {
+                    cancelOutlinerDrag();   // DEF-139
                     tabPressPending_ = true; tabDragActive_ = false;
                     tabSrcStack_ = t.stack; tabSrcIndex_ = t.tabIndex;
                     tabSrcPanel_ = t.panelId; tabPressPos_ = m;
@@ -4141,7 +4182,7 @@ void EditorApp::tickRenameInput() {
     // ── 포커스 없음 ───────────────────────────────────────────────────────────
     if (delEdge) deleteSelection();
     if (copyEdge)  copySelection();
-    if (pasteEdge) pasteClipboard();
+    if (pasteEdge && !editDragActive()) pasteClipboard();   // 붙여넣기도 주 선택을 바꿉니다(DEF-132)
 
     // 아무도 받지 않는 문자는 버립니다. 쌓아 두면 다음에 입력창을 여는 순간
     // 그동안 누른 글자가 한꺼번에 쏟아집니다.

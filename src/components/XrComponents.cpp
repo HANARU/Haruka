@@ -104,6 +104,19 @@ void TrackedPoseComponent::onDisable() {
 }
 TrackedPoseComponent::~TrackedPoseComponent() { onDisable(); }
 
+hxr::XrOriginChoice hxr::chooseOrigin(const Actor* cam) {
+    XrOriginChoice c;
+    if (!cam) return c;
+    const auto* tp = cam->getComponent<TrackedPoseComponent>();
+    if (!tp || tp->source != ETrackedSource::Head) return c;
+    const Actor* parent = cam->getParent();
+    // 씬 리그는 예전 규칙 그대로입니다(머리 추적을 꺼도 리그가 원점).
+    if (parent && parent->getComponent<XrRigComponent>()) return { EXrOrigin::SceneRig, parent };
+    // 꺼진 머리 추적은 카메라를 움직이지 않으므로 두 번 적용될 것이 없습니다. 예전처럼 카메라 기준으로 둡니다.
+    if (!tp->isLive()) return c;
+    return { EXrOrigin::TrackedParent, parent };
+}
+
 void TrackedPoseComponent::tick(float /*dt*/) {
     // 손 · 머리를 바꿔 고른 뒤에도 셈이 맞도록 매 틱 맞춥니다.
     if ((handIndex() >= 0) != countedHand_) { if (countedHand_) onDisable(); else onEnable(); }
@@ -344,10 +357,12 @@ void GrabInteractorComponent::release(const glm::vec3& linearVelocity, const glm
     auto* rb = g->owner->getComponent<RigidBodyComponent>();
     if (rb && wasDynamic_) {
         rb->setMotionRuntime(EMotionType::Dynamic);
-        if (throwIt && g->throwable) {
-            rb->setLinearVelocity(linearVelocity);
-            rb->setAngularVelocity(angularVelocity);
-        }
+        // 잡은 동안 Kinematic 바디는 손을 따라가는 속도(MoveKinematic)를 갖고 있고, Dynamic 으로 돌려도 그 속도가 남습니다.
+        // 던지지 않고 놓을 때(throwable=false, 다른 물체로 바꿔 잡기, 손 · 잡기 끄기)는 속도를 지워 그 자리에서 떨어지게
+        // 합니다. 예전에는 남은 손 속도로 날아가서 throwable=false 가 사실상 동작하지 않았습니다(DEF-143).
+        const bool toss = throwIt && g->throwable;
+        rb->setLinearVelocity(toss ? linearVelocity : glm::vec3(0.f));
+        rb->setAngularVelocity(toss ? angularVelocity : glm::vec3(0.f));
     }
     wasDynamic_ = false;
 }

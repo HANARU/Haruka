@@ -135,9 +135,11 @@ void deviceData(ma_device* d, void* out, const void* /*in*/, ma_uint32 frames) {
     ma_engine_read_pcm_frames(static_cast<ma_engine*>(d->pUserData), out, frames, nullptr);
 }
 
-// want 가 가리키는 장치를 엽니다(시작은 하지 않음). 비었거나 목록에 없으면 시스템 기본 장치이고, 없었으면 missing 이 참입니다.
-bool openDevice(OutputState& o, ma_engine* eng, const std::string& want, bool& missing) {
+// want 가 가리키는 장치 하나를 엽니다(시작은 하지 않음). 비었으면 시스템 기본 장치입니다. 목록에 없으면 열지 않고
+// missing 을 참으로, 열기가 실패하면(다른 앱의 독점 모드 등) error 에 이유를 남기고 false 를 돌려줍니다.
+bool openDevice(OutputState& o, ma_engine* eng, const std::string& want, bool& missing, std::string& error) {
     missing = false;
+    error.clear();
     ma_device_id id{};
     bool haveId = false;
     if (!want.empty()) {
@@ -146,7 +148,7 @@ bool openDevice(OutputState& o, ma_engine* eng, const std::string& want, bool& m
         if (ma_context_get_devices(&o.ctx, &infos, &count, nullptr, nullptr) == MA_SUCCESS)
             for (ma_uint32 i = 0; i < count && !haveId; ++i)
                 if (hutf::equalsIgnoreCase(deviceIdString(o.ctx, infos[i]), want)) { id = infos[i].id; haveId = true; }
-        missing = !haveId;
+        if (!haveId) { missing = true; return false; }
     }
     ma_device_config dc = ma_device_config_init(ma_device_type_playback);
     dc.playback.pDeviceID        = haveId ? &id : nullptr;
@@ -158,15 +160,45 @@ bool openDevice(OutputState& o, ma_engine* eng, const std::string& want, bool& m
     dc.noPreSilencedOutputBuffer = MA_TRUE;   // 콜백이 언제나 모든 프레임을 채웁니다(엔진 기본 장치와 같은 설정)
     dc.noClip                    = MA_TRUE;   // 엔진이 직접 자릅니다
     if (const ma_result r = ma_device_init(&o.ctx, &dc, &o.dev); r != MA_SUCCESS) {
-        HLOG(LogAudio, Error) << "Audio output device could not be opened: " << ma_result_description(r);
+        error = ma_result_description(r);
         return false;
     }
     o.devOk      = true;
-    o.activeId   = haveId ? want : std::string();
+    o.activeId   = want;
     o.activeName = o.dev.playback.name;
     return true;
 }
+
+// 후보를 앞에서부터 열어 처음 열린 것을 씁니다(AudioSystem::outputCandidates 순서). 목록에 없거나 열리지 않은 후보는
+// 경고하고 다음 후보로 갑니다. 예전에는 고른 장치가 열리지 않으면 시스템 기본으로 돌아가지 않았고(DEF-146), 헤드셋 장치가
+// 목록에 없으면 고른 장치를 건너뛰고 시스템 기본으로 열었습니다(DEF-147). quiet 면 경고를 남기지 않습니다(다시 열기 재시도).
+bool openPreferred(OutputState& o, ma_engine* eng, const std::vector<std::string>& candidates, bool quiet) {
+    for (size_t k = 0; k < candidates.size(); ++k) {
+        bool        missing = false;
+        std::string error;
+        if (openDevice(o, eng, candidates[k], missing, error)) return true;
+        if (quiet) continue;
+        const std::string what = candidates[k].empty() ? std::string("system default") : candidates[k];
+        if (missing) {
+            HLOG(LogAudio, Warning) << "Audio output device not found: " << what;
+        } else {
+            HLOG(LogAudio, Warning) << "Audio output device could not be opened: " << what << " (" << error << ")";
+        }
+        if (k + 1 < candidates.size()) {
+            HLOG(LogAudio, Warning) << "  trying " << (candidates[k + 1].empty() ? std::string("the system default") : candidates[k + 1]);
+        }
+    }
+    return false;
+}
 } // namespace
+
+std::vector<std::string> AudioSystem::outputCandidates(const std::string& overrideId, const std::string& requestedId) {
+    std::vector<std::string> c;
+    if (!overrideId.empty()) c.push_back(overrideId);
+    if (!requestedId.empty() && !hutf::equalsIgnoreCase(requestedId, overrideId)) c.push_back(requestedId);
+    c.push_back(std::string());   // 시스템 기본
+    return c;
+}
 
 void AudioSystem::startup() {
     auto* eng = new ma_engine();
@@ -179,14 +211,14 @@ void AudioSystem::startup() {
     OutputState* out = nullptr;
     if (!headless_) {
         out = new OutputState();
-        bool missing = false;
         if (const ma_result r = ma_context_init(nullptr, 0, nullptr, &out->ctx); r != MA_SUCCESS) {
             HLOG(LogAudio, Error) << "ma_context_init failed: " << ma_result_description(r);
             delete out;
             delete eng;
             return;
         }
-        if (!openDevice(*out, eng, overrideId_.empty() ? requestedId_ : overrideId_, missing)) {
+        if (!openPreferred(*out, eng, outputCandidates(overrideId_, requestedId_), false)) {
+            HLOG(LogAudio, Error) << "No audio output (no device could be opened)";
             ma_context_uninit(&out->ctx);
             delete out;
             delete eng;
@@ -278,27 +310,63 @@ std::string AudioSystem::activeOutputName() const {
     return (out && out->devOk) ? out->activeName : std::string();
 }
 
-void AudioSystem::reopenDevice() {
+bool AudioSystem::overrideActive() const {
+    const OutputState* out = asOut(out_);
+    return out && out->devOk && !overrideId_.empty() && hutf::equalsIgnoreCase(out->activeId, overrideId_);
+}
+
+bool AudioSystem::reopenDevice(bool quiet) {
     OutputState* out = asOut(out_);
-    if (!out || !engine_) return;   // headless 이거나 시작 전: 값만 기억했다가 시작할 때 엽니다
+    if (!out || !engine_) return false;   // headless 이거나 시작 전: 값만 기억했다가 시작할 때 엽니다
     const std::string& want = overrideId_.empty() ? requestedId_ : overrideId_;
-    if (out->devOk && hutf::equalsIgnoreCase(out->activeId, want)) return;
+    // 원하는 장치가 이미 열려 돌고 있으면 그대로 둡니다. 멈춘 장치(실행 중에 뽑힘 등)는 같은 장치라도 다시 엽니다. 예전에는
+    // 장치 ID 만 비교해서, 잃은 장치를 대화상자에서 다시 골라도 열지 않았습니다(DEF-145).
+    if (out->devOk && hutf::equalsIgnoreCase(out->activeId, want) && ma_device_is_started(&out->dev)) return true;
     // 같은 ma_device 자리를 닫고 다시 엽니다. 엔진은 이 주소를 들고 있고, 형식이 같으므로 엔진 · 사운드는 그대로입니다.
     if (out->devOk) {
         ma_device_uninit(&out->dev);
         out->devOk = false;
     }
-    bool missing = false;
-    if (!openDevice(*out, asEngine(engine_), want, missing)) {
-        HLOG(LogAudio, Error) << "No audio output (device could not be opened)";
-        return;
+    if (!openPreferred(*out, asEngine(engine_), outputCandidates(overrideId_, requestedId_), quiet)) {
+        if (!quiet) { HLOG(LogAudio, Error) << "No audio output (no device could be opened)"; }
+        return false;
     }
-    if (missing) HLOG(LogAudio, Warning) << "Audio output device not found: " << want << "; using the system default";
-    if (const ma_result r = ma_device_start(&out->dev); r != MA_SUCCESS)
-        HLOG(LogAudio, Error) << "Audio output device could not start: " << ma_result_description(r);
+    if (const ma_result r = ma_device_start(&out->dev); r != MA_SUCCESS) {
+        if (!quiet) { HLOG(LogAudio, Error) << "Audio output device could not start: " << ma_result_description(r); }
+        return false;   // 열린 채 멈춘 장치는 Play 중 tick 이 간격을 두고 다시 엽니다
+    }
     HLOG(LogAudio, Log) << "Audio output: " << out->activeName
                         << (out->activeId.empty() ? " (system default)" : "")
-                        << (!overrideId_.empty() && !missing ? " (temporary)" : "");
+                        << (overrideActive() ? " (temporary)" : "");
+    return true;
+}
+
+// 실행 중에 장치를 잃으면(USB · 블루투스 장치를 뽑음 등) miniaudio 는 장치를 멈춥니다. 시스템 기본 장치는 miniaudio 가
+// 새 기본 장치로 옮겨 주지만, 직접 고른 장치는 멈춘 채 남습니다. 간격을 두고 다시 열어, 그 장치가 없으면 다음 후보(고른
+// 장치 → 시스템 기본)로 소리를 잇습니다(DEF-145). 장치가 돌고 있으면 목록을 훑지 않으므로 평소 비용은 상태 읽기 하나입니다.
+void AudioSystem::checkOutput(float dt) {
+    OutputState* out = asOut(out_);
+    if (!out || !engine_) return;
+    if (out->devOk && ma_device_is_started(&out->dev)) {
+        if (outputLost_) {
+            outputLost_ = false;
+            const std::string& want = overrideId_.empty() ? requestedId_ : overrideId_;
+            HLOG(LogAudio, Log) << "Audio output restored: " << out->activeName
+                                << (hutf::equalsIgnoreCase(out->activeId, want) ? "" : " (the chosen device is unavailable)");
+        }
+        outputRetry_ = 0.f;
+        return;
+    }
+    if (!outputLost_) {
+        outputLost_  = true;
+        outputRetry_ = 0.f;   // 처음 알아챈 프레임에 바로 한 번
+        HLOG(LogAudio, Warning) << "Audio output stopped" << (out->devOk ? " (device lost?): " + out->activeName : std::string())
+                                << "; reopening every " << kOutputRetrySec << " s";
+    }
+    outputRetry_ -= dt;
+    if (outputRetry_ > 0.f) return;
+    outputRetry_ = kOutputRetrySec;
+    reopenDevice(/*quiet*/ true);   // 성공하면 다음 프레임에 "restored" 를 남깁니다
 }
 
 void AudioSystem::releaseWorldSounds() {
@@ -345,8 +413,10 @@ void AudioSystem::applySettings(void* maSound, const AudioComponent& ac) {
     ma_sound_set_rolloff(s, at.rolloff);
 }
 
-void AudioSystem::tick(float /*dt*/) {
-    if (!engine_ || !world_) return;
+void AudioSystem::tick(float dt) {
+    if (!engine_) return;
+    checkOutput(dt);
+    if (!world_) return;
     updateListener();
 
     for (auto& actorPtr : world_->getActors()) {

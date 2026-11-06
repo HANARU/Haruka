@@ -98,6 +98,8 @@ private:
     // 리그가 없는 씬의 보이지 않는 리그(2026-10-16): 바닥을 찾은 카메라 액터(0 = 아직)와 카메라에서 바닥까지의 거리.
     uint64_t                       implicitRigCam_  = 0;
     float                          implicitRigDrop_ = 0.f;
+    // 머리 추적 카메라의 부모를 원점으로 쓴다고 알린 카메라 액터(0 = 아직, DEF-144). 같은 카메라는 한 번만 알립니다.
+    uint64_t                       trackedOriginCam_ = 0;
     std::unique_ptr<Renderer>      renderer_;
     World                          world_;
     std::unique_ptr<AssetManager>  assets_;

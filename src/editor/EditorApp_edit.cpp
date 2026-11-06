@@ -111,9 +111,14 @@ static std::string makeClip(const std::vector<Actor*>& roots) {
 }
 
 std::vector<Actor*> EditorApp::spawnActorSet(const std::string& clip) {
-    std::string           setText;
+    std::string           setText, session;
     std::vector<uint64_t> rootParents;
-    if (!ctx_.world || !ctx_.assets || !hclip::unwrap(clip, setText, rootParents)) return {};
+    if (!ctx_.world || !ctx_.assets || !hclip::unwrap(clip, setText, rootParents, &session)) return {};
+    // 다른 실행(다시 켠 에디터 · 다른 인스턴스)에서 복사한 클립의 부모 ID 는 이 월드의 관계없는 액터와 겹칠 수 있습니다(DEF-136).
+    const bool sameSession = session == hclip::sessionToken();
+    if (!sameSession && std::any_of(rootParents.begin(), rootParents.end(), [](uint64_t p) { return p != 0; })) {
+        HLOG(LogEditorEdit, Log) << "Paste: copied in another editor session; placing at the root";
+    }
     std::set<std::string> names;
     for (const auto& ap : ctx_.world->getActors()) names.insert(ap->name);
     const std::vector<Actor*> slots = SceneSerializer::readScene(setText, *ctx_.world, *ctx_.assets);
@@ -125,7 +130,7 @@ std::vector<Actor*> EditorApp::spawnActorSet(const std::string& clip) {
         r->name = hclip::nextCopyName(r->name, names);
         names.insert(r->name);
         // 원래 부모가 이 씬에 있으면 그 아래, 같은 로컬 트랜스폼으로 둡니다(UE · Unity 처럼 원래 자리).
-        if (i < rootParents.size() && rootParents[i])
+        if (sameSession && i < rootParents.size() && rootParents[i])
             if (Actor* p = ctx_.world->findById(rootParents[i]); p && p != editorCamActor_) r->attachTo(p);
     }
     return roots;
@@ -267,6 +272,13 @@ void EditorApp::commitGizmoDrag(const Transform& before, const Transform& after)
     if (composite->cmds.size() == 1) cmdStack_.push(std::move(composite->cmds.front()));
     else                             cmdStack_.push(std::move(composite));
     groupDrag_.clear();
+}
+
+// 스플리터 · 탭이 같은 누름을 가져갈 때 아웃라이너 끌기를 지웁니다(DEF-139).
+void EditorApp::cancelOutlinerDrag() {
+    outDragId_     = 0;
+    outDragActive_ = false;
+    if (outlinerDropOverlay_) outlinerDropOverlay_->active = false;
 }
 
 // ── 아웃라이너에서 끌어 놓아 부모 바꾸기 ─────────────────────────────────────────

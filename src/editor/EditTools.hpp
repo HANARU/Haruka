@@ -7,9 +7,12 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
@@ -68,24 +71,50 @@ inline WorldPose followPivot(const WorldPose& pivotStart, const WorldPose& pivot
 
 namespace hclip {
 
-// 액터 복사 · 붙여넣기의 클립보드 글(씬 형식의 액터 세트 앞에 머리 줄 둘). 씬 읽기는 '#' 줄을 건너뛰므로
+// 액터 복사 · 붙여넣기의 클립보드 글(씬 형식의 액터 세트 앞에 머리 줄 셋). 씬 읽기는 '#' 줄을 건너뛰므로
 // 머리 줄은 읽기에 영향이 없습니다. 루트마다 원래 부모 ID 를 적어, 붙여넣을 때 그 부모가 있으면 그 아래에 둡니다.
+// 액터 ID 는 실행마다 1 부터 다시 매기므로 부모 ID 는 복사한 실행 안에서만 뜻이 있습니다. 그래서 실행마다 다른 세션
+// 표지를 함께 적고, 표지가 다르면(다시 켠 에디터 · 다른 인스턴스) 부모를 찾지 않고 루트에 붙입니다(DEF-136).
 constexpr const char* kHeader = "#HARUKA_ACTORS 1";
 
-inline std::string wrap(const std::string& actorSet, const std::vector<uint64_t>& rootParents) {
-    std::string s = std::string(kHeader) + "\n#ROOT_PARENTS";
+// 이 실행의 세션 표지(16자리 16진수). 처음 부를 때 한 번 만듭니다.
+inline const std::string& sessionToken() {
+    static const std::string token = [] {
+        std::random_device rd;
+        const uint64_t t = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
+        const uint64_t v = ((uint64_t)rd() << 32 ^ (uint64_t)rd()) ^ (t * 0x9E3779B97F4A7C15ull);
+        char buf[17];
+        std::snprintf(buf, sizeof(buf), "%016llx", (unsigned long long)v);
+        return std::string(buf);
+    }();
+    return token;
+}
+
+inline std::string wrap(const std::string& actorSet, const std::vector<uint64_t>& rootParents,
+                        const std::string& session = sessionToken()) {
+    std::string s = std::string(kHeader) + "\n#SESSION " + session + "\n#ROOT_PARENTS";
     for (uint64_t p : rootParents) s += " " + std::to_string(p);
     return s + "\n" + actorSet;
 }
 
-// Haruka 액터 클립보드가 아니면 false(다른 프로그램에서 복사한 글 등).
-inline bool unwrap(const std::string& clip, std::string& actorSet, std::vector<uint64_t>& rootParents) {
+// Haruka 액터 클립보드가 아니면 false(다른 프로그램에서 복사한 글 등). session 에는 복사한 실행의 표지를 돌려줍니다
+// (표지 줄이 없는 예전 클립이면 빈 문자열).
+inline bool unwrap(const std::string& clip, std::string& actorSet, std::vector<uint64_t>& rootParents,
+                   std::string* session = nullptr) {
     std::string text = clip;
     // 다른 프로그램을 거치며 CRLF 가 될 수 있습니다.
     text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
     const std::string head = std::string(kHeader) + "\n";
     if (text.rfind(head, 0) != 0) return false;
     size_t pos = head.size();
+    if (session) session->clear();
+    const std::string sessTag = "#SESSION ";
+    if (text.compare(pos, sessTag.size(), sessTag) == 0) {
+        const size_t se = text.find('\n', pos);
+        if (se == std::string::npos) return false;
+        if (session) *session = text.substr(pos + sessTag.size(), se - pos - sessTag.size());
+        pos = se + 1;
+    }
     const size_t eol = text.find('\n', pos);
     if (eol == std::string::npos) return false;
     const std::string line = text.substr(pos, eol - pos);

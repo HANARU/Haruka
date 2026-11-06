@@ -49,6 +49,7 @@ public:
 
     ~SNumberField() override {
         if (sFocused_ == this) sFocused_ = nullptr;   // rebuild로 파괴될 때 dangling 방지
+        if (sPressed_ == this) sPressed_ = nullptr;
     }
 
     std::shared_ptr<SNumberField> get(GetterFn fn)        { getter_     = std::move(fn); return self(); }
@@ -63,6 +64,9 @@ public:
 
     // ── 인라인 편집 (EditorApp이 키 입력을 라우팅) ────────────────────────────
     static SNumberField* focusedField() { return sFocused_; }
+    // 어떤 숫자 칸이든 눌러 끄는 중인지(누른 뒤 떼기 전). 에디터가 끄는 동안 저장 · 복제 단축키를 막는 데 씁니다
+    // (DEF-132 · 133). 끄기 중간 값이 파일에 들어가거나 끄기 결과가 다른 액터의 커맨드로 쌓이지 않게 합니다.
+    static bool anyPressed() { return sPressed_ != nullptr; }
 
     const std::string& editBuffer() const { return editBuf_; }
 
@@ -166,6 +170,7 @@ public:
             // 들어가면서 버퍼를 지금 값으로 되돌려, 치던 글자가 사라졌습니다.
             if (editing_) return HReply::Handled();
             isDragging_   = true;
+            sPressed_     = this;
             dragMoved_    = false;
             dragStartX_   = e.position.x;
             lastX_        = e.position.x;
@@ -180,6 +185,7 @@ public:
         // 사라지고, 시작값과 같아 보여 undo 기록도 남지 않았습니다(DEF-77).
         if (!isDragging_) return HReply::Unhandled();
         isDragging_ = false;
+        if (sPressed_ == this) sPressed_ = nullptr;
         if (!dragMoved_) {
             // 이동 없는 클릭 → 인라인 입력 모드 진입. 버퍼는 지금 값으로 채웁니다. 표시보다 자릿수를
             // 넉넉히 둬, 표시에서 줄여 보이던 값도 입력 모드에서는 그대로 보입니다(DEF-46).
@@ -201,6 +207,7 @@ public:
         // 마무리하고, 어디서 뗐는지 모르므로 입력 모드에는 들어가지 않습니다.
         if (isDragging_ && !e.down) {
             isDragging_ = false;
+            if (sPressed_ == this) sPressed_ = nullptr;
             if (dragMoved_) finishDrag();
             return HReply::Handled().releaseMouse();
         }
@@ -289,6 +296,7 @@ private:
 
     // 단일 에디터 창 전제의 전역 포커스 (메인 스레드 전용)
     inline static SNumberField* sFocused_ = nullptr;
+    inline static SNumberField* sPressed_ = nullptr;   // 누른 채인 칸(anyPressed)
 
     std::shared_ptr<SNumberField> self() {
         return std::static_pointer_cast<SNumberField>(shared_from_this());

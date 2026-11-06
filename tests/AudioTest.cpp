@@ -526,7 +526,17 @@ int main() {
         hs.setOutputOverride("");
         hs.setOutputDevice("");
         check(hs.outputOverride().empty() && hs.outputDevice().empty(), "비우면 시스템 기본");
+        check(!hs.overrideActive(), "장치 없는 엔진은 헤드셋 장치가 열린 것으로 보지 않음(DEF-147 표시)");
+        hs.tick(5.f);   // 장치가 없으니 다시 열기 점검도 아무것도 하지 않아야 함
         hs.shutdown();
+
+        // 열어 볼 순서(DEF-146 · 147): 헤드셋 → 고른 장치 → 시스템 기본. 헤드셋이 없다고 고른 장치를 건너뛰지 않습니다.
+        using V = std::vector<std::string>;
+        check(AudioSystem::outputCandidates("{h}", "{a}") == V{ "{h}", "{a}", "" }, "헤드셋 다음은 고른 장치, 그다음 시스템 기본");
+        check(AudioSystem::outputCandidates("", "{a}") == V{ "{a}", "" }, "고른 장치가 열리지 않으면 시스템 기본");
+        check(AudioSystem::outputCandidates("", "") == V{ "" }, "고른 장치가 없으면 시스템 기본만");
+        check(AudioSystem::outputCandidates("{H}", "{h}") == V{ "{H}", "" }, "같은 장치(대소문자 무시)는 한 번만");
+        check(AudioSystem::outputCandidates("{h}", "") == V{ "{h}", "" }, "고른 장치가 시스템 기본이면 헤드셋 다음 시스템 기본");
 
         const wchar_t endpoint[] = L"{0.0.0.00000000}.{BAFA3D4B-1578-4319-AE32-C07C0494152E}";
         check(hutf::fromUtf16(endpoint) == "{0.0.0.00000000}.{BAFA3D4B-1578-4319-AE32-C07C0494152E}", "WASAPI 끝점 ID 를 UTF-8 로");

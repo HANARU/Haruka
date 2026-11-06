@@ -39,30 +39,65 @@ inline int ordinalOf(const Actor& a, const Component* comp) {
     return -1;
 }
 
-// 디테일 패널 속성 값(buildProps 순서, 종류별). 세터를 거쳐 되돌리므로 값과 함께 하는 처리(범위 제한 등)가
-// 편집할 때와 같습니다. 무거운 뒷일은 onPropsCommitted 가 합니다(DEF-43).
+// 디테일 패널 속성 값. 칸 이름(PropDesc::label, 한 컴포넌트 안에서 겹치지 않음)과 종류로 기억합니다(UE 의 속성 경로 ·
+// Unity 의 SerializedProperty 경로와 같은 생각). 예전에는 "종류별 순번"으로 기억해서, 토글 · 열거에 따라 칸이 나타나거나
+// 사라지는 컴포넌트(라이트의 Use Temperature · Type, 소리의 Spatialize)에서 Undo · Redo 가 값을 다른 칸에 넣었습니다
+// (DEF-131). 세터를 거쳐 되돌리므로 값과 함께 하는 처리(범위 제한 등)가 편집할 때와 같습니다. 무거운 뒷일은
+// onPropsCommitted 가 합니다(DEF-43).
+struct PropValue {
+    std::string    label;
+    PropDesc::Kind kind = PropDesc::Float;
+    float          f    = 0.f;
+    int            i    = 0;
+    bool           b    = false;
+    bool operator==(const PropValue& o) const {
+        return label == o.label && kind == o.kind && f == o.f && i == o.i && b == o.b;
+    }
+};
 struct PropValues {
-    std::vector<float> f;
-    std::vector<int>   i;
-    std::vector<char>  b;
-    bool operator==(const PropValues& o) const { return f == o.f && i == o.i && b == o.b; }
+    std::vector<PropValue> v;
+    bool operator==(const PropValues& o) const { return v == o.v; }
     bool operator!=(const PropValues& o) const { return !(*this == o); }
+    size_t count(PropDesc::Kind k) const {
+        size_t n = 0;
+        for (const PropValue& e : v) n += (e.kind == k);
+        return n;
+    }
 };
 inline PropValues captureProps(Component& c) {
-    PropValues v;
+    PropValues out;
     for (const PropDesc& pd : c.buildProps()) {
-        if (pd.kind == PropDesc::Float && pd.getF)  v.f.push_back(pd.getF());
-        if (pd.kind == PropDesc::Toggle && pd.getB) v.b.push_back(pd.getB() ? 1 : 0);
-        if (pd.kind == PropDesc::Enum && pd.getI)   v.i.push_back(pd.getI());
+        PropValue e;
+        e.label = pd.label ? pd.label : "";
+        e.kind  = pd.kind;
+        if (pd.kind == PropDesc::Float && pd.getF)       e.f = pd.getF();
+        else if (pd.kind == PropDesc::Toggle && pd.getB) e.b = pd.getB();
+        else if (pd.kind == PropDesc::Enum && pd.getI)   e.i = pd.getI();
+        else continue;
+        out.v.push_back(std::move(e));
     }
-    return v;
+    return out;
 }
+// 칸 이름 · 종류가 같은 칸에만 넣습니다. 토글 · 열거를 넣으면 칸 목록이 바뀔 수 있으므로(새 칸이 나타남), 그런 값을 넣은
+// 차례가 끝나면 목록을 다시 받아 아직 넣지 않은 값을 이어서 넣습니다. 지금 보이지 않는 칸의 값은 넣지 않습니다(그 칸은
+// 기억할 때도 보이지 않던 칸이거나, 되돌린 상태에서 숨는 칸입니다).
 inline void applyProps(Component& c, const PropValues& v) {
-    size_t fi = 0, ii = 0, bi = 0;
-    for (const PropDesc& pd : c.buildProps()) {
-        if (pd.kind == PropDesc::Float && pd.setF && fi < v.f.size())  pd.setF(v.f[fi++]);
-        if (pd.kind == PropDesc::Toggle && pd.setB && bi < v.b.size()) pd.setB(v.b[bi++] != 0);
-        if (pd.kind == PropDesc::Enum && pd.setI && ii < v.i.size())   pd.setI(v.i[ii++]);
+    std::vector<char> done(v.v.size(), 0);
+    for (int pass = 0; pass < 4; ++pass) {
+        bool layoutMayChange = false;
+        for (const PropDesc& pd : c.buildProps()) {
+            const char* lbl = pd.label ? pd.label : "";
+            for (size_t k = 0; k < v.v.size(); ++k) {
+                const PropValue& e = v.v[k];
+                if (done[k] || e.kind != pd.kind || e.label != lbl) continue;
+                if (pd.kind == PropDesc::Float && pd.setF)       pd.setF(e.f);
+                else if (pd.kind == PropDesc::Toggle && pd.setB) { pd.setB(e.b); layoutMayChange = true; }
+                else if (pd.kind == PropDesc::Enum && pd.setI)   { pd.setI(e.i); layoutMayChange = true; }
+                done[k] = 1;
+                break;
+            }
+        }
+        if (!layoutMayChange) break;
     }
     c.onPropsCommitted();
 }

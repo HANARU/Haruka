@@ -570,6 +570,40 @@ int main() {
         g2->setEnabled(false);
         check(ia->held() == nullptr && rb2->motionType == EMotionType::Dynamic, "잡힌 것을 끄면 손이 놓고 Dynamic 으로 돌아옴");
 
+        // 던지지 않고 놓으면 잡은 동안 Kinematic 바디가 가졌던 손 속도가 남지 않습니다(DEF-143).
+        Actor* box3 = w.spawnActor("Box3");
+        box3->setLocalPosition({ 0.f, 6.f, 0.f });
+        auto* rb3 = box3->addComponent<RigidBodyComponent>();
+        rb3->motionType = EMotionType::Dynamic;
+        auto* g3 = box3->addComponent<GrabbableComponent>();
+        g3->throwable = false;
+        Actor* box4 = w.spawnActor("Box4");
+        box4->setLocalPosition({ 3.f, 6.f, 0.f });
+        auto* rb4 = box4->addComponent<RigidBodyComponent>();
+        rb4->motionType = EMotionType::Dynamic;
+        auto* g4 = box4->addComponent<GrabbableComponent>();
+        run(ps, 1);
+        auto swing = [&](GrabbableComponent* gg, Actor* a) {   // 잡고 한 틱 동안 손을 1m 옮김
+            ia->grab(gg, a->worldPosition(), hr);
+            ia->follow(a->worldPosition() + glm::vec3(1.f, 0.f, 0.f), hr);
+            run(ps, 1);
+        };
+        swing(g3, box3);
+        check(glm::length(rb3->linearVelocity()) > 1.f, "(준비) 잡은 동안 Kinematic 바디가 손을 따라가는 속도를 가짐");
+        ia->release({ 3.f, 0.f, 0.f }, { 0.f, 0.f, 4.f }, true);
+        check(rb3->motionType == EMotionType::Dynamic && glm::length(rb3->linearVelocity()) < 1e-5f &&
+                  glm::length(rb3->angularVelocity()) < 1e-5f,
+              "throwable=false 면 놓아도 손 속도 · 남은 Kinematic 속도 없이 멈춤");
+        const glm::vec3 p3 = box3->worldPosition();
+        run(ps, 30);
+        check(glm::length(box3->worldPosition() - p3) < 1e-3f, "throwable=false 로 놓은 물체는 그 자리에 머묾(중력 끔)");
+
+        swing(g4, box4);
+        ia->grab(g3, box3->worldPosition(), hr);   // 다른 물체로 바꿔 잡음: box4 는 던지지 않고 놓임
+        check(rb4->motionType == EMotionType::Dynamic && glm::length(rb4->linearVelocity()) < 1e-5f,
+              "바꿔 잡으면 먼저 잡던 물체는 속도 없이 놓임");
+        ia->release(glm::vec3(0.f), glm::vec3(0.f), false);
+
         // 월드를 통째로 지우면 onDisable 없이 해제됩니다. 다른 월드의 손도 해제된 컴포넌트를 가리키지 않아야 합니다.
         {
             World w2;
@@ -621,6 +655,48 @@ int main() {
         check(std::fabs(cam->xrOrigin()[3].y - 1.7f) < 1e-6f, "바닥 공간이 없으면 원점을 눈높이만큼 올림");
         cam->setXrRig(nullptr, 0.f);
         check(std::fabs(cam->xrOrigin()[3].y - head->worldPosition().y) < 1e-6f, "리그가 아니면 카메라 위치");
+
+        // 원점 고르기(DEF-144): 머리 추적 카메라는 부모가 원점. 부모가 리그가 아니어도 카메라 위치를 쓰지 않습니다.
+        check(hxr::chooseOrigin(head).kind == hxr::EXrOrigin::SceneRig && hxr::chooseOrigin(head).actor == rig, "리그의 머리는 리그가 원점");
+        {
+            Actor* car  = w.spawnActor("Car");
+            car->setLocalPosition({ 5.f, 0.5f, -2.f });
+            car->setLocalRotation(glm::angleAxis(glm::radians(30.f), glm::vec3(0.f, 1.f, 0.f)));
+            Actor* seat = w.spawnActor("SeatCam");
+            seat->attachTo(car);
+            auto* sc = seat->addComponent<CameraComponent>();
+            auto* tp = seat->addComponent<TrackedPoseComponent>();
+            tp->source = ETrackedSource::Head;
+            const hxr::XrOriginChoice oc = hxr::chooseOrigin(seat);
+            check(oc.kind == hxr::EXrOrigin::TrackedParent && oc.actor == car, "리그가 아닌 부모 아래 머리 추적 카메라는 그 부모가 원점");
+            // 머리가 30° 돌고 옆으로 움직인 자세: 카메라 월드 자세 = 부모 × 머리. 원점이 부모여야 눈 = 원점 × 머리 가 같은 자리.
+            s = HXrInputState{};
+            s.focused = true;
+            s.head.valid = true;
+            s.head.position    = { 0.3f, 1.6f, 0.f };
+            s.head.orientation = glm::angleAxis(glm::radians(30.f), glm::vec3(0.f, 1.f, 0.f));
+            in.setXrInput(s);
+            tp->tick(0.f);
+            sc->setXrTrackedParent(oc.actor, 0.f);
+            const glm::mat4 eye = sc->xrOrigin() * glm::translate(glm::mat4(1.f), s.head.position) * glm::mat4_cast(s.head.orientation);
+            const glm::vec3 eyeFwd = glm::vec3(eye * glm::vec4(0.f, 0.f, -1.f, 0.f));
+            const glm::vec3 camFwd = seat->worldRotation() * glm::vec3(0.f, 0.f, -1.f);
+            check(glm::length(glm::vec3(eye[3]) - seat->worldPosition()) < 1e-5f && glm::length(eyeFwd - camFwd) < 1e-5f,
+                  "눈 자세가 카메라 액터와 같은 자리 · 방향(머리 이동 · 요가 한 번만)");
+            seat->detach();
+            check(hxr::chooseOrigin(seat).kind == hxr::EXrOrigin::TrackedParent && hxr::chooseOrigin(seat).actor == nullptr,
+                  "부모가 없으면 월드 원점");
+            sc->setXrTrackedParent(nullptr, 1.5f);
+            check(glm::length(glm::vec3(sc->xrOrigin()[3]) - glm::vec3(0.f, 1.5f, 0.f)) < 1e-6f, "월드 원점(+ 올림)");
+            tp->setEnabled(false);
+            check(hxr::chooseOrigin(seat).kind == hxr::EXrOrigin::CameraOnly, "머리 추적을 끄면 예전처럼 카메라 기준");
+            Actor* plain = w.spawnActor("PlainCam");
+            plain->addComponent<CameraComponent>();
+            check(hxr::chooseOrigin(plain).kind == hxr::EXrOrigin::CameraOnly && hxr::chooseOrigin(nullptr).kind == hxr::EXrOrigin::CameraOnly,
+                  "머리 추적이 없으면 카메라 기준(보이지 않는 리그)");
+            w.destroyActor(car); w.destroyActor(seat); w.destroyActor(plain);
+            in.setXrInput(HXrInputState{});
+        }
         rig->setLocalPosition({ 0.f, 0.f, 0.f });
         head->setLocalPosition({ 0.f, 1.7f, 0.f });
         head->setLocalRotation(glm::quat(1.f, 0.f, 0.f, 0.f));

@@ -381,7 +381,8 @@ void Engine::endXr(const char* reason) {
     HInputSystem::get().setXrInput({});
     if (physics_) physics_->setStepRate(60.f);
     if (audio_ && !audio_->outputOverride().empty()) audio_->setOutputOverride("");   // 고른 출력 장치로 돌아감
-    implicitRigCam_ = 0;   // 다음 Play 에서 바닥을 다시 찾습니다
+    implicitRigCam_   = 0;   // 다음 Play 에서 바닥을 다시 찾습니다
+    trackedOriginCam_ = 0;   // 다음 Play 에서 원점 안내를 다시 남깁니다
     HLOG(LogEngine, Log) << "XR session ended (" << reason << ")";
 }
 
@@ -419,13 +420,10 @@ void Engine::setupInputBindings() {
     });
 }
 
-// 화면 카메라가 플레이어 리그의 머리면 그 리그를 돌려줍니다(카메라 액터에 TrackedPose[Head], 부모에 XrRig).
-static const Actor* rigOfCamera(const CameraComponent* cam) {
-    if (!cam || !cam->owner) return nullptr;
-    const auto* tp = cam->owner->getComponent<TrackedPoseComponent>();
-    const Actor* parent = cam->owner->getParent();
-    if (!tp || tp->source != ETrackedSource::Head || !parent || !parent->getComponent<XrRigComponent>()) return nullptr;
-    return parent;
+// 화면 카메라의 XR 원점(hxr::chooseOrigin). 카메라가 플레이어 리그의 머리면(카메라 액터에 TrackedPose[Head], 부모에 XrRig)
+// 그 리그, 머리 추적은 있지만 부모가 리그가 아니면 그 부모(DEF-144), 아니면 카메라 기준입니다.
+static hxr::XrOriginChoice originOfCamera(const CameraComponent* cam) {
+    return hxr::chooseOrigin(cam ? cam->owner : nullptr);
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
@@ -507,8 +505,9 @@ int Engine::run() {
         // XR 에는 언제나 리그가 있습니다(2026-10-15 플레이어 리그, 2026-10-16 보이지 않는 리그). 화면 카메라가 씬 리그의
         // 머리면 그 리그의 높이 모드를, 아니면 프로젝트 설정의 값을 씁니다. 프레임을 시작하기 전에 정해 한 프레임 안에서는
         // 바뀌지 않게 합니다.
-        CameraComponent* const viewCam = world_.getActiveCamera();
-        const Actor* const     viewRig = rigOfCamera(viewCam);
+        CameraComponent* const    viewCam    = world_.getActiveCamera();
+        const hxr::XrOriginChoice viewOrigin = originOfCamera(viewCam);
+        const Actor* const        viewRig    = viewOrigin.kind == hxr::EXrOrigin::SceneRig ? viewOrigin.actor : nullptr;
         if (xr_ && xr_->hasSession()) {
             const auto* rc = viewRig ? viewRig->getComponent<XrRigComponent>() : nullptr;
             xr_->setRigSpace(rc ? rc->trackedHeight : project_.xrTrackedHeight, rc ? rc->eyeHeight : project_.xrEyeHeight);
@@ -586,7 +585,18 @@ int Engine::run() {
         }
         if (viewCam) {
             const bool xrLive = xr_ && xr_->hasSession();
-            if (viewRig || !xrLive || !viewCam->owner) {
+            if (xrLive && viewCam->owner && viewOrigin.kind == hxr::EXrOrigin::TrackedParent) {
+                // 머리 추적 카메라인데 부모가 리그가 아님: 그 부모(없으면 월드 원점)를 리그처럼 원점으로 씁니다. 예전에는 보이지
+                // 않는 리그를 카메라에 붙여, 머리 추적이 이미 옮긴 카메라 위치 · 요를 원점으로 다시 써서 두 번 적용됐습니다(DEF-144).
+                viewCam->setXrTrackedParent(viewOrigin.actor, xr_->rigLift());
+                implicitRigCam_ = 0;
+                if (trackedOriginCam_ != viewCam->owner->id) {
+                    trackedOriginCam_ = viewCam->owner->id;
+                    HLOG(LogEngine, Log) << "XR rig: camera '" << viewCam->owner->name << "' tracks the head without an XR Rig parent; "
+                                         << (viewOrigin.actor ? "its parent '" + viewOrigin.actor->name + "'" : std::string("the world origin"))
+                                         << " is the tracking origin";
+                }
+            } else if (viewRig || !xrLive || !viewCam->owner) {
                 // 씬 리그(원점 = 리그 액터), 또는 XR 이 아님(데스크톱 · 스테레오 흉내는 예전처럼 카메라 위치 + 요).
                 viewCam->setXrRig(viewRig, xrLive ? xr_->rigLift() : 0.f);
                 if (!xrLive) implicitRigCam_ = 0;

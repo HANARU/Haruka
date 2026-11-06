@@ -7,6 +7,7 @@
 // 실행: build/Release/HarukaEditCmdTest.exe
 #include "../src/editor/EditorCommands.hpp"
 #include "../src/editor/EditTools.hpp"
+#include "../src/assets/PrefabRules.hpp"
 #include "../src/core/World.hpp"
 #include "../src/core/ComponentRegistry.hpp"
 
@@ -54,6 +55,36 @@ public:
 class OtherComp : public Component {
 public:
     const char* typeName() const override { return "OtherComp"; }
+};
+
+// 토글 · 열거에 따라 칸이 나타나고 사라지는 시험용 컴포넌트(라이트의 Use Temperature · Type 과 같은 모양, DEF-131).
+// 순서: Kind, Base, [Use Warm 이 켜졌을 때 Warm], [Kind == 1 일 때 Reach], [Kind == 2 일 때 Cone, Lit 토글]
+class CondComp : public Component {
+public:
+    int   kind = 0;
+    float base = 1.f;
+    bool  useWarm = false;
+    float warm = 6500.f;
+    float reach = 10.f;
+    float cone = 30.f;
+    bool  lit = true;
+    const char* typeName() const override { return "CondComp"; }
+    std::vector<PropDesc> buildProps() override {
+        auto* p = this;
+        std::vector<PropDesc> out;
+        out.push_back(makePropEnum("Kind", { "A", "B", "C" }, [p] { return p->kind; }, [p](int v) { p->kind = v; }));
+        out.push_back(makePropFloat("Base", PropColor::Neutral, 0.1f, [p] { return p->base; }, [p](float v) { p->base = v; }));
+        out.push_back(makePropToggle("Use Warm", [p] { return p->useWarm; }, [p](bool v) { p->useWarm = v; }));
+        if (useWarm)
+            out.push_back(makePropFloat("Warm", PropColor::Neutral, 50.f, [p] { return p->warm; }, [p](float v) { p->warm = v; }));
+        if (kind == 1)
+            out.push_back(makePropFloat("Reach", PropColor::Neutral, 0.1f, [p] { return p->reach; }, [p](float v) { p->reach = v; }));
+        if (kind == 2) {
+            out.push_back(makePropFloat("Cone", PropColor::Neutral, 0.5f, [p] { return p->cone; }, [p](float v) { p->cone = v; }));
+            out.push_back(makePropToggle("Lit", [p] { return p->lit; }, [p](bool v) { p->lit = v; }));
+        }
+        return out;
+    }
 };
 
 } // namespace
@@ -156,7 +187,8 @@ int main() {
         hcmd::PropValues before = hcmd::captureProps(*t);
         t->speed = 4.f; t->loud = true; t->mode = 2;
         hcmd::PropValues after = hcmd::captureProps(*t);
-        check(before != after && before.f.size() == 1 && before.b.size() == 1 && before.i.size() == 1, "종류별로 값을 뜸");
+        check(before != after && before.count(PropDesc::Float) == 1 && before.count(PropDesc::Toggle) == 1 &&
+                  before.count(PropDesc::Enum) == 1, "종류별로 값을 뜸");
         st.push(std::make_unique<ComponentPropsCmd>(w, a, t, before, after));
         st.undo();
         check(t->speed == 1.f && !t->loud && t->mode == 0 && t->committed == 1, "숫자 · 토글 · 열거를 되돌리고 확정 훅을 부름");
@@ -172,6 +204,50 @@ int main() {
         st.push(std::make_unique<ComponentPropsCmd>(w, a, t2, b2, hcmd::captureProps(*t2)));
         st.undo();
         check(t2->speed == 1.f && t->speed == 4.f, "두 번째 컴포넌트의 편집은 두 번째에만 되돌림");
+    }
+
+    std::printf("\n== 3-1. 칸이 나타나고 사라지는 속성의 Undo · Redo (DEF-131) ==\n");
+    {
+        World w;
+        HCommandStack st;
+        Actor* a = w.spawnActor("a");
+        auto* c = a->addComponent<CondComp>();
+        c->kind = 1;   // Reach 칸이 보임
+        c->reach = 12.f;
+
+        // Use Warm 을 켜면 Warm 칸이 Reach 앞에 낍니다. 예전에는 Undo 가 Reach 값을 Warm 자리(숫자 순번 1)에 넣었습니다.
+        hcmd::PropValues b0 = hcmd::captureProps(*c);
+        c->useWarm = true;
+        st.push(std::make_unique<ComponentPropsCmd>(w, a, c, b0, hcmd::captureProps(*c)));
+        st.undo();
+        check(!c->useWarm && c->reach == 12.f && c->warm == 6500.f, "토글을 되돌려도 숨은 칸 · 뒤 칸 값이 그대로");
+        st.redo();
+        check(c->useWarm && c->reach == 12.f && c->warm == 6500.f, "토글 다시 하기도 값이 제자리");
+
+        // 토글이 켜진 동안 Warm 을 바꾼 편집, 이어서 토글을 끈 편집. 두 번 되돌리면 Warm 이 원래 값으로.
+        hcmd::PropValues b1 = hcmd::captureProps(*c);
+        c->warm = 3000.f;
+        st.push(std::make_unique<ComponentPropsCmd>(w, a, c, b1, hcmd::captureProps(*c)));
+        hcmd::PropValues b2 = hcmd::captureProps(*c);
+        c->useWarm = false;
+        st.push(std::make_unique<ComponentPropsCmd>(w, a, c, b2, hcmd::captureProps(*c)));
+        st.undo();
+        check(c->useWarm && c->warm == 3000.f && c->reach == 12.f, "토글 끄기를 되돌리면 켜진 칸 값이 그대로");
+        st.undo();
+        check(c->useWarm && c->warm == 6500.f && c->reach == 12.f, "숨었다 나타난 칸의 편집도 제 칸에서 되돌림");
+
+        // 열거를 바꾸면 칸 묶음이 통째로 바뀝니다. 되돌리면 이전 열거의 칸(Reach)에, 다시 하면 새 칸(Cone · Lit)에.
+        hcmd::PropValues b3 = hcmd::captureProps(*c);
+        c->kind = 2;
+        c->cone = 45.f;
+        c->lit  = false;
+        st.push(std::make_unique<ComponentPropsCmd>(w, a, c, b3, hcmd::captureProps(*c)));
+        c->reach = 99.f;   // 숨은 칸을 바깥에서 바꿔도(이 시험만의 조작) 되돌리면 기억한 값으로
+        c->cone  = 1.f; c->lit = true;
+        st.undo();
+        check(c->kind == 1 && c->reach == 12.f && c->base == 1.f, "열거를 되돌리면 이전 칸 값으로");
+        st.redo();
+        check(c->kind == 2 && c->cone == 45.f && !c->lit, "열거 다시 하기는 새로 나타난 칸 · 토글에도 값을 넣음");
     }
 
     std::printf("\n== 4. 컴포넌트 추가 · 제거(값 · 켜짐 · 순서 보존) ==\n");
@@ -266,6 +342,18 @@ int main() {
         check(!hclip::unwrap(std::string(hclip::kHeader) + "\n#ROOT_PARENTS x\nACTOR:a\n", out, parents), "깨진 부모 목록은 거부");
         check(!hclip::unwrap(std::string(hclip::kHeader) + "\n#ROOT_PARENTS 0\n", out, parents), "액터가 없으면 거부");
 
+        // 세션 표지(DEF-136): 부모 ID 는 복사한 실행 안에서만 뜻이 있습니다.
+        std::string sess = "x";
+        check(hclip::unwrap(clip, out, parents, &sess) && sess == hclip::sessionToken() && sess.size() == 16,
+              "기본 클립에는 이 실행의 세션 표지가 들어감");
+        check(hclip::unwrap(hclip::wrap(set, { 7 }, "0123456789abcdef"), out, parents, &sess) &&
+                  sess == "0123456789abcdef" && sess != hclip::sessionToken() && parents == std::vector<uint64_t>{ 7 },
+              "다른 실행의 표지를 그대로 돌려줌(붙여넣기는 루트에 둠)");
+        check(hclip::unwrap(std::string(hclip::kHeader) + "\n#ROOT_PARENTS 5\n" + set, out, parents, &sess) && sess.empty() &&
+                  parents == std::vector<uint64_t>{ 5 },
+              "표지 줄이 없는 예전 클립도 읽되 표지는 비어 있음(다른 실행으로 봄)");
+        check(!hclip::unwrap(std::string(hclip::kHeader) + "\n#SESSION abc", out, parents, &sess), "표지 줄에서 끝나면 거부");
+
         std::set<std::string> names{ "Cube", "Cube (1)", "Lamp (3)" };
         check(hclip::nextCopyName("Cube", names) == "Cube (2)", "이미 있는 번호는 건너뜀");
         check(hclip::nextCopyName("Cube (1)", names) == "Cube (2)", "번호가 붙은 이름은 번호를 바꿈");
@@ -275,6 +363,55 @@ int main() {
         const float d = hframe::fitDistance(1.f, glm::radians(90.f), 1.f);
         check(std::abs(d - 1.f / std::sin(glm::radians(45.f))) < 1e-4f, "반지름 1, 시야 90° → 1/sin45°");
         check(hframe::fitDistance(1.f, glm::radians(90.f), 0.5f) > d, "세로로 긴 화면은 좁은 가로 시야에 맞춰 더 멀리");
+    }
+
+    std::printf("\n== 8. 프리팹 이름 · 머리 줄 · 실패한 블록 정리 (DEF-140 · 141 · 142) ==\n");
+    {
+        check(hprefab::isValidName("Cube") && hprefab::isValidName("Cube (1)") && hprefab::isValidName("Lamp_2-b.v2"),
+              "보통 이름 · 복사본 이름 · 점이 낀 이름은 됨");
+        std::string why;
+        check(!hprefab::isValidName("a/b", &why) && !why.empty(), "폴더 구분자 '/' 거부(이유를 돌려줌)");
+        check(!hprefab::isValidName("a\\b") && !hprefab::isValidName("..") && !hprefab::isValidName("."), "'\\' · '..' · '.' 거부");
+        check(!hprefab::isValidName("") && !hprefab::isValidName("a:b") && !hprefab::isValidName("a?") && !hprefab::isValidName("a|b"),
+              "빈 이름 · Windows 금지 글자 거부");
+        check(!hprefab::isValidName("name.") && !hprefab::isValidName("name ") && !hprefab::isValidName(" name"),
+              "끝의 점 · 앞뒤 공백 거부");
+        check(!hprefab::isValidName("CON") && !hprefab::isValidName("nul.x") && !hprefab::isValidName("Com1") &&
+                  hprefab::isValidName("CONSOLE"),
+              "장치 이름은 거부, 장치 이름으로 시작하는 긴 이름은 됨");
+        check(!hprefab::isValidName("\xED\x95\x9C") && !hprefab::isValidName(std::string(101, 'a')), "ASCII 밖 글자 · 100자 초과 거부");
+
+        std::string t1 = "# Haruka Prefab v3\nACTOR:A\n";
+        check(hprefab::stripBomAndDetectV3(t1) && t1 == "# Haruka Prefab v3\nACTOR:A\n", "머리 줄로 시작하면 v3");
+        std::string t2 = "\xEF\xBB\xBF# Haruka Prefab v3\r\nACTOR:A\r\n";
+        check(hprefab::stripBomAndDetectV3(t2) && t2.rfind("# Haruka", 0) == 0, "BOM 을 떼고 v3 로 판별");
+        std::string t3 = "\n  \r\n# hand-written note\n# Haruka Prefab v3\nACTOR:A\n";
+        check(hprefab::stripBomAndDetectV3(t3), "머리 줄 앞의 빈 줄 · 주석은 건너뜀");
+        std::string t4 = "\xEF\xBB\xBFNAME:Old\nPOS:0 0 0\n";
+        check(!hprefab::stripBomAndDetectV3(t4) && t4.rfind("NAME:", 0) == 0, "v1 · v2 는 v3 가 아님(BOM 은 떼어 옛 경로도 읽게)");
+        std::string t5 = "NAME:x\n# Haruka Prefab v3\n";
+        check(!hprefab::stripBomAndDetectV3(t5), "액터 줄 뒤의 머리 줄은 v3 로 보지 않음");
+
+        // 실패한 블록: 루트 R(0) → 자식 C(1), 실패한 중간 블록(2, null) → 그 자식 G(3) · G 의 자식 H(4)
+        World w;
+        Actor* keep = w.spawnActor("Existing");
+        Actor* R = w.spawnActor("R");
+        Actor* C = w.spawnActor("C");
+        C->attachTo(R);
+        Actor* G = w.spawnActor("G");
+        Actor* H = w.spawnActor("H");
+        H->attachTo(G);
+        const uint64_t idG = G->id, idH = H->id, idR = R->id, idC = C->id;
+        check(hprefab::discardOrphans(w, { R, C, nullptr, G, H }) == 1, "루트 밖에 남은 고아 서브트리 하나를 지움");
+        check(w.findById(idR) && w.findById(idC) && !w.findById(idG) && !w.findById(idH) && w.findById(keep->id),
+              "루트 서브트리 · 원래 있던 액터는 남고 고아와 그 자식은 지워짐");
+        Actor* A = w.spawnActor("A");
+        Actor* B = w.spawnActor("B");
+        B->attachTo(A);
+        const uint64_t idA = A->id, idB = B->id;
+        check(hprefab::discardOrphans(w, { nullptr, A, B }) == 1 && !w.findById(idA) && !w.findById(idB) && w.findById(keep->id),
+              "루트가 실패하면 꺼낸 액터를 모두 지움");
+        check(hprefab::discardOrphans(w, { w.findById(idR), w.findById(idC) }) == 0 && w.findById(idR), "실패가 없으면 아무것도 지우지 않음");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

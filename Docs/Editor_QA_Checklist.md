@@ -487,3 +487,20 @@ Meta Quest Pro, USB Link, 기본 재생 장치 = 헤드셋(사용자가 바꿈).
 | 다시 열기 | 통과 | `Config/editor_state.txt` 의 `audioOutput` 을 읽어 시작하자마자 그 장치로 바꿈 |
 | 종료 | 통과 | 검증 메시지 0, `Clean exit`. 시험용 설정은 지우고 원래 상태로 |
 | XR 자동 전환 | 남음 | 그때 Link 가 잠들어 세션을 만들지 못함. 위 VR 표의 "XR 소리 자동 전환" 줄 |
+
+### 일괄 점검 대기 (2026-11-06 검토 결함 묶음 DEF-130 ~ 147)
+
+코드 · 시험으로 고쳤고, 창을 띄워야만 볼 수 있는 동작입니다(사용자가 정한 때 한꺼번에). 상세는 Core_Defects_Task_Spec.md 끝
+"검토 결함 묶음 수정" 절입니다. 검증 레이어를 켠 Debug 에디터로 봅니다.
+
+| 결함 | 해 볼 것 | 기대 | 상태 |
+|---|---|---|---|
+| DEF-130 | 액터를 고른 채 File > Open Scene 에서 다른 씬을 마우스로 고름, File > New Scene 의 Don't Save 를 마우스로 누름 | 그 프레임부터 디테일이 "(No Selection)", 검증 메시지 · 충돌 없음 | 대기 |
+| DEF-132 | 기즈모를 끄는 동안 Ctrl+D · Ctrl+V | 복제 · 붙여넣기가 일어나지 않고 "Finish the drag first" 로그(Ctrl+V 는 로그 없이 무시), 끈 결과는 원본의 Undo 로 남음 | 대기 |
+| DEF-133 | 기즈모 · 숫자 칸을 끄는 동안 Ctrl+S | 저장하지 않고 로그만, 끈 뒤 Ctrl+S 로 저장 표지 정상 | 대기 |
+| DEF-134 | 둘 이상 고른 채 F2 | 이름 칸은 주 선택 행에만 | 대기 |
+| DEF-135 | 뷰포트 Ctrl+클릭 · 아웃라이너 Ctrl/Shift+클릭으로 선택 집합만 바꿈 | 아웃라이너 강조와 "N actors selected" 배지가 바로 맞음 | 대기 |
+| DEF-137 | Audio Output · Open Scene · Save As 를 띄운 채 창의 X | 대화상자가 닫히고 닫기가 이어짐(저장하지 않은 씬이면 Unsaved Changes) | 대기 |
+| DEF-138 | assets/scenes 밖의 씬을 연 상태에서 Save As | 입력 칸에 파일 이름(확장자 제외)만 | 대기 |
+| DEF-139 | 아웃라이너 행 오른쪽 끝에 겹친 스플리터를 끌어 크기 조절 | 부모 바꾸기가 일어나지 않음 | 대기 |
+| DEF-140 | 이름에 `/` 가 있는 액터에서 Save as Prefab | 저장하지 않고 이름을 바꾸라는 경고, "Cube (1)" 은 저장되고 목록에 나옴 | 대기 |

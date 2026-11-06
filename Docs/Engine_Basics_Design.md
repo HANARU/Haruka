@@ -195,7 +195,11 @@
 - XR 에는 언제나 리그가 있습니다(2026-10-16).
   - 화면 카메라가 씬 리그의 Head(Tracked Pose[Head] + 부모가 XR Rig)이면 엔진이 프레임마다 그 리그를 헤드셋 원점으로 넘깁니다
     (`CameraComponent::setXrRig`).
-  - 아니면 보이지 않는 리그를 붙입니다(`CameraComponent::setXrImplicitRig`). 이 카메라로 XR 을 처음 볼 때 카메라 아래 바닥을 한 번
+  - 화면 카메라에 켜진 Tracked Pose[Head] 가 있지만 부모가 XR Rig 가 아니면, 그 부모(없으면 월드 원점)를 리그처럼 원점으로 씁니다
+    (2026-11-06, DEF-144, `hxr::chooseOrigin` · `CameraComponent::setXrTrackedParent`). Unity 의 Tracked Pose Driver · UE 의 카메라와 같은
+    규칙입니다. 예전에는 보이지 않는 리그를 붙여, 머리 추적이 이미 옮긴 카메라 위치 · 요를 원점으로 다시 써서 두 번 적용됐습니다(30° 돌면
+    60°). 같은 카메라에는 "XR rig: camera … tracks the head without an XR Rig parent" 로그가 한 번 남습니다.
+  - 아니면(머리 추적이 없거나 꺼짐) 보이지 않는 리그를 붙입니다(`CameraComponent::setXrImplicitRig`). 이 카메라로 XR 을 처음 볼 때 카메라 아래 바닥을 한 번
     찾고(`hxr::floorBelow`: 켜진 액터의 로컬 바운드 합집합에 아래 방향 광선-OBB, 카메라를 감싼 바운드와 카메라 자신 · 자식은 건너뜀),
     그 뒤에는 카메라를 따라 같은 거리 아래에 둡니다. 아래에 아무것도 없으면 카메라 위치입니다. 로그에 "XR rig: none in the scene;
     standing on the floor … below the camera"가 남습니다.

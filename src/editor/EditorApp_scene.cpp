@@ -143,7 +143,7 @@ void EditorApp::openAudioOutputDialog() {
     ModalSpec m;
     m.title   = "Audio Output";
     m.message = "Now playing on: " + hutf::asciiLabel(audio_->activeOutputName(), "(none)") +
-                (audio_->outputOverride().empty() ? "" : " (headset during VR Play)") +
+                (audio_->overrideActive() ? " (headset during VR Play)" : "") +   // 헤드셋 장치가 실제로 열렸을 때만(DEF-147)
                 "\nChoose the editor's output device:";
     // 항목 글 -> 동작. 같은 이름의 장치가 둘이면 번호를 붙여 구별합니다.
     std::vector<std::pair<std::string, std::function<void()>>> items;
@@ -225,8 +225,13 @@ void EditorApp::saveSceneAs(std::function<void()> then) {
     if (doc_.untitled()) {
         dialogText_ = "NewScene";
     } else {
-        std::string rel = doc_.path().substr(std::string(kScenesDir).size() + 1);
-        if (rel.size() > 7) rel.resize(rel.size() - 7);   // ".hscene"
+        // assets/scenes/ 아래면 그 접두를 떼고, 다른 폴더의 씬이면 파일 이름 부분만 채웁니다. 예전에는 접두가 늘
+        // 있다고 보고 14글자를 잘라, 다른 폴더의 씬이면 엉뚱한 이름이 채워졌습니다(DEF-138).
+        const std::string& path   = doc_.path();
+        const std::string  prefix = std::string(kScenesDir) + "/";
+        std::string rel = path.rfind(prefix, 0) == 0 ? path.substr(prefix.size())
+                                                     : path.substr(path.find_last_of('/') + 1);   // 없으면 npos + 1 = 0
+        if (rel.size() > 7 && rel.compare(rel.size() - 7, 7, ".hscene") == 0) rel.resize(rel.size() - 7);
         dialogText_ = rel;
     }
     ModalSpec m;
@@ -283,7 +288,14 @@ void EditorApp::guardUnsaved(const std::string& verb, std::function<void()> acti
 
 bool EditorApp::requestClose() {
     if (quitApproved_) return true;
-    if (modalOpen()) return false;            // 이미 묻고 있으면 그 답을 기다립니다
+    if (modalOpen()) {
+        if (closeFlow_) return false;   // 이미 닫기를 묻고 있으면 그 답을 기다립니다
+        // 닫기와 관계없는 대화상자(Audio Output · Open Scene · Save As 등)는 취소로 닫고 닫기를 이어 갑니다. 예전에는
+        // 어떤 대화상자든 떠 있으면 창의 X 를 아무 알림 없이 버렸습니다(DEF-137). 이 함수는 엔진 루프 맨 앞(위젯 처리
+        // 밖)에서 불리므로 여기서 닫아도 됩니다.
+        cancelModalNow();
+        if (modalOpen()) return false;   // 취소 동작이 다른 대화상자를 열었으면 그 답을 기다립니다
+    }
     if (!sceneDirty()) return true;
     // Play 중이면 먼저 멈춥니다. 저장은 Play 월드가 아니라 편집 중이던 월드를 써야 합니다.
     if (playState_ != EPlayState::Editor) stopPlay();
@@ -291,7 +303,23 @@ bool EditorApp::requestClose() {
         quitApproved_ = true;
         if (ctx_.window) ctx_.window->setShouldClose(true);
     });
+    // 닫기 흐름(Unsaved Changes → Save As → Replace Scene)의 대화상자가 떠 있는 동안 표시해 둡니다. 흐름이 대화상자
+    // 없이 끝나면(취소 · 저장 실패 · 닫기 승인) flushModal 이 지웁니다.
+    closeFlow_ = modalOpen();
     return false;
+}
+
+void EditorApp::cancelModalNow() {
+    if (!modal_) return;
+    std::function<void()> cancel;
+    for (const ModalButton& b : modal_->buttons)
+        if (b.isCancel) { cancel = b.action; break; }
+    modalPending_ = nullptr;
+    if (currentFocus() == EFocusTarget::Dialog) setTextFocus(EFocusTarget::None);
+    modal_.reset();
+    modalDirty_ = true;
+    if (cancel) cancel();
+    HLOG(LogEditorScene, Log) << "Dialog closed by the window close request";
 }
 
 // ── 모달 대화상자 ─────────────────────────────────────────────────────────────────
@@ -332,6 +360,7 @@ void EditorApp::flushModal() {
         modal_.reset();
         modalDirty_ = true;
         act();   // 다른 대화상자를 열 수 있습니다
+        if (!modal_) closeFlow_ = false;   // 닫기 흐름이 대화상자 없이 끝남(DEF-137)
     }
     if (modalDirty_) { modalDirty_ = false; rebuildModal(); }
 }

@@ -62,8 +62,10 @@ public:
     // 연결되어 있어, 장치를 바꿔도 엔진 · 사운드는 그대로 두고 장치만 다시 엽니다(재생이 이어짐). UE 의 출력 장치 바꾸기
     // (Swap Audio Output Device), Godot 의 AudioServer.output_device 와 같은 역할입니다.
     //   setOutputDevice("")   시스템 기본 장치(운영체제에서 기본 장치를 바꾸면 따라감)
-    //   setOutputDevice(id)   그 장치. 목록에 없으면(뽑힘 등) 경고하고 시스템 기본 장치로 엽니다
-    //   setOutputOverride(id) 잠시 다른 장치로(XR Play 동안 헤드셋). 비우면 setOutputDevice 로 고른 장치로 돌아갑니다
+    //   setOutputDevice(id)   그 장치. 목록에 없거나 열리지 않으면(뽑힘 · 다른 앱의 독점 모드 등) 경고하고 시스템 기본 장치로 엽니다
+    //   setOutputOverride(id) 잠시 다른 장치로(XR Play 동안 헤드셋). 없으면 고른 장치, 그것도 없으면 시스템 기본입니다.
+    //                         비우면 setOutputDevice 로 고른 장치로 돌아갑니다
+    // 연 장치를 실행 중에 잃으면 Play 동안 tick 이 간격을 두고 같은 순서로 다시 엽니다(DEF-145).
     // headless 면 값만 기억하고 장치는 열지 않습니다.
     std::vector<AudioOutputDevice> outputDevices() const;
     void setOutputDevice(const std::string& id);
@@ -71,13 +73,22 @@ public:
     const std::string& outputDevice() const   { return requestedId_; }
     const std::string& outputOverride() const { return overrideId_; }
     std::string        activeOutputName() const;   // 지금 소리가 나가는 장치 이름(장치가 없으면 빈 문자열)
+    bool               overrideActive() const;     // 덮어쓰기 장치(헤드셋)가 실제로 열려 있는지(DEF-147)
+    // 열어 볼 장치 순서: 덮어쓰기 → 고른 장치 → 시스템 기본(빈 문자열). 같은 장치는 한 번만 넣습니다.
+    static std::vector<std::string> outputCandidates(const std::string& overrideId, const std::string& requestedId);
 
     static constexpr uint32_t kSampleRate = 48000;
     static constexpr uint32_t kChannels   = 2;
 
 private:
-    // 지금 원하는 장치(덮어쓰기가 있으면 그것)를 엽니다. 이미 그 장치가 열려 있으면 아무것도 하지 않습니다.
-    void reopenDevice();
+    // 지금 원하는 장치(덮어쓰기가 있으면 그것)를 엽니다. 이미 그 장치가 열려 돌고 있으면 아무것도 하지 않습니다.
+    // 장치가 돌기 시작하면 true. quiet 면 실패 경고를 남기지 않습니다(tick 의 재시도).
+    bool reopenDevice(bool quiet = false);
+    // 연 장치가 멈췄는지(잃음) 보고, 멈췄으면 kOutputRetrySec 간격으로 다시 엽니다.
+    void checkOutput(float dt);
+    static constexpr float kOutputRetrySec = 2.f;
+    bool  outputLost_  = false;
+    float outputRetry_ = 0.f;
     void updateListener();
     // 컴포넌트 값(볼륨·Loop·3D 설정)을 사운드에 반영합니다. 매 틱 부르므로 플레이 중에
     // 디테일 패널에서 바꾼 값도 바로 적용됩니다.
