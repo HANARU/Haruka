@@ -106,6 +106,7 @@ struct XrSystem::Impl {
     XrAction    primary = XR_NULL_HANDLE, secondary = XR_NULL_HANDLE;
     XrAction    stickClick = XR_NULL_HANDLE, menu = XR_NULL_HANDLE;
     XrAction    haptic = XR_NULL_HANDLE;   // 진동 출력(2026-10-15)
+    XrAction    triggerTouch = XR_NULL_HANDLE, thumbTouch = XR_NULL_HANDLE;   // 손가락 자세(2026-11-07)
     XrPath      handPath[2] = { XR_NULL_PATH, XR_NULL_PATH };
     XrSpace     gripSpace[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
     XrSpace     aimSpace[2]  = { XR_NULL_HANDLE, XR_NULL_HANDLE };
@@ -477,7 +478,9 @@ bool XrSystem::Impl::createActions() {
         !makeAction(primary,    XR_ACTION_TYPE_BOOLEAN_INPUT,  "primary",          "Primary button") ||
         !makeAction(secondary,  XR_ACTION_TYPE_BOOLEAN_INPUT,  "secondary",        "Secondary button") ||
         !makeAction(stickClick, XR_ACTION_TYPE_BOOLEAN_INPUT,  "thumbstick_click", "Thumbstick click") ||
-        !makeAction(menu,       XR_ACTION_TYPE_BOOLEAN_INPUT,  "menu",             "Menu"))
+        !makeAction(menu,       XR_ACTION_TYPE_BOOLEAN_INPUT,  "menu",             "Menu") ||
+        !makeAction(triggerTouch, XR_ACTION_TYPE_BOOLEAN_INPUT, "trigger_touch",   "Trigger touch") ||
+        !makeAction(thumbTouch,   XR_ACTION_TYPE_BOOLEAN_INPUT, "thumb_touch",     "Thumb touch"))
         return false;
 
     auto path = [&](const char* s) { XrPath p = XR_NULL_PATH; xrStringToPath(instance, s, &p); return p; };
@@ -490,8 +493,12 @@ bool XrSystem::Impl::createActions() {
         const XrResult r = xrSuggestInteractionProfileBindings(instance, &sb);
         if (XR_FAILED(r))
             HLOG(LogXR, Warning) << "Binding suggestion for " << profile << " rejected: " << resultName(instance, r);
+        return XR_SUCCEEDED(r);
     };
-    suggest("/interaction_profiles/oculus/touch_controller", {
+    // Touch 컨트롤러: 기본 바인딩에 손가락 자세용 정전식 터치(2026-11-07, Hand_Grasp_Design 4-2)를 더합니다. 경로 하나라도
+    // 런타임이 받지 않으면 그 프로필의 제안 전체가 거부되므로(같은 프로필로 다시 제안하면 앞의 것을 바꿈), 거부되면 터치 없이
+    // 다시 제안합니다. 그때 손가락은 트리거 · 그립 값만으로 움직입니다.
+    std::vector<XrActionSuggestedBinding> touchBase = {
         { gripPose,   path("/user/hand/left/input/grip/pose") },
         { gripPose,   path("/user/hand/right/input/grip/pose") },
         { aimPose,    path("/user/hand/left/input/aim/pose") },
@@ -511,7 +518,24 @@ bool XrSystem::Impl::createActions() {
         { menu,       path("/user/hand/left/input/menu/click") },
         { haptic,     path("/user/hand/left/output/haptic") },
         { haptic,     path("/user/hand/right/output/haptic") },
+    };
+    std::vector<XrActionSuggestedBinding> touchFull = touchBase;
+    touchFull.insert(touchFull.end(), {
+        { triggerTouch, path("/user/hand/left/input/trigger/touch") },
+        { triggerTouch, path("/user/hand/right/input/trigger/touch") },
+        { thumbTouch,   path("/user/hand/left/input/thumbstick/touch") },
+        { thumbTouch,   path("/user/hand/left/input/x/touch") },
+        { thumbTouch,   path("/user/hand/left/input/y/touch") },
+        { thumbTouch,   path("/user/hand/left/input/thumbrest/touch") },
+        { thumbTouch,   path("/user/hand/right/input/thumbstick/touch") },
+        { thumbTouch,   path("/user/hand/right/input/a/touch") },
+        { thumbTouch,   path("/user/hand/right/input/b/touch") },
+        { thumbTouch,   path("/user/hand/right/input/thumbrest/touch") },
     });
+    if (!suggest("/interaction_profiles/oculus/touch_controller", touchFull)) {
+        HLOG(LogXR, Warning) << "Retrying Touch controller bindings without finger touch inputs";
+        suggest("/interaction_profiles/oculus/touch_controller", touchBase);
+    }
     suggest("/interaction_profiles/khr/simple_controller", {
         { gripPose, path("/user/hand/left/input/grip/pose") },
         { gripPose, path("/user/hand/right/input/grip/pose") },
@@ -550,6 +574,7 @@ void XrSystem::destroySession() {
     if (m.actionSet) { xrDestroyActionSet(m.actionSet); m.actionSet = XR_NULL_HANDLE; }
     m.gripPose = m.aimPose = m.trigger = m.squeeze = m.thumbstick = XR_NULL_HANDLE;
     m.primary = m.secondary = m.stickClick = m.menu = m.haptic = XR_NULL_HANDLE;
+    m.triggerTouch = m.thumbTouch = XR_NULL_HANDLE;
     if (m.swapchain) { xrDestroySwapchain(m.swapchain); m.swapchain = XR_NULL_HANDLE; }
     m.images.clear();
     if (m.headSpace)  { xrDestroySpace(m.headSpace);  m.headSpace  = XR_NULL_HANDLE; }
@@ -714,6 +739,18 @@ void XrSystem::syncInput(int64_t displayTime, HXrInputState& out) {
         button(m.secondary, hand.secondary);
         button(m.stickClick, hand.thumbstickClick);
         button(m.menu, hand.menu);
+
+        // 정전식 터치(손가락 자세). 이 액션이 활성이면(Touch 계열 컨트롤러) hasTouch 입니다.
+        auto touch = [&](XrAction a, bool& dst) {
+            XrActionStateBoolean b{ XR_TYPE_ACTION_STATE_BOOLEAN };
+            gi.action = a;
+            if (a && XR_SUCCEEDED(xrGetActionStateBoolean(m.session, &gi, &b)) && b.isActive) {
+                dst = b.currentState == XR_TRUE;
+                hand.hasTouch = true;
+            }
+        };
+        touch(m.triggerTouch, hand.triggerTouch);
+        touch(m.thumbTouch, hand.thumbTouch);
 
         // 손 자세와 속도(던지기).
         XrSpaceVelocity vel{ XR_TYPE_SPACE_VELOCITY };

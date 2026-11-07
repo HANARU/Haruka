@@ -2,6 +2,9 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <memory>
+
+struct SkinSourceData;   // assets/Skin.hpp
 
 // ── 메시 소스 데이터 (CPU 측) ────────────────────────────────────────────────
 // glTF 로더와 절차 도형 생성기가 공통으로 뱉는 중간 표현입니다.
@@ -38,4 +41,7 @@ struct MeshSourceData {
     TexSourceData metalRough;
     TexSourceData ao;
     TexSourceData emissive;
+    // 스킨 메시(2026-11-07)일 때만 있습니다. 그때 vertices 는 바인드 공간 그대로이고(노드 트랜스폼을 굽지 않음),
+    // 관절 · 정점별 관절 번호와 무게가 여기 들어 있습니다. 프리미티브마다 따로 가집니다.
+    std::shared_ptr<SkinSourceData> skin;
 };

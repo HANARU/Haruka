@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -8,6 +9,8 @@
 
 struct MeshHandle;
 struct MaterialHandle;
+struct MeshSourceVertex;
+struct SkinSourceData;
 class  Renderer;
 
 struct AssetPair {
@@ -20,6 +23,10 @@ struct AssetPair {
     float           alphaCutoff = 0.5f;    // glTF alphaCutoff(MASK 일 때만 의미)
     int             vertCount = 0;
     int             triCount  = 0;
+    // 스킨 메시(2026-11-07)일 때만: 바인드 정점(CPU 에 남김)과 스킨. mesh 에는 쉬는 자세로 스키닝한 정점이 올라가 있어
+    // 스킨 없이 그려도(StaticMeshComponent) 쉬는 자세로 보입니다. 매 프레임 자세는 SkinnedMeshComponent 가 씁니다.
+    std::shared_ptr<const std::vector<MeshSourceVertex>> bindVertices;
+    std::shared_ptr<const SkinSourceData>                skin;
 };
 
 class AssetManager {

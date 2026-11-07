@@ -1,5 +1,7 @@
 #include "GassetCache.hpp"
 #include "AssetLog.hpp"
+#include "Skin.hpp"
+#include <glm/gtc/type_ptr.hpp>
 #include "../vfs/PakFormat.hpp"
 #include "../vfs/Vfs.hpp"
 #include <fstream>
@@ -18,7 +20,9 @@ static constexpr uint32_t kMagic   = 0x47415354u; // "GAST"
 //    있어 다시 만듭니다(2026-10-31).
 // 5: 메시마다 isBlend 다음에 doubleSided(u8)를 둡니다. 버전 4 이하 캐시는 다시 만듭니다(2026-11-01).
 // 6: 5 다음에 alphaMask(u8) · alphaCutoff(f32)를 둡니다. 버전 5 이하 캐시는 다시 만듭니다(2026-11-02).
-static constexpr uint32_t kVersion = 6u;
+// 7: 메시마다 인덱스 뒤에 스킨(u8 유무, 있으면 관절 · 정점별 관절 번호 · 무게)을 둡니다. 버전 6 이하 캐시는 다시
+//    만듭니다(2026-11-07, Hand_Grasp_Design 4-1).
+static constexpr uint32_t kVersion = 7u;
 // 머리: magic(4) version(4) mtime(8) size(8) hash(8) meshCount(4)
 static constexpr std::streamoff kMtimeOffset = 8;
 
@@ -106,6 +110,28 @@ static void wTex(std::ofstream& f, const TexSourceData& t) {
     }
 }
 
+// 스킨(버전 7): u8 유무, 있으면 관절 수 · 관절마다(이름 · 부모 i32 · restT 3f · restR xyzw 4f · restS 3f ·
+// inverseBind 16f · rootParent 16f) · 정점별 관절 번호(u16 x 4) · 무게(f32 x 4). load 와 같은 순서입니다.
+static void wFloats(std::ofstream& f, const float* p, size_t n) { f.write((const char*)p, (std::streamsize)(n * 4)); }
+static void wSkin(std::ofstream& f, const SkinSourceData* s) {
+    wU8(f, s ? 1u : 0u);
+    if (!s) return;
+    wU32(f, (uint32_t)s->joints.size());
+    for (const SkinJoint& j : s->joints) {
+        wStr(f, j.name);
+        wU32(f, (uint32_t)(int32_t)j.parent);
+        wFloats(f, glm::value_ptr(j.restT), 3);
+        const float q[4] = { j.restR.x, j.restR.y, j.restR.z, j.restR.w };
+        wFloats(f, q, 4);
+        wFloats(f, glm::value_ptr(j.restS), 3);
+        wFloats(f, glm::value_ptr(j.inverseBind), 16);
+        wFloats(f, glm::value_ptr(j.rootParent), 16);
+    }
+    wU32(f, (uint32_t)s->jointIndex.size());
+    f.write((const char*)s->jointIndex.data(), (std::streamsize)(s->jointIndex.size() * sizeof(uint16_t)));
+    wFloats(f, s->jointWeight.data(), s->jointWeight.size());
+}
+
 void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceData>& meshes) {
     std::error_code dirEc;
     fs::create_directories(cacheDirStorage(), dirEc);
@@ -142,6 +168,7 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
                     (std::streamsize)(m.vertices.size() * sizeof(MeshSourceVertex)));
             f.write((const char*)m.indices.data(),
                     (std::streamsize)(m.indices.size()  * sizeof(uint32_t)));
+            wSkin(f, m.skin.get());   // 버전 7
         }
 
         if (!f) {
@@ -185,6 +212,34 @@ static TexSourceData rTex(std::ifstream& f) {
     return t;
 }
 
+static void rFloats(std::ifstream& f, float* p, size_t n) { f.read((char*)p, (std::streamsize)(n * 4)); }
+static std::shared_ptr<SkinSourceData> rSkin(std::ifstream& f, uint32_t vertexCount, const std::string& cp) {
+    if (rU8(f) == 0) return nullptr;
+    auto s = std::make_shared<SkinSourceData>();
+    const uint32_t jc = rU32(f);
+    if (!f || jc == 0 || jc > 65535) throw std::runtime_error("GassetCache: corrupted skin in " + cp);
+    s->joints.resize(jc);
+    for (SkinJoint& j : s->joints) {
+        j.name   = rStr(f);
+        j.parent = (int)(int32_t)rU32(f);
+        rFloats(f, glm::value_ptr(j.restT), 3);
+        float q[4];
+        rFloats(f, q, 4);
+        j.restR = glm::quat(q[3], q[0], q[1], q[2]);
+        rFloats(f, glm::value_ptr(j.restS), 3);
+        rFloats(f, glm::value_ptr(j.inverseBind), 16);
+        rFloats(f, glm::value_ptr(j.rootParent), 16);
+    }
+    const uint32_t n = rU32(f);
+    if (!f || n != vertexCount * (uint32_t)hskin::kInfluences) throw std::runtime_error("GassetCache: corrupted skin in " + cp);
+    s->jointIndex.resize(n);
+    s->jointWeight.resize(n);
+    f.read((char*)s->jointIndex.data(), (std::streamsize)(n * sizeof(uint16_t)));
+    rFloats(f, s->jointWeight.data(), n);
+    if (!f || !hskin::buildOrder(*s)) throw std::runtime_error("GassetCache: corrupted skin in " + cp);
+    return s;
+}
+
 std::vector<MeshSourceData> GassetCache::load(const std::string& srcPath) {
     std::string cp = cachePath(srcPath);
     std::ifstream f(cp, std::ios::binary);
@@ -215,6 +270,7 @@ std::vector<MeshSourceData> GassetCache::load(const std::string& srcPath) {
         f.read((char*)m.vertices.data(), (std::streamsize)(vc * sizeof(MeshSourceVertex)));
         f.read((char*)m.indices.data(),  (std::streamsize)(ic * sizeof(uint32_t)));
         if (!f) throw std::runtime_error("GassetCache: corrupted file " + cp);
+        m.skin = rSkin(f, vc, cp);   // 버전 7. save 와 같은 순서
         result.push_back(std::move(m));
     }
 

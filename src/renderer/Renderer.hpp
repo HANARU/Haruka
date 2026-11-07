@@ -266,6 +266,7 @@ private:
     MaterialHandle*              errorMaterial_ = nullptr;
     std::unordered_set<uint64_t> noMaterialWarned_;
     bool                         dropWarned_    = false;   // 행 예산 초과 경고(한 번)
+    bool                         skinOverflowWarned_ = false;   // 스킨 메시 정점 구간 초과 경고(한 번, 2026-11-07)
     bool                         lightBudgetWarned_ = false;   // 라이트 상한 초과 경고(한 번, DEF-33)
     uint32_t                     maxDrawRows_   = EngineLimits{}.maxDrawRows;   // setLimits(DEF-10)
     uint32_t                     maxLights_     = EngineLimits{}.maxLights;

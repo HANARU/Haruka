@@ -2,6 +2,8 @@
 #include "../ui/slate/HSlateRenderer.hpp"
 #include "../core/World.hpp"
 #include "../components/StaticMeshComponent.hpp"
+#include "../components/SkinnedMeshComponent.hpp"
+#include "../assets/MeshSource.hpp"
 #include "../components/CameraComponent.hpp"
 #include "../components/LightComponent.hpp"
 #include "../core/FrameTimings.hpp"
@@ -258,21 +260,55 @@ void Renderer::buildDrawCommands(World& world,
     models.reserve(allMeshes.size());
     materials.reserve(allMeshes.size());
 
+    // 머티리얼이 없는 메시는 오류 머티리얼(자홍색)로 그리고 액터마다 한 번 경고합니다(DEF-28).
+    // 건너뛰지 않는 이유: 빠진 메시가 화면에서 보여야 알아챌 수 있습니다. 또 materialRowsOut
+    // 에 nullptr 이 들어가지 않는다는 불변식을 이 대체가 지킵니다. null 이면(오류 머티리얼을 만들기 전, 초기화 중) 건너뜁니다.
+    auto resolveMaterial = [&](const MaterialHandle* material, const Actor* owner) -> const MaterialHandle* {
+        if (material) return material;
+        const uint64_t actorId = owner ? owner->id : 0;
+        if (noMaterialWarned_.insert(actorId).second) {
+            HLOG(LogRenderer, Warning) << "Mesh on actor '"
+                << (owner ? owner->name : std::string("?"))
+                << "' has no material; drawing it with the magenta error material";
+        }
+        return errorMaterial_;
+    };
+
+    // 월드 공간 바운딩 구를 여기서 한 번만 만들어 카메라·라이트 판정에 함께 쓰고, 보이면 후보로 넣습니다.
+    // 스태틱 메시와 스킨 메시(2026-11-07)가 함께 씁니다.
+    auto pushCandidate = [&](const MaterialHandle* material, const glm::mat4& model, const glm::vec3& boundCenter,
+                             float boundRadius, uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset,
+                             float distSq, bool transparent) {
+        const float sx = glm::length(glm::vec3(model[0]));
+        const float sy = glm::length(glm::vec3(model[1]));
+        const float sz = glm::length(glm::vec3(model[2]));
+        const float maxScale = std::max({sx, sy, sz});
+        const glm::vec3 wCenter = glm::vec3(model * glm::vec4(boundCenter, 1.f));
+        const float     wRadius = boundRadius * maxScale;
+
+        // 카메라 가시성과 라이트(섀도) 가시성을 따로 판정한다.
+        const bool inCam   = !hasCam   || sphereInAnyView(planes.data(), viewCount_, wCenter, wRadius);
+        const bool inLight = hasShadow && sphereInFrustum(lightPlanes, wCenter, wRadius);
+        if (!inCam && !inLight) return;
+
+        hbatch::Candidate c;
+        c.material     = material;
+        c.indexCount   = indexCount;
+        c.firstIndex   = firstIndex;
+        c.vertexOffset = vertexOffset;
+        c.distSq       = distSq;
+        c.inCam        = inCam;
+        c.inLight      = inLight;
+        c.transparent  = transparent;
+        cands.push_back(c);
+        models.push_back(model);
+        materials.push_back(material);
+    };
+
     for (auto* mc : allMeshes) {
         if (!mc->visible || !mc->mesh) continue;
-        // 머티리얼이 없는 메시는 오류 머티리얼(자홍색)로 그리고 액터마다 한 번 경고합니다(DEF-28).
-        // 건너뛰지 않는 이유: 빠진 메시가 화면에서 보여야 알아챌 수 있습니다. 또 materialRowsOut
-        // 에 nullptr 이 들어가지 않는다는 불변식을 이 대체가 지킵니다.
-        const MaterialHandle* material = mc->material;
-        if (!material) {
-            material = errorMaterial_;
-            const uint64_t actorId = mc->owner ? mc->owner->id : 0;
-            if (noMaterialWarned_.insert(actorId).second)
-                HLOG(LogRenderer, Warning) << "Mesh on actor '"
-                    << (mc->owner ? mc->owner->name : std::string("?"))
-                    << "' has no material; drawing it with the magenta error material";
-            if (!material) continue;   // 오류 머티리얼을 만들기 전(초기화 중)에만
-        }
+        const MaterialHandle* material = resolveMaterial(mc->material, mc->owner);
+        if (!material) continue;
 
         glm::mat4 model = mc->owner ? mc->owner->worldMatrix() : glm::mat4(1.f);
 
@@ -281,31 +317,45 @@ void Renderer::buildDrawCommands(World& world,
         MeshHandle* mesh = mc->getMeshForDistanceSq(distSq);
         if (!mesh) continue;
 
-        // 월드 공간 바운딩 구를 여기서 한 번만 만들어 카메라·라이트 판정에 함께 쓴다.
-        const float sx = glm::length(glm::vec3(model[0]));
-        const float sy = glm::length(glm::vec3(model[1]));
-        const float sz = glm::length(glm::vec3(model[2]));
-        const float maxScale = std::max({sx, sy, sz});
-        const glm::vec3 wCenter = glm::vec3(model * glm::vec4(mesh->boundCenter, 1.f));
-        const float     wRadius = mesh->boundRadius * maxScale;
+        pushCandidate(material, model, mesh->boundCenter, mesh->boundRadius, mesh->indexCount, mesh->firstIndex,
+                      (int32_t)mesh->firstVertex, distSq, mc->transparent);
+    }
 
-        // 카메라 가시성과 라이트(섀도) 가시성을 따로 판정한다.
-        const bool inCam   = !hasCam   || sphereInAnyView(planes.data(), viewCount_, wCenter, wRadius);
-        const bool inLight = hasShadow && sphereInFrustum(lightPlanes, wCenter, wRadius);
-        if (!inCam && !inLight) continue;
-
-        hbatch::Candidate c;
-        c.material     = material;
-        c.indexCount   = mesh->indexCount;
-        c.firstIndex   = mesh->firstIndex;
-        c.vertexOffset = (int32_t)mesh->firstVertex;
-        c.distSq       = distSq;
-        c.inCam        = inCam;
-        c.inLight      = inLight;
-        c.transparent  = mc->transparent;
-        cands.push_back(c);
-        models.push_back(model);
-        materials.push_back(material);
+    // 스킨 메시(2026-11-07, Hand_Grasp_Design 4-1): 이 프레임 슬롯의 스킨 구간에 지금 자세로 CPU 스키닝한 정점을 직접 쓰고,
+    // 그 자리를 정점 오프셋으로 그립니다. 이 함수는 슬롯 펜스를 기다린 뒤(extract 구간)에 불리므로 GPU 가 이 슬롯의 구간을
+    // 읽고 있지 않습니다. Zone B 는 HOST_COHERENT 라 제출 시점에 쓰기가 보입니다. 인덱스는 쉬는 자세로 올린 메시의 것을 씁니다.
+    {
+        uint32_t arenaFirst = 0, used = 0;
+        Vertex*  arena      = nullptr;
+        bool     asked      = false;
+        for (const auto& up : world.getActors()) {
+            const Actor* a = up.get();
+            if (!a->activeInHierarchy()) continue;
+            const auto* sk = a->getComponent<SkinnedMeshComponent>();
+            if (!sk || !sk->isEnabled() || !sk->visible || !sk->loaded()) continue;
+            if (!asked) { arena = scene_.skinArena(frameIdx, arenaFirst); asked = true; }
+            if (!arena) break;
+            ++totalCnt;
+            const uint32_t n = (uint32_t)sk->vertCount;
+            if (used + n > GpuScene::kSkinArenaVerts) {
+                if (!skinOverflowWarned_) {
+                    skinOverflowWarned_ = true;
+                    HLOG(LogRenderer, Warning) << "Skinned meshes need more than " << GpuScene::kSkinArenaVerts
+                        << " vertices this frame; '" << a->name << "' and later ones are not drawn (warned once)";
+                }
+                continue;
+            }
+            const MaterialHandle* material = resolveMaterial(sk->material, a);
+            if (!material) continue;
+            glm::vec3 bmin, bmax;
+            if (!sk->skinInto(reinterpret_cast<MeshSourceVertex*>(arena + used), bmin, bmax)) continue;
+            const glm::mat4 model = a->worldMatrix();
+            const float distSq = glm::length2(camPos - glm::vec3(model[3]));
+            pushCandidate(material, model, 0.5f * (bmin + bmax), 0.5f * glm::length(bmax - bmin),
+                          sk->baseMesh->indexCount, sk->baseMesh->firstIndex, (int32_t)(arenaFirst + used),
+                          distSq, sk->transparent);
+            used += n;
+        }
     }
 
     // 2) 묶기와 행 배정(DEF-16). transform SSBO 행은 hbatch::build 한 곳에서만 정해집니다(DEF-01 원칙).

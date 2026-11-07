@@ -5,6 +5,7 @@
 
 #include "GltfLoader.hpp"
 #include "AssetLog.hpp"
+#include "Skin.hpp"
 #include "../vfs/PakFormat.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "../vfs/Vfs.hpp"
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <algorithm>
 #include <set>
+#include <unordered_map>
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -188,7 +190,7 @@ static void generateTangents(std::vector<MeshSourceVertex>& verts,
 
 // ─── node hierarchy ──────────────────────────────────────────────────────────
 
-struct NodeRef { glm::mat4 world; int meshIdx; };
+struct NodeRef { glm::mat4 world; int meshIdx; int skin = -1; };
 
 static glm::mat4 nodeLocalMatrix(const tinygltf::Node& n) {
     if (!n.matrix.empty()) {
@@ -221,8 +223,154 @@ static void flattenNodes(const tinygltf::Model& model, int nodeIdx,
                           const glm::mat4& parent, std::vector<NodeRef>& out) {
     const auto& n = model.nodes[nodeIdx];
     glm::mat4   w = parent * nodeLocalMatrix(n);
-    if (n.mesh >= 0) out.push_back({ w, n.mesh });
+    if (n.mesh >= 0) out.push_back({ w, n.mesh, n.skin });
     for (int c : n.children) flattenNodes(model, c, w, out);
+}
+
+// ─── 스킨 (2026-11-07, Docs/Hand_Grasp_Design.md 4-1) ────────────────────────
+// glTF 규약: 스킨 메시의 정점은 바인드 공간에 있고, 스킨 메시 노드 자신의 트랜스폼은 무시합니다. 정점 = Σ 무게 x
+// (관절 전역 행렬 x inverseBind) x 바인드 위치입니다. 관절 노드의 쉬는 자세 TRS 와 부모를 읽어 SkinSourceData 에 담고,
+// 관절이 아닌 조상(Armature 노드 등)의 전역 행렬은 뿌리 관절의 rootParent 로 굳힙니다.
+
+// 노드마다 부모(-1 = 없음)와 전역 행렬. 장면 밖 노드도 부모 사슬로 계산합니다. 순환이 있으면 그 노드는 단위 행렬입니다.
+static void nodeGlobals(const tinygltf::Model& model, std::vector<glm::mat4>& global, std::vector<int>& parent) {
+    const int n = (int)model.nodes.size();
+    parent.assign(n, -1);
+    for (int i = 0; i < n; ++i)
+        for (int c : model.nodes[i].children)
+            if (c >= 0 && c < n) parent[c] = i;
+    global.assign(n, glm::mat4(1.f));
+    std::vector<uint8_t> done(n, 0);
+    for (int i = 0; i < n; ++i) {
+        std::vector<int> chain;
+        int j = i;
+        while (j >= 0 && !done[j] && (int)chain.size() <= n) { chain.push_back(j); j = parent[j]; }
+        glm::mat4 acc = (j >= 0 && done[j]) ? global[j] : glm::mat4(1.f);
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            acc = acc * nodeLocalMatrix(model.nodes[*it]);
+            global[*it] = acc;
+            done[*it] = 1;
+        }
+    }
+}
+
+// 정수 · 정규화 정수 · 실수 성분 하나를 읽습니다(JOINTS_0 · WEIGHTS_0).
+static float readComponent(const uint8_t* base, size_t idx, int stride, int comp, int componentType, bool normalized) {
+    const uint8_t* p = base + idx * stride;
+    switch (componentType) {
+        case TINYGLTF_COMPONENT_TYPE_FLOAT:          return reinterpret_cast<const float*>(p)[comp];
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:  { const float v = p[comp]; return normalized ? v / 255.f : v; }
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: { uint16_t v; std::memcpy(&v, p + comp * 2, 2);
+                                                       return normalized ? v / 65535.f : (float)v; }
+        default: return 0.f;
+    }
+}
+
+static std::shared_ptr<SkinSourceData> readSkin(const tinygltf::Model& model, int skinIdx, const tinygltf::Primitive& prim,
+                                                size_t vertexCount, const std::vector<glm::mat4>& global,
+                                                const std::vector<int>& parent, const std::string& path) {
+    if (skinIdx < 0 || skinIdx >= (int)model.skins.size()) return nullptr;
+    const auto& sk = model.skins[skinIdx];
+    if (!prim.attributes.count("JOINTS_0") || !prim.attributes.count("WEIGHTS_0")) {
+        HLOG(LogAsset, Warning) << path << ": skinned node has a primitive without JOINTS_0/WEIGHTS_0; drawn without skinning";
+        return nullptr;
+    }
+    if (sk.joints.empty() || sk.joints.size() > 65535) {
+        HLOG(LogAsset, Warning) << path << ": skin " << skinIdx << " has " << sk.joints.size() << " joints; drawn without skinning";
+        return nullptr;
+    }
+    auto out = std::make_shared<SkinSourceData>();
+    const int jc = (int)sk.joints.size();
+    std::unordered_map<int, int> nodeToJoint;
+    for (int j = 0; j < jc; ++j) nodeToJoint[sk.joints[j]] = j;
+    out->joints.resize(jc);
+    for (int j = 0; j < jc; ++j) {
+        const int nj = sk.joints[j];
+        if (nj < 0 || nj >= (int)model.nodes.size()) {
+            HLOG(LogAsset, Warning) << path << ": skin joint node " << nj << " is out of range; drawn without skinning";
+            return nullptr;
+        }
+        const auto& node = model.nodes[nj];
+        SkinJoint& jt = out->joints[j];
+        jt.name = node.name.empty() ? ("joint" + std::to_string(j)) : node.name;
+        if (!node.matrix.empty()) {
+            // 행렬로 준 관절: 이동 = 4열, 배율 = 각 열의 길이, 회전 = 배율을 나눈 3x3(전단 · 원근은 버림).
+            const glm::mat4 m = nodeLocalMatrix(node);
+            jt.restT = glm::vec3(m[3]);
+            jt.restS = glm::vec3(glm::length(glm::vec3(m[0])), glm::length(glm::vec3(m[1])), glm::length(glm::vec3(m[2])));
+            const glm::mat3 r(glm::vec3(m[0]) / std::max(jt.restS.x, 1e-12f),
+                              glm::vec3(m[1]) / std::max(jt.restS.y, 1e-12f),
+                              glm::vec3(m[2]) / std::max(jt.restS.z, 1e-12f));
+            jt.restR = glm::normalize(glm::quat_cast(r));
+        } else {
+            if (node.translation.size() == 3)
+                jt.restT = glm::vec3((float)node.translation[0], (float)node.translation[1], (float)node.translation[2]);
+            if (node.rotation.size() == 4)
+                jt.restR = glm::normalize(glm::quat((float)node.rotation[3], (float)node.rotation[0],
+                                                    (float)node.rotation[1], (float)node.rotation[2]));
+            if (node.scale.size() == 3)
+                jt.restS = glm::vec3((float)node.scale[0], (float)node.scale[1], (float)node.scale[2]);
+        }
+        const int pn = parent[nj];
+        const auto it = pn >= 0 ? nodeToJoint.find(pn) : nodeToJoint.end();
+        if (it != nodeToJoint.end()) jt.parent = it->second;
+        else { jt.parent = -1; jt.rootParent = pn >= 0 ? global[pn] : glm::mat4(1.f); }
+    }
+    if (sk.inverseBindMatrices >= 0) {
+        const auto& acc = model.accessors[sk.inverseBindMatrices];
+        if (acc.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT || acc.type != TINYGLTF_TYPE_MAT4 || (int)acc.count < jc) {
+            HLOG(LogAsset, Warning) << path << ": skin " << skinIdx << " inverseBindMatrices is not " << jc
+                                    << " float MAT4; drawn without skinning";
+            return nullptr;
+        }
+        auto [base, stride, cnt] = accessorInfo(model, sk.inverseBindMatrices);
+        (void)cnt;
+        for (int j = 0; j < jc; ++j)
+            std::memcpy(glm::value_ptr(out->joints[j].inverseBind), base + (size_t)j * stride, 64);
+    }
+
+    const auto& jAcc = model.accessors[prim.attributes.at("JOINTS_0")];
+    const auto& wAcc = model.accessors[prim.attributes.at("WEIGHTS_0")];
+    if (jAcc.type != TINYGLTF_TYPE_VEC4 || wAcc.type != TINYGLTF_TYPE_VEC4 ||
+        jAcc.count < vertexCount || wAcc.count < vertexCount) {
+        HLOG(LogAsset, Warning) << path << ": JOINTS_0/WEIGHTS_0 are not VEC4 per vertex; drawn without skinning";
+        return nullptr;
+    }
+    auto [jBase, jStride, jCnt] = accessorInfo(model, prim.attributes.at("JOINTS_0"));
+    auto [wBase, wStride, wCnt] = accessorInfo(model, prim.attributes.at("WEIGHTS_0"));
+    (void)jCnt; (void)wCnt;
+    out->jointIndex.assign(vertexCount * hskin::kInfluences, 0);
+    out->jointWeight.assign(vertexCount * hskin::kInfluences, 0.f);
+    size_t badIndex = 0, noWeight = 0;
+    for (size_t i = 0; i < vertexCount; ++i) {
+        float sum = 0.f;
+        for (int k = 0; k < hskin::kInfluences; ++k) {
+            const float ji = readComponent(jBase, i, jStride, k, jAcc.componentType, false);
+            float       w  = readComponent(wBase, i, wStride, k, wAcc.componentType, wAcc.normalized);
+            int idx = (int)ji;
+            if (idx < 0 || idx >= jc) { if (w > 0.f) ++badIndex; idx = 0; w = 0.f; }
+            if (!(w > 0.f)) w = 0.f;
+            out->jointIndex[i * hskin::kInfluences + k]  = (uint16_t)idx;
+            out->jointWeight[i * hskin::kInfluences + k] = w;
+            sum += w;
+        }
+        if (sum > 0.f) for (int k = 0; k < hskin::kInfluences; ++k) out->jointWeight[i * hskin::kInfluences + k] /= sum;
+        else ++noWeight;
+    }
+    if (badIndex) {
+        HLOG(LogAsset, Warning) << path << ": " << badIndex << " skin weight(s) point at a missing joint and were dropped";
+    }
+    if (noWeight) {
+        HLOG(LogAsset, Warning) << path << ": " << noWeight << " vertex(es) have no skin weight and stay at the bind pose";
+    }
+    if (prim.attributes.count("JOINTS_1")) {
+        HLOG(LogAsset, Warning) << path << ": JOINTS_1/WEIGHTS_1 are ignored (up to 4 influences per vertex)";
+    }
+    if (!hskin::buildOrder(*out)) {
+        HLOG(LogAsset, Warning) << path << ": skin " << skinIdx << " joint hierarchy has a cycle; drawn without skinning";
+        return nullptr;
+    }
+    return out;
 }
 
 // ─── 파일 읽기 (2026-10-24) ──────────────────────────────────────────────────
@@ -346,10 +494,14 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
 
     std::vector<MeshSourceData> result;
 
-    for (const auto& [worldMat, meshIdx] : refs) {
-        const auto& mesh = model.meshes[meshIdx];
-        // Inverse-transpose for transforming normals and tangents under non-uniform scale
-        glm::mat3 normalMat = glm::mat3(glm::transpose(glm::inverse(worldMat)));
+    // 스킨이 있으면 관절의 부모 · 조상 행렬을 알아야 합니다(2026-11-07).
+    std::vector<glm::mat4> nodeGlobal;
+    std::vector<int>       nodeParent;
+    if (!model.skins.empty()) nodeGlobals(model, nodeGlobal, nodeParent);
+
+    for (const auto& ref : refs) {
+        const int   meshIdx = ref.meshIdx;
+        const auto& mesh    = model.meshes[meshIdx];
 
         for (const auto& prim : mesh.primitives) {
             if (!prim.attributes.count("POSITION")) continue;
@@ -362,6 +514,14 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
             auto [posBase, posStride, posCount] =
                 accessorInfo(model, prim.attributes.at("POSITION"));
             d.vertices.resize(posCount);
+
+            // 스킨 메시는 정점을 바인드 공간 그대로 둡니다(glTF 규약: 스킨 메시 노드의 트랜스폼은 무시). 스키닝 행렬이
+            // 관절 · 조상 트랜스폼을 모두 담습니다. 스킨을 읽지 못하면 보통 메시처럼 노드 트랜스폼을 굽습니다.
+            if (ref.skin >= 0)
+                d.skin = readSkin(model, ref.skin, prim, posCount, nodeGlobal, nodeParent, path);
+            const glm::mat4 worldMat = d.skin ? glm::mat4(1.f) : ref.world;
+            // Inverse-transpose for transforming normals and tangents under non-uniform scale
+            const glm::mat3 normalMat = glm::mat3(glm::transpose(glm::inverse(worldMat)));
 
             for (size_t i = 0; i < posCount; ++i) {
                 glm::vec4 lp(readF(posBase, i, posStride, 0),
@@ -531,11 +691,12 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
     if (result.empty())
         throw std::runtime_error("glTF has no valid primitives: " + path);
 
-    size_t totalV = 0, totalT = 0;
-    for (const auto& r : result) { totalV += r.vertices.size(); totalT += r.indices.size() / 3; }
+    size_t totalV = 0, totalT = 0, skinned = 0;
+    for (const auto& r : result) { totalV += r.vertices.size(); totalT += r.indices.size() / 3; skinned += r.skin ? 1 : 0; }
     HLOG(LogAsset, Log) << "Loaded: " << path
                         << "  meshes=" << result.size()
-                        << "  verts=" << totalV << "  tris=" << totalT;
+                        << "  verts=" << totalV << "  tris=" << totalT
+                        << (skinned ? "  skinned=" + std::to_string(skinned) : std::string());
     return result;
 }
 

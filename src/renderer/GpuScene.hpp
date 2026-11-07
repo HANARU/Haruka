@@ -48,8 +48,19 @@ public:
     VkBuffer vertexBuffer() const { return megaVertBuf_; }
     VkBuffer indexBuffer()  const { return megaIdxBuf_;  }
 
+    // 스킨 메시의 프레임별 정점 구간(2026-11-07, Hand_Grasp_Design 4-1). 처음 부를 때 메가 버퍼에서 슬롯 MAX_FRAMES 개
+    // 분량을 한 번 잡고 계속 다시 씁니다(메가 버퍼는 반납이 없는 범프 할당). 렌더러가 그 슬롯의 펜스를 기다린 뒤 CPU 로
+    // 스키닝한 정점을 직접 쓰고(Zone B 는 매핑 · HOST_COHERENT), 그리기는 firstVertex 를 정점 오프셋으로 씁니다.
+    // 메가 버퍼가 모자라면 null 을 돌려주고 한 번 경고합니다.
+    static constexpr uint32_t kSkinArenaVerts = 32768;   // 슬롯마다(손 두 개는 수천 정점)
+    Vertex* skinArena(uint32_t frameSlot, uint32_t& firstVertex);
+
 private:
     RenderContext* rc_ = nullptr;
+
+    bool     skinArenaReserved_ = false;
+    bool     skinArenaFailed_   = false;
+    uint32_t skinArenaFirst_    = 0;
 
     // 형식마다 밉 블릿 가능 여부를 한 번만 묻습니다(DEF-165). 텍스처는 SRGB · UNORM 두 형식뿐입니다.
     bool canBlitMips(VkFormat fmt);

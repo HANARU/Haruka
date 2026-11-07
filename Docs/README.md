@@ -35,6 +35,7 @@
 | [Audio_Design.md](Audio_Design.md) | 오디오: 재생 규칙(일시정지·비활성), 청취자·3D 감쇠 설정, 씬 형식, 시험 음원 |
 | [Engine_Basics_Design.md](Engine_Basics_Design.md) | 엔진 기본 기능 보강(2026-10-15): 씬 관리 · 편집 기본기(ID 기반 Undo · 다중 선택 · 클립보드) · 플레이어 리그와 입력 · 잡기, 제안서 대조 결정 |
 | [Packaging_Design.md](Packaging_Design.md) | 패키징(2026-10-19 ~ 24, Windows · Android XR): 조사 요약, 1단계 결정, 런타임 분리(HarukaGame) · 실행 폴더 기준 경로와 쓰기 루트 · 배포 ZIP, 자체 묶음 파일 `.hpak` v1 · 가상 파일 시스템 · 묶음 도구 |
+| [Hand_Grasp_Design.md](Hand_Grasp_Design.md) | 손 쥐기(2026-11-07, A · B 단계 구현, 헤드셋 확인 대기): 조사 요약, 혼합형 결정(자동 맞춤 + 지정 자세), 스키닝 · OpenXR 26관절 손 뼈대 · 컨트롤러 손가락 · 볼록 껍질 충돌체 · 자동 맞춤의 단계별 설계, A · B 단계 결과 |
 | [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) | 결함 심층 분석 + 마스터 체크리스트(정본) |
 | [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) | 결함 작업 지시서(정본, Stabilization 과 상태 일치) |
 | [Editor_QA_Checklist.md](Editor_QA_Checklist.md) | 에디터 실기 체크리스트: 준비·결함 재현·기능 회귀·결과 기록, 자동 조작 요령 |

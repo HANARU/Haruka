@@ -3,6 +3,7 @@
 #include "../geometry/PrimitiveLog.hpp"
 #include "GltfLoader.hpp"
 #include "GassetCache.hpp"
+#include "Skin.hpp"
 #include "../renderer/Renderer.hpp"
 #include "../renderer/Vertex.hpp"
 #include "../geometry/PrimitiveBuilder.hpp"
@@ -45,9 +46,23 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
     float firstCutoff = 0.5f;
 
     for (auto& data : meshes) {
+        // 스킨 메시는 쉬는 자세로 한 번 스키닝해 올립니다(바인드 자세와 쉬는 자세가 다른 모델도 제자리에 보이게).
+        // 바인드 정점과 스킨은 SkinnedMeshComponent 가 매 프레임 쓰도록 남깁니다(2026-11-07).
+        std::vector<MeshSourceVertex> restPose;
+        const std::vector<MeshSourceVertex>* src = &data.vertices;
+        if (data.skin) {
+            std::vector<glm::mat4> globals, palette;
+            hskin::computeGlobals(*data.skin, nullptr, globals);
+            hskin::computePalette(*data.skin, globals, palette);
+            restPose.resize(data.vertices.size());
+            glm::vec3 bmin, bmax;
+            hskin::skinVertices(data.vertices.data(), data.vertices.size(), *data.skin, palette.data(),
+                                restPose.data(), bmin, bmax);
+            src = &restPose;
+        }
         std::vector<Vertex> verts;
-        verts.reserve(data.vertices.size());
-        for (const auto& gv : data.vertices) {
+        verts.reserve(src->size());
+        for (const auto& gv : *src) {
             Vertex v{};
             std::memcpy(v.pos,     gv.pos,     sizeof(v.pos));
             std::memcpy(v.normal,  gv.normal,  sizeof(v.normal));
@@ -57,6 +72,10 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
         }
 
         AssetPair p;
+        if (data.skin) {
+            p.skin         = data.skin;
+            p.bindVertices = std::make_shared<const std::vector<MeshSourceVertex>>(data.vertices);
+        }
         p.mesh      = renderer->uploadMesh(verts, data.indices);
         p.material  = renderer->uploadMaterial(
             data.albedo, data.normalMap, data.metalRough, data.ao, data.emissive);

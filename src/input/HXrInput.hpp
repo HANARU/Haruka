@@ -31,6 +31,11 @@ struct HHandInput {
     bool      secondary       = false;  // 왼손 Y · 오른손 B
     bool      thumbstickClick = false;
     bool      menu            = false;  // 왼손 메뉴 버튼(오른손은 시스템 예약)
+    // 정전식 터치(2026-11-07, 손가락 자세 · Hand_Grasp_Design 4-2). hasTouch 는 지금 컨트롤러가 터치 입력을 내는지
+    // (Touch 계열이면 true, 단순 컨트롤러면 false)입니다. false 이면 아래 두 값은 의미가 없습니다.
+    bool      hasTouch     = false;
+    bool      triggerTouch = false;     // 검지가 트리거에 닿음
+    bool      thumbTouch   = false;     // 엄지가 스틱 · 버튼 · 엄지 받침 중 하나에 닿음
 };
 
 struct HXrInputState {

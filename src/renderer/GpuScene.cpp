@@ -1,11 +1,21 @@
 #include "GpuScene.hpp"
 #include "MipChain.hpp"
 #include "RendererLog.hpp"
+#include "RenderTypes.hpp"
 #include "../assets/GltfLoader.hpp"
+#include "../assets/MeshSource.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <stdexcept>
+
+// CPU 스키닝(hskin::skinVertices)은 MeshSourceVertex 로 쓰고 렌더러는 같은 바이트를 Vertex 로 읽습니다(2026-11-07).
+static_assert(sizeof(MeshSourceVertex) == sizeof(Vertex), "MeshSourceVertex and Vertex must share a layout");
+static_assert(offsetof(MeshSourceVertex, pos)     == offsetof(Vertex, pos),     "layout");
+static_assert(offsetof(MeshSourceVertex, normal)  == offsetof(Vertex, normal),  "layout");
+static_assert(offsetof(MeshSourceVertex, uv)      == offsetof(Vertex, uv),      "layout");
+static_assert(offsetof(MeshSourceVertex, tangent) == offsetof(Vertex, tangent), "layout");
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -38,6 +48,29 @@ void GpuScene::destroy() {
     if (!rc_) return;
     if (megaVertBuf_) { vkDestroyBuffer(rc_->device, megaVertBuf_, nullptr); rc_->allocator->freeB(megaVertAlloc_); megaVertBuf_ = VK_NULL_HANDLE; }
     if (megaIdxBuf_)  { vkDestroyBuffer(rc_->device, megaIdxBuf_,  nullptr); rc_->allocator->freeB(megaIdxAlloc_);  megaIdxBuf_  = VK_NULL_HANDLE; }
+}
+
+// ── 스킨 메시 정점 구간 (2026-11-07) ─────────────────────────────────────────
+
+Vertex* GpuScene::skinArena(uint32_t frameSlot, uint32_t& firstVertex) {
+    firstVertex = 0;
+    if (frameSlot >= (uint32_t)MAX_FRAMES || skinArenaFailed_ || !megaVertAlloc_.mappedPtr) return nullptr;
+    if (!skinArenaReserved_) {
+        const uint64_t need = (uint64_t)kSkinArenaVerts * MAX_FRAMES;
+        if ((megaVertCount_ + need) * sizeof(Vertex) > kMegaVertBytes) {
+            skinArenaFailed_ = true;
+            HLOG(LogRenderer, Warning) << "mega vertex buffer has no room for the skinned-mesh area ("
+                                       << need << " vertices); skinned meshes are not drawn";
+            return nullptr;
+        }
+        skinArenaFirst_    = megaVertCount_;
+        megaVertCount_    += (uint32_t)need;
+        skinArenaReserved_ = true;
+        HLOG(LogRenderer, Log) << "Skinned-mesh area reserved: " << kSkinArenaVerts << " vertices x "
+                               << MAX_FRAMES << " frame slot(s) at vertex " << skinArenaFirst_;
+    }
+    firstVertex = skinArenaFirst_ + frameSlot * kSkinArenaVerts;
+    return reinterpret_cast<Vertex*>(static_cast<uint8_t*>(megaVertAlloc_.mappedPtr)) + firstVertex;
 }
 
 // ── Mesh upload (mega buffer) ─────────────────────────────────────────────────

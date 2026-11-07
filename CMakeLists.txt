@@ -274,6 +274,8 @@ set(RUNTIME_SOURCES
     src/components/RigidBodyComponent.cpp
     src/components/CoreComponents.cpp
     src/components/XrComponents.cpp
+    src/components/SkinnedMeshComponent.cpp
+    src/components/HandPoseComponent.cpp
     src/renderer/Renderer.cpp
     src/renderer/Renderer_swap.cpp
     src/renderer/Renderer_render.cpp
@@ -292,6 +294,7 @@ set(RUNTIME_SOURCES
     src/assets/GltfLoader.cpp
     src/assets/AssetManager.cpp
     src/assets/GassetCache.cpp
+    src/assets/Skin.cpp
     src/assets/PrefabManager.cpp
     src/assets/SceneSerializer.cpp
     src/assets/ComponentSerializer.cpp
@@ -707,9 +710,11 @@ if(NOT ANDROID)
     add_executable(HarukaAssetCacheTest
         tests/AssetCacheTest.cpp
         src/assets/GassetCache.cpp
+        src/assets/Skin.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaAssetCacheTest PRIVATE HarukaVfs)
+    # 캐시 버전 7 부터 스킨을 담아(2026-11-07) Skin.cpp · glm 이 필요합니다.
+    target_link_libraries(HarukaAssetCacheTest PRIVATE HarukaVfs glm::glm)
     target_include_directories(HarukaAssetCacheTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaAssetCacheTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
@@ -948,6 +953,7 @@ if(NOT ANDROID)
     add_executable(HarukaGltfTest
         tests/GltfLoaderTest.cpp
         src/assets/GltfLoader.cpp
+        src/assets/Skin.cpp
         src/core/HLog.cpp
     )
     target_link_libraries(HarukaGltfTest PRIVATE HarukaVfs tinygltf glm::glm)
@@ -957,12 +963,37 @@ if(NOT ANDROID)
         set_target_properties(HarukaGltfTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 손 쥐기 A 단계 테스트(2026-11-07, Docs/Hand_Grasp_Design.md 6) ---------
+    # 손 뼈대 표 · CPU 스키닝 수식 · 시험 장갑 glb 읽기 · 캐시 7 왕복 · 손 자세(굽힘 방향 · 축 규약 경고)를 화면 없이 검산합니다.
+    # 시험 장갑을 저장소의 assets/models/hands 에서 읽도록 소스 폴더를 가상 파일 시스템 뿌리로 씁니다.
+    add_executable(HarukaHandTest
+        tests/HandTest.cpp
+        src/assets/GltfLoader.cpp
+        src/assets/GassetCache.cpp
+        src/assets/Skin.cpp
+        src/components/SkinnedMeshComponent.cpp
+        src/components/HandPoseComponent.cpp
+        src/components/CameraComponent.cpp
+        src/input/HInputSystem.cpp
+        src/core/World.cpp
+        src/core/Actor.cpp
+        src/core/Component.cpp
+        src/core/HLog.cpp
+    )
+    target_link_libraries(HarukaHandTest PRIVATE HarukaVfs tinygltf glm::glm)
+    target_include_directories(HarukaHandTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_compile_definitions(HarukaHandTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(HarukaHandTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaHandTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # 모든 시험 실행 파일이 엔진 · 도구와 같은 코드 페이지(UTF-8)에서 돕니다(DEF-121, 2026-10-31 검토). 예를 들어 소리 시험은
     # 임시 폴더의 경로를 std::string 으로 넘기는데, 매니페스트가 없으면 CP949 바이트가 되어 가상 파일 시스템이 찾지 못합니다.
     set(HARUKA_TESTS HarukaPakTest HarukaGltfTest HarukaGeometryTest HarukaActorTest HarukaCommandTest HarukaActorUndoTest
         HarukaLogTest HarukaAudioTest HarukaSlateTest HarukaPhysicsTest HarukaStereoTest HarukaInputTest HarukaBatchTest
         HarukaRenderExtTest HarukaSceneTest HarukaLightTest HarukaAssetCacheTest HarukaSceneDocTest HarukaEditCmdTest
-        HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest)
+        HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest)
     if(WIN32)
         list(APPEND HARUKA_TESTS HarukaVkImportTest)
     endif()
@@ -996,6 +1027,7 @@ if(NOT ANDROID)
     add_test(NAME barrier_compat       COMMAND HarukaBarrierTest)
     add_test(NAME memory_types         COMMAND HarukaMemoryTest)
     add_test(NAME headless_render      COMMAND HarukaHeadlessTest)
+add_test(NAME hand_skinning        COMMAND HarukaHandTest)
     if(WIN32)
         add_test(NAME vulkan_imports   COMMAND HarukaVkImportTest $<TARGET_FILE:HarukaEngine> $<TARGET_FILE:HarukaGame>
                                                ${Vulkan_INCLUDE_DIRS}/vulkan/vulkan_core.h)
