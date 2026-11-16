@@ -205,7 +205,7 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
         }
         lc->innerConeAngle  = d.lightSpotInner;
         lc->outerConeAngle  = d.lightSpotOuter;
-        lc->direction       = d.lightDir;
+        lc->foldLegacyDirection(d.lightDir);
         lc->useTemperature  = (d.lightUseTemp != 0);
         lc->temperatureK    = d.lightTempK;
         lc->castShadows     = (d.lightCastShadows != 0);

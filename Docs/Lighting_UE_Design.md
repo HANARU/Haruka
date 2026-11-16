@@ -45,7 +45,7 @@ Haruka 라이팅의 성격은 **All-Movable · 무단위(Unitless) · 하드튜�
 ### 라이트 타입
 | UE 용어 | 정의 | Haruka 현재 | 채택 |
 |---|---|---|---|
-| Directional Light | 무한 원거리 평행광(태양). 방향만, 위치 무관 | 있음(Sun), worldDirection() | now |
+| Directional Light | 무한 원거리 평행광(태양). 방향만, 위치 무관 | 있음(Sun), emitDirection() (-Z 회전) | now |
 | Point Light | 한 점에서 전방위, 반경 내 역제곱 감쇠 | 있음(2026-10-04 부터 역제곱 + 창 함수) | now |
 | Spot Light | Point를 원뿔로 제한 | 있음 | now |
 | Rect Light (Area) | 사각 면광원, LTC 해석 적분 | 없음 | advanced |
@@ -131,7 +131,7 @@ LightComponent (UE 어휘):
   shadowBiasConstant/Slope  float = 0.0004 / 1.75  // 명칭화
   lightChannels   uint = 0x1       // 신규 비트마스크
   sourceRadius    float = 0        // 예약(소프트섀도)
-  worldDirection()                 // 유지
+  emitDirection()                  // 액터 월드 회전 × (0, 0, -1)
 ```
 
 **제거·이관**:
@@ -199,11 +199,12 @@ LightComponent (UE 어휘):
 3. ✅ **결정: 완전 제거(2026-08-27).** LightComponent 에서 `ambient` 삭제. 직렬화는 옛 파일 호환을 위해
    토큰 자리만 예약 슬롯으로 유지. Sky Light iblIntensity 이관은 SkyLightComponent 신설 시점으로 미룸.
 4. **라이트 방향 표현**: 현 로컬 direction+회전 혼합 유지 vs UE식 -Z(forward) 규약으로 흡수(기존 값 재해석).
-   ✅ **결정(2026-10-15): 회전에서만 유도, 축은 -Z.** `direction` 필드를 없애고 액터 회전의 -Z 를 빛이 나아가는 방향으로
-   씁니다(카메라 `forward()` · OpenXR · Godot 과 같은 축. UE 는 +X, Unity 는 +Z 이지만 모두 트랜스폼 회전만 씀). 옛 씬은 읽을 때
-   `direction` 을 액터 회전에 접어 넣어 화면이 바뀌지 않게 합니다. 시점은 다음 라이팅 작업 때입니다. 지금 코드는 아직 혼합
-   방식입니다(월드 방향 = 액터 회전 × 로컬 `direction`, `worldDirection`). [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md)
-   D6 에서 "`direction` 유지"를 정하면서 이 항목을 따로 남겼던 것입니다.
+   ✅ **결정(2026-10-15) · 구현 완료(2026-11-15, light_dir-4):** `direction` 필드와 `worldDirection()` 을 없애고
+   액터 월드 회전 × `(0, 0, -1)` 을 발광 방향(`emitDirection()`)으로 통일했습니다(카메라 `forward()` · OpenXR · Godot 과
+   같은 축). 추가 결정(2026-11-15): (1) 옛 씬의 `direction` 이 0 벡터 · NaN · 무한이면 예전 대체값(Directional `+Y`,
+   Spot `-Y`)으로 접고 `LogScene` 경고를 남김, (2) 저장할 때 `direction` 키는 쓰지 않고 옛 `COMPONENT` · `LIGHT` 줄은
+   읽을 때 액터 로컬 회전에 오른쪽 곱으로 접음(`Point` 는 접지 않음), (3) 기본 생성 라이트의 방향은 항등 회전 `-Z` 이며
+   owner 가 없으면 `(0, 0, -1)`. 검산은 `HarukaSceneTest` 9 ~ 13절에 있습니다.
 5. ✅ **결정: enum 자체를 추가 안 함(2026-08-27).** 유효값이 Movable 하나뿐이라 필드로 만들면 방금 제거한
    `ambient` 처럼 또 다른 사문 필드가 됨. 문서(§3 Mobility 표)로만 남김.
 6. **CSM 캐스케이드 수**(Quest 예산): 2 vs 3. **(2026-10-15 현재 열림)** CSM 을 구현할 때 Quest 예산과 함께 정합니다.

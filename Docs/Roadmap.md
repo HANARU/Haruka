@@ -113,8 +113,10 @@ UE식 용어 채택, **"명칭만" 결정**(내부 상대값, 물리 단위·노
   슬롯 전달 + `Lo*=shadow` 범위 축소, 라이트 프러스텀 섀도 목록 + 카메라 우선 2단계 행 배정). 적대적 검증 통과.
 - **다음 — Phase 2 잔여**: **Light Channels**(per-object 채널을 셰이더까지 배선 = 중간 규모: 파이프라인
   레이아웃·푸시 상수·프리미티브 필드·직렬화·UI). GpuLight 여유 슬롯(spotParams.zw)은 라이트 쪽만 있음.
-- **라이트 방향 표현(2026-10-15 사용자 결정)**: `direction` 필드를 없애고 액터 회전의 -Z 를 빛의 방향으로 씁니다(카메라 ·
-  OpenXR · Godot 과 같은 축). 옛 씬은 읽을 때 `direction` 을 회전에 접어 넣어 화면을 유지합니다. 다음 라이팅 작업 때 합니다.
+- ✅ **라이트 방향 표현(2026-10-15 사용자 결정, 2026-11-15 구현)**: `direction` 필드 · `worldDirection()` 을 없애고 액터 월드
+  회전 × (0, 0, -1) 을 발광 방향으로 씁니다(카메라 · OpenXR · Godot 과 같은 축). 옛 씬의 `direction` 키와 옛 `LIGHT` 줄은 읽을 때
+  액터 로컬 회전에 접어 화면을 유지하고, 저장할 때는 `direction` 키를 쓰지 않습니다(Point 는 접지 않음, 0 · NaN · 무한은 예전
+  대체값으로 접고 경고). 새 라이트는 회전이 항등이면 -Z 로 비춥니다. 2026-11-16 에디터 확인 통과. 정본 Lighting_UE_Design.md 6절 4번.
 - soon: 노출 배선, CSM 2캐스케이드, Contact Shadows, Reflection Capture, Height Fog. skip(예약어): Static/
   Stationary·Lightmass·Lumen·VSM·Distance Field·Auto Exposure.
 

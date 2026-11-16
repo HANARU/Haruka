@@ -79,18 +79,10 @@ std::vector<PropDesc> LightComponent::buildProps() {
     return props;
 }
 
-// 로컬 direction 에 액터 월드 회전을 적용해 월드 방향을 구합니다. 회전이 항등이면
-// 로컬 값 그대로라 기본 씬 조명이 유지되고, 회전 기즈모로 라이트를 돌리면 방향이 따라옵니다.
-glm::vec3 LightComponent::worldDirection() const {
-    glm::vec3 local = glm::dot(direction, direction) > 1e-8f
-                    ? glm::normalize(direction) : glm::vec3(0.f, -1.f, 0.f);
-    if (!owner) return local;
-    return glm::normalize(owner->worldRotation() * local);
-}
-
 glm::vec3 LightComponent::emitDirection() const {
-    const glm::vec3 w = worldDirection();   // 다시 정규화하지 않습니다(부호 반전은 비트까지 정확)
-    return lightType == LightType::Directional ? -w : w;
+    constexpr glm::vec3 kLocalForward{ 0.f, 0.f, -1.f };
+    if (!owner) return kLocalForward;
+    return glm::normalize(owner->worldRotation() * kLocalForward);
 }
 
 static bool finite3(const glm::vec3& v) {
@@ -114,6 +106,20 @@ std::optional<glm::vec3> LightComponent::legacyEmitDirection(LightType t, const 
     if (!finite3(d) || !(glm::dot(d, d) > 1e-8f)) return std::nullopt;
     const glm::vec3 n = glm::normalize(d);
     return t == LightType::Directional ? -n : n;
+}
+
+void LightComponent::foldLegacyDirection(const glm::vec3& d) {
+    if (!owner || lightType == LightType::Point) return;
+    std::optional<glm::vec3> e = legacyEmitDirection(lightType, d);
+    if (!e) {
+        HLOG(LogScene, Warning) << "Light on '" << owner->name
+            << "' has invalid legacy direction (" << d.x << ", " << d.y << ", " << d.z
+            << "); using fallback";
+        e = (lightType == LightType::Directional)
+            ? glm::vec3(0.f, 1.f, 0.f)
+            : glm::vec3(0.f, -1.f, 0.f);
+    }
+    owner->setLocalRotation(owner->transform().rotation() * rotationForEmitDirection(*e));
 }
 
 glm::vec3 LightComponent::effectiveColor() const {
@@ -146,7 +152,6 @@ void LightComponent::writeFields(ComponentFieldWriter& w) const {
     w.f ("attenuationRadius", attenuationRadius);
     w.f ("innerConeAngle",    innerConeAngle);
     w.f ("outerConeAngle",    outerConeAngle);
-    w.v3("direction",         direction);
     w.b ("useTemperature",    useTemperature);
     w.f ("temperatureK",      temperatureK);
     w.b ("castShadows",       castShadows);
@@ -160,7 +165,12 @@ bool LightComponent::readField(const std::string& key, const std::string& value)
     else if (key == "attenuationRadius") ok = fieldparse::toFloat(value, attenuationRadius);
     else if (key == "innerConeAngle")    ok = fieldparse::toFloat(value, innerConeAngle);
     else if (key == "outerConeAngle")    ok = fieldparse::toFloat(value, outerConeAngle);
-    else if (key == "direction")         ok = fieldparse::toVec3 (value, direction);
+    else if (key == "direction") {
+        glm::vec3 d{};
+        ok = fieldparse::toVec3(value, d);
+        if (ok) pendingLegacyDirection_ = d;
+        else    pendingLegacyDirection_.reset();
+    }
     else if (key == "useTemperature")    ok = fieldparse::toBool (value, useTemperature);
     else if (key == "temperatureK")      ok = fieldparse::toFloat(value, temperatureK);
     else if (key == "castShadows")       ok = fieldparse::toBool (value, castShadows);
@@ -169,9 +179,15 @@ bool LightComponent::readField(const std::string& key, const std::string& value)
     return true;
 }
 
-// 반경은 0 보다 커야 합니다(DEF-35). Point · Spot 에서 0 이하(또는 NaN)가 들어오면 최솟값으로 고치고
-// 알립니다. Directional 은 반경을 쓰지 않으므로 조용히 고칩니다.
+// 옛 direction 이 있으면 액터 로컬 회전에 접고, 반경은 0 보다 커야 합니다(DEF-35).
+// Point · Spot 에서 0 이하(또는 NaN)가 들어오면 최솟값으로 고치고 알립니다.
+// Directional 은 반경을 쓰지 않으므로 조용히 고칩니다.
 void LightComponent::onFieldsLoaded(const ComponentLoadContext& /*ctx*/) {
+    if (pendingLegacyDirection_) {
+        const glm::vec3 d = *pendingLegacyDirection_;
+        pendingLegacyDirection_.reset();
+        foldLegacyDirection(d);
+    }
     if (attenuationRadius >= kMinAttenuationRadius) return;
     if (lightType != LightType::Directional)
         HLOG(LogScene, Warning) << "Light on '" << (owner ? owner->name : std::string("?"))

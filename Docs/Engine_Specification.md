@@ -123,7 +123,7 @@
 | 컴포넌트 명시 등록 | 2026-10-14 | 전역 객체 자동 등록 대신 시작할 때 명시적으로 등록합니다(정적 라이브러리에서 링커가 버릴 수 있음) | 같은 문서 "DEF-22" |
 | 자동 인스턴싱만 | 2026-10-14 | 명시적 인스턴싱 컴포넌트는 파편장 착수 때 만듭니다 | 같은 문서 "DEF-16" |
 | 3D UI 는 render-to-texture | 2026-08-26 (2026-10-15 재확인) | `UIPanelComponent` 와 기존 `HWidget` 트리, HSlate 오프스크린 렌더. 미구현 | [Spatial_Representation_Design.md](Spatial_Representation_Design.md) 10절 |
-| 라이트 방향은 회전에서만 | 2026-10-15 | `direction` 필드를 없애고 액터 회전의 -Z 를 씁니다. 다음 라이팅 작업 때 구현 | [Lighting_UE_Design.md](Lighting_UE_Design.md) 6절 4번 |
+| 라이트 방향은 회전에서만 | 2026-10-15 | `direction` 필드를 없애고 액터 회전의 -Z 를 씁니다. 2026-11-15 구현(옛 씬은 읽을 때 회전에 접음) | [Lighting_UE_Design.md](Lighting_UE_Design.md) 6절 4번 |
 | VR 은 Play 동안만 | 2026-10-15 | `--xr` 은 OpenXR 를 준비만 하고, 세션은 Play 때 만들고 Stop 때 끝냅니다(UE VR Preview · Unity 와 같음) | [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) "헤드셋 확인 결과" |
 | 할당자는 이식 때 조사 | 2026-10-15 | VMA 대 자체 할당자는 Quest 이식 착수 때 정합니다. 2026-10-19 GPU 힙 조사에서 판단 근거(메모리 종류를 여럿 다뤄야 함)가 더해졌습니다 | [Roadmap.md](Roadmap.md), [Packaging_Design.md](Packaging_Design.md) 2절 |
 | 런타임 분리는 빌드 타깃 | 2026-10-19 | 에디터를 뺀 엔진을 `HarukaRuntime` 정적 라이브러리로 묶고 에디터 · 게임 실행 파일이 각각 링크합니다(UE 의 Game · Editor 타깃, O3DE 와 같음). 엔진은 앞단 인터페이스로만 에디터 · 게임을 부릅니다 | [Packaging_Design.md](Packaging_Design.md) 3 · 4-1절 |
@@ -351,7 +351,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 | 컴포넌트 | 주요 값 |
 |---|---|
-| Light | type · color · intensity · attenuationRadius · inner/outerConeAngle · direction · useTemperature · temperatureK · castShadows |
+| Light | type · color · intensity · attenuationRadius · inner/outerConeAngle · useTemperature · temperatureK · castShadows. 방향은 액터 회전(-Z), 옛 `direction` 키는 읽을 때 회전에 접음 |
 | Camera | fovY · zNear · zFar · primary. 방향은 액터 회전 |
 | StaticMesh | visible · transparent · 절차 도형(prim · primMaterial) 또는 모델(model · meshIndex) |
 | Audio | file · volume · loop · autoPlay · attenuation(공간화 · 감쇠 모델 · 최소/최대 거리 · 롤오프) |

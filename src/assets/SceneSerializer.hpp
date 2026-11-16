@@ -59,7 +59,7 @@ public:
         int         lightType      = 0;      // 0=Directional 1=Point 2=Spot
         float       lightRange     = 10.f;   // → attenuationRadius
         float       lightSpotInner = 15.f, lightSpotOuter = 30.f;   // → inner/outerConeAngle
-        glm::vec3   lightDir{ 1.f, 2.f, 1.5f };   // 로컬 방향(worldDirection 이 정규화)
+        glm::vec3   lightDir{ 1.f, 2.f, 1.5f };   // 옛 형식, 읽을 때 액터 회전에 접음
         // Phase 2 색온도. 다시 trailing 확장이라 옛 파일엔 없어 기본값(꺼짐·6500K)이 유지됩니다.
         int         lightUseTemp = 0;
         float       lightTempK   = 6500.f;

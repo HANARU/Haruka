@@ -265,25 +265,25 @@ int main() {
     {
         Actor a;
         auto* l = a.addComponent<LightComponent>();
-        l->lightType = LightType::Directional; l->direction = { 0.f, 1.f, 0.f };
-        check(near3(l->emitDirection(), { 0.f, -1.f, 0.f }), "Directional(태양 쪽 +Y) 의 발광 방향은 -Y");
-        l->lightType = LightType::Spot; l->direction = { 0.f, -1.f, 0.f };
-        check(near3(l->emitDirection(), { 0.f, -1.f, 0.f }), "Spot(조사 방향 -Y) 의 발광 방향은 -Y");
+        l->lightType = LightType::Directional;
+        check(near3(l->emitDirection(), { 0.f, 0.f, -1.f }), "항등 회전 Directional 의 발광 방향은 -Z");
+        l->lightType = LightType::Spot;
+        check(near3(l->emitDirection(), { 0.f, 0.f, -1.f }), "항등 회전 Spot 의 발광 방향은 -Z");
 
         a.setLocalRotation(glm::angleAxis(1.5707964f, glm::vec3(0.f, 1.f, 0.f)));
-        l->lightType = LightType::Directional; l->direction = { 0.f, 0.f, 1.f };
+        l->lightType = LightType::Directional;
         const glm::vec3 dEmit = l->emitDirection();
-        l->lightType = LightType::Spot; l->direction = { 0.f, 0.f, -1.f };
+        l->lightType = LightType::Spot;
         const glm::vec3 sEmit = l->emitDirection();
         auto near3e = [](glm::vec3 p, glm::vec3 q) { return glm::length(p - q) < 1e-5f; };
-        check(near3e(dEmit, { -1.f, 0.f, 0.f }) && near3e(sEmit, { -1.f, 0.f, 0.f }), "Y 축 90° 회전: 둘 다 -X(회전의 -Z 와 같은 축)");
+        check(near3e(dEmit, { -1.f, 0.f, 0.f }) && near3e(sEmit, { -1.f, 0.f, 0.f }), "Y 축 90° 회전: 둘 다 -X(회전의 -Z)");
 
-        l->lightType = LightType::Directional; l->direction = { 1.f, 2.f, 1.5f };
-        check(l->emitDirection() == -l->worldDirection(), "Directional 은 -worldDirection() 과 비트까지 같음(화면 바이트 동일의 근거)");
-
+        const glm::vec3 target = glm::normalize(glm::vec3(0.4f, -0.7f, -0.6f));
+        a.setLocalRotation(LightComponent::rotationForEmitDirection(target));
         LightComponent free;
-        free.lightType = LightType::Directional; free.direction = { 0.f, 0.f, 0.f };
-        check(near3(free.emitDirection(), { 0.f, 1.f, 0.f }), "owner 없음 · direction 0 이면 예전 대체값(-Y 의 반대) 유지");
+        free.lightType = LightType::Directional;
+        check(near3(l->emitDirection(), target) && near3(free.emitDirection(), { 0.f, 0.f, -1.f }),
+              "rotationForEmitDirection(e) 회전이면 e, owner 없음이면 (0, 0, -1)");
     }
 
     std::printf("\n== 10. 옛 direction 접기 회전(연결 전 검산) ==\n");
@@ -333,8 +333,8 @@ int main() {
         const glm::quat qn = LightComponent::rotationForEmitDirection({ nan, 1.f, 0.f });
         check(qz == glm::quat(1.f, 0.f, 0.f, 0.f) && qn == glm::quat(1.f, 0.f, 0.f, 0.f), "(c) 0 · NaN 의 회전은 항등");
 
-        // (d) 지금 렌더 경로 그대로: 옛 액터(회전 R, direction d)와 접은 액터(회전 R x 접기, 정규값 direction)가
-        //     부모 회전과 상관없이 같은 월드 발광 방향을 냄
+        // (d) 회전 접기 검산: 옛 의미(Directional = -(W·normalize(d)), Spot = +(W·normalize(d)), W = 부모 × 로컬)와
+        //     로컬 회전을 R × rotationForEmitDirection(legacyEmitDirection(t, d)) 로 둔 액터의 발광 방향이 같음
         const LightType types[] = { LightType::Directional, LightType::Spot };
         const glm::vec3 ds[] = { { 1.f, 2.f, 1.5f }, { 0.f, 0.f, -1.f }, { 0.f, 0.f, 1.f }, { 0.3f, -0.9f, 0.2f }, { 0.f, 1.f, 0.f } };
         const glm::quat ps[] = { glm::quat(1.f, 0.f, 0.f, 0.f), glm::angleAxis(0.7f, glm::normalize(glm::vec3(1.f, 1.f, 0.f))) };
@@ -344,24 +344,20 @@ int main() {
             for (const glm::vec3& d : ds)
                 for (const glm::quat& P : ps)
                     for (const glm::quat& R : rs) {
-                        Actor parentA, A, parentB, B;
-                        A.attachTo(&parentA);
+                        Actor parentB, B;
                         B.attachTo(&parentB);
-                        parentA.setLocalRotation(P);
                         parentB.setLocalRotation(P);
-                        A.setLocalRotation(R);
-                        auto* la = A.addComponent<LightComponent>();
-                        la->lightType = t; la->direction = d;
                         const glm::vec3 e = *LightComponent::legacyEmitDirection(t, d);
                         B.setLocalRotation(R * LightComponent::rotationForEmitDirection(e));
                         auto* lb = B.addComponent<LightComponent>();
                         lb->lightType = t;
-                        lb->direction = (t == LightType::Directional) ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(0.f, 0.f, -1.f);
+                        const glm::vec3 wOld = (P * R) * glm::normalize(d);
+                        const glm::vec3 expect = (t == LightType::Directional) ? -wOld : wOld;
                         ++combos;
-                        if (!near3(la->emitDirection(), lb->emitDirection())) ++endBad;
+                        if (!near3(lb->emitDirection(), expect)) ++endBad;
                     }
         check(combos == 40 && endBad == 0,
-              "(d) 40개 조합(2 종류 x 5 d x 2 부모 x 2 로컬)에서 접은 액터와 옛 액터의 발광 방향이 같음(1e-6)");
+              "(d) 40개 조합(2 종류 x 5 d x 2 부모 x 2 로컬)에서 접은 액터와 옛 의미의 발광 방향이 같음(1e-6)");
     }
 
     std::printf("\n== 11. 옛 direction 불러오기 결과 고정(-Z 통일 전후 공통) ==\n");
@@ -446,41 +442,101 @@ int main() {
 
     std::printf("\n== 12. 스팟 발광 방향은 단위 길이(pbr.frag 가 spotDir 을 다시 정규화하지 않음) ==\n");
     {
-        // light_dir-4 가 direction 필드를 없애면 (a) · (c) · (d) 는 회전으로 바꿔 쓰되, 회전 사슬 아래 길이 1 검사는
-        // 남깁니다(-Z 구현이 normalize 를 빼면 쿼터니언 오차로 길이가 1 에서 벗어날 수 있음).
         auto unit = [](const glm::vec3& v) { return std::fabs(glm::length(v) - 1.f) < 1e-5f; };
 
         LightComponent lone;
         lone.lightType = LightType::Spot;
-        lone.direction = { 0.f, -3.f, 0.f };
-        check(near3(lone.emitDirection(), { 0.f, -1.f, 0.f }), "(a) owner 없음 · 길이 3 인 direction 도 단위 발광 방향");
-        lone.direction = { 0.f, 0.f, 0.f };
-        check(unit(lone.emitDirection()), "(b) owner 없음 · direction 0 이어도 발광 방향은 단위 길이");
+        check(near3(lone.emitDirection(), { 0.f, 0.f, -1.f }) && unit(lone.emitDirection()),
+              "(a) owner 없음(Spot): (0, 0, -1) 이고 단위 길이");
+        lone.lightType = LightType::Directional;
+        check(unit(lone.emitDirection()), "(b) owner 없음(Directional): 발광 방향은 단위 길이");
 
         Actor a;
         auto* l = a.addComponent<LightComponent>();
         l->lightType = LightType::Spot;
-        l->direction = { 1.f, 2.f, 1.5f };
         a.setLocalRotation(glm::angleAxis(glm::radians(37.f), glm::normalize(glm::vec3(1.f, 0.3f, 0.f))));
-        check(unit(l->emitDirection()), "(c) 회전한 액터 · 정규화하지 않은 direction(1, 2, 1.5): 길이 1");
+        const bool u1 = unit(l->emitDirection());
+        a.setLocalRotation(glm::quat(1.01f, 0.05f, -0.03f, 0.02f));
+        const bool u2 = unit(l->emitDirection());
+        check(u1 && u2, "(c) 회전한 액터 · 비정규 쿼터니언(Spot): 길이 1");
 
         Actor parent, child;
         parent.setLocalRotation(glm::angleAxis(glm::radians(120.f), glm::normalize(glm::vec3(0.2f, 1.f, -0.4f))));
         child.attachTo(&parent);
-        child.setLocalRotation(glm::angleAxis(glm::radians(-63.f), glm::normalize(glm::vec3(0.f, 0.5f, 1.f))));
         auto* lc = child.addComponent<LightComponent>();
         lc->lightType = LightType::Spot;
-        const float sizes[] = { 0.01f, 1.f, 100.f };
+        const float rolls[] = { -45.f, 0.f, 70.f };
         int bad = 0, n = 0;
         for (int yi = 0; yi < 12; ++yi)
             for (int pi = 0; pi < 6; ++pi)
-                for (float s : sizes) {
+                for (float rDeg : rolls) {
                     const float y = glm::radians(30.f * (float)yi), p = glm::radians(-75.f + 30.f * (float)pi);
-                    lc->direction = s * glm::vec3(std::cos(p) * std::sin(y), std::sin(p), std::cos(p) * std::cos(y));
+                    const glm::quat qRoll = glm::angleAxis(glm::radians(rDeg), glm::vec3(0.f, 0.f, -1.f));
+                    child.setLocalRotation(CameraComponent::yawPitchRotation(y, p) * qRoll);
                     ++n;
                     if (!unit(lc->emitDirection())) ++bad;
                 }
-        check(n == 216 && bad == 0, "(d) 부모 · 자식 회전 아래 216개 direction(크기 0.01 · 1 · 100): 모두 길이 1(1e-5)");
+        check(n == 216 && bad == 0, "(d) 부모 · 자식 회전 아래 216개 회전(12 요 x 6 피치 x 3 롤): 모두 길이 1(1e-5)");
+    }
+
+    std::printf("\n== 13. -Z 통일 규약 및 결정 1 ~ 3 검증 ==\n");
+    {
+        // 결정 1: direction 이 0 벡터 · NaN · 무한이면 예전 대체값으로 접음(Directional +Y, Spot -Y)
+        const std::string badDirs[] = { "0 0 0", "nan 0 1", "inf 0 0" };
+        int d1Bad = 0;
+        for (const std::string& bd : badDirs) {
+            Actor da, sa;
+            ComponentSerializer::spawn(da, parse("COMPONENT:LightComponent\ntype=directional\ndirection=" + bd + "\nEND_COMPONENT\n"), ctx);
+            ComponentSerializer::spawn(sa, parse("COMPONENT:LightComponent\ntype=spot\ndirection=" + bd + "\nEND_COMPONENT\n"), ctx);
+            auto* dl = da.getComponent<LightComponent>();
+            auto* sl = sa.getComponent<LightComponent>();
+            if (!dl || !near3(dl->emitDirection(), { 0.f, 1.f, 0.f })) ++d1Bad;
+            if (!sl || !near3(sl->emitDirection(), { 0.f, -1.f, 0.f })) ++d1Bad;
+        }
+        check(d1Bad == 0, "(a) 결정 1: 0 벡터 · NaN · 무한 direction 은 Directional +Y, Spot -Y 로 접힘");
+
+        // 결정 2: 저장 시 direction 키를 쓰지 않음
+        Actor wa;
+        auto* wl = wa.addComponent<LightComponent>();
+        wl->lightType = LightType::Directional;
+        const std::string dText = writeOf(wa);
+        wl->lightType = LightType::Spot;
+        const std::string sText = writeOf(wa);
+        check(dText.find("direction=") == std::string::npos && sText.find("direction=") == std::string::npos,
+              "(b) 결정 2: writeFields 결과에 direction 키가 없음");
+
+        // direction 키가 없는 새 형식 블록을 읽으면 액터 회전이 정확히 그대로
+        const glm::quat R = CameraComponent::yawPitchRotation(-2.5f, 0.4f);
+        Actor clean;
+        clean.setLocalRotation(R);
+        ComponentSerializer::spawn(clean, parse("COMPONENT:LightComponent\ntype=spot\nintensity=2\nEND_COMPONENT\n"), ctx);
+        check(clean.transform().rotation() == R, "(c) direction 키가 없는 새 형식 블록을 읽으면 액터 회전이 정확히 그대로");
+
+        // 옛 LIGHT 줄 경로(foldLegacyDirection): 지정 방향과 짧은 줄 기본값 (1, 2, 1.5), Point 는 불변
+        const glm::vec3 dCustom{ 0.3f, -0.9f, 0.2f };
+        const glm::vec3 dShort{ 1.f, 2.f, 1.5f };
+        Actor ld1, ls1, ld2, ls2, lp0;
+        ld1.setLocalRotation(R); ls1.setLocalRotation(R);
+        ld2.setLocalRotation(R); ls2.setLocalRotation(R);
+        lp0.setLocalRotation(R);
+        auto* c_d1 = ld1.addComponent<LightComponent>(); c_d1->lightType = LightType::Directional; c_d1->foldLegacyDirection(dCustom);
+        auto* c_s1 = ls1.addComponent<LightComponent>(); c_s1->lightType = LightType::Spot;        c_s1->foldLegacyDirection(dCustom);
+        auto* c_d2 = ld2.addComponent<LightComponent>(); c_d2->lightType = LightType::Directional; c_d2->foldLegacyDirection(dShort);
+        auto* c_s2 = ls2.addComponent<LightComponent>(); c_s2->lightType = LightType::Spot;        c_s2->foldLegacyDirection(dShort);
+        auto* c_p0 = lp0.addComponent<LightComponent>(); c_p0->lightType = LightType::Point;       c_p0->foldLegacyDirection(dCustom);
+        check(near3(c_d1->emitDirection(), -(R * glm::normalize(dCustom))) &&
+              near3(c_s1->emitDirection(),  (R * glm::normalize(dCustom))) &&
+              near3(c_d2->emitDirection(), -(R * glm::normalize(dShort)))  &&
+              near3(c_s2->emitDirection(),  (R * glm::normalize(dShort)))  &&
+              lp0.transform().rotation() == R,
+              "(d) 옛 LIGHT 줄 접기(지정 방향 및 기본값 (1, 2, 1.5))가 옛 의미와 같고 Point 는 회전 불변");
+
+        // 결정 3: 새로 만든 라이트를 항등 회전 액터에 붙이면 발광 방향이 (0, 0, -1)
+        Actor def;
+        auto* dl = def.addComponent<LightComponent>();
+        check(def.transform().rotation() == glm::quat(1.f, 0.f, 0.f, 0.f) &&
+              near3(dl->emitDirection(), { 0.f, 0.f, -1.f }),
+              "(e) 결정 3: 기본 생성한 라이트를 항등 회전 액터에 붙이면 회전 불변 · 발광 방향 (0, 0, -1)");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

@@ -18,11 +18,8 @@ enum class LightType : uint32_t {
 class LightComponent : public Component {
 public:
     LightType lightType    = LightType::Directional;
-    // 라이트의 **로컬** 방향(방향광=태양 쪽, 스팟=조사 방향). 실제 월드 방향은
-    // worldDirection() 이 액터 회전을 곱해 구합니다(유니티: 라이트 방향 = Transform).
-    // 회전이 없으면(기본 Sun) 월드 방향 == 이 로컬 값이라 기존 씬 조명이 그대로 유지됩니다.
-    // Sun 을 회전 기즈모로 돌리면 그림자·조명이 따라 바뀝니다. 소비처는 emitDirection() 하나뿐입니다.
-    glm::vec3 direction    = glm::normalize(glm::vec3(1.0f, 2.0f, 1.5f));
+    // 발광 방향은 액터 월드 회전 × (0, 0, -1) 로만 정합니다(유니티: 라이트 방향 = Transform).
+    // 회전이 항등이면 -Z 로 비춥니다.
     glm::vec3 color        = {1.0f, 1.0f, 1.0f};   // 선형 RGB 틴트
     // 0.85 이던 값. 그때 하늘의 등가 조도는 pi * 0.6017 = 1.890 이어서 하늘이
     // 태양보다 2.2 배 밝았다. 물리적으로 흐린 날이고, 흐린 날에는 정의상 음영이
@@ -59,23 +56,20 @@ public:
 
     bool editorIcon(glm::vec4& c) const override { c = {1.f, 0.85f, 0.2f, 1.f}; return true; }
 
-    // 옛 혼합 방식의 원값입니다(Directional = 태양 쪽, Spot = 비추는 방향). 새 코드는 emitDirection() 을 쓰십시오.
-    // 월드 공간 라이트 방향 = 액터 회전 × 로컬 direction. owner 가 없으면 로컬 값 그대로.
-    // 정의는 LightComponent.cpp (Actor 완전정의가 필요하므로). 항상 단위 길이를 돌려줍니다.
-    // pbr.frag 가 spotDir 을 다시 정규화하지 않으므로 이 보장을 깨면 안 됩니다.
-    glm::vec3 worldDirection() const;
-    // 빛이 나아가는 월드 방향(발광 방향, 단위 벡터)입니다. 렌더러 · 에디터 · 앞으로의 하늘 연동은 이 함수만 읽습니다.
-    // 저장 형식(direction)이 그대로라 지금은 Directional 은 -worldDirection(), Spot 은 +worldDirection() 입니다.
-    // Point 에는 뜻이 없습니다. -Z 통일 뒤에는 구현만 액터 월드 회전 x (0,0,-1) 로 바뀌고 호출부는 그대로입니다.
+    // 빛이 나아가는 월드 방향(발광 방향, 단위 벡터)입니다. 액터 월드 회전 × (0, 0, -1) 이며
+    // owner 가 없으면 (0, 0, -1) 을 돌려줍니다. pbr.frag 가 spotDir 을 다시 정규화하지 않으므로
+    // 항상 단위 길이를 보장합니다. Point 에서도 같은 값을 돌려주되 뜻은 없습니다.
     glm::vec3 emitDirection() const;
 
-    // ── 옛 direction 접기(2026-10-15 결정: 방향은 회전에서만, 축 -Z) ──────────────────────────
-    // 읽기 경로 연결은 light_dir-4(사용자 결정 뒤)이고, 지금 호출부는 시험(HarukaSceneTest 10절)뿐입니다.
+    // ── 옛 direction 접기(방향은 회전에서만, 축 -Z) ─────────────────────────────────────────
     // 로컬 -Z 를 e 로 보내는 롤 0 회전(요 · 피치만)입니다. e 가 0 · NaN · 무한이면 항등 회전을 돌려줍니다.
     static glm::quat rotationForEmitDirection(const glm::vec3& e);
     // 옛 direction 값 d 가 뜻하던 발광 방향입니다. Directional 은 -normalize(d), Spot 은 +normalize(d) 입니다.
-    // Point 와, 0 · NaN · 무한인 d 는 nullopt 입니다. 퇴화한 값을 어떻게 처리할지는 호출자가 정합니다(사용자 결정 7).
+    // Point 와, 0 · NaN · 무한인 d 는 nullopt 입니다.
     static std::optional<glm::vec3> legacyEmitDirection(LightType t, const glm::vec3& d);
+    // 옛 direction 값 d 를 액터의 로컬 회전에 오른쪽으로 접어 넣습니다(lightType 설정 뒤 호출).
+    // Point 이거나 owner 가 없으면 아무것도 하지 않으며, 0 · NaN · 무한은 예전 대체값으로 접고 경고를 남깁니다.
+    void foldLegacyDirection(const glm::vec3& d);
     // color 에 색온도 틴트를 접은 유효 색(intensity 는 곱하지 않음). useTemperature 가
     // 꺼져 있으면 color 그대로라 렌더가 불변입니다. 정의는 LightComponent.cpp.
     glm::vec3 effectiveColor() const;
@@ -86,5 +80,8 @@ public:
     // 직렬화 (DEF-22). 이름은 멤버 이름을 따릅니다.
     void writeFields(ComponentFieldWriter& w) const override;
     bool readField(const std::string& key, const std::string& value) override;
-    void onFieldsLoaded(const ComponentLoadContext& ctx) override;   // 반경 최솟값(DEF-35)
+    void onFieldsLoaded(const ComponentLoadContext& ctx) override;   // 옛 direction 접기 + 반경 최솟값(DEF-35)
+
+private:
+    std::optional<glm::vec3> pendingLegacyDirection_;
 };
