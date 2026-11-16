@@ -16,6 +16,7 @@
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <algorithm>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -31,6 +32,7 @@ class IWindow;
 class Actor;
 class CameraComponent;
 class AudioSystem;
+enum class EHrtfMode : uint8_t;   // audio/AudioSystem.hpp
 
 // 에디터 실행 파일(HarukaEngine)의 엔진 앞단입니다(2026-10-19, core/IEngineFrontend.hpp). 정책 · 생성 함수는
 // editor/EditorFrontend.cpp 에 있습니다.
@@ -646,6 +648,7 @@ private:
     AudioSystem* audio_            = nullptr;
     std::string  audioOutput_;              // Config/editor_state.txt 의 audioOutput
     bool         headsetAudioInVr_ = true;  // Config/editor_state.txt 의 audioHeadsetInVr
+    EHrtfMode    hrtfMode_{};               // Config/editor_state.txt 의 audioHrtf(2026-11-06). {} = Auto(0)
     void openAudioOutputDialog();
 
     // ── 모달 대화상자 (2026-10-15) ───────────────────────────────────────────

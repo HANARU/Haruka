@@ -47,6 +47,8 @@ void EditorApp::loadEditorState() {
         if (key == "lastScene") lastScene_ = val;
         else if (key == "audioOutput") audioOutput_ = val;
         else if (key == "audioHeadsetInVr") headsetAudioInVr_ = (val != "0");
+        else if (key == "audioHrtf" && !AudioSystem::hrtfModeFromText(val, hrtfMode_))
+            HLOG(LogEditorScene, Warning) << "Editor state: unknown audioHrtf '" << val << "' (auto, on, off); using auto";
     }
 }
 
@@ -56,6 +58,7 @@ void EditorApp::saveEditorState() const {
     // 소리 출력 장치(비면 시스템 기본)와 XR Play 동안 헤드셋으로 바꿀지(2026-10-16).
     if (!audioOutput_.empty()) text += "audioOutput=" + audioOutput_ + "\n";
     text += std::string("audioHeadsetInVr=") + (headsetAudioInVr_ ? "1" : "0") + "\n";
+    text += std::string("audioHrtf=") + AudioSystem::hrtfModeName(hrtfMode_) + "\n";   // HRTF 를 켜는 때(2026-11-06)
     std::string err;
     if (!hfile::writeAtomic(happ::inWriteRoot(kStatePath), text, &err))
         HLOG(LogEditorScene, Warning) << "Editor state not saved: " << err;
@@ -90,6 +93,7 @@ bool EditorApp::blockedDuringPlay(const char* what) const {
 void EditorApp::openInitialScene(const std::string& startScene) {
     loadEditorState();
     if (audio_ && !audioOutput_.empty()) audio_->setOutputDevice(audioOutput_);
+    if (audio_) audio_->setHrtfMode(hrtfMode_);
     scanSceneFiles();
     std::error_code ec;
     auto usable = [&](const std::string& p) {
@@ -169,6 +173,17 @@ void EditorApp::openAudioOutputDialog() {
                           saveEditorState();
                           HLOG(LogEditorScene, Log) << "Headset audio during VR Play: " << (headsetAudioInVr_ ? "on" : "off")
                                                     << " (applies from the next Play)";
+                      } });
+    // HRTF(2026-11-06, Audio_Design.md 9-6): 누를 때마다 Auto → On → Off 로 바뀌고 바로 적용됩니다(다음 틱에 소리마다 사슬을 바꿈).
+    // HRTF 는 헤드폰 · 헤드셋용이라 기본(Auto)은 VR Play 동안만 켭니다.
+    static const char* const kHrtfLabels[] = { "Auto (VR Play only)", "On (headphones)", "Off (stereo panning)" };
+    items.push_back({ std::string("3D audio (HRTF): ") + kHrtfLabels[(int)hrtfMode_] + "  - now " + audio_->hrtfStatus() +
+                          " (click to change)",
+                      [this] {
+                          hrtfMode_ = hrtfMode_ == EHrtfMode::Auto ? EHrtfMode::On
+                                    : hrtfMode_ == EHrtfMode::On   ? EHrtfMode::Off : EHrtfMode::Auto;
+                          audio_->setHrtfMode(hrtfMode_);
+                          saveEditorState();
                       } });
     for (const auto& it : items) m.list.push_back(it.first);
     m.onPick = [items](const std::string& label) {

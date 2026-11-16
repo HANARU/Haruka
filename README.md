@@ -36,7 +36,7 @@ GLFW 창(1600x900) 하나를 띄웁니다. 에디터 실행 파일(`HarukaEngine
 | VR(선택) | `--xr` 로 띄울 때만. PC VR OpenXR 런타임(Meta Quest Link 등)과 헤드셋. 없으면 경고를 남기고 데스크톱으로 계속합니다 |
 | 네트워크 | 첫 CMake 구성 시 필요(의존성을 FetchContent로 내려받음) |
 
-미리 설치할 도구는 Visual Studio(MSVC), CMake, Git, Vulkan SDK 입니다. glm 1.0.1, GLFW 3.4, tinygltf v2.9.3, stb, miniaudio 0.11.21, JoltPhysics v5.1.0, OpenXR-SDK release-1.1.63(로더 정적 링크), LZ4 v1.10.0 · xxHash v0.8.3(묶음 파일)은 CMake FetchContent가 구성 시점에 내려받으며 저장소에는 포함되어 있지 않습니다. 셰이더는 런타임이 아니라 빌드 시점에 `glslc`로 SPIR-V(그래픽스 셰이더 18개)로 컴파일되므로, `glslc`를 찾지 못하면 구성 단계에서 실패합니다.
+미리 설치할 도구는 Visual Studio(MSVC), CMake, Git, Vulkan SDK 입니다. glm 1.0.1, GLFW 3.4, tinygltf v2.9.3, stb, miniaudio 0.11.21, JoltPhysics v5.1.0, OpenXR-SDK release-1.1.63(로더 정적 링크), LZ4 v1.10.0 · xxHash v0.8.3(묶음 파일)은 CMake FetchContent가 구성 시점에 내려받으며 저장소에는 포함되어 있지 않습니다. HRTF(3D 소리의 앞뒤 · 위아래 단서)용 Steam Audio 4.8.1 은 공식 릴리스 ZIP(약 181MB)을 빌드 폴더마다 한 번 받아 SHA-256 을 확인하고 헤더 · 라이브러리만 풉니다(2026-11-06). 이미 받은 ZIP 은 `-DHARUKA_STEAM_AUDIO_ZIP=<경로>` 로 넘기고, 받지 않으려면 `-DHARUKA_STEAM_AUDIO=OFF`(3D 소리는 스테레오 패닝)로 구성합니다. 셰이더는 런타임이 아니라 빌드 시점에 `glslc`로 SPIR-V(그래픽스 셰이더 18개)로 컴파일되므로, `glslc`를 찾지 못하면 구성 단계에서 실패합니다.
 
 ### 명령
 

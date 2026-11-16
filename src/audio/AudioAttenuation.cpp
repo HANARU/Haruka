@@ -29,6 +29,19 @@ bool parseFloatToken(const std::string& tok, float& out) {
     return true;
 }
 
+// 공백으로 나눕니다. 손으로 고친 파일을 위해 공백이 여러 개여도 받아들입니다.
+std::vector<std::string> splitTokens(std::string_view text) {
+    std::vector<std::string> toks;
+    size_t i = 0;
+    while (i < text.size()) {
+        while (i < text.size() && (text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n')) ++i;
+        const size_t b = i;
+        while (i < text.size() && !(text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n')) ++i;
+        if (i > b) toks.emplace_back(text.substr(b, i - b));
+    }
+    return toks;
+}
+
 } // namespace
 
 const char* AudioAttenuationSettings::modelName(EAudioAttenuation m) {
@@ -49,15 +62,7 @@ std::string AudioAttenuationSettings::toText() const {
 }
 
 bool AudioAttenuationSettings::fromText(std::string_view text, AudioAttenuationSettings& out) {
-    // 공백으로 나눕니다. 손으로 고친 파일을 위해 공백이 여러 개여도 받아들입니다.
-    std::vector<std::string> toks;
-    size_t i = 0;
-    while (i < text.size()) {
-        while (i < text.size() && (text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n')) ++i;
-        const size_t b = i;
-        while (i < text.size() && !(text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n')) ++i;
-        if (i > b) toks.emplace_back(text.substr(b, i - b));
-    }
+    const std::vector<std::string> toks = splitTokens(text);
     // 새 값은 이 줄을 늘리지 않고 다른 키로 추가합니다. 그래서 토큰 수를 정확히 요구합니다.
     if (toks.size() != 5) return false;
 
@@ -70,6 +75,34 @@ bool AudioAttenuationSettings::fromText(std::string_view text, AudioAttenuationS
     if (!parseFloatToken(toks[3], s.maxDistance)) return false;
     if (!parseFloatToken(toks[4], s.rolloff))     return false;
     if (!(s.minDistance > 0.f) || !(s.maxDistance > s.minDistance) || !(s.rolloff >= 0.f)) return false;
+
+    out = s;
+    return true;
+}
+
+// ── 차폐 설정 (2026-11-06) ───────────────────────────────────────────────────────
+
+std::string AudioOcclusionSettings::toText() const {
+    return std::string(enabled ? "1" : "0") + " " + floatToText(lowPassHz) + " " + floatToText(volume) + " "
+         + floatToText(smoothTime) + " " + floatToText(radius);
+}
+
+bool AudioOcclusionSettings::fromText(std::string_view text, AudioOcclusionSettings& out) {
+    const std::vector<std::string> toks = splitTokens(text);
+    if (toks.size() != 5) return false;
+
+    AudioOcclusionSettings s;
+    if      (toks[0] == "1") s.enabled = true;
+    else if (toks[0] == "0") s.enabled = false;
+    else return false;
+    if (!parseFloatToken(toks[1], s.lowPassHz))  return false;
+    if (!parseFloatToken(toks[2], s.volume))     return false;
+    if (!parseFloatToken(toks[3], s.smoothTime)) return false;
+    if (!parseFloatToken(toks[4], s.radius))     return false;
+    if (!(s.lowPassHz >= kMinHz && s.lowPassHz <= kMaxHz))     return false;
+    if (!(s.volume >= 0.f && s.volume <= 1.f))                return false;
+    if (!(s.smoothTime >= 0.f && s.smoothTime <= kMaxSmooth)) return false;
+    if (!(s.radius >= 0.f && s.radius <= kMaxRadius))         return false;
 
     out = s;
     return true;

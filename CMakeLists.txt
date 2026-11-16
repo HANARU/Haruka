@@ -54,6 +54,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(miniaudio)
 
+# ── Steam Audio (HRTF, 2026-11-06) ────────────────────────────────────────────
+# 릴리스 ZIP 을 받아 헤더와 이 플랫폼의 라이브러리만 풉니다. 끄려면 -DHARUKA_STEAM_AUDIO=OFF(엔진은 패닝으로 동작).
+include(cmake/SteamAudio.cmake)
+
 # ── LZ4 · xxHash (묶음 파일 .hpak, 2026-10-24) ─────────────────────────────────
 # 두 라이브러리 모두 BSD-2 입니다(LZ4 는 lib/ 아래). 저장소의 CMake 를 쓰지 않고 소스만 받습니다(SOURCE_SUBDIR 에
 # CMakeLists.txt 가 없으면 받기만 함). LZ4 는 lz4.c · lz4hc.c 두 파일을 정적 라이브러리로, xxHash 는 헤더 하나로 씁니다.
@@ -271,6 +275,7 @@ set(RUNTIME_SOURCES
     src/components/LightComponent.cpp
     src/components/StaticMeshComponent.cpp
     src/components/AudioComponent.cpp
+    src/components/ReverbZoneComponent.cpp
     src/components/RigidBodyComponent.cpp
     src/components/CoreComponents.cpp
     src/components/XrComponents.cpp
@@ -301,6 +306,7 @@ set(RUNTIME_SOURCES
     src/audio/AudioSystem.cpp
     src/audio/AudioAttenuation.cpp
     src/audio/MiniaudioImpl.cpp
+    src/audio/SteamAudioHrtf.cpp
     src/physics/PhysicsSystem.cpp
     src/ui/slate/HPaintContext.cpp
     src/ui/slate/HFontAtlas.cpp
@@ -466,6 +472,16 @@ if(NOT ANDROID)
     foreach(EXE ${HARUKA_EXECUTABLES})
         add_dependencies(${EXE} RuntimeFiles)
     endforeach()
+    # Steam Audio(HRTF)는 엔진이 실행 폴더에서 엽니다. 오디오 시험도 같은 폴더에 생기므로 함께 기댑니다(아래).
+    if(HARUKA_STEAM_AUDIO_FOUND)
+        add_custom_target(SteamAudioRuntime ALL
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HARUKA_STEAM_AUDIO_LIBRARY} $<TARGET_FILE_DIR:HarukaGame>
+            COMMENT "Copying the Steam Audio library to the output dir"
+        )
+        foreach(EXE ${HARUKA_EXECUTABLES})
+            add_dependencies(${EXE} SteamAudioRuntime)
+        endforeach()
+    endif()
 endif()
 
 # ── 묶음 도구와 게임 묶음 (2026-10-24) ─────────────────────────────────────────
@@ -578,7 +594,28 @@ endif()
 haruka_notice_file("JsonCpp, bundled with the OpenXR loader (Public Domain or MIT License)"
     ${openxr_SOURCE_DIR}/src/external/jsoncpp/LICENSE)
 haruka_notice_file("miniaudio (Public Domain or MIT No Attribution)" ${miniaudio_SOURCE_DIR}/LICENSE)
+# verblib(잔향, 2026-11-06): miniaudio 의 extras 에 든 Freeverb 기반 리버브입니다. MIT No Attribution 또는 퍼블릭 도메인이라 고지 의무는
+# 없지만 출처를 밝혀 둡니다. 원문은 verblib.h 끝의 LICENSE 주석입니다.
+file(READ ${miniaudio_SOURCE_DIR}/extras/nodes/ma_reverb_node/verblib.h _verblib)
+string(FIND "${_verblib}" "/* LICENSE" _verblib_at)
+if(_verblib_at GREATER -1)
+    string(SUBSTRING "${_verblib}" ${_verblib_at} -1 _verblib_license)
+    haruka_notice("verblib by Philip Bennefall, bundled with miniaudio, based on Freeverb by Jezar at Dreampoint (Public Domain or MIT No Attribution)"
+        "${_verblib_license}")
+else()
+    message(FATAL_ERROR "verblib.h license block not found (miniaudio extras changed?)")
+endif()
 haruka_notice_file("stb, including stb_image bundled with tinygltf (Public Domain or MIT License)" ${stb_SOURCE_DIR}/LICENSE)
+# Steam Audio(HRTF, 2026-11-06): 라이브러리를 그대로 함께 배포합니다(Windows phonon.dll, Android libphonon.so). Apache-2.0 §4 에 따라
+# 라이선스 원문과 저작권 표시(phonon.h 머리말)를 넣습니다. 저장소에 NOTICE 파일은 없습니다. 라이브러리 안에 든 서드파티(IPP · FFTS ·
+# PFFFT · MySOFA · Embree · CIPIC HRTF 등)의 문구는 Valve 가 ZIP 에 넣은 THIRDPARTY.md 를 그대로 붙입니다.
+if(HARUKA_STEAM_AUDIO_FOUND)
+    file(READ ${openxr_SOURCE_DIR}/LICENSES/Apache-2.0.txt _sa_apache2)
+    file(READ ${HARUKA_STEAM_AUDIO_THIRDPARTY} _sa_thirdparty)
+    haruka_notice("Steam Audio 4.8.1 (Apache License 2.0)" "Copyright 2017-2023 Valve Corporation.\n\n${_sa_apache2}")
+    haruka_notice("Third-party software included in the Steam Audio library (THIRDPARTY.md from the Steam Audio release)"
+        "${_sa_thirdparty}")
+endif()
 
 # ── 게임 패키지 (2026-10-19, Windows) ─────────────────────────────────────────
 # 배포 폴더 규칙입니다. 빌드한 뒤 "cmake --build build --config Release --target PACKAGE" 로 build/ 아래에
@@ -586,6 +623,7 @@ haruka_notice_file("stb, including stb_image bundled with tinygltf (Public Domai
 #   HarukaGame.exe      게임 실행 파일(에디터 코드 없음). OpenXR 로더는 정적 링크라 DLL 이 없습니다.
 #   VC++ 런타임 DLL     실행 파일 옆에 둡니다(사용자 결정 7, InstallRequiredSystemLibraries). UCRT 는 Windows 10 부터
 #                       운영체제에 들어 있어 넣지 않습니다.
+#   phonon.dll          Steam Audio(HRTF, 2026-11-06, 약 53 MB). 엔진이 실행 중에 열며, 없으면 3D 소리는 패닝으로 동작합니다.
 #   game.hpak           셰이더와 에셋의 묶음(2026-10-24, 사용자 결정 6). 낱개 shaders/ · assets/ 는 넣지 않습니다.
 #                       glTF 캐시는 기기에서 처음 실행할 때 쓰기 루트에 만듭니다.
 #   THIRD_PARTY_NOTICES.txt  서드파티 라이선스 고지
@@ -596,6 +634,9 @@ haruka_notice_file("stb, including stb_image bundled with tinygltf (Public Domai
 if(WIN32 AND NOT ANDROID)
     install(TARGETS HarukaGame RUNTIME DESTINATION . COMPONENT Game)
     install(FILES ${GAME_PACK} ${THIRD_PARTY_NOTICES} DESTINATION . COMPONENT Game)
+    if(HARUKA_STEAM_AUDIO_FOUND)
+        install(FILES ${HARUKA_STEAM_AUDIO_LIBRARY} DESTINATION . COMPONENT Game)   # phonon.dll(HRTF, 2026-11-06)
+    endif()
 
     set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION .)
     set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT Game)
@@ -873,22 +914,32 @@ if(NOT ANDROID)
     # 출력 장치 없는 miniaudio 엔진(noDevice)에서 출력 샘플을 직접 당겨, 청취자 방향·거리
     # 감쇠·일시정지·비활성 정지·OGG 디코딩을 귀가 아니라 숫자로 검산합니다. Vulkan 도 창도
     # 필요 없습니다. OGG 확인에는 저장소의 시험용 음원을 쓰므로 소스 경로를 넘깁니다.
+    # 차폐 절(2026-11-06)은 실제 물리(Jolt)로 정적 상자 벽을 세우고 레이 판정까지 검산하므로 물리 파일도 넣습니다.
     add_executable(HarukaAudioTest
         tests/AudioTest.cpp
         src/audio/AudioSystem.cpp
         src/audio/AudioAttenuation.cpp
         src/audio/MiniaudioImpl.cpp
+        src/audio/SteamAudioHrtf.cpp
         src/components/AudioComponent.cpp
         src/components/CameraComponent.cpp
+        src/components/ReverbZoneComponent.cpp
+        src/components/RigidBodyComponent.cpp
+        src/physics/PhysicsSystem.cpp
         src/core/World.cpp
         src/core/Actor.cpp
         src/core/Component.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaAudioTest PRIVATE glm::glm HarukaVfs)
+    target_link_libraries(HarukaAudioTest PRIVATE glm::glm HarukaVfs Jolt)
     target_include_directories(HarukaAudioTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${miniaudio_SOURCE_DIR})
     target_compile_definitions(HarukaAudioTest PRIVATE
         HARUKA_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    # HRTF 절(17절)은 Steam Audio 로 빌드했으면 실제 라이브러리도 확인합니다(실행 폴더의 phonon.dll).
+    if(HARUKA_STEAM_AUDIO_FOUND)
+        target_compile_definitions(HarukaAudioTest PRIVATE HARUKA_EXPECT_STEAM_AUDIO=1)
+        add_dependencies(HarukaAudioTest SteamAudioRuntime)
+    endif()
     if(MSVC)
         target_compile_options(HarukaAudioTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaAudioTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")

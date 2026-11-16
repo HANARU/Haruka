@@ -69,10 +69,10 @@
 |---|---|
 | 소스 | `src/` 의 `.cpp` · `.hpp` 179 파일, 30,275 줄 |
 | 셰이더 | GLSL 20 파일(셰이더 19 + 공용 헤더 1), 841 줄(2026-11-02). 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 24개 실행 파일, 검사 1,211개(`ctest -C Release`, 2026-11-06) |
+| 자동 테스트 | 24개 실행 파일, 검사 1,329개(`ctest -C Release`, 2026-11-07) |
 | 문서 | `Docs/` 활성 문서 28개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
-| 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳤습니다. 같은 날 빛 · 그림자 조사 후속에서 DEF-148 을 고치고 DEF-158 ~ 161(4건)을 등재해 모두 고쳤습니다. 2026-11-02 헤드셋 확인에서 DEF-162 · 163, 마지막 점검에서 DEF-164 를 등재해 모두 고쳤습니다. 2026-11-06 검토 결함 묶음 DEF-130 ~ 147(18건)을 모두 고쳤고, 같은 날 임포트 검토에서 DEF-165(텍스처 밉맵)를 등재해 고쳐, 지금은 165건 중 해결 154 · 열림 5 · 보류 3 · 닫음 3 입니다 |
+| 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳤습니다. 같은 날 빛 · 그림자 조사 후속에서 DEF-148 을 고치고 DEF-158 ~ 161(4건)을 등재해 모두 고쳤습니다. 2026-11-02 헤드셋 확인에서 DEF-162 · 163, 마지막 점검에서 DEF-164 를 등재해 모두 고쳤습니다. 2026-11-06 검토 결함 묶음 DEF-130 ~ 147(18건)을 모두 고쳤고, 같은 날 임포트 검토에서 DEF-165(텍스처 밉맵)를, 공간 음향 조사에서 DEF-166(패닝 문서 오류)을 등재해 고쳐, 지금은 166건 중 해결 155 · 열림 5 · 보류 3 · 닫음 3 입니다 |
 
 ---
 
@@ -106,6 +106,7 @@
 | 2026-10-17 ~ 10-24 | **패키징 1단계**(목표: Windows · Android XR 배포): 열린 결함과 패키징 조사 6건, 런타임 분리(빌드 타깃 `HarukaRuntime` · `HarukaEngine` · `HarukaGame`, 엔진 앞단 인터페이스, DEF-12), 게임 실행 규칙(VR 시작 설정 · 런타임 종료 처리 · 초점 일시정지), 실행 폴더 기준 경로와 쓰기 루트(`%LOCALAPPDATA%`), 배포 ZIP(CMake install · CPack), 자체 묶음 파일 `.hpak` v1 · 가상 파일 시스템 · 묶음 도구 `HarukaPak`, 서드파티 라이선스 고지, 이 과정에서 찾은 DEF-112 ~ 119 | [Packaging_Design.md](Packaging_Design.md) |
 | 2026-10-31 | 미커밋 작업 전체의 **오류 검토**(결함마다 검증 두 표, DEF-120 ~ 147 등재), **패키징 마무리 묶음**(UTF-8 묶음 도구 · 조작한 목차 검사 · C 콜백 예외 경계 · 에디터의 옛 에셋 복사본 · glTF `../` · `--loose` 우선순위 · 숨김 폴더 · jsoncpp 고지, DEF-121 ~ 128), 패키징 2단계 계획 | [Packaging_Design.md](Packaging_Design.md) 5-2, [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 절 |
 | 2026-10-31 | **패키징 2단계**: Vulkan 1.1 기준선(장치 계획 · 확장 함수 포인터 · XR 런타임 범위), 배리어 분기(sync2 또는 1.0), 창 없는 렌더 경로(`--headless` · 합성 눈 · 자동 확인 종료 코드), 핵심 힙 1GB 고정 · MSAA 지연 할당(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120). **3단계 진행**: Android 빌드(NDK, Gradle 없이) · `android_main` · OpenXR 로더(공유) · APK | [Packaging_Design.md](Packaging_Design.md) 6 · 7절, [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 절 |
+| 2026-11-06 | **공간 음향** 조사(차폐 · 회절 · 잔향 · HRTF · 기본 기능 4갈래) → 사용자 결정(단계 0 ~ 3) → 단계 0 기반(음원별 노드 사슬 · 레이캐스트 제외 액터 · DEF-166 패닝 문서 정정), 단계 1 차폐 + 회절 근사(표본 9개 일부 차폐), 단계 2 잔향(verblib 공용 리버브 · 음원별 센드 · 잔향 구역 컴포넌트), 단계 3 HRTF(Steam Audio 4.8.1 바이노럴 노드, 기본은 XR Play 동안, 2026-11-07 배포 확인까지 마침) | [Audio_Design.md](Audio_Design.md) 9절 |
 
 ### 2-3. 주요 결정 기록
 
@@ -166,9 +167,9 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | `src/memory/` | 2 · 388 | `HarukaAllocator`(1GB 단일 힙, 세 구역) |
 | `src/assets/` | 15 · 1,916 | `AssetManager`, glTF 로더, `.gasset` 캐시, 씬 · 프리팹 직렬화, 컴포넌트 블록 직렬화, 회전 글자 표현 |
 | `src/geometry/` | 5 · 1,321 | 절차 도형 기술자와 메시 생성기 |
-| `src/components/` | 14 · 1,641 | Light · Camera · StaticMesh · Audio · RigidBody, XR 리그 · 추적 자세 · 이동 · 잡기(`XrComponents`), 기본 컴포넌트 등록 |
-| `src/physics/` | 2 · 687 | `PhysicsSystem`(Jolt) |
-| `src/audio/` | 5 · 697 | `AudioSystem`(miniaudio, 출력 장치 선택, 가상 파일 시스템 파일 콜백), 3D 감쇠 설정 |
+| `src/components/` | 16 · 1,954 | Light · Camera · StaticMesh · Audio · RigidBody · Reverb Zone, XR 리그 · 추적 자세 · 이동 · 잡기(`XrComponents`), 기본 컴포넌트 등록 |
+| `src/physics/` | 2 · 711 | `PhysicsSystem`(Jolt) |
+| `src/audio/` | 10 · 2,096 | `AudioSystem`(miniaudio, 출력 장치 선택, 가상 파일 시스템 파일 콜백, 음원별 노드 사슬 · 차폐 · 공용 리버브 · HRTF 노드), 3D 감쇠 · 차폐 설정, 차폐 · 잔향 계산(`AudioOcclusion` · `AudioReverb`), verblib 설정, HRTF 인터페이스(`AudioHrtf`)와 Steam Audio 구현(`SteamAudioHrtf`, 라이브러리를 실행 중에 엶) |
 | `src/input/` | 3 · 456 | `HInputSystem`(액션 · 축 바인딩, 키 · 마우스 축, 설정 줄 바인딩, 햅틱), XR 입력 상태 |
 | `src/xr/` | 2 · 894 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력 · 진동 · 바닥 기준 공간 · 세션을 잃은 이유) |
 | `src/platform/` | 5 · 602 | `IWindow`, GLFW 구현, Android 스텁 |
@@ -228,7 +229,8 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | glm | 1.0.1 | 수학(`GLM_FORCE_DEPTH_ZERO_TO_ONE` 전역) |
 | tinygltf | v2.9.3 | glTF 2.0 읽기 |
 | stb | `master`(고정되지 않음) | 폰트 래스터라이즈(stb_truetype)에만 씁니다. 이미지 디코드는 tinygltf 에 들어 있는 `stb_image.h` 가 맡으므로 tinygltf 버전과 함께 고정됩니다 |
-| miniaudio | 0.11.21 | 오디오 장치 · 디코드(OGG 는 함께 들어 있는 stb_vorbis) |
+| miniaudio | 0.11.21 | 오디오 장치 · 디코드(OGG 는 함께 들어 있는 stb_vorbis). 잔향은 함께 들어 있는 verblib(Freeverb 기반, 2026-11-06) |
+| Steam Audio | 4.8.1 | HRTF(바이노럴, Apache-2.0, 2026-11-06). FetchContent 가 아니라 `cmake/SteamAudio.cmake` 가 릴리스 ZIP 을 받아 SHA-256 을 확인하고 헤더 · 그 플랫폼의 라이브러리만 풉니다. 링크하지 않고 실행 중에 엶, `-DHARUKA_STEAM_AUDIO=OFF` 로 뺄 수 있음 |
 | JoltPhysics | v5.1.0 | 물리 |
 | OpenXR-SDK | release-1.1.63 | OpenXR 로더(정적 링크) |
 | LZ4 | v1.10.0 | 묶음 파일 압축(`lib/lz4.c` · `lz4hc.c` 만, BSD-2, 2026-10-24) |
@@ -412,7 +414,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 24개, 검사 1,211개(2026-11-06).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 24개, 검사 1,329개(2026-11-07).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -421,13 +423,13 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `command_stack_purge` | 8 | 커맨드 스택의 액터 참조 제거 |
 | `actor_undo` | 27 | 액터 생성 · 삭제 Undo(원래 ID · 부모 · 순서로 되살림, 삭제 전 이력이 이어짐) |
 | `log_category` | 61 | 로그 카테고리 |
-| `audio_system` | 80 | 오디오(헤드리스 출력 검산, XR 머리 자세 청취자, 출력 장치 설정 · 장치 ID 변환 · 열 장치 후보 순서(DEF-146 · 147), 묶음 안 음원 디코딩) |
+| `audio_system` | 191 | 오디오(헤드리스 출력 검산, XR 머리 자세 청취자, 스테레오 패닝 값(DEF-166), 출력 장치 설정 · 장치 ID 변환 · 열 장치 후보 순서(DEF-146 · 147), 묶음 안 음원 디코딩, 음원별 노드 사슬, 차폐 · 회절 근사, 잔향 · 잔향 구역, HRTF(가짜 구현으로 FIFO · 꼬리 · 블록 경계, 실제 Steam Audio 로 방향 단서 · 크기 맞춤)) |
 | `slate_input` | 97 | UI 입력 · 숫자 칸 |
-| `physics_lifecycle` | 120 | 바디 생명주기 · 물리 API · 얇은 콜라이더, 잡기 · 던지기(던지지 않고 놓기, DEF-143) · 플레이어 리그 · 추적 자세 · XR 원점(리그가 아닌 부모의 머리 추적, DEF-144), 카메라 아래 바닥 찾기 · 보이지 않는 리그 · 리그 높이 값 |
+| `physics_lifecycle` | 127 | 바디 생명주기 · 물리 API · 얇은 콜라이더, 레이캐스트에서 액터 빼기(소리 차폐용, 출발점을 감싼 충돌체 포함), 잡기 · 던지기(던지지 않고 놓기, DEF-143) · 플레이어 리그 · 추적 자세 · XR 원점(리그가 아닌 부모의 머리 추적, DEF-144), 카메라 아래 바닥 찾기 · 보이지 않는 리그 · 리그 높이 값 |
 | `stereo_views` | 18 | 눈별 투영 · 두 눈 컬링 · 합성 눈 |
 | `xr_input` | 31 | VR 입력, 키 · 마우스 축, 설정 줄 바인딩, 햅틱 |
 | `draw_batching` | 26 | 자동 인스턴싱 묶기 · 행 배정 |
-| `render_extensions` | 17 | 패스 레지스트리 · 확장 지점 |
+| `render_extensions` | 32 | 패스 레지스트리 · 확장 지점, 텍스처 밉 사슬(DEF-165) |
 | `scene_components` | 66 | 컴포넌트 등록 · 씬 v4 값 · 회전 왕복 |
 | `light_selection` | 39 | 라이트 선택 · 상한 설정 파일 |
 | `asset_cache` | 28 | glTF 캐시 유효성(옛 형식 v1 ~ 3 다시 만듦), 논리 경로 키의 안정성, 묶음 안 원본 판정, 에셋 논리 경로 해석 |

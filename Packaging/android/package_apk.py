@@ -1,7 +1,7 @@
 """Package the Quest APK without Gradle (2026-10-31, packaging stage 3).
 
-Inputs: the Android CMake build (libHarukaGame.so, libopenxr_loader.so, THIRD_PARTY_NOTICES.txt) and AndroidManifest.xml
-next to this script.
+Inputs: the Android CMake build (libHarukaGame.so, libopenxr_loader.so, THIRD_PARTY_NOTICES.txt, and libphonon.so from the
+Steam Audio release when HRTF is enabled) and AndroidManifest.xml next to this script.
 Steps: aapt2 link (manifest only, no resources) -> add the stripped .so files uncompressed under lib/arm64-v8a and the
 third-party notices as assets/THIRD_PARTY_NOTICES.txt -> zipalign -P 16 (16 KB page alignment) -> apksigner with the
 debug keystore (created on first use) -> verify.
@@ -68,6 +68,13 @@ def main():
     for name, path in libs.items():
         if not path:
             sys.exit(f"error: {name} not found under {args.build} (build the HarukaGame target first)")
+    # Steam Audio (HRTF, 2026-11-06): CMake extracts the release library into the build folder. The engine opens it at run
+    # time and falls back to stereo panning without it, so a build configured with HARUKA_STEAM_AUDIO=OFF still packages.
+    phonon = find_file(args.build, "libphonon.so")
+    if phonon:
+        libs["libphonon.so"] = phonon
+    else:
+        print("note: libphonon.so not found (HARUKA_STEAM_AUDIO=OFF?); the APK has no HRTF")
     # MIT, BSD-2 and Apache-2.0 ask for their notices in binary distributions (DEF-151). CMake writes this file when it
     # configures the Android build, including the Android-only parts (jnipp, android_native_app_glue).
     notices = os.path.join(args.build, "THIRD_PARTY_NOTICES.txt")

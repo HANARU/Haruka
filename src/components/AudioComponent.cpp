@@ -20,8 +20,8 @@ void AudioComponent::onDestroy() {
 }
 
 void AudioComponent::releaseSound() {
-    if (sound_ && audioSys_) audioSys_->destroySound(sound_);
-    sound_    = nullptr;
+    if (voice_ && audioSys_) audioSys_->destroyVoice(voice_);
+    voice_    = nullptr;
     audioSys_ = nullptr;
 }
 
@@ -65,6 +65,33 @@ std::vector<PropDesc> AudioComponent::buildProps() {
         props.push_back(makePropFloat("Rolloff", PropColor::Neutral, 0.05f,
             [p]{ return p->attenuation.rolloff; },
             [p](float v){ p->attenuation.rolloff = std::max(0.f, v); }));
+
+        // 잔향 센드(2026-11-06). 잔향 구역(Reverb Zone)이 없으면 들리지 않습니다.
+        props.push_back(makePropFloat("Reverb Send", PropColor::Neutral, 0.01f,
+            [p]{ return p->reverbSend; },
+            [p](float v){ p->reverbSend = std::clamp(v, 0.f, kMaxReverbSend); }, PropUnit::Ratio));
+        props.push_back(makePropFloat("Reverb Reach", PropColor::Neutral, 0.01f,
+            [p]{ return p->reverbReach; },
+            [p](float v){ p->reverbReach = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+
+        // 차폐(2026-11-06). UE 의 Attenuation > Occlusion 과 같은 항목이고, 끄면 아래 행을 숨깁니다.
+        using O = AudioOcclusionSettings;
+        props.push_back(makePropToggle("Occlusion",
+            [p]{ return p->occlusion.enabled; }, [p](bool v){ p->occlusion.enabled = v; }));
+        if (occlusion.enabled) {
+            props.push_back(makePropFloat("Occluded Low Pass", PropColor::Neutral, 50.f,
+                [p]{ return p->occlusion.lowPassHz; },
+                [p](float v){ p->occlusion.lowPassHz = std::clamp(v, O::kMinHz, O::kMaxHz); }));
+            props.push_back(makePropFloat("Occluded Volume", PropColor::Neutral, 0.01f,
+                [p]{ return p->occlusion.volume; },
+                [p](float v){ p->occlusion.volume = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+            props.push_back(makePropFloat("Occlusion Time", PropColor::Neutral, 0.01f,
+                [p]{ return p->occlusion.smoothTime; },
+                [p](float v){ p->occlusion.smoothTime = std::clamp(v, 0.f, O::kMaxSmooth); }));
+            props.push_back(makePropFloat("Source Radius", PropColor::Neutral, 0.05f,
+                [p]{ return p->occlusion.radius; },
+                [p](float v){ p->occlusion.radius = std::clamp(v, 0.f, O::kMaxRadius); }, PropUnit::Size));
+        }
     }
     return props;
 }
@@ -75,15 +102,19 @@ std::string AudioComponent::readOnlyInfo() const {
 }
 
 void AudioComponent::play() {
-    if (audioSys_) audioSys_->playSound(sound_);
+    if (audioSys_) audioSys_->playVoice(voice_);
 }
 
 void AudioComponent::stop() {
-    if (audioSys_) audioSys_->stopSound(sound_);
+    if (audioSys_) audioSys_->stopVoice(voice_);
 }
 
 bool AudioComponent::isPlaying() const {
-    return audioSys_ && audioSys_->isSoundPlaying(sound_);
+    return audioSys_ && audioSys_->isVoicePlaying(voice_);
+}
+
+float AudioComponent::occlusionAmount() const {
+    return audioSys_ ? audioSys_->voiceOcclusion(voice_) : 0.f;
 }
 
 // ── 직렬화 (DEF-22) ─────────────────────────────────────────────────────────────
@@ -94,6 +125,9 @@ void AudioComponent::writeFields(ComponentFieldWriter& w) const {
     w.b("loop",        loop);
     w.b("autoPlay",    autoPlay);
     w.s("attenuation", attenuation.toText());
+    w.s("occlusion",   occlusion.toText());   // 2026-11-06. 옛 파일에는 없고, 없으면 기본(끔)입니다
+    w.f("reverbSend",  reverbSend);           // 2026-11-06. 없으면 기본값
+    w.f("reverbReach", reverbReach);
 }
 
 bool AudioComponent::readField(const std::string& key, const std::string& value) {
@@ -107,6 +141,17 @@ bool AudioComponent::readField(const std::string& key, const std::string& value)
         AudioAttenuationSettings a;
         if (AudioAttenuationSettings::fromText(value, a)) attenuation = a;
         else ok = false;
+    }
+    else if (key == "occlusion") {
+        AudioOcclusionSettings o;
+        if (AudioOcclusionSettings::fromText(value, o)) occlusion = o;
+        else ok = false;
+    }
+    else if (key == "reverbSend" || key == "reverbReach") {
+        float v;
+        const float hi = key == "reverbSend" ? kMaxReverbSend : 1.f;
+        ok = fieldparse::toFloat(value, v) && v >= 0.f && v <= hi;
+        if (ok) (key == "reverbSend" ? reverbSend : reverbReach) = v;
     }
     else return false;
     if (!ok) reportBadField(key, value);

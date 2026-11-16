@@ -1,12 +1,26 @@
 #pragma once
 #include "../core/IEngineModule.hpp"
+#include "AudioReverb.hpp"
+#include "AudioHrtf.hpp"
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include <glm/glm.hpp>
 
 class World;
+class Actor;
 class AudioComponent;
+class PhysicsSystem;
+// 소리 하나(보이스). ma_sound 와 그 뒤에 이어지는 Haruka 노드들을 묶은 것으로, 정의는 AudioSystem.cpp 에 있습니다
+// (miniaudio.h 는 .cpp 에서만 포함). AudioComponent 는 이 포인터만 들고 AudioSystem 의 함수로 다룹니다(2026-11-06).
+struct AudioVoice;
+
+// HRTF 를 켜는 때(2026-11-06, Docs/Audio_Design.md 9-6). HRTF 는 헤드폰 · 헤드셋용이라 스피커로 들으면 오히려 어색합니다.
+//   Auto  XR 세션이 있는 동안(헤드셋으로 들음)만. 기본값
+//   On    언제나(데스크톱에서 헤드폰으로 들을 때)
+//   Off   쓰지 않음(패닝)
+enum class EHrtfMode : uint8_t { Auto = 0, On = 1, Off = 2 };
 
 // 소리 출력 장치 하나(2026-10-16).
 struct AudioOutputDevice {
@@ -38,21 +52,50 @@ public:
     void setWorld(World* w) { world_ = w; }
     bool isPaused() const   { return paused_; }
 
+    // 차폐 판정에 쓰는 물리(2026-11-06). 없으면 차폐를 켠 소리도 열린 것으로 둡니다. 판정은 게임 스레드의 tick 에서
+    // PhysicsSystem::raycast 로 하고(오디오 스레드에서 쏘지 않음, Steam Audio 권고와 같음), 결과만 보이스 필터에 넘깁니다.
+    void setPhysics(const PhysicsSystem* p) { physics_ = p; }
+    // 보이스의 지금 차폐 정도(0 = 열림, 1 = 완전히 막힘, 평활 뒤 값). 차폐가 꺼졌거나 보이스가 없으면 0 입니다.
+    float voiceOcclusion(const AudioVoice* voice) const;
+
+    // 잔향(2026-11-06, Docs/Audio_Design.md 9-5). 공용 리버브 하나가 월드 그룹 안에 있고, 청취자가 있는 잔향 구역이 매개변수를 정합니다.
+    // 구역 밖이면 크기가 0 으로 줄어든 뒤 리버브를 멈춥니다(그동안 CPU 를 쓰지 않고, 출력이 잔향이 없던 때와 비트 단위로 같음).
+    const hrev::ReverbParams& reverbParams() const { return reverbCur_; }   // 평활 뒤 지금 값
+    bool                      reverbRunning() const { return reverbRunning_; }
+
+    // HRTF(2026-11-06, Docs/Audio_Design.md 9-6). 켜지면 공간화한 소리마다 HRTF 노드를 사슬에 넣고(보이스 필터 → HRTF → 월드 그룹)
+    // miniaudio 의 좌우 패닝을 끕니다(거리 감쇠 · 콘 · 도플러는 그대로). 꺼지면 노드를 사슬에서 빼고 패닝으로 돌아가며, 그동안의
+    // 출력은 HRTF 가 없던 때와 같습니다. 구현은 처음 켜질 때 Steam Audio 를 열어 만들고, 열지 못하면 경고하고 패닝으로 둡니다.
+    void      setHrtfMode(EHrtfMode m);
+    EHrtfMode hrtfMode() const { return hrtfMode_; }
+    // Engine 이 XR 세션을 만들고 지울 때 알립니다(Auto 모드가 따름).
+    void      setXrActive(bool active);
+    bool      hrtfActive() const { return hrtfActive_; }          // 지금 HRTF 로 소리를 내는지(모드 · XR · 구현이 모두 맞을 때)
+    bool      hrtfAvailable() const { return hrtf_ != nullptr; }  // 구현이 있는지(Steam Audio 를 열었거나 넣어 줌)
+    std::string hrtfStatus() const;   // 설정 화면용 짧은 ASCII 상태("on (Steam Audio 4.8.1)" · "off" · "unavailable (see the log)")
+    // 구현을 바꿔 끼웁니다(시험용 구현 · 다른 HRTF). 이미 만든 HRTF 노드는 모두 사슬에서 빼고 지운 뒤 바꿉니다. nullptr 면 구현
+    // 없음(패닝)이고, 그 뒤로는 Steam Audio 를 열지 않습니다.
+    void      setHrtfBackend(std::unique_ptr<hhrtf::Backend> backend);
+    bool      voiceHrtfRouted(const AudioVoice* voice) const;   // 이 보이스가 HRTF 노드를 거치는지
+    uint64_t  voiceHrtfBlocks(const AudioVoice* voice) const;   // HRTF 노드가 처리한 블록 수(소리가 끝나고 꼬리를 다 내면 멈춤)
+    static const char* hrtfModeName(EHrtfMode m);                // "auto" · "on" · "off"(설정 파일의 값)
+    static bool        hrtfModeFromText(const std::string& text, EHrtfMode& out);
+
     // 청취자를 활성 카메라 대신 이 월드 자세(위치 + 방향, -Z 가 정면 · +Y 가 위)에 둡니다. XR 세션이 입력을
     // 받는 동안 Engine 이 매 프레임 헤드셋(두 눈 사이)의 자세를 넘깁니다. 카메라는 XR 원점일 뿐이라, 넘기지
     // 않으면 고개를 돌려도 소리의 좌우가 바뀌지 않습니다. clearListenerPose 뒤에는 다시 카메라를 따릅니다.
     void setListenerPose(const glm::mat4& worldPose) { listenerPose_ = worldPose; hasListenerPose_ = true; }
     void clearListenerPose()                          { hasListenerPose_ = false; }
 
-    // AudioComponent::play()/stop() 이 부릅니다. stopSound 는 처음으로 되감습니다.
-    void playSound (void* maSound);
-    void stopSound (void* maSound);
-    bool isSoundPlaying(void* maSound) const;
+    // AudioComponent::play()/stop() 이 부릅니다. stopVoice 는 처음으로 되감습니다.
+    void playVoice (AudioVoice* voice);
+    void stopVoice (AudioVoice* voice);
+    bool isVoicePlaying(const AudioVoice* voice) const;
 
-    // ma_sound 를 만들어 월드 그룹에 붙이고, 정리합니다. 만들기에 실패하면 이유를 로그로
-    // 남기고 false 를 돌려줍니다.
-    bool initSound (const char* filePath, bool loop, void** outSound);
-    void destroySound(void* maSound);
+    // 보이스를 만들어 월드 그룹에 붙이고, 정리합니다. 만들기에 실패하면 이유를 로그로 남기고 nullptr 를 돌려줍니다.
+    // 사슬은 ma_sound → 보이스 필터 → (HRTF 노드) → 월드 그룹입니다(AudioSystem.cpp 의 "음원별 노드 사슬").
+    AudioVoice* createVoice (const char* filePath, bool loop);
+    void        destroyVoice(AudioVoice* voice);
 
     // headless 일 때만 동작합니다. 스테레오 interleaved float 를 frameCount 프레임 채웁니다.
     bool renderHeadless(float* outStereo, uint32_t frameCount);
@@ -90,9 +133,46 @@ private:
     bool  outputLost_  = false;
     float outputRetry_ = 0.f;
     void updateListener();
+    // 차폐(2026-11-06): 소리마다 kRetraceSec 간격으로 판정하고(처음 만들 때는 바로 판정해 그 값으로 시작) 매 틱 평활해
+    // 보이스 필터에 넘깁니다.
+    void  updateOcclusion(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos, float dt);
+    float traceOcclusion(const AudioComponent& ac, const glm::vec3& sourcePos);   // 막힌 표본의 비율
+    bool  segmentBlocked(const glm::vec3& from, const glm::vec3& to) const;
+    const PhysicsSystem* physics_ = nullptr;
+    glm::vec3            listenerPos_{ 0.f };
+    Actor*               listenerActor_ = nullptr;   // 레이에서 뺄 청취자 쪽 액터(활성 카메라의 액터)
+    std::vector<Actor*>    ignore_;                   // 판정마다 다시 채우는 제외 목록(할당을 재사용)
+    std::vector<glm::vec3> samples_;
+    uint32_t               voiceSerial_ = 0;          // 판정 시점을 엇갈리게 하는 일련번호
+
+    // 잔향(2026-11-06): 구역 고르기 · 매개변수 평활 · 리버브 시작과 멈춤, 소리마다 센드 양.
+    void updateReverb(float dt);
+    void stopReverb();
+    void updateSend(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos);
+    void*              reverb_ = nullptr;   // 리버브 노드(.cpp 의 ReverbNode). 월드 그룹이 없으면 없음
+    hrev::ReverbParams reverbCur_;          // 평활 뒤 지금 값(level 0 이면 멈춤)
+    hrev::ReverbParams reverbTarget_;
+    float              reverbFade_    = 0.5f;
+    bool               reverbRunning_ = false;
+    // HRTF(2026-11-06): 모드 · XR · 구현으로 hrtfActive_ 를 정하고(처음 필요할 때 Steam Audio 를 엶), 소리마다 노드를 넣고 빼며
+    // 방향을 넘깁니다.
+    void refreshHrtf();
+    void updateHrtf(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos);
+    bool createHrtfNode(AudioVoice& voice);
+    void dropHrtfNodes();   // 모든 보이스의 HRTF 노드를 사슬에서 빼고 지움(구현을 바꾸기 전)
+    std::unique_ptr<hhrtf::Backend> hrtf_;
+    EHrtfMode hrtfMode_    = EHrtfMode::Auto;
+    bool      xrActive_    = false;
+    bool      hrtfActive_  = false;
+    bool      hrtfTried_   = false;   // Steam Audio 열기를 해 봤는지(실패해도 되풀이하지 않음)
+    bool      hrtfWarned_  = false;   // 노드 만들기 실패 경고를 남겼는지
+    glm::vec3 listenerFwd_{ 0.f, 0.f, -1.f };
+    glm::vec3 listenerUp_ { 0.f, 1.f, 0.f };
+    void* sinkNode() const;   // 보이스 출력이 붙는 곳(월드 그룹, 없으면 엔진 출력)
+
     // 컴포넌트 값(볼륨·Loop·3D 설정)을 사운드에 반영합니다. 매 틱 부르므로 플레이 중에
     // 디테일 패널에서 바꾼 값도 바로 적용됩니다.
-    static void applySettings(void* maSound, const AudioComponent& ac);
+    static void applySettings(AudioVoice& voice, const AudioComponent& ac);
     // 월드에 남은 컴포넌트 사운드를 전부 정리하고 컴포넌트의 포인터를 비웁니다.
     void releaseWorldSounds();
 

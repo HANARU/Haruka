@@ -5,6 +5,7 @@
 #include "CameraComponent.hpp"
 #include "HandPoseComponent.hpp"
 #include "LightComponent.hpp"
+#include "ReverbZoneComponent.hpp"
 #include "RigidBodyComponent.hpp"
 #include "SkinnedMeshComponent.hpp"
 #include "StaticMeshComponent.hpp"
@@ -17,6 +18,7 @@ void registerCoreComponents() {
     if (!r.find("StaticMeshComponent")) r.registerType<StaticMeshComponent>("StaticMeshComponent", "Mesh");
     if (!r.find("AudioComponent"))      r.registerType<AudioComponent>     ("AudioComponent",      "Audio");
     if (!r.find("RigidBodyComponent"))  r.registerType<RigidBodyComponent> ("RigidBodyComponent",  "RigidBody");
+    if (!r.find("ReverbZoneComponent")) r.registerType<ReverbZoneComponent>("ReverbZoneComponent", "Reverb Zone");   // 2026-11-06
     // 손 쥐기 A 단계(2026-11-07, Hand_Grasp_Design 4-1)
     if (!r.find("SkinnedMeshComponent")) r.registerType<SkinnedMeshComponent>("SkinnedMeshComponent", "Skinned Mesh");
     if (!r.find("HandPoseComponent"))    r.registerType<HandPoseComponent>   ("HandPoseComponent",    "Hand Pose");

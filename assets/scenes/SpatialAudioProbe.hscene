@@ -1,0 +1,224 @@
+# Haruka Scene v4
+# Spatial audio listening check (2026-11-09, Docs/Audio_Design.md 9-4 ~ 9-6). Walk with WASD (E/Q up/down), look by
+# dragging with the right mouse button in the viewport during Play, or play in VR. Three stations, each only audible nearby:
+#   yellow  FrontBeep    3 m ahead of the start: direction. Turn around it; with HRTF on (Edit > Audio Output, use
+#                        headphones) it should sound in front / behind / above, not only left / right.
+#   red     WallNoise    to the right, behind the gray wall: occlusion. Behind the wall it is quieter and duller; step
+#                        out past the wall's end (toward +Z) and it opens up over about 0.1 s.
+#   blue    RoomBeep     to the left, inside the blue floor (a 3 s reverb zone): reverb. Walk onto the blue floor and the
+#                        tail fades in; walk off and it fades out.
+ACTOR:Sun
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:LightComponent
+enabled=1
+type=directional
+color=1 1 1
+intensity=3
+attenuationRadius=10
+innerConeAngle=15
+outerConeAngle=30
+direction=0.37139067 0.74278134 0.557086
+useTemperature=0
+temperatureK=6500
+castShadows=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Ground
+POS:0 -0.1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:40 0.2 40
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:XrPlayer
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:XrRigComponent
+enabled=1
+height=tracked
+eyeHeight=1.7
+END_COMPONENT
+COMPONENT:RigLocomotionComponent
+enabled=1
+moveSpeed=2
+snapTurn=45
+flying=0
+lookSensitivity=0.15
+END_COMPONENT
+END_ACTOR
+ACTOR:Head
+POS:0 1.7 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+PARENT:2
+COMPONENT:CameraComponent
+enabled=1
+fovY=75
+zNear=0.05
+zFar=1000
+primary=1
+END_COMPONENT
+COMPONENT:TrackedPoseComponent
+enabled=1
+source=head
+showDebug=0
+END_COMPONENT
+END_ACTOR
+ACTOR:FrontBeep
+POS:0 1.5 -3
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.3 0.3 0.3
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color E6C84AFF 0 0.5
+END_COMPONENT
+COMPONENT:AudioComponent
+enabled=1
+file=assets/audio/Test_BeepLoop.wav
+volume=0.8
+loop=1
+autoPlay=1
+attenuation=1 linear 1 8 1
+occlusion=0 1200 0.4 0.1 0
+reverbSend=1
+reverbReach=0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:Wall
+POS:11 1.5 -4
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.3 3 5
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color 6E6E73FF 0 0.8
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:WallNoise
+POS:14 1.2 -4
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.3 0.3 0.3
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color D94D4DFF 0 0.5
+END_COMPONENT
+COMPONENT:AudioComponent
+enabled=1
+file=assets/audio/Test_NoiseLoop.ogg
+volume=0.6
+loop=1
+autoPlay=1
+attenuation=1 linear 2 12 1
+occlusion=1 1200 0.4 0.1 0.3
+reverbSend=1
+reverbReach=0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:RoomFloor
+POS:-12 0.01 -4
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:8 0.02 8
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color 4A6FB0FF 0 0.6
+END_COMPONENT
+END_ACTOR
+ACTOR:RoomReverb
+POS:-12 1.5 -4
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:ReverbZoneComponent
+enabled=1
+shape=box
+halfExtent=4 2.5 4
+radius=5
+blendDistance=1
+priority=0
+unbounded=0
+decayTime=3
+damping=0.3
+width=1
+level=1.5
+fadeTime=0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:RoomBeep
+POS:-12 1.5 -6
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.3 0.3 0.3
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color 4D73D9FF 0 0.5
+END_COMPONENT
+COMPONENT:AudioComponent
+enabled=1
+file=assets/audio/Test_BeepLoop.wav
+volume=0.8
+loop=1
+autoPlay=1
+attenuation=1 linear 1 10 1
+occlusion=0 1200 0.4 0.1 0
+reverbSend=1
+reverbReach=0.5
+END_COMPONENT
+END_ACTOR

@@ -45,3 +45,32 @@ struct AudioAttenuationSettings {
             && maxDistance == o.maxDistance && rolloff == o.rolloff;
     }
 };
+
+// ── 소리 차폐 설정 (2026-11-06, Docs/Audio_Design.md 9-4) ──────────────────────
+// 청취자와 음원 사이를 물리 충돌체(RigidBody 의 상자 · 구 · 캡슐)가 막으면 소리를 줄이고 먹먹하게(저역 통과) 합니다. UE 내장
+// 차폐(Sound Attenuation 의 Occlusion)와 같은 항목이고, 반지름을 주면 Steam Audio 의 Volumetric 처럼 음원 주변 여러 점으로
+// 일부만 막힌 정도를 구합니다(모서리를 돌 때 소리가 서서히 바뀌어 회절을 흉내 냄). 공간화를 끈 소리(2D)에는 걸리지 않습니다.
+struct AudioOcclusionSettings {
+    bool  enabled    = false;    // 기본 끔: 기존 씬 · 소리가 바뀌지 않게
+    float lowPassHz  = 1200.f;   // 완전히 막혔을 때의 저역 통과 차단 주파수(Hz). 열려 있을 때는 필터를 거치지 않습니다
+    float volume     = 0.4f;     // 완전히 막혔을 때의 볼륨 배율(0.4 ≈ -8 dB)
+    float smoothTime = 0.1f;     // 막힘 ↔ 열림 전환의 시간 상수(초). 0 이면 판정 즉시 바뀝니다
+    float radius     = 0.f;      // 음원 반지름(m). 0 = 레이 하나(막힘/열림 둘 중 하나), 0 보다 크면 원판 위 표본 9개(일부 차폐)
+
+    static constexpr float kMinHz     = 20.f;
+    static constexpr float kMaxHz     = 20000.f;
+    static constexpr float kMaxSmooth = 10.f;
+    static constexpr float kMaxRadius = 10.f;
+
+    // 씬 파일 값입니다. 예: "1 1200 0.4 0.1 0.5" (enabled, lowPassHz, volume, smoothTime, radius).
+    // AUDIO_3D 와 같이 토큰 수를 정확히 요구하고, 값이 늘면 다른 키로 추가합니다.
+    std::string toText() const;
+    // 다섯 토큰이 모두 있고 범위가 맞아야 true 입니다(20 ≤ lowPassHz ≤ 20000, 0 ≤ volume ≤ 1, 0 ≤ smoothTime ≤ 10,
+    // 0 ≤ radius ≤ 10, 유한값). 실패하면 out 을 건드리지 않습니다.
+    static bool fromText(std::string_view text, AudioOcclusionSettings& out);
+
+    bool operator==(const AudioOcclusionSettings& o) const {
+        return enabled == o.enabled && lowPassHz == o.lowPassHz && volume == o.volume
+            && smoothTime == o.smoothTime && radius == o.radius;
+    }
+};

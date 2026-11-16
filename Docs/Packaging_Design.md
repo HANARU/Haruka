@@ -116,11 +116,13 @@
 | 들어가는 것 | 비고 |
 |---|---|
 | `HarukaGame.exe` | OpenXR 로더는 정적 링크라 DLL 이 없음 |
+| `phonon.dll` | Steam Audio 4.8.1(HRTF, 2026-11-06, 50.5 MB, 배포 ZIP 안에서 18.0 MB). 엔진이 실행 중에 열고, 없으면 3D 소리는 패닝으로 동작(Audio_Design.md 9-6). 빌드 옵션 `HARUKA_STEAM_AUDIO=OFF` 면 빠짐 |
 | `game.hpak` | 셰이더 18개와 에셋 9개의 묶음(2026-10-24, 5절). 2026-10-19 에는 묶음 대신 `shaders/` · `assets/` 폴더를 넣었음 |
 | `THIRD_PARTY_NOTICES.txt` | 서드파티 라이선스 고지(2026-10-24). 구성할 때 받은 소스의 라이선스 파일에서 만듦 |
 | VC++ 런타임 DLL 8개 | `InstallRequiredSystemLibraries`. UCRT 는 Windows 10 부터 운영체제에 있어 넣지 않음 |
 
-2026-10-24 기준 ZIP 은 11개 파일입니다. 옛 셰이더 결과물(목록에서 빠진 `.spv`, 예: 2026-10-04 에 지운 `cull.comp.spv`)은 구성할 때
+2026-10-24 기준 ZIP 은 11개 파일입니다. 2026-11-07 에 `phonon.dll` 이 더해져 12개 파일, 2.4 MB → 20.4 MB 가 되었습니다(MB = 1,048,576
+바이트). 옛 셰이더 결과물(목록에서 빠진 `.spv`, 예: 2026-10-04 에 지운 `cull.comp.spv`)은 구성할 때
 빌드 폴더에서 지워, 묶음에 따라 들어가지 않습니다.
 
 ### 4-5. 확인
@@ -296,6 +298,7 @@
 | 빌드 | **Gradle 없이** NDK + 기존 CMake/Ninja 로 `.so`, aapt2 · zipalign(`-P 16`) · apksigner 로 APK | `hasCode="false"` 라 Java 가 없음. 빌드 체계가 하나이고, 내려받기는 약 1GB(Gradle 은 4 ~ 5GB). Godot 의 내보내기 템플릿 · rawdrawandroid 와 같은 방식 |
 | 도구 | NDK r30, build-tools 36.0.0, platform android-34, JDK 21(apksigner · keytool). adb 는 Meta Quest Developer Hub 의 것 | 공식 저장소에서 받아 해시를 확인함 |
 | OpenXR 로더 | 데스크톱과 같은 OpenXR-SDK 1.1.63 소스를 공유 라이브러리로(`libopenxr_loader.so`) | hello_xr · Meta 예제와 같은 형태. 추가 내려받기 없음 |
+| HRTF(2026-11-06) | Steam Audio 릴리스의 `libphonon.so`(arm64-v8a)를 `package_apk.py` 가 strip 해 넣음(20.5 MB → 6.9 MB, APK 5.8 → 12.6 MB). 없으면 경고하고 빼며, 엔진은 패닝으로 동작 | NEEDED 가 liblog · libandroid · libm · libdl · libc 뿐이라 `libc++_shared.so` 가 필요 없고, LOAD 정렬이 16 KB. Audio_Design.md 9-6 |
 | SDK 수준 | minSdk 32 / targetSdk 34 | Meta 의 현재 규칙 |
 | 첫 실행의 에셋 | Android 빌드가 만든 `build/android/pack/game.hpak` 을 `adb push` 로 앱의 외부 파일 폴더(안 되면 OBB 폴더)에 넣음 | 기존 POSIX 묶음 읽기를 그대로 씀. APK 안 묶음은 다음 단계(AAsset fd + 시작 위치, aapt2 `-0 hpak`). 엔진이 묶음의 셰이더가 이 빌드의 것인지 확인함(7-1, DEF-149) |
 | 소리 | 첫 실행은 끔(`noAudio`) | 변수를 줄임. 다음 단계에서 켬 |
@@ -336,7 +339,7 @@ python -I Packaging/android/package_apk.py        (ANDROID_HOME · JAVA_HOME 필
   - `ANativeActivity_onCreate` 를 내보냅니다.
   - 미해결 Vulkan 기호에 1.2 이상 함수가 없습니다. Features2 · Properties2 는 API 28 부터 있는 1.1 코어입니다.
   - LOAD 정렬은 16KB 입니다.
-- APK 는 5.6MB 입니다(strip 한 엔진 5.0MB · 로더 0.6MB, 2026-11-01 고지 파일을 넣은 뒤 5.7MB). zipalign `-P 16` 검사와 apksigner 검증을 통과했고, `aapt2 dump badging` 이 manifest 대로입니다.
+- APK 는 5.6MB 입니다(strip 한 엔진 5.0MB · 로더 0.6MB, 2026-11-01 고지 파일을 넣은 뒤 5.7MB, 2026-11-07 Steam Audio `libphonon.so` 6.9MB 를 넣은 뒤 12.6MB). zipalign `-P 16` 검사와 apksigner 검증을 통과했고, `aapt2 dump badging` 이 manifest 대로입니다.
 - 이 과정에서 처음 컴파일된 Android 갈래의 기존 오류 1건(`AppPaths.cpp` 의 변수 재정의)을 고쳤습니다.
 - clang `-Wall -Wextra` 경고는 기존 코드의 같은 유형입니다(로그 매크로의 dangling-else, XR · Vulkan 구조체의 빈 칸 초기화, 쓰지 않는 인자). 첫 실행 뒤에 정리합니다(결정).
 

@@ -310,6 +310,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     auto* physics = modules_.registerModule(std::move(physicsModule));
     physics->setWorld(&world_);
     physics_ = physics;
+    audio->setPhysics(physics);   // 소리 차폐 판정(2026-11-06, Audio_Design.md 9-4)
 
     // 앞단(에디터 또는 게임).
     frontend_->init(*renderer_, world_, *assets_, *window_);
@@ -371,6 +372,7 @@ bool Engine::startXrSession() {
     // XR Play 동안 소리를 헤드셋 장치로(2026-10-16, 에디터 설정에서 끌 수 있음). 세션이 끝나면 고른 장치로 돌아갑니다.
     if (audio_ && frontend_->headsetAudioInVr() && !xr_->headsetAudioOutputId().empty())
         audio_->setOutputOverride(xr_->headsetAudioOutputId());
+    if (audio_) audio_->setXrActive(true);   // HRTF 모드 Auto 는 XR 세션 동안 켜짐(2026-11-06)
     return true;
 }
 
@@ -381,6 +383,7 @@ void Engine::endXr(const char* reason) {
     HInputSystem::get().setXrInput({});
     if (physics_) physics_->setStepRate(60.f);
     if (audio_ && !audio_->outputOverride().empty()) audio_->setOutputOverride("");   // 고른 출력 장치로 돌아감
+    if (audio_) audio_->setXrActive(false);
     implicitRigCam_   = 0;   // 다음 Play 에서 바닥을 다시 찾습니다
     trackedOriginCam_ = 0;   // 다음 Play 에서 원점 안내를 다시 남깁니다
     HLOG(LogEngine, Log) << "XR session ended (" << reason << ")";

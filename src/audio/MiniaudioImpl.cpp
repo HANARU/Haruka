@@ -32,3 +32,7 @@
 #elif defined(__clang__)
     #pragma clang diagnostic pop
 #endif
+
+// verblib(잔향, 2026-11-06) 구현부. 구조체 크기를 정하는 매크로가 Verblib.hpp 에 있어 그 헤더를 거칩니다(경고 억제도 그 안).
+#define VERBLIB_IMPLEMENTATION
+#include "Verblib.hpp"
