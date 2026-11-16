@@ -412,6 +412,47 @@ int main() {
         ps.shutdown();
     }
 
+    {
+        // 소리 차폐 준비(2026-11-06): 청취자 → 음원 레이가 음원 자신 · 청취자 리그의 충돌체에 맞으면 모든 소리가 막힌 것으로
+        // 나옵니다. 특히 볼록 셰이프 안에서 출발한 레이는 그 셰이프에 거리 0 으로 맞습니다.
+        std::printf("\n-- 레이캐스트에서 액터 빼기 --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        auto box = [&](const char* name, glm::vec3 pos) {
+            Actor* a = w.spawnActor(name);
+            a->setLocalPosition(pos);
+            auto* rb = a->addComponent<RigidBodyComponent>();
+            rb->motionType = EMotionType::Static;
+            rb->halfExtent = { 0.5f, 0.5f, 0.5f };
+            return a;
+        };
+        Actor* nearBox = box("Near", { 0.f, 0.f, -3.f });   // 앞면 z = -2.5
+        Actor* farBox  = box("Far",  { 0.f, 0.f, -8.f });   // 앞면 z = -7.5
+        ps.tick(kDt);
+        PhysicsSystem::RaycastHit hit;
+        const glm::vec3 o{ 0.f }, fwd{ 0.f, 0.f, -1.f };
+        bool got = ps.raycast(o, fwd, 20.f, hit);
+        check(got && hit.actor == nearBox && std::fabs(hit.distance - 2.5f) < 1e-3f, "빼지 않으면 가까운 상자(거리 2.5)");
+        Actor* ignoreNear[] = { nearBox };
+        got = ps.raycast(o, fwd, 20.f, hit, ignoreNear);
+        check(got && hit.actor == farBox && std::fabs(hit.distance - 7.5f) < 1e-3f, "가까운 상자를 빼면 그 너머 상자(거리 7.5)");
+        Actor* ignoreBoth[] = { nearBox, farBox };
+        check(!ps.raycast(o, fwd, 20.f, hit, ignoreBoth) && hit.actor == nullptr, "둘 다 빼면 맞지 않음");
+        Actor* withNull[] = { nullptr, nearBox };
+        check(ps.raycast(o, fwd, 20.f, hit, withNull) && hit.actor == farBox, "nullptr 항목은 건너뜀");
+        std::vector<Actor*> asVector{ nearBox };
+        check(ps.raycast(o, fwd, 20.f, hit, asVector) && hit.actor == farBox, "std::vector 로도 넘길 수 있음");
+
+        const glm::vec3 inside{ 0.f, 0.f, -3.f };   // 가까운 상자의 가운데(음원이 자기 충돌체 안에 있는 경우)
+        got = ps.raycast(inside, fwd, 20.f, hit);
+        check(got && hit.actor == nearBox && hit.distance < 1e-4f, "상자 안에서 쏘면 그 상자에 거리 0 으로 맞음(Jolt 기본)");
+        got = ps.raycast(inside, fwd, 20.f, hit, ignoreNear);
+        check(got && hit.actor == farBox && std::fabs(hit.distance - 4.5f) < 1e-3f, "출발점을 감싼 상자를 빼면 그 너머를 봄(거리 4.5)");
+        ps.shutdown();
+    }
+
     // ── 직렬화(DEF-22): 이름 붙은 값의 왕복 ─────────────────────────────────────
     {
         std::printf("\n-- DEF-22: RigidBody 값이 이름으로 왕복 --\n");

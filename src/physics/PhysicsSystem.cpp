@@ -23,6 +23,7 @@
 #include <Jolt/Physics/Collision/CollideShape.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/BodyFilter.h>
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -284,8 +285,24 @@ glm::vec3 PhysicsSystem::angularVelocity(uint32_t body) const {
     return bi.IsAdded(JPH::BodyID(body)) ? toG(bi.GetAngularVelocity(JPH::BodyID(body))) : glm::vec3(0.f);
 }
 
+namespace {
+// 바디의 사용자 값(액터 ID, createBody 의 mUserData)으로 거릅니다. 잠근 바디에서 읽어야 하므로 ShouldCollideLocked 를 씁니다.
+class IgnoreActorsFilter final : public JPH::BodyFilter {
+public:
+    explicit IgnoreActorsFilter(std::span<Actor* const> ignore) : ignore_(ignore) {}
+    bool ShouldCollideLocked(const JPH::Body& body) const override {
+        const uint64_t id = body.GetUserData();
+        for (const Actor* a : ignore_)
+            if (a && a->id == id) return false;
+        return true;
+    }
+private:
+    std::span<Actor* const> ignore_;
+};
+} // namespace
+
 bool PhysicsSystem::raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDistance,
-                            RaycastHit& out) const {
+                            RaycastHit& out, std::span<Actor* const> ignore) const {
     out = {};
     if (!impl_ || !world_ || maxDistance <= 0.f) return false;
     const float len = glm::length(dir);
@@ -293,7 +310,9 @@ bool PhysicsSystem::raycast(const glm::vec3& origin, const glm::vec3& dir, float
     const glm::vec3 d = dir / len;
     const JPH::RRayCast ray{ toJR(origin), toJ(d * maxDistance) };
     JPH::RayCastResult hit;
-    if (!impl_->physics->GetNarrowPhaseQuery().CastRay(ray, hit)) return false;
+    // 빈 목록이어도 같은 필터를 넘깁니다. Jolt 는 후보 바디마다 어차피 잠그고 필터를 부르므로 비용은 가상 호출 하나입니다.
+    const IgnoreActorsFilter filter(ignore);
+    if (!impl_->physics->GetNarrowPhaseQuery().CastRay(ray, hit, {}, {}, filter)) return false;
 
     out.distance = hit.mFraction * maxDistance;
     out.point    = origin + d * out.distance;

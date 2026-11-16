@@ -3,6 +3,7 @@
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <memory>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -87,7 +88,11 @@ public:
         float     distance = 0.f;
     };
     // origin 에서 dir 방향(길이는 상관없음)으로 maxDistance 안에서 가장 가까운 바디를 찾습니다.
-    bool raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDistance, RaycastHit& out) const;
+    // ignore 에 든 액터의 바디는 건너뜁니다(2026-11-06). 소리 차폐가 음원 자신 · 청취자 리그의 충돌체를 빼는 데 씁니다.
+    // 액터 단위이므로 자식 액터의 바디는 따로 넣어야 합니다. 볼록 셰이프 안에서 출발한 레이는 그 셰이프에 거리 0 으로
+    // 맞으므로(Jolt 의 기본 동작), 출발점을 감싼 바디는 빼야 그 너머를 봅니다. nullptr 항목은 무시합니다.
+    bool raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDistance, RaycastHit& out,
+                 std::span<Actor* const> ignore = {}) const;
     // 구와 겹치는 바디의 액터를 모읍니다(VR 손으로 잡을 물체 찾기). out 은 비우고 채웁니다.
     void overlapSphere(const glm::vec3& center, float radius, std::vector<Actor*>& out) const;
 
