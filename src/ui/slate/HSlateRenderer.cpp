@@ -428,31 +428,31 @@ void HSlateRenderer::createBuffers(CmdBeginFn /*beginCmd*/, CmdEndFn /*endCmd*/)
 // ── record ─────────────────────────────────────────────────────────────────────
 bool HSlateRenderer::record(VkCommandBuffer cmd, uint32_t imgIdx,
                              VkExtent2D extent, uint32_t frameIdx) {
-    if (!root_ || root_->isCollapsed()) return false;
+    // P0 에서는 출력이 에디터 하나뿐이고 record 가 프레임마다 한 번 불리므로 여기서 슬롯을
+    // 초기화합니다. P1 에서 패널 출력이 생기면 이 호출을 렌더러의 프레임 시작으로 옮깁니다.
+    beginFrame(frameIdx % kFramesInFlight);
+
     if (imgIdx >= framebuffers_.size() || framebuffers_[imgIdx] == VK_NULL_HANDLE) return false;
 
-    HGeometry fullGeo;
-    fullGeo.position = { 0.f, 0.f };
-    fullGeo.size     = { (float)extent.width, (float)extent.height };
-    fullGeo.scale    = 1.f;
+    const glm::vec2 size{ (float)extent.width, (float)extent.height };
+    HSlateDrawList drawList;
+    if (!ctx_.buildDrawList(size, fonts_, whiteView_, kMaxVerts, drawList))
+        return false;
 
-    arrange(fullGeo.size);
+    // 글리프 확장이 끝난 **뒤에** 업로드해야 합니다. 위에서 getGlyph 가 새 글리프를
+    // 래스터라이즈하므로, 확장 전에 업로드하면 그 프레임에 처음 나온 글자가 빈 텍셀로 그려집니다.
+    if (fonts_.isDirty()) fonts_.upload();
 
-    HPaintContext ctx(&fonts_);
-    root_->paint(ctx, fullGeo);
-
-    std::stable_sort(ctx.elements.begin(), ctx.elements.end(),
-        [](const HDrawElement& a, const HDrawElement& b) {
-            return a.layer < b.layer;
-        });
-
-    return flush(cmd, imgIdx, extent, ctx.elements, frameIdx % kFramesInFlight);
+    return recordDrawList(cmd, uiRenderPass_, framebuffers_[imgIdx], extent, drawList, frameIdx);
 }
 
-// ── flush ──────────────────────────────────────────────────────────────────────
-bool HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
-                            VkExtent2D extent,
-                            std::vector<HDrawElement>& elements, uint32_t slot) {
+static bool buildDrawListFromElements(const std::vector<HDrawElement>& elements,
+                                      HFontAtlas& fonts, VkImageView whiteView,
+                                      uint32_t maxVerts, HSlateDrawList& out) {
+    out.vertices.clear();
+    out.batches.clear();
+    out.overflowed = false;
+
     // Expand Text elements into per-glyph Texture elements
     std::vector<HDrawElement> flat;
     flat.reserve(elements.size() * 4);
@@ -471,14 +471,14 @@ bool HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
                 baseY += e.fontSize * 1.2f;
                 continue;
             }
-            auto g = fonts_.getGlyph(c, e.fontSize);
+            auto g = fonts.getGlyph(c, e.fontSize);
             if (g.pixelSize.x < 1.f || g.pixelSize.y < 1.f) {
                 penX += g.advance;
                 continue; // space or empty glyph
             }
             HDrawElement glyph{};
             glyph.type    = HDrawElement::Type::Texture;
-            glyph.texture = fonts_.atlasView();
+            glyph.texture = fonts.atlasView();
             glyph.color   = e.color;
             glyph.layer   = e.layer;
             glyph.clip    = e.clip;
@@ -495,14 +495,100 @@ bool HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
 
     if (flat.empty()) return false;   // 렌더 패스를 열지 않음(표시 전환은 렌더러가 함, DEF-120)
 
-    // 글리프 확장이 끝난 **뒤에** 업로드해야 합니다. 위에서 getGlyph 가 새 글리프를
-    // 래스터라이즈하므로, 확장 전에 업로드하면 그 프레임에 처음 나온 글자가 빈 텍셀로 그려집니다.
-    if (fonts_.isDirty()) fonts_.upload();
+    uint32_t vertCount  = 0;
+    uint32_t batchStart = 0;
+    VkImageView curTex  = VK_NULL_HANDLE;
+
+    auto flushBatch = [&]() {
+        uint32_t quadCount = (vertCount / 4) - batchStart;
+        if (quadCount == 0) return;
+        out.batches.push_back({ curTex, batchStart, quadCount });
+        batchStart = vertCount / 4;
+    };
+
+    for (const auto& e : flat) {
+        VkImageView tex    = (e.texture != VK_NULL_HANDLE) ? e.texture : whiteView;
+        glm::vec4   uvRect = e.uvRect;
+        if (e.type == HDrawElement::Type::Rect) {
+            tex    = whiteView;
+            uvRect = { 0.f, 0.f, 1.f, 1.f };
+        }
+        // 클립은 사각형을 CPU 에서 잘라 적용합니다. 요소가 모두 축 정렬 사각형이라 정확하고,
+        // 시저처럼 클립이 바뀔 때마다 배치를 끊지 않아도 됩니다(DEF-56).
+        glm::vec4 rect = e.rect;
+        if (e.clipped && !HClipQuad(rect, uvRect, e.clip)) continue;
+
+        if (tex != curTex) {
+            flushBatch();
+            curTex = tex;
+        }
+
+        if (vertCount + 4 > maxVerts) {
+            out.overflowed = true;
+            break;
+        }
+        float x = rect.x, y = rect.y, w = rect.z, h = rect.w;
+        float u0 = uvRect.x, v0 = uvRect.y, u1 = uvRect.z, v1 = uvRect.w;
+        out.vertices.push_back({ { x,     y     }, { u0, v0 }, e.color });
+        out.vertices.push_back({ { x + w, y     }, { u1, v0 }, e.color });
+        out.vertices.push_back({ { x + w, y + h }, { u1, v1 }, e.color });
+        out.vertices.push_back({ { x,     y + h }, { u0, v1 }, e.color });
+        vertCount += 4;
+    }
+    flushBatch();
+    return true;
+}
+
+bool HSlateContext::buildDrawList(glm::vec2 size, HFontAtlas& fonts,
+                                  VkImageView whiteView, uint32_t maxVerts,
+                                  HSlateDrawList& out) {
+    if (!root_ || root_->isCollapsed()) return false;
+
+    HGeometry fullGeo;
+    fullGeo.position = { 0.f, 0.f };
+    fullGeo.size     = size;
+    fullGeo.scale    = 1.f;
+
+    arrange(fullGeo.size);
+
+    HPaintContext ctx(&fonts);
+    root_->paint(ctx, fullGeo);
+
+    std::stable_sort(ctx.elements.begin(), ctx.elements.end(),
+        [](const HDrawElement& a, const HDrawElement& b) {
+            return a.layer < b.layer;
+        });
+
+    return buildDrawListFromElements(ctx.elements, fonts, whiteView, maxVerts, out);
+}
+
+// ── recordDrawList ─────────────────────────────────────────────────────────────
+bool HSlateRenderer::recordDrawList(VkCommandBuffer cmd, VkRenderPass renderPass,
+                                    VkFramebuffer framebuffer, VkExtent2D extent,
+                                    const HSlateDrawList& drawList, uint32_t frameIdx) {
+    const uint32_t slot = frameIdx % kFramesInFlight;
+    const uint32_t count = static_cast<uint32_t>(drawList.vertices.size());
+    if (slotVertOffset_[slot] + count > kMaxVerts) {
+        static bool budgetWarned = false;
+        if (!budgetWarned) {
+            budgetWarned = true;
+            HLOG(LogUI, Warning) << "UI slot vertex budget exceeded (" << slotVertOffset_[slot]
+                                 << " + " << count << " > " << kMaxVerts
+                                 << ") - skipping render pass";
+        }
+        return false;
+    }
+
+    const uint32_t baseVert = advanceSlotVertexOffset(slotVertOffset_[slot], count);
+    if (count > 0) {
+        std::memcpy(vertexPtr_[slot] + baseVert, drawList.vertices.data(),
+                    count * sizeof(UIVertex));
+    }
 
     VkRenderPassBeginInfo rpbi{};
     rpbi.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpbi.renderPass        = uiRenderPass_;
-    rpbi.framebuffer       = framebuffers_[imgIdx];
+    rpbi.renderPass        = renderPass;
+    rpbi.framebuffer       = framebuffer;
     rpbi.renderArea.extent = extent;
     // No clear values — LOAD_OP_LOAD preserves the 3D scene
     vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
@@ -522,65 +608,24 @@ bool HSlateRenderer::flush(VkCommandBuffer cmd, uint32_t imgIdx,
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuf_[slot], &vbOffset);
     vkCmdBindIndexBuffer  (cmd, indexBuf_, 0, VK_INDEX_TYPE_UINT32);
 
-    uint32_t vertCount  = 0; // total vertices written this frame
-    uint32_t batchStart = 0; // quad index where current batch begins
+    const uint32_t baseQuad = baseVert / 4;
+    for (const auto& b : drawList.batches) {
+        pushDescriptor(cmd, b.texture);
+        // vertexOffset shifts pre-generated indices so quad 0 maps to (baseQuad + batch.firstQuad)*4
+        vkCmdDrawIndexed(cmd, b.quadCount * 6, 1, 0,
+                         static_cast<int32_t>((baseQuad + b.firstQuad) * 4), 0);
+    }
 
-    auto emitQuad = [&](const glm::vec4& rect, const glm::vec4& uv,
-                        const glm::vec4& color) -> bool {
-        if (vertCount + 4 > kMaxVerts) return false; // overflow guard
-        float x = rect.x, y = rect.y, w = rect.z, h = rect.w;
-        float u0 = uv.x, v0 = uv.y, u1 = uv.z, v1 = uv.w;
-        UIVertex* v = vertexPtr_[slot] + vertCount;
-        v[0] = {{ x,     y     }, { u0, v0 }, color };
-        v[1] = {{ x + w, y     }, { u1, v0 }, color };
-        v[2] = {{ x + w, y + h }, { u1, v1 }, color };
-        v[3] = {{ x,     y + h }, { u0, v1 }, color };
-        vertCount += 4;
-        return true;
-    };
-
-    auto flushBatch = [&]() {
-        uint32_t quadCount = (vertCount / 4) - batchStart;
-        if (quadCount == 0) return;
-        // vertexOffset shifts pre-generated indices so quad 0 maps to batchStart*4
-        vkCmdDrawIndexed(cmd, quadCount * 6, 1, 0,
-                         static_cast<int32_t>(batchStart * 4), 0);
-        batchStart = vertCount / 4;
-    };
-
-    VkImageView curTex = VK_NULL_HANDLE;
-
-    for (const auto& e : flat) {
-        VkImageView tex    = (e.texture != VK_NULL_HANDLE) ? e.texture : whiteView_;
-        glm::vec4   uvRect = e.uvRect;
-        if (e.type == HDrawElement::Type::Rect) {
-            tex    = whiteView_;
-            uvRect = { 0.f, 0.f, 1.f, 1.f };
-        }
-        // 클립은 사각형을 CPU 에서 잘라 적용합니다. 요소가 모두 축 정렬 사각형이라 정확하고,
-        // 시저처럼 클립이 바뀔 때마다 배치를 끊지 않아도 됩니다(DEF-56).
-        glm::vec4 rect = e.rect;
-        if (e.clipped && !HClipQuad(rect, uvRect, e.clip)) continue;
-
-        if (tex != curTex) {
-            flushBatch();
-            curTex = tex;
-            pushDescriptor(cmd, curTex);
-        }
-
-        if (!emitQuad(rect, uvRect, e.color)) {
-            // 예산을 넘으면 나머지가 조용히 사라집니다. 화면만 보고는 원인을 알 수 없으므로
-            // 한 번은 알립니다(매 프레임 찍으면 로그 패널이 잠깁니다).
-            static bool warned = false;
-            if (!warned) {
-                warned = true;
-                HLOG(LogUI, Warning) << "UI vertex budget exceeded (" << kMaxVerts
-                                     << ") - remaining draw elements dropped this frame";
-            }
-            break;
+    if (drawList.overflowed) {
+        // 예산을 넘으면 나머지가 조용히 사라집니다. 화면만 보고는 원인을 알 수 없으므로
+        // 한 번은 알립니다(매 프레임 찍으면 로그 패널이 잠깁니다).
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            HLOG(LogUI, Warning) << "UI vertex budget exceeded (" << kMaxVerts
+                                 << ") - remaining draw elements dropped this frame";
         }
     }
-    flushBatch();
 
     vkCmdEndRenderPass(cmd);
     return true;
@@ -605,7 +650,7 @@ void HSlateRenderer::pushDescriptor(VkCommandBuffer cmd, VkImageView view) {
 }
 
 // ── arrange ────────────────────────────────────────────────────────────────────
-void HSlateRenderer::arrange(glm::vec2 size) {
+void HSlateContext::arrange(glm::vec2 size) {
     if (!root_ || root_->isCollapsed()) return;
     HGeometry fullGeo;
     fullGeo.size = size;
@@ -614,7 +659,7 @@ void HSlateRenderer::arrange(glm::vec2 size) {
 }
 
 // ── handlePointerEvent ─────────────────────────────────────────────────────────
-HReply HSlateRenderer::handlePointerEvent(HPointerEvent e) {
+HReply HSlateContext::handlePointerEvent(HPointerEvent e) {
     if (!root_ || !root_->isVisible()) return HReply::Unhandled();
 
     // 버튼 상태를 싣는 것은 이동 이벤트뿐입니다(e.down = 좌버튼이 지금 눌려 있음). 휠

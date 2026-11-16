@@ -31,6 +31,8 @@ public:
     // 폰트 파일만 읽습니다(GPU 없음). init 이 부르고, 화면 없는 테스트가 글자 폭을 잴 때도
     // 씁니다. 읽으면 이 아틀라스가 레이아웃의 글자 폭 기준(metrics)으로 등록됩니다.
     bool loadFont(const std::string& fontPath = "");
+    // GPU 없이 폰트를 읽고 CPU 아틀라스 버퍼까지 준비합니다(화면 없는 그리기 목록 생성용).
+    bool initCpuOnly(const std::string& fontPath = "");
     void unloadFont();
 
     // 레이아웃이 글자 폭을 재는 기준입니다. 위젯의 computeDesiredSize 는 페인트 컨텍스트를

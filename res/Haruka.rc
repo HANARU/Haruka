@@ -1,7 +1,7 @@
 // Haruka Engine - Win32 resource script
 //
 // ASCII only on purpose. rc.exe reads a .rc through the ANSI/console code page
-// unless it finds a BOM, so a non-ASCII comment can desynchronise the lines that
+// unless it finds a BOM, so a non-ASCII comment can desynchronize the lines that
 // follow it. Same reasoning as the ASCII-only rule for build.bat / run.bat.
 //
 // One multi-size icon is registered under two names:

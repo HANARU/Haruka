@@ -19,7 +19,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -753,6 +755,225 @@ void testTextMeasure() {
     check(HFontAtlas::metrics() == nullptr, "폰트를 읽은 아틀라스가 사라지면 등록도 풀림 (낡은 주소가 남지 않음)");
 }
 
+// ── P0: 그리기 목록 고정 (4-1절) ──────────────────────────────────────────────
+uint64_t hashDrawList(const HSlateDrawList& dl, VkImageView whiteView, VkImageView atlasView) {
+    uint64_t h = 14695981039346656037ULL;
+    auto mix = [&](const void* data, size_t n) {
+        const auto* p = static_cast<const uint8_t*>(data);
+        for (size_t i = 0; i < n; ++i) {
+            h ^= p[i];
+            h *= 1099511628211ULL;
+        }
+    };
+    const uint64_t vc = dl.vertices.size();
+    mix(&vc, sizeof(vc));
+    if (!dl.vertices.empty())
+        mix(dl.vertices.data(), dl.vertices.size() * sizeof(UIVertex));
+    const uint64_t bc = dl.batches.size();
+    mix(&bc, sizeof(bc));
+    for (const auto& b : dl.batches) {
+        uint8_t tag = 2;
+        if (b.texture == whiteView) tag = 0;
+        else if (atlasView != VK_NULL_HANDLE && b.texture == atlasView) tag = 1;
+        mix(&tag, sizeof(tag));
+        mix(&b.firstQuad, sizeof(b.firstQuad));
+        mix(&b.quadCount, sizeof(b.quadCount));
+    }
+    const uint8_t ov = dl.overflowed ? 1 : 0;
+    mix(&ov, sizeof(ov));
+    return h;
+}
+
+struct LayeredProbe : HWidget {
+    int layerValue = 0;
+    glm::vec4 color{ 0.3f, 0.6f, 0.9f, 1.f };
+    LayeredProbe(int l, glm::vec4 c) : layerValue(l), color(c) {}
+    glm::vec2 computeDesiredSize() override { return { 20.f, 20.f }; }
+    void paint(HPaintContext& ctx, const HGeometry& geo) override {
+        if (!isVisible()) return;
+        ctx.pushLayer(layerValue);
+        ctx.drawRect(geo, color);
+        ctx.popLayer(layerValue);
+    }
+};
+
+void testDrawListFixed() {
+    std::printf("\n-- P0: 그리기 목록 고정 --\n");
+    const VkImageView kWhite = reinterpret_cast<VkImageView>(uintptr_t(0x1111));
+    const VkImageView kImg   = reinterpret_cast<VkImageView>(uintptr_t(0x2222));
+
+    // (a) 루트 없음 · 접힌 루트 · 그릴 것 없는 루트 -> false
+    {
+        HSlateRenderer ui;
+        HSlateDrawList dl;
+        check(!ui.buildDrawList({ 400.f, 300.f }, kWhite, dl), "루트 없음 -> false");
+
+        auto box = HNew(SBox)->widthOverride(100.f)->heightOverride(40.f);
+        ui.setRootWidget(box);
+        check(!ui.buildDrawList({ 400.f, 300.f }, kWhite, dl), "그릴 것 없음 -> false");
+
+        auto border = HNew(SBorder)->background({ 0.2f, 0.3f, 0.4f, 1.f });
+        border->visibility = EVisibility::Collapsed;
+        ui.setRootWidget(border);
+        check(!ui.buildDrawList({ 400.f, 300.f }, kWhite, dl), "접힌 루트 -> false");
+    }
+
+    // (b) 복합 위젯 트리 고정 해시
+    {
+        HSlateRenderer ui;
+        const bool hasFont = ui.fontAtlas().initCpuOnly();
+        if (!hasFont) {
+            std::printf("  (폰트 파일이 없어 고정 해시 검사를 건너뜀)\n");
+        } else {
+            auto vbox = HNew(SVerticalBox);
+            auto hbox = HNew(SHorizontalBox);
+            hbox->addSlot(HNew(SButton)->content(HNew(STextBlock)->text("OK")->fontSize(13.f)),
+                          SHorizontalBox::ESizeRule::Auto)
+                ->addSlot(HNew(SImage)->image(kImg)->desiredSize({ 24.f, 24.f }),
+                          SHorizontalBox::ESizeRule::Fixed, 24.f);
+
+            auto scroll = HNew(SScrollBox);
+            auto inner  = HNew(SVerticalBox);
+            for (int i = 0; i < 10; ++i)
+                inner->addSlot(HNew(SBorder)->background({ 0.1f * i, 0.2f, 0.3f, 1.f })
+                    ->content(HNew(SBox)->heightOverride(30.f)), SVerticalBox::ESizeRule::Auto);
+            scroll->content(inner);
+
+            auto text = HNew(STextBlock)->text("Line 1\nLine 2 spaced")->fontSize(14.f);
+
+            auto overlay = HNew(SOverlay);
+            overlay->addSlot(std::make_shared<LayeredProbe>(2, glm::vec4{ 0.8f, 0.2f, 0.2f, 1.f }))
+                   ->addSlot(HNew(SBorder)->background({ 0.5f, 0.5f, 0.5f, 1.f }))
+                   ->addSlot(std::make_shared<LayeredProbe>(-1, glm::vec4{ 0.2f, 0.8f, 0.2f, 1.f }))
+                   ->addSlot(HNew(STextBlock)->text("Top")->fontSize(12.f));
+
+            vbox->addSlot(HNew(SBorder)->background({ 0.1f, 0.1f, 0.1f, 1.f })->content(hbox),
+                          SVerticalBox::ESizeRule::Auto)
+                ->addSlot(text, SVerticalBox::ESizeRule::Auto)
+                ->addSlot(scroll, SVerticalBox::ESizeRule::Fixed, 80.f)
+                ->addSlot(overlay, SVerticalBox::ESizeRule::Fill, 1.f);
+
+            ui.setRootWidget(vbox);
+            HSlateDrawList dl;
+            const bool ok = ui.buildDrawList({ 400.f, 300.f }, kWhite, dl);
+            const uint64_t h = hashDrawList(dl, kWhite, ui.fontAtlas().atlasView());
+            constexpr uint64_t kExpectedHash = 0xdd11fcb176aa175bULL;
+            check(ok && !dl.overflowed && dl.vertices.size() == 128 && dl.batches.size() == 3 &&
+                  h == kExpectedHash,
+                  "복합 트리 그리기 목록 고정 (verts=128, batches=3, hash=0xdd11fcb176aa175b)");
+        }
+    }
+
+    // (c) 정점 예산 초과 (사각형 16,385개) -> overflowed=true, 정점 65,536
+    {
+        auto vbox = HNew(SVerticalBox);
+        for (int i = 0; i < 16385; ++i)
+            vbox->addSlot(HNew(SBorder)->background({ 1.f, 0.f, 0.f, 1.f })
+                ->content(HNew(SBox)->widthOverride(4.f)->heightOverride(4.f)),
+                SVerticalBox::ESizeRule::Auto);
+        HSlateRenderer ui;
+        ui.setRootWidget(vbox);
+        HSlateDrawList dl;
+        const bool ok = ui.buildDrawList({ 400.f, 70000.f }, kWhite, dl);
+        check(ok && dl.overflowed && dl.vertices.size() == HSlateRenderer::maxVerts(),
+              "예산 초과(16,385 사각형) -> overflowed=true, 정점 65,536");
+    }
+}
+
+void testMultiContextCapture() {
+    std::printf("\n-- P0: 여러 문맥 포인터 캡처 분리 --\n");
+    resetCounts();
+    auto rootA = HNew(SOverlay);
+    rootA->addSlot(std::make_shared<CaptorProbe>(), EHAlign::Fill, EVAlign::Fill, kPadA);
+    auto rootB = HNew(SOverlay);
+    rootB->addSlot(std::make_shared<PlainProbe>(), EHAlign::Fill, EVAlign::Fill, kPadB);
+    arrange(rootA);
+    arrange(rootB);
+
+    HSlateContext ctxA, ctxB;
+    ctxA.setRootWidget(rootA);
+    ctxB.setRootWidget(rootB);
+
+    ctxA.handlePointerEvent(press(kInA));
+    check(g_cap.down == 1, "문맥 A 에서 누름 -> 캡처 시작");
+
+    // 다른 문맥 B 로 이동 · 뗌을 보내도 문맥 A 의 캡처가 풀리거나 B 가 영향을 주지 않음
+    ctxB.handlePointerEvent(move(kInB, true));
+    ctxB.handlePointerEvent(release(kInB));
+    check(g_cap.move == 0 && g_cap.up == 0 && g_plain.up == 1, "문맥 B 의 입력은 문맥 B 로만 전달");
+
+    // 문맥 A 로 이동 · 뗌을 보내면 여전히 캡처한 위젯이 받음
+    ctxA.handlePointerEvent(move(kInB, true));
+    ctxA.handlePointerEvent(release(kInB));
+    check(g_cap.move == 1 && g_cap.up == 1, "문맥 A 의 캡처가 유지되었다가 A 의 뗌에서 해제됨");
+
+    // 한쪽 루트 교체 시 그 문맥의 캡처만 정리되고 다른 문맥은 유지
+    resetCounts();
+    auto rootB2 = HNew(SOverlay);
+    rootB2->addSlot(std::make_shared<CaptorProbe>(), EHAlign::Fill, EVAlign::Fill, kPadB);
+    arrange(rootB2);
+    ctxB.setRootWidget(rootB2);
+
+    ctxA.handlePointerEvent(press(kInA));
+    ctxB.handlePointerEvent(press(kInB));
+    ctxA.setRootWidget(HNew(SBox));
+    ctxB.handlePointerEvent(release(kEmpty));
+    check(g_cap.up == 1, "문맥 A 루트 교체 뒤에도 문맥 B 의 캡처는 유지됨");
+}
+
+void testSlotVertexOffset() {
+    std::printf("\n-- P0: 슬롯 정점 오프셋 --\n");
+    uint32_t slotOffset = 0;
+    const uint32_t off1 = HSlateRenderer::advanceSlotVertexOffset(slotOffset, 120);
+    const uint32_t off2 = HSlateRenderer::advanceSlotVertexOffset(slotOffset, 64);
+    check(off1 == 0 && off2 == 120 && slotOffset == 184,
+          "같은 슬롯에 두 번 더하면 이어 씀");
+
+    // 슬롯 0 · 1 · 0 · 1 · 0 순서로 beginFrame → 한 번 더하기 반복 시 매번 0 부터 시작(DEF 재현)
+    HSlateRenderer ui;
+    uint32_t simSlots[HSlateRenderer::kFramesInFlight] = { 999, 999 };
+    const uint32_t seq[] = { 0, 1, 0, 1, 0 };
+    bool allZero = true;
+    for (uint32_t s : seq) {
+        ui.beginFrame(s);
+        if (ui.slotVertexOffset(s) != 0) allZero = false;
+        simSlots[s] = ui.slotVertexOffset(s);
+        const uint32_t base = HSlateRenderer::advanceSlotVertexOffset(simSlots[s], 120);
+        if (base != 0 || simSlots[s] != 120) allZero = false;
+    }
+    check(allZero, "슬롯 0·1·0·1·0 순환에서 beginFrame 뒤 매번 오프셋 0 으로 시작");
+}
+
+void testLayerSortStability() {
+    std::printf("\n-- P0: 층 정렬 안정성 (40개 동층 요소) --\n");
+    auto overlay = HNew(SOverlay);
+    overlay->addSlot(std::make_shared<LayeredProbe>(1, glm::vec4{ 1.f, 1.f, 1.f, 1.f }));
+    for (int i = 0; i < 40; ++i) {
+        const float c = (i + 1) / 41.f;
+        overlay->addSlot(std::make_shared<LayeredProbe>(0, glm::vec4{ c, 0.f, 0.f, 1.f }));
+    }
+    overlay->addSlot(std::make_shared<LayeredProbe>(-1, glm::vec4{ 0.f, 1.f, 0.f, 1.f }));
+
+    HSlateRenderer ui;
+    ui.setRootWidget(overlay);
+    HSlateDrawList dl;
+    const VkImageView kWhite = reinterpret_cast<VkImageView>(uintptr_t(0x1111));
+    const bool ok = ui.buildDrawList({ 200.f, 200.f }, kWhite, dl);
+    bool ordered = ok && dl.vertices.size() == 42 * 4;
+    if (ordered) {
+        // 인덱스 0 은 layer -1 (green=1), 1..40 은 layer 0 (red 오름차순), 41 은 layer 1 (white)
+        if (dl.vertices[0].color.g != 1.f) ordered = false;
+        for (int i = 0; i < 40; ++i) {
+            const float expectedR = (i + 1) / 41.f;
+            if (std::fabs(dl.vertices[(1 + i) * 4].color.r - expectedR) > 1e-6f) {
+                ordered = false;
+                break;
+            }
+        }
+    }
+    check(ordered, "동일 층 40개 요소의 그리기 순서가 stable_sort 로 보존됨");
+}
+
 } // namespace
 
 int main() {
@@ -779,6 +1000,10 @@ int main() {
     testNestedScrollFirst();
     testClip();
     testTextMeasure();
+    testDrawListFixed();
+    testMultiContextCapture();
+    testSlotVertexOffset();
+    testLayerSortStability();
 
     if (g_failed) {
         std::printf("\n%d check(s) FAILED\n", g_failed);

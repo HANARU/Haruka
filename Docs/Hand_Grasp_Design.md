@@ -338,6 +338,6 @@ B 단계에서 헤드셋 확인용으로 장갑으로 바꿨고(10절), 기준 P
 | `HarukaHandTest` | 89개 통과(A 73 + B 16) |
 | 전체 시험(ctest) | 25개 모두 통과(Release) |
 | 창 없는 실행 | `XrDemo.hscene`: 13 액터, 장갑 두 개를 스키닝해 그림, 검증 오류 0(데스크톱에서는 손이 화면 밖) |
-| 헤드셋 | 대기. 항목은 Editor_QA_Checklist.md 끝 "헤드셋 확인 대기 (2026-11-07 손 쥐기 A · B 단계)" |
+| 헤드셋 | 통과(2026-11-16, Quest Pro · Air Link, 8항목 모두 정상, Touch 바인딩 재시도 경고 0 · 검증 0). 항목은 Editor_QA_Checklist.md "헤드셋 확인 (2026-11-07 손 쥐기 A · B 단계)" |
 
 Touch Pro 의 트리거 굽힘 · 밀기 · 근접(`curl_fb` · `slide_fb` · `proximity_fb`)은 아직 쓰지 않습니다. 헤드셋에서 검지 표현이 부족하면 더합니다.

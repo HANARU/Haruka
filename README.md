@@ -4,7 +4,7 @@ Vulkan 1.1 기반 C++20 게임 엔진. 렌더러, GPU 메모리 할당자, UI �
 
 장기 목표는 VR입니다. PC OpenXR 연결(`--xr`, Quest Link 등 PC VR 런타임)이 들어 있고, 2026-10-15 Meta Quest Pro(Quest Link)에서 확인했습니다. 자세한 내용은 [알려진 한계](#알려진-한계)를 보십시오.
 
-소스는 `src/` 기준 `.cpp`/`.hpp` 179 파일 30,275 줄, 셰이더는 GLSL 19 파일 705 줄입니다(2026-10-31). 릴리스·태그 없음, CI 없음, 자동 테스트 24건.
+소스는 `src/` 기준 `.cpp`/`.hpp` 179 파일 30,275 줄, 셰이더는 GLSL 19 파일 705 줄입니다(2026-10-31). 릴리스·태그 없음, CI 없음, 자동 테스트 25건.
 
 ## 지금 동작하는 것
 
@@ -94,7 +94,7 @@ shaders/       GLSL → 빌드 시 glslc 로 SPIR-V 컴파일
 assets/        모델 1 · 시험 음원 3 · 씬 2 · 프리팹 2 · 프로젝트 설정(project.ini)
 Packaging/     게임 묶음 목록(game.pack.txt), Android 매니페스트 · APK 포장 스크립트(android/)
 res/           실행 파일 아이콘 · 매니페스트(UTF-8 코드 페이지)
-tests/         단위 테스트 24개 (ctest)
+tests/         단위 테스트 25개 (ctest)
 Docs/          설계 · 결함 · 결정 기록 (색인: Docs/README.md)
 ```
 

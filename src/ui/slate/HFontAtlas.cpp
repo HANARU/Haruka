@@ -61,6 +61,17 @@ void HFontAtlas::unloadFont() {
 }
 
 // ── 초기화 ────────────────────────────────────────────────────────────────────
+bool HFontAtlas::initCpuOnly(const std::string& fontPath) {
+    if (!loadFont(fontPath)) return false;
+    cursorX_ = 0;
+    cursorY_ = 0;
+    rowH_    = 0;
+    dirty_   = false;
+    // CPU 아틀라스 버퍼 초기화 (RGBA, 불투명 흰색 × 투명)
+    cpuAtlas_.assign(kAtlasW * kAtlasH * 4, 0);
+    return true;
+}
+
 void HFontAtlas::init(VkDevice device, VkPhysicalDevice physDevice,
                       CmdBeginFn beginCmd, CmdEndFn endCmd,
                       const std::string& fontPath)
@@ -70,11 +81,8 @@ void HFontAtlas::init(VkDevice device, VkPhysicalDevice physDevice,
     beginCmd_  = beginCmd;
     endCmd_    = endCmd;
 
-    if (!loadFont(fontPath))
+    if (!initCpuOnly(fontPath))
         throw std::runtime_error("[HFontAtlas] No usable font file found!");
-
-    // CPU 아틀라스 버퍼 초기화 (RGBA, 불투명 흰색 × 투명)
-    cpuAtlas_.assign(kAtlasW * kAtlasH * 4, 0);
 
     createAtlasImage();
     uploadFullAtlas();
@@ -224,6 +232,7 @@ void HFontAtlas::createAtlasImage() {
 }
 
 void HFontAtlas::uploadFullAtlas() {
+    if (device_ == VK_NULL_HANDLE || atlasImage_ == VK_NULL_HANDLE) return;
     VkDeviceSize size = kAtlasW * kAtlasH * 4;
 
     // Staging buffer
@@ -294,6 +303,7 @@ void HFontAtlas::uploadFullAtlas() {
 }
 
 void HFontAtlas::upload() {
+    if (device_ == VK_NULL_HANDLE || atlasImage_ == VK_NULL_HANDLE) return;
     uploadFullAtlas();
     dirty_ = false;
 }
