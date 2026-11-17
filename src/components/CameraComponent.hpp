@@ -21,6 +21,8 @@ public:
     bool  primary =  true;
 
     bool editorIcon(glm::vec4& c) const override { c = {0.35f, 0.6f, 1.f, 1.f}; return true; }
+    int  editorIconShape() const override { return 2; }
+    void drawEditorVisual() const override;   // 절두체(가까운 면 ~ min(zFar, 5 m), 16:9)
 
     const char*           typeName()   const override { return "CameraComponent"; }
     std::vector<PropDesc> buildProps()       override;

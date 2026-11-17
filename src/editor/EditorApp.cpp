@@ -358,6 +358,11 @@ void EditorApp::tick(float dt) {
         buildEditorIcons(*ctx_.world, wvp, lines, tris);
         // 손 추적 컴포넌트가 있으면 손 표시는 그쪽(디버그 선)이 그립니다. 없으면 예전처럼 카메라 원점 기준으로 그립니다.
         if (TrackedPoseComponent::liveHands() == 0) appendXrControllerLines(*ctx_.world, lines);
+        // 선택한 액터의 범위 표시(라이트 범위 · 원뿔, 카메라 절두체, 소리 반경, 충돌체 등, 2026-11-17 drawEditorVisual).
+        for (Actor* o : ctx_.selection)
+            if (o && o->activeInHierarchy())
+                for (const auto& c : o->getComponents())
+                    if (c->isEnabled()) c->drawEditorVisual();
         // 컴포넌트 · 게임 코드가 모은 디버그 선(2026-10-15). 앞 프레임의 월드 틱이 모은 것을 그리고 비웁니다.
         for (const hdebug::Line& l : hdebug::lines()) { lines.push_back({ l.a, l.color }); lines.push_back({ l.b, l.color }); }
         hdebug::lines().clear();
@@ -1237,6 +1242,13 @@ void EditorApp::buildMenus() {
         { "Duplicate        Ctrl+D", [this]{ duplicateSelection(); } },
         { "Delete           Del",    [this]{ deleteSelection(); } },
         { "Frame Selected   F",      [this]{ frameSelection(); } },
+        // 기즈모 크기(카메라 거리 배율)를 작게 0.08 · 보통 0.12 · 크게 0.18 로 돌립니다. 툴바는 폭 사다리 때문에 칩을 더하지 않습니다.
+        { "Gizmo Size (S/M/L)",      [this]{
+            const float f = gizmo_.sizeFactor();
+            const float n = f < 0.10f ? 0.12f : (f < 0.15f ? 0.18f : 0.08f);
+            gizmo_.setSizeFactor(n);
+            HLOG(LogEditor, Log) << "Gizmo size " << (n < 0.10f ? "small" : (n < 0.15f ? "medium" : "large"));
+        } },
         { "Audio Output...",         [this]{ openAudioOutputDialog(); } },
     }, 0.f });
     menus_.push_back({ "Actor", {
@@ -2347,12 +2359,14 @@ void EditorApp::rebuildDetails() {
 
     if (!ctx_.selected) return;
 
-    // 여러 액터를 고른 경우 디테일은 주 선택(마지막에 고른 것) 하나만 보여 줍니다(2026-10-15).
+    // 여러 액터를 고른 경우 디테일은 주 선택(마지막에 고른 것)의 값을 보여 주고, 바꾼 칸은 같은 컴포넌트(타입 · 순번)를
+    // 가진 다른 선택 액터에도 같은 값으로 넣습니다(2026-11-17, UE 의 다중 선택 편집). 트랜스폼은 바꾼 성분 하나만 넣어
+    // 나머지 성분은 액터마다 그대로입니다. 한 번의 편집은 한 번의 Undo 입니다.
     if (ctx_.selection.size() > 1)
         detailsList_->addSlot(
             HNew(SBorder)->background({0.07f, 0.20f, 0.33f, 1.f})->padding({s(8.f), s(3.f)})
                 ->content(HNew(STextBlock)
-                    ->text(std::to_string(ctx_.selection.size()) + " actors selected (showing the last one)")
+                    ->text(std::to_string(ctx_.selection.size()) + " actors selected (edits apply to all)")
                     ->fontSize(s(12.f))->color(kTextBody)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
             SVerticalBox::ESizeRule::Fixed, s(24.f));
 
@@ -2389,10 +2403,25 @@ void EditorApp::rebuildDetails() {
     };
 
     // ── Transform (collapsible) ───────────────────────────────────────────────
-    auto txBegin = [this, sel]{ undoSnapshot_ = sel->transform(); };
-    auto txEnd   = [this, sel]{
-        cmdStack_.push(std::make_unique<SetTransformCmd>(*ctx_.world, sel, undoSnapshot_, sel->transform()));
+    // 함께 바꿀 다른 선택 액터들(주 선택 제외). 디테일은 선택이 바뀌면 다시 만들어지므로 여기서 한 번 떠 둡니다.
+    std::vector<Actor*> others;
+    for (Actor* a : ctx_.selection) if (a && a != sel) others.push_back(a);
+    auto txBefore = std::make_shared<std::vector<Transform>>();
+    auto txBegin = [this, sel, others, txBefore]{
+        undoSnapshot_ = sel->transform();
+        txBefore->clear();
+        for (Actor* a : others) txBefore->push_back(a->transform());
+    };
+    auto txEnd   = [this, sel, others, txBefore]{
+        auto comp = std::make_unique<CompositeCmd>();
+        comp->add(std::make_unique<SetTransformCmd>(*ctx_.world, sel, undoSnapshot_, sel->transform()));
         sel->notifyTransformCommitted();   // 물리 바디 등이 편집 결과를 따라오게
+        for (size_t i = 0; i < others.size() && i < txBefore->size(); ++i) {
+            comp->add(std::make_unique<SetTransformCmd>(*ctx_.world, others[i], (*txBefore)[i], others[i]->transform()));
+            others[i]->notifyTransformCommitted();
+        }
+        if (comp->cmds.size() == 1) cmdStack_.push(std::move(comp->cmds.front()));
+        else                        cmdStack_.push(std::move(comp));
     };
 
     auto txBody = HNew(SVerticalBox);
@@ -2414,25 +2443,42 @@ void EditorApp::rebuildDetails() {
 
     txBody->addSlot(sectionHeader("LOCATION"), SVerticalBox::ESizeRule::Fixed, s(22.f));
     // 성분별 세터는 값을 읽어 한 성분만 바꾸고 세터로 되돌려 넣습니다(필드 직접 쓰기 불가).
-    auto setPosX = [sel](float v){ glm::vec3 p = sel->transform().position(); p.x = v; sel->setLocalPosition(p); };
-    auto setPosY = [sel](float v){ glm::vec3 p = sel->transform().position(); p.y = v; sel->setLocalPosition(p); };
-    auto setPosZ = [sel](float v){ glm::vec3 p = sel->transform().position(); p.z = v; sel->setLocalPosition(p); };
+    auto posSetter = [sel, others](int axis) {
+        return [sel, others, axis](float v) {
+            for (Actor* a : others) { glm::vec3 p = a->transform().position(); p[axis] = v; a->setLocalPosition(p); }
+            glm::vec3 p = sel->transform().position(); p[axis] = v; sel->setLocalPosition(p);
+        };
+    };
+    auto setPosX = posSetter(0), setPosY = posSetter(1), setPosZ = posSetter(2);
     addTxRow("X", kRed,   [sel]{ return sel->transform().position().x; }, setPosX, 0.01f, ENumberUnit::Offset);
     addTxRow("Y", kGreen, [sel]{ return sel->transform().position().y; }, setPosY, 0.01f, ENumberUnit::Offset);
     addTxRow("Z", kBlue,  [sel]{ return sel->transform().position().z; }, setPosZ, 0.01f, ENumberUnit::Offset);
     txBody->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
 
     txBody->addSlot(sectionHeader("ROTATION"), SVerticalBox::ESizeRule::Fixed, s(22.f));
-    auto setEuler = [this,sel]{ sel->setLocalRotation(glm::quat(glm::radians(cachedEuler_))); };
-    addTxRow("X", kRed,   [this]{ return cachedEuler_.x; }, [this,setEuler](float v){ cachedEuler_.x=v; setEuler(); }, 0.5f, ENumberUnit::Angle);
-    addTxRow("Y", kGreen, [this]{ return cachedEuler_.y; }, [this,setEuler](float v){ cachedEuler_.y=v; setEuler(); }, 0.5f, ENumberUnit::Angle);
-    addTxRow("Z", kBlue,  [this]{ return cachedEuler_.z; }, [this,setEuler](float v){ cachedEuler_.z=v; setEuler(); }, 0.5f, ENumberUnit::Angle);
+    // 다른 액터는 자기 오일러 각에서 그 성분만 바꿉니다.
+    auto setEuler = [this, sel, others](int axis, float v) {
+        cachedEuler_[axis] = v;
+        sel->setLocalRotation(glm::quat(glm::radians(cachedEuler_)));
+        for (Actor* a : others) {
+            glm::vec3 e = quatToEulerDeg(a->transform().rotation());
+            e[axis] = v;
+            a->setLocalRotation(glm::quat(glm::radians(e)));
+        }
+    };
+    addTxRow("X", kRed,   [this]{ return cachedEuler_.x; }, [setEuler](float v){ setEuler(0, v); }, 0.5f, ENumberUnit::Angle);
+    addTxRow("Y", kGreen, [this]{ return cachedEuler_.y; }, [setEuler](float v){ setEuler(1, v); }, 0.5f, ENumberUnit::Angle);
+    addTxRow("Z", kBlue,  [this]{ return cachedEuler_.z; }, [setEuler](float v){ setEuler(2, v); }, 0.5f, ENumberUnit::Angle);
     txBody->addSlot(spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
 
     txBody->addSlot(sectionHeader("SCALE"), SVerticalBox::ESizeRule::Fixed, s(22.f));
-    auto setSclX = [sel](float v){ glm::vec3 s2 = sel->transform().scale(); s2.x = v; sel->setLocalScale(s2); };
-    auto setSclY = [sel](float v){ glm::vec3 s2 = sel->transform().scale(); s2.y = v; sel->setLocalScale(s2); };
-    auto setSclZ = [sel](float v){ glm::vec3 s2 = sel->transform().scale(); s2.z = v; sel->setLocalScale(s2); };
+    auto sclSetter = [sel, others](int axis) {
+        return [sel, others, axis](float v) {
+            for (Actor* a : others) { glm::vec3 s2 = a->transform().scale(); s2[axis] = v; a->setLocalScale(s2); }
+            glm::vec3 s2 = sel->transform().scale(); s2[axis] = v; sel->setLocalScale(s2);
+        };
+    };
+    auto setSclX = sclSetter(0), setSclY = sclSetter(1), setSclZ = sclSetter(2);
     addTxRow("X", kRed,   [sel]{ return sel->transform().scale().x; }, setSclX, 0.01f, ENumberUnit::Size);
     addTxRow("Y", kGreen, [sel]{ return sel->transform().scale().y; }, setSclY, 0.01f, ENumberUnit::Size);
     addTxRow("Z", kBlue,  [sel]{ return sel->transform().scale().z; }, setSclZ, 0.01f, ENumberUnit::Size);
@@ -2538,38 +2584,72 @@ void EditorApp::rebuildDetails() {
 
         // ── Generic property rows via buildProps() ────────────────────────────
         auto props      = std::make_shared<std::vector<PropDesc>>(comp->buildProps());
-        auto snapBefore = std::make_shared<hcmd::PropValues>();
+        // 함께 바꿀 다른 선택 액터의 같은 컴포넌트(타입 · 순번). 각자의 이전 값을 떠 두었다가 한 커맨드로 묶습니다.
+        const std::vector<Component*> peers = hcmd::peerComponents(*sel, *comp, ctx_.selection);
+        auto snapBefore = std::make_shared<std::vector<hcmd::PropValues>>();   // [0] = 주 선택, [1..] = peers
 
         // 숫자 칸은 드래그 · 입력을 시작할 때와 확정할 때의 값을 떠서 한 커맨드로 쌓습니다. 커맨드는 컴포넌트를
         // 포인터가 아니라 액터 ID · 타입 · 순번으로 기억합니다(EditorCommands.hpp). 토글 · 열거도 이제 되돌립니다.
-        auto compBegin = [comp, snapBefore] { *snapBefore = hcmd::captureProps(*comp); };
-        auto compEnd = [this, sel, comp, snapBefore] {
-            hcmd::PropValues after = hcmd::captureProps(*comp);
-            if (after != *snapBefore)
-                cmdStack_.push(std::make_unique<ComponentPropsCmd>(*ctx_.world, sel, comp, *snapBefore, std::move(after)));
-            comp->onPropsCommitted();
+        auto captureAll = [comp, peers](std::vector<hcmd::PropValues>& out) {
+            out.clear();
+            out.push_back(hcmd::captureProps(*comp));
+            for (Component* pc : peers) out.push_back(hcmd::captureProps(*pc));
         };
-        auto commitClick = [this, sel, comp](const std::function<void()>& change) {
-            hcmd::PropValues before = hcmd::captureProps(*comp);
+        auto pushChanges = [this, sel, comp, peers](std::vector<hcmd::PropValues>& before) {
+            auto group = std::make_unique<CompositeCmd>();
+            for (size_t k = 0; k < before.size() && k <= peers.size(); ++k) {
+                Component* c = k == 0 ? comp : peers[k - 1];
+                hcmd::PropValues after = hcmd::captureProps(*c);
+                if (after == before[k]) continue;
+                group->add(std::make_unique<ComponentPropsCmd>(*ctx_.world, k == 0 ? sel : c->owner, c,
+                                                               std::move(before[k]), std::move(after)));
+            }
+            if (group->cmds.size() == 1)  cmdStack_.push(std::move(group->cmds.front()));
+            else if (!group->empty())     cmdStack_.push(std::move(group));
+        };
+        auto compBegin = [captureAll, snapBefore] { captureAll(*snapBefore); };
+        auto compEnd = [comp, peers, snapBefore, pushChanges] {
+            pushChanges(*snapBefore);
+            comp->onPropsCommitted();
+            for (Component* pc : peers) pc->onPropsCommitted();
+        };
+        auto commitClick = [comp, peers, captureAll, pushChanges](const std::function<void()>& change) {
+            std::vector<hcmd::PropValues> before;
+            captureAll(before);
             change();
             comp->onPropsCommitted();
-            hcmd::PropValues after = hcmd::captureProps(*comp);
-            if (after != before)
-                cmdStack_.push(std::make_unique<ComponentPropsCmd>(*ctx_.world, sel, comp, std::move(before), std::move(after)));
+            for (Component* pc : peers) pc->onPropsCommitted();
+            pushChanges(before);
         };
+        // 다른 액터에 같은 칸 값을 넣습니다(칸 이름 · 종류로 찾음).
+        auto toPeers = [peers](hcmd::PropValue e) { for (Component* pc : peers) hcmd::setProp(*pc, e); };
 
         // 열거·토글 칸은 클릭 한 번이 곧 확정이라 세터 직후에 확정 훅을 부릅니다.
         for (auto& pd : *props) {
+            const std::string lbl = pd.label ? pd.label : "";
             if (pd.kind == PropDesc::Float)
                 addNumRow(pd.label, pd.color,
-                    [pd]{ return pd.getF(); }, [pd](float v){ pd.setF(v); },
+                    [pd]{ return pd.getF(); },
+                    [pd, lbl, toPeers](float v){
+                        pd.setF(v);
+                        hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Float; e.f = v;
+                        toPeers(e);
+                    },
                     pd.step, toNumberUnit(pd.unit), compBegin, compEnd);
             else if (pd.kind == PropDesc::Toggle)
                 addBoolRow(pd.label, pd.getB,
-                           [commitClick, setB = pd.setB](bool v){ commitClick([&]{ setB(v); }); });
+                           [commitClick, toPeers, lbl, setB = pd.setB](bool v){ commitClick([&]{
+                               setB(v);
+                               hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Toggle; e.b = v;
+                               toPeers(e);
+                           }); });
             else if (pd.kind == PropDesc::Enum)
                 addEnumRow(pd.label, pd.options, pd.getI,
-                           [commitClick, setI = pd.setI](int v){ commitClick([&]{ setI(v); }); });
+                           [commitClick, toPeers, lbl, setI = pd.setI](int v){ commitClick([&]{
+                               setI(v);
+                               hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Enum; e.i = v;
+                               toPeers(e);
+                           }); });
         }
 
         std::string info = comp->readOnlyInfo();
@@ -3859,11 +3939,64 @@ void EditorApp::buildEditorIcons(World& world, const WorldViewport& /*wvp*/,
         const bool      sel  = isSelected(a);
         const glm::vec4 col  = sel ? glm::vec4(1.f, 1.f, 1.f, 1.f) : color;
 
-        // 카메라를 향하는 사각형(빌보드)
+        // 카메라를 향하는 아이콘(빌보드). 모양은 컴포넌트가 정합니다(2026-11-17, Component::editorIconShape):
+        // 사각형 바탕 위에 종류별 그림(라이트 = 전구 원 + 빛살, 카메라 = 몸통 + 렌즈 삼각형, 소리 = 스피커, 구역 = 테두리 상자,
+        // 안개 = 물결 세 줄, 반사 캡처 = 원 둘). 선택 테두리 · 피킹 크기는 예전 사각형 그대로입니다.
         const glm::vec3 r = right * ssz, u = up * ssz;
         const glm::vec3 p0 = pos - r - u, p1 = pos + r - u, p2 = pos + r + u, p3 = pos - r + u;
-        tris.push_back({p0,col}); tris.push_back({p1,col}); tris.push_back({p2,col});
-        tris.push_back({p0,col}); tris.push_back({p2,col}); tris.push_back({p3,col});
+        int shape = 0;
+        for (const auto& comp : a->getComponents())
+            if (glm::vec4 tmp; comp->editorIcon(tmp)) { shape = comp->editorIconShape(); break; }
+        const glm::vec4 bg = glm::vec4(glm::vec3(col) * 0.35f, 1.f);
+        auto quad = [&](glm::vec2 a0, glm::vec2 a1, const glm::vec4& c) {   // 아이콘 좌표 [-1, 1]² 의 사각형
+            const glm::vec3 q0 = pos + right * (ssz * a0.x) + up * (ssz * a0.y), q1 = pos + right * (ssz * a1.x) + up * (ssz * a0.y);
+            const glm::vec3 q2 = pos + right * (ssz * a1.x) + up * (ssz * a1.y), q3 = pos + right * (ssz * a0.x) + up * (ssz * a1.y);
+            tris.push_back({q0,c}); tris.push_back({q1,c}); tris.push_back({q2,c});
+            tris.push_back({q0,c}); tris.push_back({q2,c}); tris.push_back({q3,c});
+        };
+        auto tri = [&](glm::vec2 a0, glm::vec2 a1, glm::vec2 a2, const glm::vec4& c) {
+            auto at = [&](glm::vec2 q) { return pos + right * (ssz * q.x) + up * (ssz * q.y); };
+            tris.push_back({at(a0),c}); tris.push_back({at(a1),c}); tris.push_back({at(a2),c});
+        };
+        auto disk = [&](glm::vec2 c0, float rad, const glm::vec4& c) {
+            for (int k = 0; k < 12; ++k) {
+                const float t0 = 6.2831853f * k / 12.f, t1 = 6.2831853f * (k + 1) / 12.f;
+                tri(c0, c0 + rad * glm::vec2(std::cos(t0), std::sin(t0)), c0 + rad * glm::vec2(std::cos(t1), std::sin(t1)), c);
+            }
+        };
+        if (shape == 0) {
+            quad({ -1.f, -1.f }, { 1.f, 1.f }, col);
+        } else {
+            quad({ -1.f, -1.f }, { 1.f, 1.f }, bg);
+            switch (shape) {
+                case 1:   // 라이트: 전구 + 빛살
+                    disk({ 0.f, 0.15f }, 0.5f, col);
+                    quad({ -0.22f, -0.75f }, { 0.22f, -0.35f }, col);
+                    break;
+                case 2:   // 카메라: 몸통 + 렌즈
+                    quad({ -0.8f, -0.45f }, { 0.3f, 0.45f }, col);
+                    tri({ 0.3f, 0.f }, { 0.85f, 0.45f }, { 0.85f, -0.45f }, col);
+                    break;
+                case 3:   // 소리: 스피커
+                    quad({ -0.75f, -0.3f }, { -0.3f, 0.3f }, col);
+                    tri({ -0.3f, 0.f }, { 0.35f, 0.7f }, { 0.35f, -0.7f }, col);
+                    quad({ 0.5f, -0.35f }, { 0.62f, 0.35f }, col);
+                    break;
+                case 4:   // 구역: 테두리
+                    quad({ -0.8f, -0.8f }, { 0.8f, -0.6f }, col); quad({ -0.8f, 0.6f }, { 0.8f, 0.8f }, col);
+                    quad({ -0.8f, -0.8f }, { -0.6f, 0.8f }, col); quad({ 0.6f, -0.8f }, { 0.8f, 0.8f }, col);
+                    break;
+                case 5:   // 안개: 줄 셋
+                    for (float y : { -0.5f, 0.f, 0.5f }) quad({ -0.8f, y - 0.1f }, { 0.8f, y + 0.1f }, col);
+                    break;
+                case 6:   // 반사 캡처: 원 + 안쪽 원
+                    disk({ 0.f, 0.f }, 0.75f, col);
+                    disk({ -0.2f, 0.2f }, 0.25f, bg);
+                    break;
+                default:
+                    quad({ -1.f, -1.f }, { 1.f, 1.f }, col);
+            }
+        }
 
         if (sel) {   // 선택 시 테두리
             const glm::vec4 oc{1.f, 0.85f, 0.15f, 1.f};

@@ -102,6 +102,29 @@ inline void applyProps(Component& c, const PropValues& v) {
     c.onPropsCommitted();
 }
 
+// ── 여러 액터 동시 편집(2026-11-17, UE 디테일 패널의 다중 선택 편집과 같은 생각) ──────────────────────────────
+// 주 선택 액터의 컴포넌트 c 와 같은 타입 · 같은 순번의 컴포넌트를 selection 의 다른 액터들에서 찾습니다(없는 액터는 건너뜀).
+inline std::vector<Component*> peerComponents(const Actor& primary, const Component& c, const std::vector<Actor*>& selection) {
+    std::vector<Component*> out;
+    const int ord = ordinalOf(primary, &c);
+    if (ord < 0) return out;
+    for (Actor* a : selection) {
+        if (!a || a == &primary) continue;
+        if (Component* pc = findComponent(*a, c.typeName(), ord)) out.push_back(pc);
+    }
+    return out;
+}
+// 칸 이름 · 종류가 같은 칸 하나에 값을 넣습니다(확정 훅은 부르지 않음, 숫자 칸 드래그 중에 씀). 그런 칸이 없으면 false.
+inline bool setProp(Component& c, const PropValue& e) {
+    for (const PropDesc& pd : c.buildProps()) {
+        if (pd.kind != e.kind || e.label != (pd.label ? pd.label : "")) continue;
+        if (pd.kind == PropDesc::Float && pd.setF)       { pd.setF(e.f); return true; }
+        if (pd.kind == PropDesc::Toggle && pd.setB)      { pd.setB(e.b); return true; }
+        if (pd.kind == PropDesc::Enum && pd.setI)        { pd.setI(e.i); return true; }
+    }
+    return false;
+}
+
 } // namespace hcmd
 
 // 여러 커맨드를 한 번의 Undo 로 묶습니다(여러 액터를 함께 옮긴 기즈모 드래그, 컴포넌트를 붙이고 값을 넣은 편집).

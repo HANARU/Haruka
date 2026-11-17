@@ -244,6 +244,13 @@ void EditorGizmo::tick(Actor* selected, World& world,
 
 }
 
+bool EditorGizmo::uniformOnly(const Actor* a) {
+    const auto* sm = a ? a->getComponent<StaticMeshComponent>() : nullptr;
+    if (!sm || !sm->primitive) return false;
+    const EPrimitiveShape sh = sm->primitive->shape;
+    return sh == EPrimitiveShape::Capsule || sh == EPrimitiveShape::Torus;
+}
+
 // ── handleDrag ─────────────────────────────────────────────────────────────────
 bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdStack,
                              const WorldViewport& wvp, bool leftDown, bool prevLeftDown,
@@ -280,9 +287,24 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
             glm::vec3 ro, rd;
             prevAngle_  = 0.f;
             accumAngle_ = 0.f;
+            rotLinear_  = false;
             if (wvp.ray(vp,ro, rd)) {
                 float denom = glm::dot(rd, dragAxisW_);
-                if (std::abs(denom) > 1e-5f) {
+                // 시선이 회전 평면과 거의 나란하면(링이 선처럼 보임) 평면 교차점이 멀리 튀어 각도가 요동칩니다.
+                // 이때는 링에서 카메라 쪽 점의 접선을 화면에 투영해, 그 방향의 마우스 이동량을 각도로 씁니다
+                // (Blender · UE 와 같은 방식). 접선 길이 = 링 반지름이라 링 반지름만큼 끌면 1 라디안입니다.
+                if (std::abs(denom) < kRotLinearDot) {
+                    const float refLen = std::max(0.02f,
+                        glm::length(cam->owner->worldPosition() - pos) * sizeFactor_);
+                    glm::vec3 w = -(rd - dragAxisW_ * denom);          // 평면 안에서 카메라를 향하는 방향
+                    if (glm::dot(w, w) < 1e-8f) w = planeU_;
+                    w = glm::normalize(w);
+                    const glm::vec3 q    = pos + w * refLen;
+                    const glm::vec3 tdir = glm::cross(dragAxisW_, w);
+                    rotTan2D_  = wvp.project(vp, q + tdir * refLen) - wvp.project(vp, q);
+                    rotLinear_ = glm::dot(rotTan2D_, rotTan2D_) > 1.f;
+                }
+                if (!rotLinear_ && std::abs(denom) > 1e-5f) {
                     float t = glm::dot(pos - ro, dragAxisW_) / denom;
                     glm::vec3 p = ro + rd * t - pos;
                     prevAngle_ = std::atan2(glm::dot(p, planeV_), glm::dot(p, planeU_));
@@ -320,7 +342,11 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
             }
         } else if (mode == 2) {                                // ── 회전 ──
             glm::vec3 ro, rd;
-            if (wvp.ray(vp,ro, rd)) {
+            bool moved = false;
+            if (rotLinear_) {
+                accumAngle_ += glm::dot(mouse - prevMouse_, rotTan2D_) / glm::dot(rotTan2D_, rotTan2D_);
+                moved = true;
+            } else if (wvp.ray(vp,ro, rd)) {
                 float denom = glm::dot(rd, dragAxisW_);
                 if (std::abs(denom) > 1e-5f) {
                     float t = glm::dot(pos - ro, dragAxisW_) / denom;
@@ -331,6 +357,11 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
                     while (d < -3.14159265f) d += kTwoPi;
                     accumAngle_ += d;
                     prevAngle_   = ang;
+                    moved = true;
+                }
+            }
+            {
+                if (moved) {
 
                     // accumAngle_ 원본은 건드리지 않습니다. prevAngle_ 과 함께 누적
                     // 기준이라, 스냅값을 되쓰면 되감김과 히스테리시스가 생깁니다.
@@ -373,7 +404,10 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
                     // 빈 undo 가 쌓이고, (b) 음수(미러) 스케일이 하한에 걸려 부호를 잃습니다.
                     const float factor = std::max(0.05f, snapTo(1.f + amount, st));
                     glm::vec3 ns = s0;
-                    ns[axis_] = s0[axis_] * factor;
+                    // 캡슐 · 토러스는 모양을 ratio 로 정하므로 한 축만 늘리면 반구 · 관이 찌그러집니다. 어느 축 핸들이든
+                    // 세 축에 같은 배율을 겁니다(UE 의 캡슐 컴포넌트가 반지름 · 높이를 따로 두고 크기는 균등으로 쓰는 것과 같은 뜻).
+                    if (uniformOnly(selected)) ns = s0 * factor;
+                    else                       ns[axis_] = s0[axis_] * factor;
                     selected->setLocalScale(ns);
                     // 균등 핸들과 같은 양(배율)을 보고합니다. 절대 스케일을 보고하면
                     // 시작 스케일이 1 이 아닐 때 스텝이 눈금과 달라 보여, 스냅이 걸리는지

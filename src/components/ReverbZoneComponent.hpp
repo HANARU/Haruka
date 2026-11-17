@@ -41,6 +41,8 @@ public:
     hrev::ReverbParams params() const;
 
     bool editorIcon(glm::vec4& c) const override { c = { 0.45f, 0.7f, 1.f, 1.f }; return true; }
+    int  editorIconShape() const override { return 4; }
+    void drawEditorVisual() const override;   // 구역 경계(상자 · 구)
 
     const char*           typeName() const override { return "ReverbZoneComponent"; }
     void                  writeFields(ComponentFieldWriter& w) const override;

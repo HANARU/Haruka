@@ -41,6 +41,7 @@ public:
     bool          interpolate = false;
 
     void onDestroy() override;
+    void drawEditorVisual() const override;   // 충돌체(상자 · 구 · 캡슐, 중심 오프셋 포함)
     void onDisable() override;              // 꺼지면 바디를 지웁니다(DEF-80)
     void onPropsCommitted() override;       // 셰이프·모션·크기·질량이 바뀌었으면 바디 재생성(DEF-43)
     void onTransformCommitted() override;   // 스케일이 바뀌었으면 재생성, 아니면 바디를 옮김

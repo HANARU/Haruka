@@ -8,6 +8,7 @@
 
 struct MeshHandle;
 struct MaterialHandle;
+class AssetManager;
 
 #define SM_PROPS(p) \
     XPROP_Toggle(p, "Visible",      visible),    \
@@ -55,7 +56,14 @@ public:
     bool readField(const std::string& key, const std::string& value) override;
     void onFieldsLoaded(const ComponentLoadContext& ctx) override;   // 메시 · 머티리얼을 불러옴
 
+    // 머티리얼 편집(2026-11-17): 절차 도형이면 디테일 패널에 Checker · R · G · B · Metallic · Roughness 칸이 나오고, 값을
+    // 확정하면(onPropsCommitted) 그 값의 머티리얼을 다시 받습니다(AssetManager 가 값마다 하나를 캐시하므로 같은 값은 공유).
+    // 파일 메시의 머티리얼은 텍스처만 있어(인자 없음) 아직 편집하지 않습니다.
+    void bindAssets(AssetManager* a) { assets_ = a; }
+    void onPropsCommitted() override;
+
 private:
+    AssetManager* assets_ = nullptr;   // 머티리얼을 다시 받을 곳(불러올 때 정해짐)
     int lodCurrent_ = 0;   // selectMeshForScreenSize 가 고른 단계
     bool transparentLoaded_ = false;   // 파일에 transparent 가 있었는지(없으면 에셋 값을 씀)
 };

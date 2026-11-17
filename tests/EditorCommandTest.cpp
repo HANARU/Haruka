@@ -206,6 +206,44 @@ int main() {
         check(t2->speed == 1.f && t->speed == 4.f, "두 번째 컴포넌트의 편집은 두 번째에만 되돌림");
     }
 
+    std::printf("\n== 3-0. 여러 액터 동시 편집(같은 타입 · 순번 찾기, 칸 이름으로 넣기, 한 번의 Undo) ==\n");
+    {
+        World w;
+        HCommandStack st;
+        Actor* a = w.spawnActor("a");
+        Actor* b = w.spawnActor("b");
+        Actor* c = w.spawnActor("c");
+        auto* ta = a->addComponent<TestComp>();
+        b->addComponent<OtherComp>();
+        auto* tb = b->addComponent<TestComp>();   // 순번 0(다른 타입이 앞에 있어도)
+        c->addComponent<OtherComp>();             // TestComp 없음 → 건너뜀
+        const std::vector<Actor*> sel{ a, b, c };
+        const auto peers = hcmd::peerComponents(*a, *ta, sel);
+        check(peers.size() == 1 && peers[0] == tb, "같은 타입 · 순번의 컴포넌트를 가진 액터만 고름");
+        auto* ta2 = a->addComponent<TestComp>();  // a 의 두 번째 TestComp: b 에는 순번 1 이 없음
+        check(hcmd::peerComponents(*a, *ta2, sel).empty(), "순번이 다르면 고르지 않음");
+
+        hcmd::PropValue e; e.label = "Speed"; e.kind = PropDesc::Float; e.f = 3.f;
+        check(hcmd::setProp(*tb, e) && tb->speed == 3.f && tb->committed == 0, "칸 이름 · 종류로 값을 넣고 확정 훅은 부르지 않음");
+        e.kind = PropDesc::Toggle;
+        check(!hcmd::setProp(*tb, e), "이름이 같아도 종류가 다르면 넣지 않음");
+        e.label = "Mode"; e.kind = PropDesc::Enum; e.i = 2;
+        check(hcmd::setProp(*tb, e) && tb->mode == 2, "열거 값");
+
+        // 디테일 패널과 같은 순서: 두 컴포넌트의 이전 값 → 바꿈 → 한 묶음 커맨드
+        tb->speed = 1.f; tb->mode = 0;
+        const hcmd::PropValues ba = hcmd::captureProps(*ta), bb = hcmd::captureProps(*tb);
+        ta->speed = 5.f; tb->speed = 5.f;
+        auto group = std::make_unique<CompositeCmd>();
+        group->add(std::make_unique<ComponentPropsCmd>(w, a, ta, ba, hcmd::captureProps(*ta)));
+        group->add(std::make_unique<ComponentPropsCmd>(w, b, tb, bb, hcmd::captureProps(*tb)));
+        st.push(std::move(group));
+        st.undo();
+        check(ta->speed == 1.f && tb->speed == 1.f, "한 번의 Undo 로 두 액터 모두 되돌림");
+        st.redo();
+        check(ta->speed == 5.f && tb->speed == 5.f, "다시 하기도 함께");
+    }
+
     std::printf("\n== 3-1. 칸이 나타나고 사라지는 속성의 Undo · Redo (DEF-131) ==\n");
     {
         World w;

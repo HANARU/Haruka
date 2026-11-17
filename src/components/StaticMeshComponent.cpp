@@ -20,7 +20,34 @@ MeshHandle* StaticMeshComponent::selectMeshForScreenSize(float screenSize) {
 
 std::vector<PropDesc> StaticMeshComponent::buildProps() {
     auto* p = this;
-    return { SM_PROPS(p) };
+    std::vector<PropDesc> props{ SM_PROPS(p) };
+    if (primitive) {
+        PrimitiveMaterialDesc* m = &primitiveMaterial;
+        props.push_back(makePropToggle("Checker", [m] { return m->checker; }, [m](bool v) { m->checker = v; }));
+        if (!m->checker) {
+            // 색은 sRGB 표시값 0 ~ 1(저장은 8비트 그대로). shift 는 rgba8 안의 자리입니다.
+            auto channel = [m](const char* lbl, glm::vec4 col, int shift) {
+                return makePropFloat(lbl, col, 0.005f,
+                    [m, shift] { return float((m->rgba8 >> shift) & 0xFFu) / 255.f; },
+                    [m, shift](float v) {
+                        const uint32_t c = uint32_t(std::clamp(v, 0.f, 1.f) * 255.f + 0.5f);
+                        m->rgba8 = (m->rgba8 & ~(0xFFu << shift)) | (c << shift);
+                    }, PropUnit::Ratio);
+            };
+            props.push_back(channel("R", PropColor::Red,   24));
+            props.push_back(channel("G", PropColor::Green, 16));
+            props.push_back(channel("B", PropColor::Blue,  8));
+            props.push_back(makePropFloat("Metallic", PropColor::Neutral, 0.01f, [m] { return m->metallic; },
+                                          [m](float v) { m->metallic = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+            props.push_back(makePropFloat("Roughness", PropColor::Neutral, 0.01f, [m] { return m->roughness; },
+                                          [m](float v) { m->roughness = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+        }
+    }
+    return props;
+}
+
+void StaticMeshComponent::onPropsCommitted() {
+    if (primitive && assets_) material = assets_->acquirePrimitiveMaterial(primitiveMaterial);
 }
 
 std::string StaticMeshComponent::readOnlyInfo() const {
@@ -96,6 +123,7 @@ bool StaticMeshComponent::readField(const std::string& key, const std::string& v
 // 없이 남되 도형 · 경로 값은 그대로 두어 다시 저장해도 사라지지 않습니다.
 void StaticMeshComponent::onFieldsLoaded(const ComponentLoadContext& ctx) {
     if (!ctx.assets) return;
+    assets_ = ctx.assets;
     const std::string actorName = owner ? owner->name : std::string("?");
     if (primitive) {
         if (!modelPath.empty())

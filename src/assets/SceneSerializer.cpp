@@ -162,6 +162,7 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
                 mc->material          = assets.acquirePrimitiveMaterial(d.primMat);
                 mc->primitive         = d.prim;
                 mc->primitiveMaterial = d.primMat;
+                mc->bindAssets(&assets);
                 mc->vertCount         = pair.vertCount;
                 mc->triCount          = pair.triCount;
                 mc->visible           = (d.meshVisible != 0);

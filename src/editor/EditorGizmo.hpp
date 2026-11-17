@@ -148,6 +148,12 @@ private:
     float     prevAngle_  = 0.f;   // 직전 프레임의 각도 (증분 누적용)
     float     accumAngle_ = 0.f;   // 시작 이후 누적 회전각 (2pi 감김을 흡수)
     float     sizeFactor_ = 0.12f; // 카메라 거리에 곱하는 기즈모 크기 배율
+    bool      rotLinear_  = false; // 링을 옆에서 보며 시작한 회전 드래그(화면 접선 모드)
+    glm::vec2 rotTan2D_{0.f};      // 그때 쓰는 링 접선의 화면 투영(길이 = 링 반지름 픽셀)
+    static constexpr float kRotLinearDot = 0.2f;   // |dot(시선, 회전 축)| 이 이보다 작으면 접선 모드
+
+    // 캡슐 · 토러스 절차 도형처럼 크기를 균등으로만 바꿔야 하는 액터인지
+    static bool uniformOnly(const Actor* a);
 
     // ── 스냅 (Phase 2) ────────────────────────────────────────────────────────
     HGizmoSnap snap_{};

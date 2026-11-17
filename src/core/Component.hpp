@@ -29,6 +29,11 @@ public:
     // 하는 에디터 아이콘입니다. true 면 outColor 로 아이콘을 그리고 화면 원판 판정으로
     // 픽합니다. 아이콘은 액터 원점에 화면 고정 크기로 그려집니다.
     virtual bool editorIcon(glm::vec4& /*outColor*/) const { return false; }
+    // 에디터 아이콘 모양(2026-11-17): 0 사각형, 1 라이트, 2 카메라, 3 소리, 4 구역, 5 안개, 6 반사 캡처. 색은 editorIcon.
+    virtual int  editorIconShape() const { return 0; }
+    // 선택했을 때 에디터 뷰포트에 그리는 범위 표시(라이트 범위 · 원뿔, 카메라 절두체, 소리 반경, 충돌체 등, 2026-11-17).
+    // hdebug 선으로 그립니다. 기본은 없음.
+    virtual void drawEditorVisual() const {}
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
     virtual void onAttach()         {}  // immediately after addComponent()

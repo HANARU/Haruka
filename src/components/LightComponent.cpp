@@ -1,4 +1,6 @@
 #include "LightComponent.hpp"
+#include "../core/DebugDraw.hpp"
+#include "../core/Actor.hpp"
 #include "CameraComponent.hpp"
 #include "../core/Actor.hpp"
 #include "../core/Reflect.hpp"
@@ -194,4 +196,30 @@ void LightComponent::onFieldsLoaded(const ComponentLoadContext& /*ctx*/) {
             << "' has attenuation radius " << attenuationRadius << "; clamped to "
             << kMinAttenuationRadius << " m";
     attenuationRadius = kMinAttenuationRadius;
+}
+
+// 선택한 라이트의 범위(2026-11-17): Point = 감쇠 반경 구, Spot = 바깥 원뿔(길이 = 감쇠 반경), Directional = 빛 방향 화살표.
+void LightComponent::drawEditorVisual() const {
+    if (!owner) return;
+    const glm::vec3 p = owner->worldPosition();
+    const glm::vec4 c{ 1.f, 0.9f, 0.4f, 1.f };
+    if (lightType == LightType::Point) {
+        hdebug::sphere(p, attenuationRadius, c);
+    } else if (lightType == LightType::Spot) {
+        const glm::vec3 d = emitDirection();
+        const float     r = attenuationRadius;
+        const float     a = glm::radians(outerConeAngle);
+        const glm::vec3 end = p + d * (r * std::cos(a));
+        const float     rr  = r * std::sin(a);
+        hdebug::circle(end, d, rr, c);
+        const glm::vec3 ref = std::abs(d.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+        const glm::vec3 u = glm::normalize(glm::cross(d, ref)), v = glm::cross(d, u);
+        for (const glm::vec3& o : { u, -u, v, -v }) hdebug::line(p, end + o * rr, c);
+        hdebug::circle(p + d * (r * std::cos(glm::radians(innerConeAngle))), d, r * std::sin(glm::radians(innerConeAngle)),
+                       { 1.f, 0.9f, 0.4f, 0.5f });
+    } else {
+        const glm::vec3 d = emitDirection();
+        hdebug::line(p, p + d * 2.f, c);
+        hdebug::circle(p + d * 2.f, d, 0.15f, c, 12);
+    }
 }
