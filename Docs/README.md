@@ -18,6 +18,7 @@
 | [CHANGES.md](CHANGES.md) | 변경 이력 |
 | [Architecture_Overview.md](Architecture_Overview.md) | 엔진 아키텍처 개요 |
 | [Layer_Architecture.md](Layer_Architecture.md) | 코어(Layer 1)와 도메인 경계, 단위 규약 |
+| [Engine_Structure_Design.md](Engine_Structure_Design.md) | 엔진 구조 안정화(2026-11-18 ~): 진단, 모듈 층과 include 방향(정본), core · scene · runtime 분할, 아키텍처 시험 · 허용 목록, 3단계 계획 |
 
 ## 활성 설계 정본
 

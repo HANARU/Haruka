@@ -118,6 +118,8 @@
 
 ## 4. 현재 경계가 새는 지점
 
+> **[2026-11-18]** 코어 안의 모듈 구조(모듈 층 · include 방향 · core 분할)는 [Engine_Structure_Design.md](Engine_Structure_Design.md)가 정본이고, 시험 `architecture_deps` 가 지킵니다. 이 절은 Layer 2 를 막는 지점만 다룹니다.
+
 아래는 코드 실측 결과이며, **Layer 2를 작성할 수 없게 만드는 구조적 장애**입니다. 우주 기능을 얹기 전에 이 중 상당수를 코어에서 먼저 해소해야 합니다.
 
 > **[2026-08-25]** 이 절은 계층 경계가 막히는 지점만 다루며 결함 대장이 아닙니다. 코어 내부 결함의 등재와 추적은 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md)와 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md)가 담당하므로, 개별 결함의 상세는 그쪽을 보십시오. 같은 날 해결된 Transform SSBO 인덱스 동기화와 스피어 인덱스 도메인 불일치, 그리고 깊이 프리패스와 컬러 서브패스의 가시 집합 불일치는 §6의 0단계에 완료로 표기했습니다. 스테레오 컬링은 경계 누출이 아니라 VR 코어의 미비 항목이므로 §3의 판정표에 두었습니다.
@@ -243,3 +245,4 @@ Carbon Engine 저장소를 원본으로 확인한 결과, **코어에 들어갈 
 | [Deep_Space_VR_Specification.md](Deep_Space_VR_Specification.md) | Layer 2 명세. 코어 선결 조건을 함께 읽어야 합니다 |
 | [Threading.md](Threading.md) | 스레드 소유권 규칙. 계층과 무관하게 전역 적용됩니다 |
 | [RendererRefactor.md](RendererRefactor.md) | 현재 렌더러 구조. 패스 확장 지점 논의의 출발점입니다 |
+| [Engine_Structure_Design.md](Engine_Structure_Design.md) | 코어 안의 모듈 층과 include 방향(정본), core · scene · runtime 분할, 아키텍처 시험 |

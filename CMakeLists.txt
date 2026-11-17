@@ -716,6 +716,15 @@ if(NOT ANDROID)
         set_target_properties(HarukaStereoTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 모듈 의존 방향 시험(엔진 구조 안정화 S1, 2026-11-18) -------------------
+    # src 아래 모든 #include "..." 가 tests/ArchitectureRules.txt 의 허용 방향 안인지 봅니다. 정본 Docs/Engine_Structure_Design.md.
+    add_executable(HarukaArchTest tests/ArchitectureTest.cpp)
+    target_compile_definitions(HarukaArchTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(HarukaArchTest PRIVATE /W4 /utf-8)
+        set_target_properties(HarukaArchTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 공통 수학 테스트(src/math, 2026-11-17) -----------------------------
     # 광선 · 도형 판정, 감쇠 · 스프링, 곡선, 시드 난수 · 노이즈, 포즈 필터, 두 뼈 IK 를 화면 없이 검산합니다. 헤더만 씁니다.
     add_executable(HarukaMathTest tests/MathTest.cpp)
@@ -1076,7 +1085,7 @@ if(NOT ANDROID)
     set(HARUKA_TESTS HarukaPakTest HarukaGltfTest HarukaGeometryTest HarukaActorTest HarukaCommandTest HarukaActorUndoTest
         HarukaLogTest HarukaAudioTest HarukaSlateTest HarukaPhysicsTest HarukaStereoTest HarukaInputTest HarukaBatchTest
         HarukaRenderExtTest HarukaSceneTest HarukaLightTest HarukaAssetCacheTest HarukaSceneDocTest HarukaEditCmdTest
-        HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest HarukaMathTest)
+        HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest HarukaMathTest HarukaArchTest)
     if(WIN32)
         list(APPEND HARUKA_TESTS HarukaVkImportTest)
     endif()
@@ -1099,6 +1108,7 @@ if(NOT ANDROID)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
     add_test(NAME stereo_views         COMMAND HarukaStereoTest)
     add_test(NAME math_common          COMMAND HarukaMathTest)
+    add_test(NAME architecture_deps    COMMAND HarukaArchTest)
     add_test(NAME xr_input             COMMAND HarukaInputTest)
     add_test(NAME draw_batching        COMMAND HarukaBatchTest)
     add_test(NAME render_extensions    COMMAND HarukaRenderExtTest)
