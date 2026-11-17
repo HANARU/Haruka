@@ -17,11 +17,17 @@ public:
     static constexpr int kFramesInFlight = 2;   // == MAX_FRAMES
 
     // 프레임별 카메라 파라미터 (RenderView 추출 시점에 채움)
+    static constexpr float kContactThickness = 0.08f;   // 접촉 그림자: 이보다 두꺼운 앞 물체만 가린다고 봄(m, 얇은 것 뒤를 새지 않게)
     struct CameraParams {
         float     zNear = 0.1f, zFar = 100.f;
         glm::mat4 invProj{1.f};
         glm::mat4 proj{1.f};      // SSAO 샘플을 화면으로 투영(예전에는 셰이더가 픽셀마다 inverse(invProj) 를 계산)
         bool      valid = false;
+        // 접촉 그림자(2026-11-17): 이 눈의 뷰 공간 태양 방향(표면 → 태양, 단위)과 광선 길이(m, 0 = 끔). AO 를 끈 채 접촉 그림자만
+        // 켜면 aoTerm 이 거짓이라 SSAO 표본은 건너뛰고 접촉 그림자만 씁니다.
+        glm::vec3 sunView{ 0.f, 1.f, 0.f };
+        float     contactLength = 0.f;
+        bool      aoTerm = true;
     };
 
     void create(RenderContext& rc);

@@ -257,6 +257,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     renderer_->setLimits(limits.maxDrawRows, limits.maxLights);
     renderer_->setForceNoSync2(options.vkNoSync2);
     renderer_->setForceDedicatedMsaa(options.vkDedicatedMsaa);
+    renderer_->setMultiview(options.multiview);
     // 후처리 패스 켬/끔(프로젝트 설정 render.ao · render.bloom). --ssao · --no-ssao 가 AO 를 덮어씁니다.
     renderer_->setPostFeatures(project_.renderAo, project_.renderBloom);
     if (options.ssao.has_value()) renderer_->setAoEnabled(*options.ssao);
@@ -921,7 +922,7 @@ int Engine::finishRun() {
         if (!synthetic_ || lastSynthetic_ == UINT32_MAX) {
             captureNote = "capture skipped (needs --synthetic-eyes and at least one drawn frame)";
             blank       = true;
-        } else if (!renderer_->captureXrEye(lastSynthetic_, 0, rgba, ext)) {
+        } else if (!renderer_->captureXrEye(lastSynthetic_, options_.captureEye, rgba, ext)) {
             captureNote = "capture failed";
             blank       = true;
         } else {
@@ -937,7 +938,8 @@ int Engine::finishRun() {
             const bool ok = f.is_open() &&
                             stbi_write_png_to_func(sink, &f, (int)ext.width, (int)ext.height, 4, rgba.data(),
                                                    (int)ext.width * 4) != 0 && f.good();
-            captureNote = (ok ? "capture " : "capture not written: ") + options_.capturePath + " (" +
+            captureNote = (ok ? "capture " : "capture not written: ") + options_.capturePath +
+                          (options_.captureEye ? " (right eye, " : " (") +
                           std::to_string(ext.width) + "x" + std::to_string(ext.height) + (blank ? ", blank" : "") + ")";
             if (!ok) blank = true;
         }

@@ -37,8 +37,14 @@ using hgpu::GpuLight;
 // 한 프레임에 그리는 뷰(눈)의 최대 수. 셰이더와 같은 값입니다.
 constexpr uint32_t kMaxViews = HARUKA_MAX_VIEWS;
 
+// 월드 행렬을 3 행 아핀 트랜스폼으로 담습니다(O15). 마지막 행은 (0, 0, 0, 1) 이라고 보고 버립니다.
+inline void packAffine(const glm::mat4& m, GpuTransform& out) {
+    for (int r = 0; r < 3; ++r) out.rows[r] = glm::vec4(m[0][r], m[1][r], m[2][r], m[3][r]);
+}
+
 // C++ 배치가 셰이더(std140/std430) 배치와 같은지 컴파일할 때 확인합니다.
-static_assert(sizeof(FrameUBO) == 304,                   "FrameUBO layout changed: update shaders/include/haruka_shared.h rules");
+static_assert(sizeof(GpuTransform) == 48, "GpuTransform is three vec4 rows (std430 stride 48)");
+static_assert(sizeof(FrameUBO) == 448,                   "FrameUBO layout changed: update shaders/include/haruka_shared.h rules");
 static_assert(offsetof(FrameUBO, lightViewProj) == 128,  "FrameUBO.lightViewProj offset");
 static_assert(offsetof(FrameUBO, eyePos)        == 192,  "FrameUBO.eyePos offset");
 static_assert(offsetof(FrameUBO, screenParams)  == 224,  "FrameUBO.screenParams offset");
@@ -46,13 +52,18 @@ static_assert(offsetof(FrameUBO, timeParams)    == 240,  "FrameUBO.timeParams of
 static_assert(offsetof(FrameUBO, miscParams)    == 256,  "FrameUBO.miscParams offset");
 static_assert(offsetof(FrameUBO, shadowParams)  == 272,  "FrameUBO.shadowParams offset");
 static_assert(offsetof(FrameUBO, shadowFade)    == 288,  "FrameUBO.shadowFade offset");
-static_assert(sizeof(GpuTransform) == 64,                "GpuTransform must be one mat4");
+static_assert(offsetof(FrameUBO, fogColor)      == 304,  "FrameUBO.fogColor offset");
+static_assert(offsetof(FrameUBO, fogParams)     == 320,  "FrameUBO.fogParams offset");
+static_assert(offsetof(FrameUBO, lightViewProjNear) == 336, "FrameUBO.lightViewProjNear offset");
+static_assert(offsetof(FrameUBO, cascadeNear)   == 400,  "FrameUBO.cascadeNear offset");
+static_assert(offsetof(FrameUBO, capturePos)    == 416,  "FrameUBO.capturePos offset");
 static_assert(sizeof(GpuLight)     == 64,                "GpuLight must be four vec4");
 
 // 셰이더의 HARUKA_VIEW_PUSH_CONSTANT 와 같은 배치입니다. PBR · 깊이 · 라인 파이프라인 레이아웃이
 // 이 크기의 푸시 상수 범위를 둡니다(정점 · 조각 단계).
-struct GpuViewPush { int32_t viewIndex; };
-static_assert(sizeof(GpuViewPush) == 4, "GpuViewPush must match HarukaViewPush");
+// lightChannels(2026-11-17): 이 드로의 메시 라이트 채널 비트(LightChannels.hpp). pbr.frag 가 라이트 채널과 겹칠 때만 비춥니다.
+struct GpuViewPush { int32_t viewIndex; uint32_t lightChannels = 1; };
+static_assert(sizeof(GpuViewPush) == 8, "GpuViewPush must match HarukaViewPush");
 
 // 월드 UI 패널 푸시 상수(3D UI P1b). shaders/ui_panel.vert · .frag 의 PanelPush 와 같은 배치입니다.
 // flags 비트 0 = 양면(뒷면도 그림). brightness 는 패널 색에 곱하는 선형 밝기(3D UI 구간 4), pad 는 16바이트 정렬용.
@@ -84,6 +95,11 @@ struct XrFrameTarget {
     uint32_t                           imageIndex = 0;
     std::array<XrEyePose, kMaxViews>   eyes{};
 };
+
+// transform SSBO 행마다 붙는 그리기 상태 비트(Renderer::RenderView::rowFlags). 묶음의 행은 모두 같은 값입니다.
+constexpr uint8_t kRowMirrored = 1;   // 거울 변환: 앞면 시계 방향 파이프라인(DEF-170)
+constexpr uint8_t kRowIndex16  = 2;   // 16비트 인덱스 구역(O3)
+constexpr int     kRowChannelShift = 2;   // 비트 2 ~ 4: 메시 라이트 채널(LightChannels.hpp)
 
 // Draw command (mirrors VkDrawIndexedIndirectCommand)
 struct GpuDrawCmd {

@@ -4,6 +4,7 @@
 #include "RenderTypes.hpp"
 #include "../assets/GltfLoader.hpp"
 #include "../assets/MeshSource.hpp"
+#include "../geometry/MeshOptimize.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -52,12 +53,12 @@ void GpuScene::destroy() {
 
 // ── 스킨 메시 정점 구간 (2026-11-07) ─────────────────────────────────────────
 
-Vertex* GpuScene::skinArena(uint32_t frameSlot, uint32_t& firstVertex) {
+PackedVertex* GpuScene::skinArena(uint32_t frameSlot, uint32_t& firstVertex) {
     firstVertex = 0;
     if (frameSlot >= (uint32_t)MAX_FRAMES || skinArenaFailed_ || !megaVertAlloc_.mappedPtr) return nullptr;
     if (!skinArenaReserved_) {
         const uint64_t need = (uint64_t)kSkinArenaVerts * MAX_FRAMES;
-        if ((megaVertCount_ + need) * sizeof(Vertex) > kMegaVertBytes) {
+        if ((megaVertCount_ + need) * sizeof(PackedVertex) > kMegaVertBytes) {
             skinArenaFailed_ = true;
             HLOG(LogRenderer, Warning) << "mega vertex buffer has no room for the skinned-mesh area ("
                                        << need << " vertices); skinned meshes are not drawn";
@@ -70,7 +71,7 @@ Vertex* GpuScene::skinArena(uint32_t frameSlot, uint32_t& firstVertex) {
                                << MAX_FRAMES << " frame slot(s) at vertex " << skinArenaFirst_;
     }
     firstVertex = skinArenaFirst_ + frameSlot * kSkinArenaVerts;
-    return reinterpret_cast<Vertex*>(static_cast<uint8_t*>(megaVertAlloc_.mappedPtr)) + firstVertex;
+    return reinterpret_cast<PackedVertex*>(static_cast<uint8_t*>(megaVertAlloc_.mappedPtr)) + firstVertex;
 }
 
 // ── Mesh upload (mega buffer) ─────────────────────────────────────────────────
@@ -84,24 +85,39 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
     // DEF-45: 예전에는 여기서 먼저 new MeshHandle() 을 하고 그 다음에 용량을
     // 검사해 throw 했습니다. 즉 초과할 때마다 핸들이 하나씩 새어 나갔습니다.
     // 검사를 앞으로 옮기면 그 경로 자체가 없어집니다.
-    if ((megaVertCount_ + vCount) * sizeof(Vertex)   > kMegaVertBytes ||
-        (megaIdxCount_  + iCount) * sizeof(uint32_t) > kMegaIdxBytes)
+    // 16비트로 넣을 수 있는가: 인덱스는 메시 안 번호(정점 오프셋은 그릴 때 더함)이므로 정점 수만 보면 됩니다.
+    const bool use16 = vCount <= 65536u;
+    if ((megaVertCount_ + vCount) * sizeof(PackedVertex) > kMegaVertBytes ||
+        (use16 ? (uint64_t)(megaIdx16Count_ + iCount) * sizeof(uint16_t) > kMegaIdxBytes - kIdx16Base
+               : (uint64_t)(megaIdxCount_ + iCount) * sizeof(uint32_t) > kIdx16Base))
         throw std::runtime_error("Mega buffer overflow! Too many vertices/indices.");
+
+    // 정점 캐시 순서(O3): 삼각형 순서만 바꿉니다(집합 · 감기 방향 그대로).
+    std::vector<uint32_t> ordered(indices);
+    hmesh::optimizeVertexCache(ordered, vCount);
 
     auto* h = new MeshHandle();
     h->firstVertex = megaVertCount_;
-    h->firstIndex  = megaIdxCount_;
+    h->firstIndex  = use16 ? megaIdx16Count_ : megaIdxCount_;
     h->indexCount  = iCount;
     h->vertexCount = vCount;
+    h->index16     = use16;
 
     // Copy into mega buffers (Zone B mapped via auxMem for images — buffers in heap)
-    void* vertDst = static_cast<uint8_t*>(megaVertAlloc_.mappedPtr) + megaVertCount_ * sizeof(Vertex);
-    memcpy(vertDst, verts.data(), vCount * sizeof(Vertex));
-    void* idxDst  = static_cast<uint8_t*>(megaIdxAlloc_.mappedPtr) + megaIdxCount_ * sizeof(uint32_t);
-    memcpy(idxDst, indices.data(), iCount * sizeof(uint32_t));
+    // QTangent(C2): 올리면서 28 B 정점으로 줄입니다.
+    auto* vertDst = reinterpret_cast<PackedVertex*>(static_cast<uint8_t*>(megaVertAlloc_.mappedPtr)) + megaVertCount_;
+    hqtan::packRange(verts.data(), vertDst, vCount);
+    uint8_t* idxBase = static_cast<uint8_t*>(megaIdxAlloc_.mappedPtr);
+    if (use16) {
+        uint16_t* dst = reinterpret_cast<uint16_t*>(idxBase + kIdx16Base) + megaIdx16Count_;
+        for (uint32_t i = 0; i < iCount; ++i) dst[i] = (uint16_t)ordered[i];
+        megaIdx16Count_ += iCount;
+    } else {
+        memcpy(idxBase + (size_t)megaIdxCount_ * sizeof(uint32_t), ordered.data(), iCount * sizeof(uint32_t));
+        megaIdxCount_ += iCount;
+    }
 
     megaVertCount_ += vCount;
-    megaIdxCount_  += iCount;
 
     // ── 바운드 ────────────────────────────────────────────────────────────────
     // 메가버퍼는 해제 없는 범프 할당자입니다. 여기서 소모한 공간은 영영
@@ -155,9 +171,11 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
 GpuScene::MeshBudget GpuScene::budget() const {
     MeshBudget b{};
     b.verts   = megaVertCount_;
-    b.indices = megaIdxCount_;
-    b.vertPct = 100.f * (float)((double)megaVertCount_ * sizeof(Vertex)   / (double)kMegaVertBytes);
-    b.idxPct  = 100.f * (float)((double)megaIdxCount_  * sizeof(uint32_t) / (double)kMegaIdxBytes);
+    b.indices = megaIdxCount_ + megaIdx16Count_;
+    b.vertPct = 100.f * (float)((double)megaVertCount_ * sizeof(PackedVertex) / (double)kMegaVertBytes);
+    // 두 구역 중 더 찬 쪽(어느 한쪽이 차면 그 형식의 메시를 더 올릴 수 없음)
+    b.idxPct  = 100.f * (float)std::max((double)megaIdxCount_ * sizeof(uint32_t) / (double)kIdx16Base,
+                                        (double)megaIdx16Count_ * sizeof(uint16_t) / (double)(kMegaIdxBytes - kIdx16Base));
     return b;
 }
 

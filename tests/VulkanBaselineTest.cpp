@@ -49,6 +49,8 @@ hvk::DeviceCaps questPro() {
     c.extSync2              = true;
     c.featSync2             = true;
     c.featSamplerAnisotropy = true;
+    c.featMultiview         = true;
+    c.maxMultiviewViewCount = 6;
     c.maxPushDescriptors    = 32;
     return c;
 }
@@ -113,6 +115,7 @@ int main() {
                                        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME }),
               "A1 켤 확장 = swapchain · push_descriptor · synchronization2");
         check(p.sync2 && p.samplerAnisotropy && !p.storageImageMultisample, "A1 sync2 켬, 이방성 켬, MS 저장 끔");
+        check(p.multiview, "A1 멀티뷰 켬(필수 기능, 2026-11-18)");
         check(noDuplicates(p.extensions), "A1 확장 목록에 중복 없음");
 
         hvk::DeviceCaps q3 = questPro();
@@ -192,12 +195,22 @@ int main() {
         both.apiVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
         const hvk::DevicePlan pa11 = hvk::planDevice(both, true, false);
         check(!pa11.suitable && pa11.whyNot.find("; ") != std::string::npos, "A11 이유가 여럿이면 모두 적음");
+
+        hvk::DeviceCaps noMv = questPro();
+        noMv.featMultiview = false;
+        const hvk::DevicePlan pa14 = hvk::planDevice(noMv, true, false);
+        check(!pa14.suitable && !pa14.multiview && pa14.whyNot.find("multiview") != std::string::npos,
+              "A14 멀티뷰 기능이 없으면 맞지 않음(메인 패스 셰이더가 gl_ViewIndex 를 씀)");
+        hvk::DeviceCaps oneView = questPro();
+        oneView.maxMultiviewViewCount = 1;
+        check(!hvk::planDevice(oneView, true, false).suitable, "A14 멀티뷰 눈 수가 2 보다 작으면 맞지 않음");
     }
 
     std::printf("\n== B. 기능 체인 ==\n");
     {
-        auto walk = [](const void* head, int& count, bool& coreStruct, bool& sync2On) {
-            count = 0; coreStruct = false; sync2On = false;
+        bool mvOn = false;
+        auto walk = [&mvOn](const void* head, int& count, bool& coreStruct, bool& sync2On) {
+            count = 0; coreStruct = false; sync2On = false; mvOn = false;
             for (const VkBaseInStructure* s = static_cast<const VkBaseInStructure*>(head); s; s = s->pNext) {
                 ++count;
                 if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES ||
@@ -207,6 +220,8 @@ int main() {
                     coreStruct = true;
                 if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR)
                     sync2On = reinterpret_cast<const VkPhysicalDeviceSynchronization2FeaturesKHR*>(s)->synchronization2 == VK_TRUE;
+                if (s->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES)
+                    mvOn = reinterpret_cast<const VkPhysicalDeviceMultiviewFeatures*>(s)->multiview == VK_TRUE;
             }
         };
         hvk::FeatureChain fc;
@@ -215,7 +230,9 @@ int main() {
         const hvk::DevicePlan on = hvk::planDevice(ms, true, true);
         int n = 0; bool core = false, s2 = false;
         walk(hvk::buildFeatureChain(on, fc), n, core, s2);
-        check(n == 1 && s2 && !core, "B1 sync2 를 켜면 sync2 구조체 정확히 하나(synchronization2 = VK_TRUE)");
+        check(n == 2 && s2 && mvOn && !core, "B1 sync2 를 켜면 멀티뷰 · sync2 구조체 둘(둘 다 VK_TRUE, VulkanNNFeatures 없음)");
+        check(fc.multiview.multiviewGeometryShader == VK_FALSE && fc.multiview.multiviewTessellationShader == VK_FALSE,
+              "B1 멀티뷰 기하 · 테셀레이션은 켜지 않음");
         check(fc.core.samplerAnisotropy == VK_TRUE && fc.core.shaderStorageImageMultisample == VK_TRUE,
               "B1 기본 기능이 계획과 같음(이방성 · MS 저장)");
         check(fc.core.depthBiasClamp == VK_FALSE, "B1 depthBiasClamp 를 지원하지 않는 계획이면 VK_FALSE");
@@ -239,13 +256,15 @@ int main() {
         const hvk::DevicePlan off = hvk::planDevice(noExt, false, false);
         hvk::FeatureChain fc2;
         const void* head = hvk::buildFeatureChain(off, fc2);
-        check(head == nullptr, "B2 sync2 를 끄면 체인 없음(nullptr)");
+        walk(head, n, core, s2);
+        check(head == &fc2.multiview && n == 1 && mvOn && !s2, "B2 sync2 를 끄면 멀티뷰 구조체 하나만");
         check(fc2.core.samplerAnisotropy == VK_FALSE && fc2.core.shaderStorageImageMultisample == VK_FALSE,
               "B2 이방성 · MS 저장 끔이 기본 기능에 그대로");
 
         // 이전 값이 남지 않음(같은 FeatureChain 을 다시 씀)
         const void* again = hvk::buildFeatureChain(off, fc);
-        check(again == nullptr && fc.core.samplerAnisotropy == VK_FALSE, "B3 다시 만들면 이전 값이 남지 않음");
+        walk(again, n, core, s2);
+        check(n == 1 && !s2 && fc.core.samplerAnisotropy == VK_FALSE, "B3 다시 만들면 이전 값이 남지 않음");
     }
 
     std::printf("\n== C. 장치 함수 ==\n");

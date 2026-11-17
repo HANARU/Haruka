@@ -11,8 +11,11 @@
 //     xrInstanceApiVersion). 그래도 엔진이 묻고 부르는 함수는 같습니다.
 //   · VK_KHR_push_descriptor 는 필수, VK_KHR_synchronization2 는 선택입니다(없으면 1.0 배리어, BarrierCompat.hpp).
 //     둘 다 1.1 에 기댑니다(vk.xml depends). push descriptor 확장에는 기능 구조체가 없습니다.
-//   · 기능 체인에는 sync2 구조체 하나만 잇습니다. Vulkan11~14Features 는 잇지 않습니다(1.1 장치에는 없는 구조체이고,
-//     Vulkan13Features 와 개별 구조체를 함께 달면 VUID-VkDeviceCreateInfo-pNext-06532 위반).
+//   · 기능 체인에는 멀티뷰 구조체(1.1 코어 VkPhysicalDeviceMultiviewFeatures)와 sync2 구조체만 잇습니다. Vulkan11~14Features
+//     는 잇지 않습니다(1.1 장치에는 없는 구조체이고, Vulkan13Features 와 개별 구조체를 함께 달면
+//     VUID-VkDeviceCreateInfo-pNext-06532 위반).
+//   · 멀티뷰(두 눈)는 필수입니다(2026-11-18). 1.1 에서 지원이 필수인 기능이고, 메인 패스 셰이더가 gl_ViewIndex 를 쓰므로
+//     (MultiView 능력) 렌더 경로와 상관없이 늘 켭니다. --no-multiview 는 그리는 경로만 고릅니다.
 //   · 확장 함수는 vkGetDeviceProcAddr 로 KHR 이름만 묻습니다. 1.2 이상 코어 이름은 링크하지도 묻지도 않습니다.
 //   · 이방성 필터링이 없는 장치는 끄고 계속합니다(사용자 결정 2026-10-31). 다중 샘플 저장 이미지는 XR 장치이고
 //     지원할 때만 켭니다(DEF-110).
@@ -53,6 +56,8 @@ struct DeviceCaps {
     bool         featStorageImageMultisample = false;
     bool         featDepthBiasClamp          = false;   // 섀도 경사 바이어스 상한(ShadowPass)
     bool         featDepthClamp              = false;   // 섀도 캐스터 pancaking(ShadowPass, ShadowFit.hpp)
+    bool         featMultiview               = false;   // VkPhysicalDeviceMultiviewFeatures::multiview(1.1 코어)
+    uint32_t     maxMultiviewViewCount       = 0;       // VkPhysicalDeviceMultiviewProperties(규격 최솟값 6)
     uint32_t     maxPushDescriptors          = 0;       // 로그용(규격 최솟값 32)
     VkDeviceSize maxMemoryAllocationSize     = 0;       // 0 = 모름(Maintenance3, 할당자에 넘김)
 };
@@ -66,7 +71,11 @@ struct DevicePlan {
     bool                     storageImageMultisample = false;
     bool                     depthBiasClamp          = false;
     bool                     depthClamp              = false;
+    bool                     multiview               = false;   // 맞는 장치면 늘 참(필수 기능)
 };
+
+// 멀티뷰로 한 번에 그리는 눈 수입니다(HARUKA_MAX_VIEWS 와 같음). 장치가 이만큼 지원해야 합니다.
+inline constexpr uint32_t kMultiviewViews = 2;
 
 // needSwapchain 은 창이 표면을 줄 때만 참입니다(창 없는 경로 · Quest 는 거짓). forceNoSync2 는 1.0 배리어 경로를
 // PC 에서 시험하는 명령줄 스위치(--vk-no-sync2)입니다.
@@ -80,7 +89,10 @@ inline DevicePlan planDevice(const DeviceCaps& caps, bool needSwapchain, bool xr
         reject("Vulkan 1.1 or newer is required (device reports " + versionString(caps.apiVersion) + ")");
     if (!caps.extPushDescriptor) reject("missing " VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     if (needSwapchain && !caps.extSwapchain) reject("missing " VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    p.suitable = p.whyNot.empty();
+    if (!caps.featMultiview || caps.maxMultiviewViewCount < kMultiviewViews)
+        reject("multiview with " + std::to_string(kMultiviewViews) + " views is required (Vulkan 1.1 core feature)");
+    p.suitable  = p.whyNot.empty();
+    p.multiview = p.suitable;
 
     if (needSwapchain) p.extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     p.extensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
@@ -96,7 +108,9 @@ inline DevicePlan planDevice(const DeviceCaps& caps, bool needSwapchain, bool xr
 }
 
 // 장치 생성의 기능 체인입니다. 반환값을 VkDeviceCreateInfo::pNext 에, &out.core 를 pEnabledFeatures 에 넣습니다.
+// 순서는 멀티뷰 → sync2 입니다(있는 것만).
 struct FeatureChain {
+    VkPhysicalDeviceMultiviewFeatures           multiview{};
     VkPhysicalDeviceSynchronization2FeaturesKHR sync2{};
     VkPhysicalDeviceFeatures                    core{};
 };
@@ -107,11 +121,20 @@ inline const void* buildFeatureChain(const DevicePlan& plan, FeatureChain& out) 
     out.core.shaderStorageImageMultisample = plan.storageImageMultisample ? VK_TRUE : VK_FALSE;
     out.core.depthBiasClamp                = plan.depthBiasClamp ? VK_TRUE : VK_FALSE;
     out.core.depthClamp                    = plan.depthClamp ? VK_TRUE : VK_FALSE;
-    if (!plan.sync2) return nullptr;
-    out.sync2.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR;
-    out.sync2.pNext            = nullptr;
-    out.sync2.synchronization2 = VK_TRUE;
-    return &out.sync2;
+    const void* head = nullptr;
+    if (plan.sync2) {
+        out.sync2.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR;
+        out.sync2.pNext            = nullptr;
+        out.sync2.synchronization2 = VK_TRUE;
+        head = &out.sync2;
+    }
+    if (plan.multiview) {
+        out.multiview.sType     = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
+        out.multiview.pNext     = const_cast<void*>(head);
+        out.multiview.multiview = VK_TRUE;   // 기하 · 테셀레이션 셰이더 멀티뷰는 쓰지 않습니다
+        head = &out.multiview;
+    }
+    return head;
 }
 
 // ── 큐 계열 ───────────────────────────────────────────────────────────────────────────────────

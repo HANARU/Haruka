@@ -14,6 +14,8 @@
 //     되므로 행을 따로 배정하지 않습니다.
 //   · 카메라에 보이는 메시가 행 예산을 먼저 씁니다. 라이트에만 보이는 캐스터는 그 뒤에 지오메트리
 //     기준으로 묶습니다(섀도는 머티리얼을 쓰지 않음). 예산을 넘친 수는 dropped 로 셉니다(DEF-10).
+//   · 거울 변환(행렬식 < 0)인 메시는 따로 묶습니다. 삼각형 감기 방향이 뒤집혀 앞면 방향이 다른 파이프라인으로
+//     그리기 때문입니다(DEF-170, UE 의 드로마다 행렬식 부호로 앞면을 바꾸는 방식).
 //
 // Vulkan 에 의존하지 않아 HarukaBatchTest(draw_batching)가 화면 없이 검산합니다.
 
@@ -36,6 +38,9 @@ struct Candidate {
     bool        inCam       = false;
     bool        inLight     = false;
     bool        transparent = false;
+    bool        mirrored    = false;    // 모델 행렬의 행렬식이 음수(거울 변환). 감기 방향이 뒤집혀 다른 파이프라인으로 그림(DEF-170)
+    bool        index16     = false;    // 인덱스가 16비트 구역(O3). firstIndex 는 그 구역 안 번호라 묶음 키에 듦
+    uint8_t     lightChannels = 1;      // 메시 라이트 채널(드로마다 푸시 상수라 묶음 키에 듦, 그림자 묶음에는 쓰지 않음)
 };
 
 // VkDrawIndexedIndirectCommand 와 같은 배치입니다(렌더러의 GpuDrawCmd 로 그대로 옮깁니다).
@@ -45,6 +50,8 @@ struct Run {
     uint32_t firstIndex;
     int32_t  vertexOffset;
     uint32_t firstInstance;   // 첫 행. 묶음의 행은 [firstInstance, firstInstance + instanceCount)
+    bool     mirrored = false;   // 묶음 전체가 거울 변환(Candidate::mirrored 가 같은 것끼리만 묶음)
+    bool     index16  = false;   // 16비트 인덱스 구역(O3)
 };
 
 struct Result {
@@ -62,21 +69,27 @@ struct Key {
     const void* material;
     uint32_t    indexCount, firstIndex;
     int32_t     vertexOffset;
+    bool        mirrored;
+    bool        index16;
+    uint8_t     lightChannels;
     bool operator==(const Key& o) const {
         return material == o.material && indexCount == o.indexCount &&
-               firstIndex == o.firstIndex && vertexOffset == o.vertexOffset;
+               firstIndex == o.firstIndex && vertexOffset == o.vertexOffset && mirrored == o.mirrored &&
+               index16 == o.index16 && lightChannels == o.lightChannels;
     }
 };
 struct KeyHash {
     size_t operator()(const Key& k) const {
         size_t h = std::hash<const void*>{}(k.material);
         auto mix = [&h](size_t v) { h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2); };
-        mix(k.indexCount); mix(k.firstIndex); mix((uint32_t)k.vertexOffset);
+        mix(k.indexCount); mix(k.firstIndex); mix((uint32_t)k.vertexOffset); mix((k.mirrored ? 1u : 0u) | (k.index16 ? 2u : 0u) | ((uint32_t)k.lightChannels << 2));
         return h;
     }
 };
 inline Key keyOf(const Candidate& c, bool withMaterial) {
-    return { withMaterial ? c.material : nullptr, c.indexCount, c.firstIndex, c.vertexOffset };
+    // 그림자 묶음(withMaterial 거짓)은 채널을 보지 않습니다(그림자는 채널과 무관).
+    return { withMaterial ? c.material : nullptr, c.indexCount, c.firstIndex, c.vertexOffset, c.mirrored, c.index16,
+             withMaterial ? c.lightChannels : (uint8_t)0 };
 }
 } // namespace detail
 
@@ -109,7 +122,7 @@ inline Result build(const std::vector<Candidate>& cands, uint32_t maxRows, bool 
         if (!s.group) {
             const Candidate& c = cands[s.index];
             if (row >= maxRows) { ++r.droppedCam; continue; }
-            const Run run{ c.indexCount, 1, c.firstIndex, c.vertexOffset, row++ };
+            const Run run{ c.indexCount, 1, c.firstIndex, c.vertexOffset, row++, c.mirrored, c.index16 };
             r.rowSource.push_back(s.index);
             transp.push_back({ c.distSq, run });
             if (c.inLight) r.shadow.push_back(run);   // 카메라에도 보이면서 라이트 안이면 같은 행으로 그림자
@@ -122,7 +135,7 @@ inline Result build(const std::vector<Candidate>& cands, uint32_t maxRows, bool 
         r.droppedCam += (uint32_t)m.size() - n;
         if (n == 0) continue;
         const Candidate& c0 = cands[m[0]];
-        const Run run{ c0.indexCount, n, c0.firstIndex, c0.vertexOffset, row };
+        const Run run{ c0.indexCount, n, c0.firstIndex, c0.vertexOffset, row, c0.mirrored, c0.index16 };
         uint32_t lit = 0;
         for (uint32_t k = 0; k < n; ++k) {
             r.rowSource.push_back(m[k]);
@@ -151,7 +164,7 @@ inline Result build(const std::vector<Candidate>& cands, uint32_t maxRows, bool 
         r.droppedShadow += (uint32_t)m.size() - n;
         if (n == 0) continue;
         const Candidate& c0 = cands[m[0]];
-        r.shadow.push_back({ c0.indexCount, n, c0.firstIndex, c0.vertexOffset, row });
+        r.shadow.push_back({ c0.indexCount, n, c0.firstIndex, c0.vertexOffset, row, c0.mirrored, c0.index16 });
         for (uint32_t k = 0; k < n; ++k) r.rowSource.push_back(m[k]);
         row += n;
     }

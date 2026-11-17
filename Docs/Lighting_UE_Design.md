@@ -208,3 +208,14 @@ LightComponent (UE 어휘):
 5. ✅ **결정: enum 자체를 추가 안 함(2026-08-27).** 유효값이 Movable 하나뿐이라 필드로 만들면 방금 제거한
    `ambient` 처럼 또 다른 사문 필드가 됨. 문서(§3 Mobility 표)로만 남김.
 6. **CSM 캐스케이드 수**(Quest 예산): 2 vs 3. **(2026-10-15 현재 열림)** CSM 을 구현할 때 Quest 예산과 함께 정합니다.
+
+## 7. 2026-11-17 구현
+
+| 기능 | 내용 |
+|---|---|
+| Light Channels | 라이트 · 메시마다 채널 3개(`LightChannels.hpp`), 라이트 마스크는 `GpuLight.spotParams.z`, 메시 마스크는 푸시 상수, 묶기 키에 포함 |
+| 노출 | `CameraComponent.exposureEv`, 후처리 노출 × 2^EV |
+| CSM | 2단(가까운 단 반경 6 m · 먼 단), 가로 두 칸 아틀라스, 경계 섞기. 6번 열린 항목(2 vs 3)은 **2 로 시작**하고 Quest 측정 뒤 다시 봅니다. PC 섀도 메모리 +64 MB. **2026-11-18 품질 단계**: `render.csmCascades` · `render.shadowDistance`(project.ini), 저장소의 Quest 값은 사용자가 승인한 성능 안정화 제안대로 1단 · 12 m 입니다. 위 "Quest 는 2 단으로 시작"과 다르므로 Quest 측정 때 함께 다시 봅니다(1 단은 그림자 가장자리가 거칠어짐, PC 측정 섀도 패스 0.068 → 0.044 ms) |
+| 접촉 그림자 | `LightComponent.contactShadowLength`, 화면 공간 12걸음(ssao.frag), AO 항에 곱함(근사), AO 를 꺼도 동작 |
+| 반사 캡처 | `ReflectionCaptureComponent`(한 장면 하나, 정적, 구 프록시 시차 보정, 반경 바깥 30 % 섞음). 비용(Release, LightingProbe): 면마다 256² 영역만 그리고(예전에는 렌더 크기 전체) 읽은 값을 한 번에 복사 · 빠른 half 변환, 프리필터는 면마다 스레드 하나 → 합계 약 430 ms → 20 ms(Debug 2.4 s → 79 ms), 화면은 화소 단위로 같음 |
+| 높이 안개 | `HeightFogComponent`(지수 고도 안개, 배경에는 걸리지 않음) |

@@ -24,6 +24,7 @@ class SkinnedMeshComponent : public Component {
 public:
     bool        visible     = true;
     bool        transparent = false;
+    uint8_t     lightChannels = 1;   // 라이트 채널(LightChannels.hpp, 2026-11-17)
     std::string modelPath;
     int         meshIndex   = 0;   // AssetManager::loadAll() 결과 안의 번호. 스킨이 있는 메시여야 합니다
 

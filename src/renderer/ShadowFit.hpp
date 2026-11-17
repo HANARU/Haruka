@@ -23,6 +23,12 @@
 namespace hshadow {
 
 constexpr float kRadius         = 20.f;    // 그림자 거리: 머리 중심 구의 반지름(m). UE 의 Dynamic Shadow Distance 에 해당
+// 캐스케이드(CSM, 2026-11-17, Lighting_UE_Design Phase 5): 2단. 가까운 단(kNearRadius)은 같은 해상도로 좁은 구를 덮어 텍셀이
+// kRadius / kNearRadius 배 촘촘하고, 먼 단은 예전 단일 맵(kRadius) 그대로입니다. 두 단은 섀도 이미지 하나를 가로로 나눠 씁니다
+// (왼쪽 = 가까운 단, 오른쪽 = 먼 단). 가까운 단의 페이드 구간(0.8 × 6 m ~ 6 m − 2텍셀)에서 먼 단으로 섞습니다. Quest 는 2단으로
+// 시작한다는 결정(Lighting_UE_Design 열린 항목 6)을 따릅니다.
+constexpr int   kCascadeCount   = 2;
+constexpr float kNearRadius     = 6.f;
 constexpr float kCasterReach    = 100.f;   // 구보다 빛 쪽으로 캐스터를 더 받는 거리(m)
 constexpr float kFadeStartFrac  = 0.8f;    // 페이드 시작 = kFadeStartFrac × R
 constexpr float kFadeEndTexels  = 2.f;     // 페이드 끝 = R - kFadeEndTexels 텍셀

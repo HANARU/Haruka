@@ -8,8 +8,12 @@
 // 실행: build/Release/HarukaGeometryTest.exe
 
 #include "../src/geometry/PrimitiveBuilder.hpp"
+#include "../src/geometry/MeshOptimize.hpp"
+#include "../src/geometry/QTangent.hpp"
 #include "../src/core/TextFloat.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -364,6 +368,99 @@ int main() {
               "유효 숫자 6자리를 넘는 값도 되읽으면 같은 값입니다 (예전 기본 형식은 1.23457 로 잘림)");
     }
 
+
+    std::printf("\n== 정점 캐시 순서(O3) ==\n");
+    {
+        PrimitiveDesc sphere; sphere.shape = EPrimitiveShape::Sphere;
+        sphere.segU = 64; sphere.segV = 32;
+        const MeshSourceData sm = PrimitiveBuilder::build(sphere);
+        // 무작위로 섞은 순서(최악에 가까움)와 원래 순서에서 최적화합니다.
+        std::vector<uint32_t> shuffled = sm.indices;
+        uint32_t seed = 12345u;
+        for (size_t t = shuffled.size() / 3; t > 1; --t) {
+            seed = seed * 1664525u + 1013904223u;
+            const size_t j = (seed >> 8) % t;
+            for (int k = 0; k < 3; ++k) std::swap(shuffled[(t - 1) * 3 + k], shuffled[j * 3 + k]);
+        }
+        const uint32_t vc = (uint32_t)sm.vertices.size();
+        const float before = hmesh::acmr(shuffled);
+        std::vector<uint32_t> opt = shuffled;
+        hmesh::optimizeVertexCache(opt, vc);
+        const float after = hmesh::acmr(opt);
+        std::printf("  (참고) ACMR(캐시 16): 섞은 순서 %.3f → 최적화 %.3f, 원래 순서 %.3f\n", before, after, hmesh::acmr(sm.indices));
+        check(after < 0.8f && after < before * 0.6f, "섞은 구의 ACMR 이 크게 줄어듦(0.8 미만)");
+        // 삼각형 집합과 감기 방향이 그대로(회전한 같은 삼각형은 같은 것으로 봄)
+        auto canon = [](const std::vector<uint32_t>& idx) {
+            std::vector<std::array<uint32_t, 3>> tris;
+            for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+                std::array<uint32_t, 3> t{ idx[i], idx[i + 1], idx[i + 2] };
+                while (t[0] > t[1] || t[0] > t[2]) t = { t[1], t[2], t[0] };   // 가장 작은 번호가 앞에 오게 돌림(감기 유지)
+                tris.push_back(t);
+            }
+            std::sort(tris.begin(), tris.end());
+            return tris;
+        };
+        check(opt.size() == shuffled.size() && canon(opt) == canon(shuffled), "삼각형 집합 · 감기 방향 그대로");
+        std::vector<uint32_t> bad{ 0, 1, 2, 0, 2, 9 };
+        const std::vector<uint32_t> badCopy = bad;
+        hmesh::optimizeVertexCache(bad, 4);
+        check(bad == badCopy, "범위를 벗어난 인덱스가 있으면 그대로 둠");
+    }
+
+    {
+        std::printf("\n== C2 QTangent: 법선 · 접선 · 손잡이를 snorm16 쿼터니언 하나로 ==\n");
+        auto roundTrip = [](const float n[3], const float t[4], float& errN, float& errT, bool& signOk) {
+            float q[4], dn[3], dt[3], sg;
+            hqtan::encode(n, t, q);
+            for (float& c : q) c = hqtan::fromSnorm16(hqtan::toSnorm16(c));
+            hqtan::decode(q, dn, dt, sg);
+            // 기대값: 정규화한 n, n 에 직교화한 t
+            float nn[3] = { n[0], n[1], n[2] };
+            hqtan::normalize3(nn);
+            float d = t[0] * nn[0] + t[1] * nn[1] + t[2] * nn[2];
+            float tt[3] = { t[0] - d * nn[0], t[1] - d * nn[1], t[2] - d * nn[2] };
+            hqtan::normalize3(tt);
+            errN = errT = 0.f;
+            for (int i = 0; i < 3; ++i) {
+                errN = std::max(errN, std::fabs(dn[i] - nn[i]));
+                errT = std::max(errT, std::fabs(dt[i] - tt[i]));
+            }
+            signOk = (sg < 0.f) == (t[3] < 0.f);
+        };
+        uint32_t rng = 12345u;
+        auto rnd = [&rng] { rng = rng * 1664525u + 1013904223u; return float(rng >> 8) / float(1u << 24) * 2.f - 1.f; };
+        float worstN = 0.f, worstT = 0.f;
+        bool  allSign = true;
+        for (int k = 0; k < 2000; ++k) {
+            const float n[3] = { rnd(), rnd(), rnd() + 0.01f };
+            const float t[4] = { rnd(), rnd(), rnd(), (k & 1) ? 1.f : -1.f };
+            float eN, eT; bool ok;
+            roundTrip(n, t, eN, eT, ok);
+            worstN = std::max(worstN, eN); worstT = std::max(worstT, eT); allSign = allSign && ok;
+        }
+        std::printf("  (참고) 무작위 2000개: 법선 오차 최대 %.2e, 접선 오차 최대 %.2e\n", worstN, worstT);
+        check(worstN < 2e-4f && worstT < 2e-4f, "무작위 기저를 1e-4 수준으로 되살림");
+        check(allSign, "손잡이(±1)를 모두 지킴");
+        // w = 0 인 회전(180°): N = −Z, T = +X → x 축 둘레 180°. 바이어스가 없으면 손잡이를 잃는 경우.
+        {
+            const float n[3] = { 0.f, 0.f, -1.f };
+            float eN, eT; bool okP, okM;
+            const float tp[4] = { 1.f, 0.f, 0.f, 1.f }, tm[4] = { 1.f, 0.f, 0.f, -1.f };
+            roundTrip(n, tp, eN, eT, okP);
+            const bool accP = eN < 2e-4f && eT < 2e-4f;
+            roundTrip(n, tm, eN, eT, okM);
+            check(accP && eN < 2e-4f && eT < 2e-4f && okP && okM, "w = 0 회전(180°)에서도 기저 · 두 손잡이를 지킴");
+        }
+        {
+            const float n[3] = { 0.f, 1.f, 0.f }, t[4] = { 0.f, 0.f, 0.f, 1.f };   // 접선 없음(노멀 맵 없는 메시)
+            float q[4], dn[3], dt[3], sg;
+            hqtan::encode(n, t, q);
+            for (float& c : q) c = hqtan::fromSnorm16(hqtan::toSnorm16(c));
+            hqtan::decode(q, dn, dt, sg);
+            check(std::fabs(dn[1] - 1.f) < 2e-4f && std::fabs(dt[0] * dn[0] + dt[1] * dn[1] + dt[2] * dn[2]) < 1e-3f,
+                  "접선이 0 이면 법선은 그대로, 접선은 아무 직교 방향");
+        }
+    }
 
     std::printf("\n실패 %d 건\n", g_failed);
     return g_failed == 0 ? 0 : 1;

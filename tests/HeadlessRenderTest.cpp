@@ -134,6 +134,12 @@ int main() {
         check(o.capturePath == "a.png" && u.empty(), "--capture=a.png");
         o = parse({ "--capture=" }, u);
         check(o.capturePath.empty() && u.size() == 1, "--capture= → 거부");
+        o = parse({ "--capture=a.png" }, u);
+        check(o.captureEye == 0, "캡처 눈은 기본 왼쪽");
+        o = parse({ "--capture-eye=right" }, u);
+        check(o.captureEye == 1 && u.empty() && o.capturePath.empty(), "--capture-eye=right(--capture 와 따로 해석)");
+        o = parse({ "--capture-eye=up" }, u);
+        check(o.captureEye == 0 && u.size() == 1, "--capture-eye=up → 거부");
         // --scene(2026-11-16, 시험 장면 캡처): 씬 논리 경로 규칙(assets/ 아래 .hscene, .. · 역슬래시 없음)을 따름
         o = parse({ "--scene=assets/scenes/UIPanelProbe.hscene" }, u);
         check(o.scenePath == "assets/scenes/UIPanelProbe.hscene" && u.empty(), "--scene=assets/scenes/X.hscene");
@@ -153,6 +159,10 @@ int main() {
         check(!o.vkNoSync2 && !o.vkDedicatedMsaa, "기본은 sync2 를 쓰고 MSAA 컬러는 보통 경로");
         o = parse({ "--vk-dedicated-msaa" }, u);
         check(o.vkDedicatedMsaa && u.empty(), "--vk-dedicated-msaa(별도 할당 경로)");
+        o = parse({}, u);
+        check(o.multiview, "기본은 두 눈 메인 패스를 멀티뷰로");
+        o = parse({ "--no-multiview" }, u);
+        check(!o.multiview && u.empty(), "--no-multiview(눈마다 그리는 경로)");
         o = parse({}, u);
         check(!o.ssao.has_value(), "SSAO 옵션이 없으면 프로젝트 설정을 따름");
         o = parse({ "--no-ssao" }, u);

@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_multiview : require   // gl_ViewIndex(HARUKA_EYE_INDEX, 멀티뷰 메인 패스)
 #include "haruka_shared.h"
 
 layout(set = 0, binding = 0) uniform FrameBlock { FrameUBO ubo; };
@@ -11,6 +12,6 @@ layout(location = 1) in vec4 inColor;
 layout(location = 0) out vec4 fragColor;
 
 void main() {
-    gl_Position = ubo.viewProj[HARUKA_VIEW_INDEX] * vec4(inPos, 1.0);
+    gl_Position = ubo.viewProj[HARUKA_EYE_INDEX] * vec4(inPos, 1.0);
     fragColor   = inColor;
 }

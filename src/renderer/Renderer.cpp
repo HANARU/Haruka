@@ -64,6 +64,11 @@ VKAPI_ATTR VkBool32 VKAPI_CALL Renderer::debugCallback(
 
 // ── init / cleanup ────────────────────────────────────────────────────────────
 
+void Renderer::setQuality(const Quality& q) {
+    quality_ = q;
+    shadow_.configure(q.csmCascades, q.shadowDistance);
+}
+
 void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
     window       = win;
     deviceHooks_ = deviceHooks;
@@ -112,6 +117,7 @@ void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
     rc_.viewportOffset = { 0, 0 };
     rc_.viewportExtent = rc_.extent;
     rc_.renderExtent   = desiredRenderExtent();
+    syncSceneLayers();
     panels_.init(&rc_);
 
     // 기본 패스의 수명주기 목록(DEF-17). 프레임 순서대로이고, 확장은 등록할 때 뒤에 붙습니다.
@@ -174,6 +180,8 @@ void Renderer::cleanup() {
     freeTexSlot(TexSlot{ brdfLutImage_, brdfLutView_, brdfLutAlloc_ });
     freeTexSlot(TexSlot{ iblIrradianceImage_, iblIrradianceView_, iblIrradianceAlloc_ });
     freeTexSlot(TexSlot{ iblPrefilterImage_,  iblPrefilterView_,  iblPrefilterAlloc_  });
+    if (captureImage_) freeTexSlot(TexSlot{ captureImage_, captureView_, captureAlloc_ });   // 반사 캡처(2026-11-17)
+    captureImage_ = VK_NULL_HANDLE; captureView_ = VK_NULL_HANDLE;
     if (iblSampler_)  { vkDestroySampler(device, iblSampler_, nullptr);  iblSampler_  = VK_NULL_HANDLE; }
     if (brdfSampler_) { vkDestroySampler(device, brdfSampler_, nullptr); brdfSampler_ = VK_NULL_HANDLE; }
 
@@ -684,9 +692,8 @@ void Renderer::createLogicalDevice() {
         qci.queueFamilyIndex = qf; qci.queueCount = 1; qci.pQueuePriorities = &prio;
         qcis.push_back(qci);
     }
-    // 멀티뷰는 켜지 않습니다. 지금 두 눈은 눈마다 따로 그립니다(DEF-09 첫 단계). 예전에는 기능만 켜고
-    // 쓰는 경로가 없었습니다. 셰이더와 UBO 는 두 눈 기준이라, 멀티뷰로 옮길 때(Quest) 이 자리에서 켜고
-    // 렌더 패스 viewMask · 배열 층 · gl_ViewIndex 를 함께 바꿉니다.
+    // 멀티뷰는 늘 켭니다(2026-11-18). 메인 패스 셰이더가 gl_ViewIndex 를 쓰고(MultiView 능력), 두 눈이면 메인 패스를
+    // viewMask 0b11 로 한 번 그립니다(GeometryPass). --no-multiview 는 그리는 경로만 눈마다로 바꿉니다.
     // drawIndirectCount 는 요구하지 않습니다. GPU 컬링(유일한 사용처)을 지웠고, 이 기능이 없는
     // 기기에서는 장치 생성부터 실패합니다(DEF-03).
     // 기능은 Vulkan 1.1 기준선으로 켭니다(DEF-97, VulkanBaseline.hpp). push descriptor 는 확장만 켜면 되고 기능 구조체가
@@ -736,6 +743,8 @@ void Renderer::createLogicalDevice() {
                                                        : VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME " unavailable")
                                << ")";
     }
+    HLOG(LogRenderer, Log) << "Multiview: "
+                           << (multiview_ ? "on (two-eye main pass drawn once)" : "off (--no-multiview, main pass per eye)");
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -785,18 +794,24 @@ hvk::DeviceCaps Renderer::queryDeviceCaps(VkPhysicalDevice dev) {
     if (hvk::majorMinor(c.apiVersion) < hvk::majorMinor(VK_API_VERSION_1_1)) return c;
 
     VkPhysicalDeviceSynchronization2FeaturesKHR s2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR };
+    VkPhysicalDeviceMultiviewFeatures           mvf{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES };
     VkPhysicalDeviceFeatures2 f2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-    if (c.extSync2) f2.pNext = &s2;
+    f2.pNext = &mvf;
+    if (c.extSync2) mvf.pNext = &s2;
     vkGetPhysicalDeviceFeatures2(dev, &f2);
-    c.featSync2 = c.extSync2 && s2.synchronization2 == VK_TRUE;
+    c.featSync2     = c.extSync2 && s2.synchronization2 == VK_TRUE;
+    c.featMultiview = mvf.multiview == VK_TRUE;
 
     VkPhysicalDevicePushDescriptorPropertiesKHR push{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR };
     VkPhysicalDeviceMaintenance3Properties      m3{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES };
+    VkPhysicalDeviceMultiviewProperties         mvp{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES };
     VkPhysicalDeviceProperties2                 p2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
-    p2.pNext = &m3;
-    if (c.extPushDescriptor) { m3.pNext = &push; }
+    p2.pNext  = &m3;
+    m3.pNext  = &mvp;
+    if (c.extPushDescriptor) { mvp.pNext = &push; }
     vkGetPhysicalDeviceProperties2(dev, &p2);
     c.maxMemoryAllocationSize = m3.maxMemoryAllocationSize;
+    c.maxMultiviewViewCount   = mvp.maxMultiviewViewCount;
     c.maxPushDescriptors      = c.extPushDescriptor ? push.maxPushDescriptors : 0;
     return c;
 }
@@ -993,6 +1008,7 @@ void Renderer::addRenderExtension(std::shared_ptr<IRenderExtension> ext) {
     info.rc                 = &rc_;
     info.frameSetLayout     = frames_.frameLayout();
     info.mainPass           = geometry_.mainPass();
+    info.mainPassMultiview  = geometry_.mainPassMultiview();
     info.opaqueSubpass      = 1;
     info.transparentSubpass = 2;
     info.hdrFormat          = GeometryPass::kHdrFormat;

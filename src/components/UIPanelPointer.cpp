@@ -37,16 +37,11 @@ bool UIPanelPointer::intersect(const UIPanelComponent& panel, const glm::vec3& o
 bool UIPanelPointer::rayFromScreen(const glm::mat4& viewProj, glm::vec2 frac, Ray& out) {
     out.valid = false;
     if (!(frac.x >= 0.f && frac.x <= 1.f && frac.y >= 0.f && frac.y <= 1.f)) return false;
-    const glm::mat4 inv = glm::inverse(viewProj);
-    const glm::vec2 ndc = frac * 2.f - 1.f;
-    const glm::vec4 pN  = inv * glm::vec4(ndc, 0.f, 1.f);
-    const glm::vec4 pF  = inv * glm::vec4(ndc, 1.f, 1.f);
-    if (std::fabs(pN.w) < 1e-6f || std::fabs(pF.w) < 1e-6f) return false;
-    const glm::vec3 o = glm::vec3(pN) / pN.w;
-    const glm::vec3 d = glm::vec3(pF) / pF.w - o;
-    if (glm::dot(d, d) < 1e-12f) return false;
-    out.origin = o;
-    out.dir    = glm::normalize(d);
+    hmath::Ray r;
+    // Reverse-Z 무한 원평면(C1): 가까운 면 깊이 1, 0 은 무한히 먼 곳이라 두 번째 점은 깊이 0.5(가까운 면의 두 배 거리)에서 뽑습니다.
+    if (!hmath::rayFromNdc(glm::inverse(viewProj), frac * 2.f - 1.f, r, 1.f, 0.5f)) return false;
+    out.origin = r.origin;
+    out.dir    = r.dir;
     out.valid  = true;
     return true;
 }

@@ -13,6 +13,9 @@ struct MeshHandle {
     // 지금 넣지 않으면 소급이 불가능합니다. 현재 구조는 메가버퍼를 "반납하지
     // 않는" 것이 아니라 반납에 필요한 정보를 기록조차 하지 않는 상태였습니다.
     uint32_t vertexCount = 0;
+    // 16비트 인덱스(O3, 2026-11-17): 정점이 65,536 개 이하면 인덱스를 메가 인덱스 버퍼의 16비트 구역(GpuScene::kIdx16Base 부터)에
+    // 넣습니다. firstIndex 는 그 구역 안의 원소 번호입니다. 그릴 때 이 값에 맞춰 인덱스 버퍼를 바인딩합니다.
+    bool     index16     = false;
 
     // Local-space bounding sphere (used for GPU frustum culling)
     glm::vec3 boundCenter{ 0.f };

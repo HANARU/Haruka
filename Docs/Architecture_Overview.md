@@ -68,7 +68,7 @@
 *   **Forward Rendering 고정**:
     - 모바일 VR 기기의 대역폭 한계와 타일 기반(Tile-based) GPU 아키텍처 특성을 고려하여 Deferred를 배제하고 Forward 파이프라인으로 구축.
     - **구현 상태**: Forward 파이프라인과 패스 구조는 구현되어 있습니다. 다만 렌더 패스를 Layer 2에서 추가할 수 있는 확장 지점이 없습니다. `HPass`가 `create()`와 `record()`를 제외한 수명주기 전용 인터페이스이고(`HPass.hpp:8-15`), 여섯 패스가 `Renderer`의 구체 멤버로 여섯 곳에서 손으로 열거됩니다. 패스 레지스트리 도입은 [Layer_Architecture.md](Layer_Architecture.md) 6절의 2단계 과제입니다.
-    - `VK_KHR_multiview` 확장을 적극 활용하여 좌/우안 렌더링 오버헤드 최소화. **현재는 절반만 되어 있습니다.** 자세한 것은 아래 4절을 보십시오.
+    - `VK_KHR_multiview` 확장을 적극 활용하여 좌/우안 렌더링 오버헤드 최소화. **2026-11-18 에 메인 패스를 멀티뷰로 바꿨습니다.** 자세한 것은 아래 4절을 보십시오.
 *   **Math over Textures**:
     - 메모리 대역폭을 갉아먹는 고해상도 텍스처 의존도를 낮춤. (최대 해상도 2K 제한, ASTC 압축 필수)
     - 텍스처 대신 노이즈(Noise) 함수, SDF(Signed Distance Field) 등 GPU의 강력한 연산 능력을 활용한 절차적(Procedural) 셰이더 수학 연산 극대화.
@@ -85,7 +85,7 @@
 | 요소 | 상태 | 근거와 남은 일 |
 |---|---|---|
 | **OpenXR 세션 + 스테레오 스왑체인** | **미구현** | `Renderer.cpp:54-57`이 `GlfwSwapchain`을 직접 생성합니다. `ISwapchain` 추상화는 준비되어 있으나 `XrSwapchain` 구현체를 주입할 팩토리가 없습니다. 세션 수명주기, 프레임 페이싱, 예측 표시 시각 처리가 전부 남아 있습니다 |
-| **Multiview 스테레오 렌더링** | **절반** | 디바이스 피처는 `Renderer.cpp:577-583`에서 켜집니다. 그러나 `Renderer_render.cpp:169`가 `viewProj[1] = viewProj[0]`으로 두어 두 눈이 같은 행렬을 쓰고, 어떤 렌더패스도 `viewMask`를 설정하지 않으며, 모든 셰이더가 `viewProj[0]`만 인덱싱합니다. `viewMask` 설정, 셰이더의 `gl_ViewIndex` 사용, 어태치먼트 이미지의 `arrayLayers` 확장이 함께 필요합니다 |
+| **Multiview 스테레오 렌더링** | **구현 · 2026-11-18** (아래 옛 판정은 기록으로 남김. 현재 상태는 [Layer_Architecture.md](Layer_Architecture.md) 3절) | (옛 판정) 디바이스 피처는 `Renderer.cpp:577-583`에서 켜집니다. 그러나 `Renderer_render.cpp:169`가 `viewProj[1] = viewProj[0]`으로 두어 두 눈이 같은 행렬을 쓰고, 어떤 렌더패스도 `viewMask`를 설정하지 않으며, 모든 셰이더가 `viewProj[0]`만 인덱싱합니다. `viewMask` 설정, 셰이더의 `gl_ViewIndex` 사용, 어태치먼트 이미지의 `arrayLayers` 확장이 함께 필요합니다 |
 | **Foveated Rendering (FFR)** | **미구현** | `Renderer.hpp:167-170`에 멤버가 선언만 되어 있고 어디에서도 쓰이지 않습니다 |
 | **VR 입력 (아날로그 축 + 6DOF 컨트롤러 포즈)** | **미구현** | `HInputSystem`은 디지털 전용이며 `win.isKeyDown`만 호출합니다(`HInputSystem.cpp:22-42`). `IWindow`(`IWindow.hpp:51-62`)에 아날로그 축도 포즈도 없습니다. 액션 바인딩 개념 자체가 없으므로 OpenXR 액션 세트를 받을 자리부터 만들어야 합니다 |
 | **6DOF 카메라 자세** | **미구현** | `CameraComponent::viewMatrix`(`CameraComponent.cpp:6-14`)가 yaw/pitch 오일러각으로 뷰를 만들고 `owner->transform.rotation`을 무시하며, `worldPosition()`이 아니라 `owner->transform.position`을 씁니다. 롤이 표현되지 않고 머리와 몸체를 분리할 수 없어 HMD 자세를 그대로 받을 수 없습니다. 쿼터니언 기반 자세로 바꿔야 합니다 |

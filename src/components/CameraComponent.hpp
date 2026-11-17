@@ -11,7 +11,8 @@
     makePropFloat("zFar", PropColor::Neutral, 1.f,                                \
         [p]() -> float { return (p)->zFar; },                                     \
         [p](float _v){ (p)->zFar = std::max((p)->zNear + 1.f, _v); }),            \
-    XPROP_Toggle(p, "Primary", primary)
+    XPROP_Toggle(p, "Primary", primary),                                          \
+    XPROP_FloatClamp(p, "Exposure Compensation", PropColor::Neutral, 0.1f, exposureEv, -10.f, 10.f)
 
 class CameraComponent : public Component {
 public:
@@ -19,6 +20,9 @@ public:
     float zNear   =  0.1f;
     float zFar    =  100.0f;
     bool  primary =  true;
+    // 노출 보정(EV, 2026-11-17 노출 배선): 화면 밝기 × 2^EV. 0 이면 프로젝트 기준 노출 그대로(UE Exposure Compensation 과 같은 뜻,
+    // 자동 노출은 쓰지 않음, Lighting_UE_Design Phase 3).
+    float exposureEv = 0.f;
 
     bool editorIcon(glm::vec4& c) const override { c = {0.35f, 0.6f, 1.f, 1.f}; return true; }
     int  editorIconShape() const override { return 2; }

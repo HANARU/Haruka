@@ -1,4 +1,5 @@
 #include "SkinnedMeshComponent.hpp"
+#include "LightChannels.hpp"
 #include "../assets/AssetManager.hpp"
 #include "../assets/MeshSource.hpp"
 #include "../assets/Skin.hpp"
@@ -77,10 +78,12 @@ bool SkinnedMeshComponent::localBounds(glm::vec3& outMin, glm::vec3& outMax) con
 
 std::vector<PropDesc> SkinnedMeshComponent::buildProps() {
     auto* p = this;
-    return {
+    std::vector<PropDesc> props{
         XPROP_Toggle(p, "Visible",     visible),
         XPROP_Toggle(p, "Transparent", transparent),
     };
+    hchan::addProps(props, &lightChannels);
+    return props;
 }
 
 std::string SkinnedMeshComponent::readOnlyInfo() const {
@@ -100,6 +103,7 @@ std::string SkinnedMeshComponent::readOnlyInfo() const {
 void SkinnedMeshComponent::writeFields(ComponentFieldWriter& w) const {
     w.b("visible",     visible);
     w.b("transparent", transparent);
+    hchan::write(w, lightChannels);
     if (!modelPath.empty()) {
         w.s("model",     modelPath);
         w.i("meshIndex", meshIndex);
@@ -110,6 +114,7 @@ bool SkinnedMeshComponent::readField(const std::string& key, const std::string& 
     bool ok = true;
     if (key == "visible")          ok = fieldparse::toBool(value, visible);
     else if (key == "transparent") { ok = fieldparse::toBool(value, transparent); transparentLoaded_ = ok; }
+    else if (key == "lightChannels") ok = hchan::read(value, lightChannels);
     else if (key == "model")       modelPath = value;
     else if (key == "meshIndex")   ok = fieldparse::toInt(value, meshIndex);
     else return false;

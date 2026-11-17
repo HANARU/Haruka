@@ -1,18 +1,19 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_multiview : require   // gl_ViewIndex(HARUKA_EYE_INDEX, 멀티뷰 메인 패스)
 #include "haruka_shared.h"
 
 layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUV;
-layout(location = 3) in vec4 inTangent;  // xyz=tangent, w=handedness
+layout(location = 3) in vec4 inQTangent;   // QTangent(C2, snorm16): 법선 · 접선 · 손잡이
 
 layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec2 fragUV;
 layout(location = 2) out vec3 fragT;
 layout(location = 3) out vec3 fragB;
 layout(location = 4) out vec3 fragN;
-layout(location = 5) out vec4 fragShadowCoord;
+layout(location = 5) out vec4 fragShadowCoord;       // 먼 캐스케이드
+layout(location = 6) out vec4 fragShadowCoordNear;   // 가까운 캐스케이드(CSM, 2026-11-17)
 
 layout(set = 0, binding = 0) uniform FrameBlock { FrameUBO ubo; };
 HARUKA_VIEW_PUSH_CONSTANT;   // 눈 번호(DEF-09). pbr.frag 와 같은 선언
@@ -21,12 +22,12 @@ layout(set = 2, binding = 0) readonly buffer TransformBuffer {
     GpuTransform transforms[];
 };
 
-// 깊이 프리패스(depth.vert)와 같은 깊이를 내야 색 서브패스의 LESS_OR_EQUAL 비교를 통과합니다.
+// 깊이 프리패스(depth.vert)와 같은 깊이를 내야 색 서브패스의 GREATER_OR_EQUAL 비교(Reverse-Z)를 통과합니다.
 // invariant 와 글자 그대로 같은 식으로 이를 보장합니다. 위치 식을 바꿀 때는 depth.vert 와 같이 바꿉니다.
 invariant gl_Position;
 
 void main() {
-    mat4 model   = transforms[gl_InstanceIndex].model;
+    mat4 model   = hkModel(transforms[gl_InstanceIndex]);
     vec4 worldPos = model * vec4(inPosition, 1.0);
     fragWorldPos  = worldPos.xyz;
     fragUV        = inUV;
@@ -39,10 +40,13 @@ void main() {
     mat3  m3   = mat3(model);
     mat3  cof  = mat3(cross(m3[1], m3[2]), cross(m3[2], m3[0]), cross(m3[0], m3[1]));
     float detS = dot(m3[0], cof[0]) < 0.0 ? -1.0 : 1.0;
-    vec3 N = normalize(cof * inNormal * detS);
-    vec3 T = normalize(m3 * inTangent.xyz);
+    vec3  inN, inT;
+    float inSign;
+    hkDecodeQTangent(inQTangent, inN, inT, inSign);
+    vec3 N = normalize(cof * inN * detS);
+    vec3 T = normalize(m3 * inT);
     T = normalize(T - dot(T, N) * N);
-    vec3 B = cross(N, T) * (inTangent.w * detS);
+    vec3 B = cross(N, T) * (inSign * detS);
     fragT = T; fragB = B; fragN = N;
 
     // Shadow clip-space coordinate (perspective divide done in frag)
@@ -54,7 +58,9 @@ void main() {
     float cosL  = dot(N, toSun);
     vec3  nL    = cosL >= 0.0 ? N : -N;
     float sinL  = sqrt(max(1.0 - cosL * cosL, 0.0));
-    fragShadowCoord = ubo.lightViewProj * vec4(worldPos.xyz + nL * (ubo.shadowParams.w * sinL), 1.0);
+    fragShadowCoord     = ubo.lightViewProj     * vec4(worldPos.xyz + nL * (ubo.shadowParams.w * sinL), 1.0);
+    // 가까운 단은 텍셀이 작아 노멀 오프셋도 그 텍셀 기준(cascadeNear.w)입니다.
+    fragShadowCoordNear = ubo.lightViewProjNear * vec4(worldPos.xyz + nL * (ubo.cascadeNear.w * sinL), 1.0);
 
-    gl_Position = ubo.viewProj[HARUKA_VIEW_INDEX] * worldPos;
+    gl_Position = ubo.viewProj[HARUKA_EYE_INDEX] * worldPos;
 }

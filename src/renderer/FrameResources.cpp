@@ -19,7 +19,8 @@ void FrameResources::createLayouts(RenderContext& rc) {
 
     // Set 1: Scene — shadow, IBL, lights SSBO
     {
-        VkDescriptorSetLayoutBinding bindings[5] = {};
+        // binding 5: 반사 캡처 프리필터 큐브(2026-11-17). 캡처가 없으면 하늘 프리필터를 묶어 둡니다(셰이더는 반경 0 이면 읽지 않음).
+        VkDescriptorSetLayoutBinding bindings[6] = {};
         for (int i = 0; i < 4; i++) {
             bindings[i].binding = (uint32_t)i;
             bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -27,9 +28,11 @@ void FrameResources::createLayouts(RenderContext& rc) {
         }
         bindings[4].binding = 4; bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         bindings[4].descriptorCount = 1; bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[5].binding = 5; bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[5].descriptorCount = 1; bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         VkDescriptorSetLayoutCreateInfo ci{};
         ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        ci.bindingCount = 5; ci.pBindings = bindings;
+        ci.bindingCount = 6; ci.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(rc.device, &ci, nullptr, &sceneLayout_) != VK_SUCCESS)
             throw std::runtime_error("Failed to create scene set layout!");
     }
@@ -187,7 +190,7 @@ void FrameResources::writeSceneSets(VkSampler shadowSampler, VkImageView shadowV
                                     VkImageView prefilterView,
                                     VkSampler brdfSampler, VkImageView brdfView) {
     VkDescriptorPoolSize sizes[2] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * MAX_FRAMES },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5 * MAX_FRAMES },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         1 * MAX_FRAMES },
     };
     VkDescriptorPoolCreateInfo poolCI{};
@@ -223,6 +226,19 @@ void FrameResources::writeSceneSets(VkSampler shadowSampler, VkImageView shadowV
         ws[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; ws[3].pImageInfo  = &brdfI;
         ws[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;         ws[4].pBufferInfo = &lightI;
         vkUpdateDescriptorSets(rc_->device, 5, ws, 0, nullptr);
+    }
+    iblSampler_ = iblSampler;
+    writeCaptureView(prefilterView);   // 캡처 전에는 하늘 프리필터
+}
+
+void FrameResources::writeCaptureView(VkImageView captureView) {
+    for (int i = 0; i < MAX_FRAMES; i++) {
+        VkDescriptorImageInfo capI{ iblSampler_, captureView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkWriteDescriptorSet w{};
+        w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w.dstSet = sceneSets_[i]; w.dstBinding = 5; w.descriptorCount = 1;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; w.pImageInfo = &capI;
+        vkUpdateDescriptorSets(rc_->device, 1, &w, 0, nullptr);
     }
 }
 

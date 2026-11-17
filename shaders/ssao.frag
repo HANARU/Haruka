@@ -16,7 +16,34 @@ layout(set = 0, binding = 2) uniform SSAOData {
     // pad 는 두지 않습니다. std140 에서 float 배열은 원소마다 16 바이트로 부풀기 때문입니다.
     // 끝의 proj 는 std140 정렬로 1120 에서 시작하고, C++ 의 pad[2] 가 그 앞 8 바이트를 채웁니다. 양쪽 다 1184 입니다.
     mat4  proj;      // 샘플을 화면으로 투영하는 행렬(CPU 가 넘김)
+    vec4  contact;        // 접촉 그림자(2026-11-17): xyz = 뷰 공간 태양 방향, w = 광선 길이(m, 0 = 끔)
+    vec4  contactParams;  // x = 두께(m), y = AO 항 계산(1/0)
 } data;
+
+// 접촉 그림자(2026-11-17): 화소의 뷰 공간 점에서 태양 쪽으로 12걸음 걸으며, 걸음 자리보다 카메라에 가까운 표면이 두께 안에 있으면
+// 가려진 것으로 봅니다. 섀도맵 텍셀(먼 단 1 cm, 가까운 단 3 mm)보다 작은 접촉부 그림자를 메웁니다. 태양을 등진 면은 섀도맵이
+// 이미 그늘이라 건너뜁니다. 걸음은 화소마다 노이즈만큼 어긋나 띠 무늬를 흩습니다.
+float contactShadow(vec3 fragPos, vec3 normal, float jitter) {
+    float len = data.contact.w;
+    vec3  dir = data.contact.xyz;
+    if (len <= 0.0 || dot(normal, dir) <= 0.0) return 1.0;
+    const int STEPS = 12;
+    float stepLen = len / float(STEPS);
+    vec3  p = fragPos + normal * 0.01 + dir * (stepLen * jitter);
+    for (int i = 0; i < STEPS; ++i) {
+        p += dir * stepLen;
+        vec4 c = data.proj * vec4(p, 1.0);
+        if (c.w <= 0.0) break;
+        vec2 uv = c.xy / c.w * 0.5 + 0.5;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
+        float sceneZ = texture(linearDepth, uv).r;
+        float rayZ   = -p.z;
+        float diff   = rayZ - sceneZ;
+        if (diff > 0.002 && diff < data.contactParams.x)
+            return float(i) / float(STEPS);   // 가까운 걸음에서 가려질수록 어둡게(먼 걸음은 옅게)
+    }
+    return 1.0;
+}
 
 vec3 reconstructViewPos(vec2 uv, float linDepth) {
     vec4 clip = vec4(uv * 2.0 - 1.0, 1.0, 1.0);
@@ -71,6 +98,9 @@ void main() {
     randomVec.z    = 0.0;
     randomVec      = normalize(randomVec);
 
+    float contact = contactShadow(fragPos, normal, texture(noiseTex, inUV * data.noiseScale).b);
+    if (data.contactParams.y < 0.5) { outAO = contact; return; }   // AO 를 끄고 접촉 그림자만
+
     vec3 tangent   = normalize(randomVec - normal * dot(randomVec, normal));
     vec3 bitangent = cross(normal, tangent);
     mat3 TBN       = mat3(tangent, bitangent, normal);
@@ -92,5 +122,5 @@ void main() {
         occlusion        += (sampleDepth <= -samplePos.z - data.bias ? 1.0 : 0.0) * rangeCheck;
     }
 
-    outAO = pow(1.0 - (occlusion / float(NUM_SAMPLES)), data.power);
+    outAO = pow(1.0 - (occlusion / float(NUM_SAMPLES)), data.power) * contact;
 }

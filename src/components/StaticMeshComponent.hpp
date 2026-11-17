@@ -22,6 +22,7 @@ public:
     MaterialHandle* material    = nullptr;
     bool            visible     = true;
     bool            transparent = false;
+    uint8_t         lightChannels = 1;   // 이 메시를 비출 라이트 채널(LightChannels.hpp, 2026-11-17)
     std::string     modelPath;
     int             meshIndex   = 0;  // index into AssetManager::loadAll() result
 

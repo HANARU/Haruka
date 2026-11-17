@@ -46,6 +46,13 @@ public:
         const uint32_t bit = stageBit(stage);
         return std::any_of(exts_.begin(), exts_.end(), [bit](const auto& e) { return (e->stages() & bit) != 0; });
     }
+    // 메인 패스 안 지점(OpaqueEnd · TransparentEnd)에 멀티뷰를 지원하지 않는 확장이 있는지. 있으면 렌더러가 그 프레임의
+    // 메인 패스를 눈마다 그립니다(RenderExtension.hpp 머리말, 2026-11-18).
+    bool blocksMultiview() const {
+        const uint32_t bits = stageBit(HRenderStage::OpaqueEnd) | stageBit(HRenderStage::TransparentEnd);
+        return std::any_of(exts_.begin(), exts_.end(),
+                           [bits](const auto& e) { return (e->stages() & bits) != 0 && !e->supportsMultiview(); });
+    }
     // 그 지점의 확장을 등록 순서대로 부릅니다. 부른 수를 돌려줍니다.
     uint32_t dispatch(const HRenderStageContext& ctx) const {
         const uint32_t bit = stageBit(ctx.stage);

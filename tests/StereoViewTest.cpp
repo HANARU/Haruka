@@ -9,6 +9,8 @@
 #include "../src/renderer/FrustumCull.hpp"
 #include "../src/xr/SyntheticEyes.hpp"
 #include "../src/renderer/ScreenSize.hpp"
+#include "../src/components/HeightFogComponent.hpp"
+#include "../src/core/ComponentFields.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>
@@ -70,7 +72,23 @@ int main() {
         check(std::fabs(left.x + 1.f) < 1e-4f && std::fabs(right.x - 1.f) < 1e-4f, "왼쪽 · 오른쪽 끝이 x = -1 · +1");
         check(std::fabs(up.y + 1.f) < 1e-4f && std::fabs(down.y - 1.f) < 1e-4f, "위쪽 끝이 y = -1, 아래쪽 끝이 y = +1(Vulkan)");
         const glm::vec3 nearPt = toNdc(P, glm::vec3(0.f, 0.f, -n)), farPt = toNdc(P, glm::vec3(0.f, 0.f, -f));
-        check(std::fabs(nearPt.z) < 1e-5f && std::fabs(farPt.z - 1.f) < 1e-4f, "near · far 가 깊이 0 · 1");
+        // Reverse-Z 무한 원평면(C1): 깊이 = near / 거리. 가까운 면 1, zFar(100 m) 0.001, 무한히 먼 곳 0.
+        check(std::fabs(nearPt.z - 1.f) < 1e-5f && std::fabs(farPt.z - n / f) < 1e-6f, "Reverse-Z: 가까운 면 깊이 1, 100 m 는 near / 100");
+        const glm::vec4 inf = P * glm::vec4(0.f, 0.f, -1.f, 0.f);   // -Z 방향의 무한히 먼 점
+        check(std::fabs(inf.z) < 1e-7f && inf.w > 0.f, "무한히 먼 점의 깊이 0(무한 원평면)");
+        // 절두체: 먼 쪽 평면은 법선 0(늘 통과) → replaceInfinitePlane 으로 zFar 평면
+        auto planes = extractFrustumPlanes(P);
+        int degenerate = 0;
+        for (const auto& pl : planes) degenerate += glm::dot(pl.normal, pl.normal) == 0.f;
+        check(degenerate == 1 && sphereInFrustum(planes, glm::vec3(0.f, 0.f, -1e6f), 1.f), "무한 원평면 투영의 먼 평면은 늘 통과");
+        replaceInfinitePlane(planes, glm::mat4(1.f), f);
+        check(sphereInFrustum(planes, glm::vec3(0.f, 0.f, -99.f), 0.5f) && !sphereInFrustum(planes, glm::vec3(0.f, 0.f, -101.f), 0.5f),
+              "zFar 평면으로 바꾸면 100 m 너머는 컬링");
+        const glm::mat4 view = glm::lookAt(glm::vec3(3.f, 1.f, 2.f), glm::vec3(3.f, 1.f, -5.f), glm::vec3(0.f, 1.f, 0.f));
+        auto wp = extractFrustumPlanes(P * view);
+        replaceInfinitePlane(wp, view, 10.f);
+        check(sphereInFrustum(wp, glm::vec3(3.f, 1.f, -7.f), 0.1f) && !sphereInFrustum(wp, glm::vec3(3.f, 1.f, -8.5f), 0.1f),
+              "옮긴 카메라도 zFar(10 m) 평면이 월드 자리에 놓임");
         const glm::vec3 ahead = toNdc(P, glm::vec3(0.f, 0.f, z));
         check(ahead.x > 0.f, "바깥(왼쪽)이 넓은 왼쪽 눈에서는 정면이 화면 가운데보다 오른쪽");
     }
@@ -174,6 +192,46 @@ int main() {
 
         check(hscreen::tooSmall(0.0004f, 1920.f) && !hscreen::tooSmall(0.0006f, 1920.f),
               "높이 1920 화소에서 지름 1 화소(크기 약 0.00052)를 경계로 작은 물체를 가름");
+    }
+
+    std::printf("\n== 지수 고도 안개 · 노출 보정(2026-11-17) ==\n");
+    {
+        using hfog::amount;
+        // 수평 광선(높이 일정): 적분 = 밀도 × 거리 → 안개 = 1 − exp(−ρ·d)
+        const float a = amount({ 0, 0, 0 }, { 0, 0, -50 }, 0.02f, 0.2f, 0.f, 0.f, 1.f);
+        check(std::fabs(a - (1.f - std::exp(-0.02f * 50.f))) < 1e-5f, "수평 광선: 1 − exp(−밀도 × 거리)");
+        // 높이 h 의 수평 광선: 밀도 × exp(−k·h)
+        const float hi = amount({ 0, 10, 0 }, { 0, 10, -50 }, 0.02f, 0.2f, 0.f, 0.f, 1.f);
+        check(std::fabs(hi - (1.f - std::exp(-0.02f * std::exp(-2.f) * 50.f))) < 1e-5f, "높이 10 m 에서는 밀도 × exp(−0.2 × 10)");
+        // 기울어진 광선: 수치 적분과 비교
+        const glm::vec3 e(0, 1, 0), p(30, 25, -40);
+        double integral = 0.0;
+        const int N = 20000;
+        for (int i = 0; i < N; ++i) {
+            const glm::vec3 q = e + (p - e) * ((i + 0.5f) / N);
+            integral += 0.05 * std::exp(-0.15 * (q.y - 2.0)) * glm::length(p - e) / N;
+        }
+        const float slant = amount(e, p, 0.05f, 0.15f, 2.f, 0.f, 1.f);
+        check(std::fabs(slant - (float)(1.0 - std::exp(-integral))) < 1e-4f, "기울어진 광선의 해석 적분 = 수치 적분");
+        check(amount({ 0, 0, 0 }, { 0, 0, -5 }, 0.02f, 0.2f, 0.f, 10.f, 1.f) == 0.f, "시작 거리 안은 안개 없음");
+        check(amount({ 0, 0, 0 }, { 0, 0, -5000 }, 0.5f, 0.2f, 0.f, 0.f, 0.6f) == 0.6f, "최대 불투명도에서 멈춤");
+        check(amount({ 0, 0, 0 }, { 0, 0, -50 }, 0.f, 0.2f, 0.f, 0.f, 1.f) == 0.f, "밀도 0 이면 안개 없음");
+        const float flat = amount({ 0, 0, 0 }, { 0, 1e-6f, -50 }, 0.02f, 0.2f, 0.f, 0.f, 1.f);
+        check(std::isfinite(flat) && std::fabs(flat - a) < 1e-4f, "거의 수평인 광선도 0 으로 나누지 않음");
+
+        CameraComponent cam;
+        ComponentFieldWriter w0;
+        cam.writeFields(w0);
+        bool hasEv = false;
+        for (const auto& kv : w0.fields()) hasEv = hasEv || kv.first == "exposureEv";
+        check(!hasEv, "노출 보정 0 이면 쓰지 않음");
+        cam.exposureEv = -1.5f;
+        ComponentFieldWriter w1;
+        cam.writeFields(w1);
+        CameraComponent back;
+        for (const auto& kv : w1.fields()) back.readField(kv.first, kv.second);
+        check(back.exposureEv == -1.5f, "노출 보정 왕복");
+        check(back.readField("exposureEv", "20") && back.exposureEv == -1.5f, "범위 밖 노출 보정은 거부");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

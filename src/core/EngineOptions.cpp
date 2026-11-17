@@ -64,6 +64,7 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (a == "--synthetic-eyes") o.syntheticEyes = true;
         else if (a == "--vk-no-sync2")    o.vkNoSync2     = true;
         else if (a == "--vk-dedicated-msaa") o.vkDedicatedMsaa = true;
+        else if (a == "--no-multiview")   o.multiview     = false;
         else if (a == "--ssao")           o.ssao          = true;
         else if (a == "--no-ssao")        o.ssao          = false;
         else if (valueOf(a, "--synthetic-eyes", v)) {
@@ -80,6 +81,10 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         }
         else if (valueOf(a, "--capture", v)) {
             if (!v.empty()) o.capturePath = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--capture-eye", v)) {
+            if (v == "left" || v == "right") o.captureEye = (v == "right") ? 1u : 0u;
             else unknown.push_back(a);
         }
         else if (valueOf(a, "--scene", v)) {

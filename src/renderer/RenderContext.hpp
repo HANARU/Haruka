@@ -47,6 +47,9 @@ public:
     // 눈 하나의 씬 타깃(HDR·깊이·AO·Bloom) 크기이자 투영 비율의 기준입니다. 단안이면 뷰포트와
     // 같고, 스테레오 흉내 모드는 뷰포트의 좌우 절반, XR 은 런타임이 권하는 눈 크기입니다(DEF-09).
     VkExtent2D renderExtent{};
+    // 장면 타깃(깊이 · MSAA · HDR)의 층 수입니다. XR 이나 스테레오 흉내가 켜져 있는 동안 2(층 v = 눈 v, 멀티뷰 메인 패스),
+    // 아니면 1 입니다(2026-11-18). 렌더러가 바꾸고 바로 크기 의존 자원을 다시 만듭니다.
+    uint32_t   sceneLayers = 1;
 
     // ── 생성 헬퍼 ─────────────────────────────────────────────────────────────
     VkShaderModule createShaderModule(const std::vector<char>& code) const;

@@ -209,6 +209,45 @@ int main() {
               "depthClamp 경로는 near 앞(깊이 0 에 눌러 담김), 대체 경로는 투영 = 컬링 행렬로 범위 안");
         check(hshadow::lightUp(glm::vec3(0, 1, 0)) == glm::vec3(1, 0, 0) && hshadow::lightUp(dir) == glm::vec3(0, 1, 0),
               "거의 수직인 빛은 (1,0,0) 을 위로 씀");
+
+        // 캐스케이드(CSM, 2026-11-17): 가까운 단은 같은 해상도로 kNearRadius 를 덮어 텍셀이 촘촘하고, 그 컬링 부피는 먼 단의 컬링
+        // 부피 안에 있어(캐스터 목록 하나로 두 단을 그림) 가까운 단 구 안의 점은 두 단 모두에 들어갑니다.
+        const hshadow::DirectionalFit nearFit = hshadow::fitDirectional(head, dir, hshadow::kNearRadius, N, true);
+        check(std::fabs(nearFit.texelWorld * (R / hshadow::kNearRadius) - fit.texelWorld) < 1e-6f,
+              "가까운 단의 텍셀 = 먼 단 × (6 / 20)");
+        const auto farCull  = extractFrustumPlanes(fit.cullViewProj);
+        const auto nearCull = extractFrustumPlanes(nearFit.cullViewProj);
+        bool contained = true;
+        for (int sx = -1; sx <= 1; sx += 2)
+            for (int sy = -1; sy <= 1; sy += 2)
+                for (int sz = -1; sz <= 1; sz += 2) {
+                    const glm::vec3 p = head + glm::vec3(sx, sy, sz) * (0.55f * hshadow::kNearRadius);
+                    if (sphereInFrustum(nearCull, p, 0.f)) contained = contained && sphereInFrustum(farCull, p, 0.f);
+                }
+        check(contained, "가까운 단 컬링 안의 점은 먼 단 컬링에도 들어감(캐스터 목록 하나로 충분)");
+        const glm::vec3 inNear = ndc(nearFit.viewProj, head + glm::vec3(2.f, 0.f, 1.f));
+        check(std::fabs(inNear.x) < 1.f && std::fabs(inNear.y) < 1.f && inNear.z >= 0.f && inNear.z <= 1.f,
+              "머리 2 m 안의 점은 가까운 단 맵 안");
+        check(hshadow::kFadeStartFrac * hshadow::kNearRadius < hshadow::kNearRadius - hshadow::kFadeEndTexels * nearFit.texelWorld,
+              "가까운 단 페이드 구간이 비어 있지 않음(시작 < 끝)");
+    }
+
+    std::printf("\n== 6b. 반사 캡처 큐브 변환(2026-11-17) ==\n");
+    {
+        bool roundTrip = true;
+        for (int face = 0; face < 6; ++face)
+            for (float u : { -0.9f, -0.3f, 0.f, 0.45f, 0.95f })
+                for (float v : { -0.8f, 0.f, 0.6f }) {
+                    int f2; float u2, v2;
+                    hibl::dirToCube(hibl::cubeDir(face, u, v), f2, u2, v2);
+                    roundTrip = roundTrip && f2 == face && std::fabs(u2 - u) < 1e-5f && std::fabs(v2 - v) < 1e-5f;
+                }
+        check(roundTrip, "dirToCube 는 cubeDir 의 역(6면 × 표본 15)");
+        std::vector<glm::vec3> faces[6];
+        for (int f = 0; f < 6; ++f) faces[f].assign(16, glm::vec3((float)f));
+        const hibl::CubeSampler cs{ faces, 4 };
+        check(cs(glm::vec3(1, 0.1f, 0)).x == 0.f && cs(glm::vec3(0, -1, 0.2f)).x == 3.f && cs(glm::vec3(0.1f, 0, -1)).x == 5.f,
+              "CPU 큐브 표본이 방향의 면을 고름");
     }
 
     std::printf("\n== 7. 하늘 IBL 굽기(SkyIbl) ==\n");

@@ -189,6 +189,58 @@ int main() {
         check(covered == camOpaque && r.opaqueInstances == camOpaque, "카메라에 보이는 불투명 메시를 빠짐없이 그림");
     }
 
+    std::printf("\n== 9. 거울 변환은 따로 묶음(DEF-170) ==\n");
+    {
+        // 같은 지오메트리 · 머티리얼 넷 중 둘이 거울 변환. 앞면 방향이 다른 파이프라인으로 그려야 하므로 묶음이 둘로 나뉩니다.
+        std::vector<hbatch::Candidate> c;
+        for (int i = 0; i < 4; ++i) {
+            c.push_back(mesh(0, &gMatA, true, true));
+            c.back().mirrored = (i % 2) == 1;
+        }
+        c.push_back(mesh(0, &gMatA, false, true));   // 라이트 전용 캐스터(거울)
+        c.back().mirrored = true;
+        c.push_back(mesh(0, &gMatA, false, true));   // 라이트 전용 캐스터(보통)
+        const auto r = hbatch::build(c, 1024);
+        check(r.opaque.size() == 2, "불투명 묶음 2개(보통 · 거울)");
+        bool uniform = true;
+        for (const auto& run : r.opaque)
+            for (uint32_t k = 0; k < run.instanceCount; ++k)
+                uniform = uniform && c[r.rowSource[run.firstInstance + k]].mirrored == run.mirrored;
+        for (const auto& run : r.shadow)
+            for (uint32_t k = 0; k < run.instanceCount; ++k)
+                uniform = uniform && c[r.rowSource[run.firstInstance + k]].mirrored == run.mirrored;
+        check(uniform, "묶음 안의 행은 모두 묶음과 같은 거울 여부");
+        check(r.opaque.size() == 2 && r.opaque[0].mirrored != r.opaque[1].mirrored, "두 묶음의 거울 여부가 다름");
+        check(r.shadow.size() == 4, "그림자 드로 4개(카메라 묶음 2 + 라이트 전용 2)");
+        hbatch::Candidate t = mesh(1, &gMatB, true, false, true);
+        t.mirrored = true;
+        const auto rt = hbatch::build({ t }, 16);
+        check(rt.transparent.size() == 1 && rt.transparent[0].mirrored, "투명 드로도 거울 여부를 가짐");
+    }
+
+    std::printf("\n== 10. 라이트 채널은 색 묶음만 나눔(2026-11-17) ==\n");
+    {
+        std::vector<hbatch::Candidate> c;
+        for (int i = 0; i < 4; ++i) {
+            c.push_back(mesh(0, &gMatA, true, true));
+            c.back().lightChannels = (i < 2) ? 1 : 2;
+        }
+        const auto r = hbatch::build(c, 1024);
+        bool uniform = true;
+        for (const auto& run : r.opaque)
+            for (uint32_t k = 0; k < run.instanceCount; ++k)
+                uniform = uniform && c[r.rowSource[run.firstInstance + k]].lightChannels == c[r.rowSource[run.firstInstance]].lightChannels;
+        check(r.opaque.size() == 2 && uniform, "채널이 다르면 색 묶음이 둘(묶음 안은 같은 채널)");
+        check(r.shadow.size() == 2, "그림자는 카메라 묶음을 따라 둘(라이트 전용 캐스터는 채널 무관)");
+        std::vector<hbatch::Candidate> casters;
+        for (int i = 0; i < 4; ++i) {
+            casters.push_back(mesh(0, &gMatA, false, true));
+            casters.back().lightChannels = (uint8_t)(1 + i % 3);
+        }
+        const auto rs = hbatch::build(casters, 1024);
+        check(rs.shadow.size() == 1 && rs.shadow[0].instanceCount == 4, "라이트 전용 캐스터는 채널과 무관하게 한 묶음");
+    }
+
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
     return g_failed ? 1 : 0;
 }

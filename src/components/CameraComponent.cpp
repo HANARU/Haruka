@@ -29,10 +29,19 @@ glm::mat4 CameraComponent::viewMatrix() const {
     return view;
 }
 
+// 깊이 규약(C1, 2026-11-17): Reverse-Z + 무한 원평면. 가까운 면 = 깊이 1, 무한히 먼 곳 = 깊이 0 이고 z_ndc = zNear / 거리 입니다.
+// float 깊이는 0 근처에 표현 가능한 값이 몰려 있어, 거리에 반비례하는 깊이를 0 쪽으로 보내면 먼 곳의 정밀도가 크게 늡니다
+// (Reed 2015 "Depth Precision Visualized", UE · Godot 4 의 기본). zFar 는 투영에 쓰지 않고 컬링 거리(FrustumCull 의 먼 평면) ·
+// AO 배경 판정에만 씁니다. 깊이 비교는 GREATER(_OR_EQUAL), 깊이 지우기 값은 0 입니다(GeometryPass).
 glm::mat4 CameraComponent::projMatrix(float aspect) const {
-    glm::mat4 proj = glm::perspective(glm::radians(fovY), aspect, zNear, zFar);
-    proj[1][1] *= -1.0f;  // Vulkan Y-flip
-    return proj;
+    const float f = 1.f / std::tan(glm::radians(fovY) * 0.5f);
+    glm::mat4 m(0.f);
+    m[0][0] = f / aspect;
+    m[1][1] = -f;          // Vulkan Y-flip
+    m[2][2] = 0.f;
+    m[3][2] = zNear;       // Reverse-Z 무한 원평면: z_clip = zNear, w_clip = −z_view
+    m[2][3] = -1.f;
+    return m;
 }
 
 glm::mat4 CameraComponent::projFromFov(float angleLeft, float angleRight, float angleUp,
@@ -46,9 +55,10 @@ glm::mat4 CameraComponent::projFromFov(float angleLeft, float angleRight, float 
     m[2][0] = (tanR + tanL) / tanW;
     m[1][1] = 2.f / tanH;
     m[2][1] = (tanU + tanD) / tanH;
-    m[2][2] = -zFar / (zFar - zNear);             // 깊이 [0,1]
-    m[3][2] = -(zFar * zNear) / (zFar - zNear);
+    m[2][2] = 0.f;                                 // Reverse-Z 무한 원평면(C1): 깊이 = zNear / 거리, 가까운 면 1 · 무한 0
+    m[3][2] = zNear;
     m[2][3] = -1.f;
+    (void)zFar;                                    // 투영에는 쓰지 않음(컬링 거리는 Renderer 가 따로 넣음)
     return m;
 }
 
@@ -90,6 +100,7 @@ void CameraComponent::writeFields(ComponentFieldWriter& w) const {
     w.f("zNear",   zNear);
     w.f("zFar",    zFar);
     w.b("primary", primary);
+    if (exposureEv != 0.f) w.f("exposureEv", exposureEv);   // 2026-11-17. 기본값이면 쓰지 않음
 }
 
 bool CameraComponent::readField(const std::string& key, const std::string& value) {
@@ -98,10 +109,16 @@ bool CameraComponent::readField(const std::string& key, const std::string& value
     else if (key == "zNear")   ok = fieldparse::toFloat(value, zNear);
     else if (key == "zFar")    ok = fieldparse::toFloat(value, zFar);
     else if (key == "primary") ok = fieldparse::toBool (value, primary);
+    else if (key == "exposureEv") {
+        float v = 0.f;
+        ok = fieldparse::toFloat(value, v) && v >= -10.f && v <= 10.f;
+        if (ok) exposureEv = v;
+    }
     else return false;
     if (!ok) reportBadField(key, value);
     return true;
 }
+
 void CameraComponent::drawEditorVisual() const {
     if (!owner) return;
     const glm::mat4 w = glm::inverse(viewMatrix());

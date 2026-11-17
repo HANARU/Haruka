@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_multiview : require   // gl_ViewIndex(HARUKA_EYE_INDEX, 멀티뷰 메인 패스)
 #include "haruka_shared.h"
 
 layout(location = 0) in vec3 fragWorldPos;
@@ -7,7 +8,8 @@ layout(location = 1) in vec2 fragUV;
 layout(location = 2) in vec3 fragT;
 layout(location = 3) in vec3 fragB;
 layout(location = 4) in vec3 fragN;
-layout(location = 5) in vec4 fragShadowCoord;
+layout(location = 5) in vec4 fragShadowCoord;       // 먼 캐스케이드
+layout(location = 6) in vec4 fragShadowCoordNear;   // 가까운 캐스케이드(CSM, 2026-11-17)
 
 layout(location = 0) out vec4 outColor;
 
@@ -29,6 +31,7 @@ HARUKA_VIEW_PUSH_CONSTANT;   // 눈 번호(DEF-09). 반사 방향은 그 눈의 
 layout(set = 1, binding = 0) uniform sampler2DShadow shadowMap;
 layout(set = 1, binding = 1) uniform samplerCube     irradianceMap;
 layout(set = 1, binding = 2) uniform samplerCube     prefilterMap;
+layout(set = 1, binding = 5) uniform samplerCube     captureMap;   // 반사 캡처(2026-11-17), 없으면 하늘 프리필터
 layout(set = 1, binding = 3) uniform sampler2D       brdfLUT;
 
 layout(set = 1, binding = 4) readonly buffer LightBuffer { GpuLight lights[]; };   // GpuLight: haruka_shared.h
@@ -83,17 +86,19 @@ layout(constant_id = HARUKA_SPEC_SHADOW_FILTER) const int kShadowFilter = HARUKA
 // 앞 두 텍셀(합 2-f)과 뒤 두 텍셀(합 1+f)을 각각 쌍선형 탭 하나로 읽으면, 탭 위치를 두 텍셀 사이 무게 비율에 두어
 // 같은 가중치가 나옵니다. 비교는 텍셀마다 한 뒤 섞으므로(하드웨어 PCF) 선형이라 그대로 성립합니다. 다른 점은
 // 하드웨어 쌍선형 가중치의 소수 비트 반올림뿐입니다.
-float sampleShadow(vec4 coord) {
+// cascade: 0 = 가까운 단(아틀라스 왼쪽 칸), 1 = 먼 단(오른쪽 칸). bias = 그 단의 리시버 바이어스(섀도 NDC).
+float sampleShadow(vec4 coord, float cascade, float bias) {
     vec3 proj = coord.xyz / coord.w;
     proj.xy   = proj.xy * 0.5 + 0.5;
     if (proj.z > 1.0 || proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0)
         return 1.0;
-    // 리시버 상수 깊이 바이어스(섀도 NDC)와 텍셀 하나의 UV 크기는 updateUBO 가 FrameUBO.shadowParams 로 넘깁니다.
+    // 리시버 상수 깊이 바이어스(섀도 NDC)와 텍셀 하나의 UV 크기는 updateUBO 가 FrameUBO.shadowParams · cascadeNear 로 넘깁니다.
     // 바이어스의 월드 길이 · acne 방지 세 겹의 설명은 ShadowPass::kReceiverDepthBiasM 주석을 보십시오.
-    proj.z -= ubo.shadowParams.z;
+    proj.z -= bias;
+    proj.x  = (proj.x + cascade) * 0.5;   // 아틀라스의 그 칸으로
     if (kShadowFilter == HARUKA_SHADOW_FILTER_HARD)
         return textureLod(shadowMap, proj, 0.0);
-    vec2  texelSz = vec2(ubo.shadowParams.y);
+    vec2  texelSz = vec2(0.5 * ubo.shadowParams.y, ubo.shadowParams.y);   // 아틀라스 UV 의 텍셀(가로는 두 칸이라 절반)
     vec2  p   = proj.xy / texelSz - 0.5;
     vec2  i   = floor(p);
     vec2  f   = p - i;
@@ -113,11 +118,22 @@ float sampleShadow(vec4 coord) {
 // 그림자 거리 페이드(2026-11-02, ShadowFit.hpp). 섀도맵은 머리(두 눈 가운데) 중심 구만 덮으므로, 머리에서 shadowFade.y
 // 이상 떨어진 화소는 맵을 읽지 않고 1(그림자 없음)이고, shadowFade.x ~ .y 사이는 섞습니다. 스냅하지 않은 머리 위치를
 // 써서 경계가 텍셀 단위로 튀지 않고 부드럽게 움직입니다. 단안이면 eyePos[1] = eyePos[0] 입니다.
-float shadowWithFade(vec4 coord) {
+// 캐스케이드(CSM, 2026-11-17): 머리에서 cascadeNear.y 안이면 가까운 단을 읽고, cascadeNear.x ~ .y 사이는 먼 단과 섞습니다.
+// 그 밖은 먼 단이고, 먼 단의 거리 페이드는 예전과 같습니다. 두 단 모두 페이드가 칸 가장자리 2텍셀 안쪽에서 끝나 PCF 가 옆 칸을
+// 읽지 않습니다.
+float shadowWithFade(vec4 coordFar, vec4 coordNear) {
     vec3  head = 0.5 * (ubo.eyePos[0].xyz + ubo.eyePos[1].xyz);
     float d    = distance(fragWorldPos, head);
     if (d >= ubo.shadowFade.y) return 1.0;
-    return mix(sampleShadow(coord), 1.0, smoothstep(ubo.shadowFade.x, ubo.shadowFade.y, d));
+    float s;
+    if (d < ubo.cascadeNear.y) {
+        s = sampleShadow(coordNear, 0.0, ubo.cascadeNear.z);
+        if (d > ubo.cascadeNear.x)
+            s = mix(s, sampleShadow(coordFar, 1.0, ubo.shadowParams.z), smoothstep(ubo.cascadeNear.x, ubo.cascadeNear.y, d));
+    } else {
+        s = sampleShadow(coordFar, 1.0, ubo.shadowParams.z);
+    }
+    return mix(s, 1.0, smoothstep(ubo.shadowFade.x, ubo.shadowFade.y, d));
 }
 
 // Evaluate one light's contribution
@@ -181,6 +197,26 @@ vec3 evalLight(GpuLight L, vec3 N, vec3 V, vec3 worldPos,
     return (kD * albedo / PI + specular) * L.colorRange.rgb * NdotL * atten;
 }
 
+// 지수 고도 안개(2026-11-17, HeightFogComponent.hpp 의 hfog::amount 와 같은 식). 밀도가 0 이면 그대로 돌려줍니다.
+vec3 applyHeightFog(vec3 color, vec3 worldPos) {
+    float density = ubo.fogParams.x;
+    if (density <= 0.0) return color;
+    vec3  eye   = ubo.eyePos[HARUKA_EYE_INDEX].xyz;
+    vec3  d     = worldPos - eye;
+    float dist  = length(d);
+    float start = ubo.fogParams.w;
+    if (dist <= start) return color;
+    float rayLen   = dist - start;
+    float startY   = eye.y + d.y * (start / dist);
+    float dy       = d.y * (rayLen / dist);
+    float k        = max(ubo.fogParams.y, 1e-4);
+    float fexp     = k * dy;
+    float shape    = abs(fexp) > 1e-4 ? (1.0 - exp(-fexp)) / fexp : 1.0;
+    float integral = density * exp(-k * (startY - ubo.fogParams.z)) * shape * rayLen;
+    float amount   = min(1.0 - exp(-integral), ubo.fogColor.a);
+    return mix(color, ubo.fogColor.rgb, amount);
+}
+
 void main() {
     // ── Sample PBR maps ───────────────────────────────────────────────────────
     // albedoMap과 emissiveMap은 VK_FORMAT_R8G8B8A8_SRGB로 업로드되므로 샘플러가
@@ -204,7 +240,7 @@ void main() {
     float ao        = texture(aoMap,       fragUV).r;
     vec3  emissive  = texture(emissiveMap, fragUV).rgb;   // SRGB 포맷이라 이미 선형이다
 
-    vec3  V   = normalize(ubo.eyePos[HARUKA_VIEW_INDEX].xyz - fragWorldPos);
+    vec3  V   = normalize(ubo.eyePos[HARUKA_EYE_INDEX].xyz - fragWorldPos);
     vec3  F0  = mix(vec3(0.04), albedo, metallic);
 
     // ── Direct lighting ───────────────────────────────────────────────────────
@@ -218,8 +254,10 @@ void main() {
 
     vec3  Lo = vec3(0.0);
     for (int i = 0; i < lightCount; i++) {
+        // 라이트 채널(2026-11-17): 라이트와 메시의 채널이 겹치지 않으면 비추지 않습니다.
+        if ((uint(lights[i].spotParams.z + 0.5) & hkView.lightChannels) == 0u) continue;
         vec3 c = evalLight(lights[i], N, V, fragWorldPos, albedo, metallic, roughness, F0);
-        if (i == shadowIdx && any(notEqual(c, vec3(0.0)))) c *= shadowWithFade(fragShadowCoord);
+        if (i == shadowIdx && any(notEqual(c, vec3(0.0)))) c *= shadowWithFade(fragShadowCoord, fragShadowCoordNear);
         Lo += c;
     }
 
@@ -237,6 +275,22 @@ void main() {
     float maxMip      = float(textureQueryLevels(prefilterMap) - 1);
     float mipLevel    = roughness * maxMip;
     vec3  prefiltered = textureLod(prefilterMap, R, mipLevel).rgb;
+    // 반사 캡처(2026-11-17): 영향 반경 안이면 캡처를 구 프록시로 시차 보정해 읽습니다(반사 광선이 반경 구와 만나는 점의 방향).
+    // 반경 바깥 30 % 구간에서 하늘 반사와 섞습니다.
+    float capR = ubo.capturePos.w;
+    if (capR > 0.0) {
+        vec3  toP = fragWorldPos - ubo.capturePos.xyz;
+        float dC  = length(toP);
+        float w   = 1.0 - smoothstep(0.7 * capR, capR, dC);
+        if (w > 0.0) {
+            float b    = dot(toP, R);
+            float c    = dot(toP, toP) - capR * capR;
+            float t    = -b + sqrt(max(b * b - c, 0.0));   // 구 안이라 c < 0, 앞쪽 교점
+            vec3  dirC = toP + R * t;
+            vec3  cap  = textureLod(captureMap, dirC, mipLevel).rgb * ubo.captureParams.x;
+            prefiltered = mix(prefiltered, cap, w);
+        }
+    }
     vec2  brdf        = texture(brdfLUT, vec2(NdotV, roughness)).rg;
     vec3  specularIBL = prefiltered * (F_ibl * brdf.x + brdf.y);
     // 수평선 오클루전: 노멀맵이 기울인 반사 R 이 기하 법선 기준으로 표면 아래를 향하면 하늘 큐브 아래 반구(땅색)를
@@ -262,5 +316,6 @@ void main() {
     // HDR 타깃은 16비트 부동소수(최대 65504)입니다. 역제곱 감쇠에서는 라이트 바로 앞의 매끈한 면이
     // 이 값을 넘을 수 있고, 넘으면 inf 가 되어 블룸·AO 로 번집니다. 그 전에 잘라 둡니다.
     color      = min(color, vec3(60000.0));
+    color      = applyHeightFog(color, fragWorldPos);
     outColor   = vec4(color, alpha);
 }

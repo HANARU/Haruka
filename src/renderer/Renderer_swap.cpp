@@ -98,6 +98,16 @@ VkExtent2D Renderer::desiredRenderExtent() const {
     return rc_.viewportExtent;
 }
 
+// 두 눈을 그릴 수 있는 동안(XR 출력이 붙어 있거나 스테레오 흉내) 장면 타깃을 2층으로 둡니다(멀티뷰, 2026-11-18). XR 은
+// 헤드셋을 벗은 프레임처럼 그 사이에도 단안 프레임이 섞이므로, 프레임의 눈 수가 아니라 모드로 정해 프레임마다 다시 만들지
+// 않습니다. 단안 프레임은 층 0 에 그립니다.
+bool Renderer::syncSceneLayers() {
+    const uint32_t want = (xrActive_ || emulateStereo_) ? 2u : 1u;
+    if (rc_.sceneLayers == want) return false;
+    rc_.sceneLayers = want;
+    return true;
+}
+
 void Renderer::setViewportRect(int x, int y, int w, int h) {
     // 스왑체인 범위로 클램프합니다. 폭/높이는 최소 1. 스왑체인 크기가 0 이면 클램프 범위가 뒤집혀(하한 1 > 상한 0)
     // 미정의 동작이므로 아무것도 하지 않습니다(창 없는 실행은 명목 크기라 평소에는 오지 않음, 2026-10-31).
@@ -158,8 +168,9 @@ void Renderer::attachXrSwapchain(const std::vector<VkImage>& images, VkFormat fo
     pipelineCacheDirty_ = true;   // 이 포맷의 톤매핑 파이프라인을 새로 만들었을 수 있음(DEF-153)
     HLOG(LogRenderer, Log) << "XR output attached: " << images.size() << " images, "
                            << eyeExtent.width << "x" << eyeExtent.height << " per eye";
+    const bool layersChanged = syncSceneLayers();
     const VkExtent2D newExt = desiredRenderExtent();
-    if (newExt.width != rc_.renderExtent.width || newExt.height != rc_.renderExtent.height) {
+    if (layersChanged || newExt.width != rc_.renderExtent.width || newExt.height != rc_.renderExtent.height) {
         rc_.renderExtent = newExt;
         recreateRenderTargets();
     }
@@ -175,9 +186,11 @@ void Renderer::detachXrSwapchain(bool restoreTargets) {
     xrViews_.clear();
     xrActive_ = false;
     HLOG(LogRenderer, Log) << "XR output detached";
+    // 다시 붙이는 경우(restoreTargets 거짓)에도 층 수는 맞춰 둡니다. 곧 attach 가 다시 2 로 바꾸며 타깃을 만듭니다.
+    const bool layersChanged = syncSceneLayers();
     if (!restoreTargets) return;
     const VkExtent2D newExt = desiredRenderExtent();
-    if (newExt.width != rc_.renderExtent.width || newExt.height != rc_.renderExtent.height) {
+    if (layersChanged || newExt.width != rc_.renderExtent.width || newExt.height != rc_.renderExtent.height) {
         rc_.renderExtent = newExt;
         recreateRenderTargets();
     }
@@ -289,8 +302,9 @@ void Renderer::setStereoEmulation(bool on) {
     emulateStereo_ = on;
     HLOG(LogRenderer, Log) << "Stereo emulation " << (on ? "on" : "off")
                            << " (two parallel eyes, 64 mm apart, side by side in the viewport)";
+    const bool layersChanged = syncSceneLayers();
     const VkExtent2D newExt = desiredRenderExtent();
-    if (newExt.width == rc_.renderExtent.width && newExt.height == rc_.renderExtent.height)
+    if (!layersChanged && newExt.width == rc_.renderExtent.width && newExt.height == rc_.renderExtent.height)
         return;
     rc_.renderExtent = newExt;
     recreateRenderTargets();

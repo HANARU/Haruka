@@ -58,18 +58,11 @@ struct WorldViewport {
 
     // mouseFb → 월드 광선(project 의 정확한 역변환). 실패 시 false.
     bool ray(const glm::mat4& vp, glm::vec3& outO, glm::vec3& outD) const {
-        glm::mat4 inv  = glm::inverse(vp);
-        glm::vec2 frac = (mouseFb - glm::vec2(fbRect.left, fbRect.top))
-                       / glm::vec2(fbRect.width, fbRect.height);
-        glm::vec2 ndc  = frac * 2.f - 1.f;
-        glm::vec4 pN = inv * glm::vec4(ndc, 0.f, 1.f);
-        glm::vec4 pF = inv * glm::vec4(ndc, 1.f, 1.f);
-        if (std::abs(pN.w) < 1e-6f || std::abs(pF.w) < 1e-6f) return false;
-        glm::vec3 o = glm::vec3(pN) / pN.w;
-        glm::vec3 f = glm::vec3(pF) / pF.w;
-        glm::vec3 d = f - o;
-        if (glm::dot(d, d) < 1e-12f) return false;
-        outO = o; outD = glm::normalize(d);
+        const glm::vec2 frac = (mouseFb - glm::vec2(fbRect.left, fbRect.top))
+                             / glm::vec2(fbRect.width, fbRect.height);
+        hmath::Ray r;
+        if (!hmath::rayFromNdc(glm::inverse(vp), frac * 2.f - 1.f, r, 1.f, 0.5f)) return false;   // Reverse-Z(C1)
+        outO = r.origin; outD = r.dir;
         return true;
     }
 };

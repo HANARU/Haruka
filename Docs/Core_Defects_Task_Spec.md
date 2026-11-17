@@ -108,7 +108,7 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-06** | MSAA `LAZILY_ALLOCATED` 메모리 속성 누락 | **해결됨 · 2026-10-31** (원래 HIGH, MSAA 컬러만 지연 할당 타입에 핵심 힙 밖으로. 깊이는 SAMPLED · STORE 라 제외) | `src/renderer/passes/GeometryPass.cpp`, `src/memory/HarukaAllocator.cpp` | `acquireSizeDependent`, `allocLazyImage` |
 | **DEF-07** | `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터 | **해결됨 · 2026-08-26** (원래 MEDIUM, A-1: EditorApp 구독 + 컴포넌트 `notifyDestroy`) | `src/core/World.hpp`, `src/core/World.cpp` | L27, L27 |
 | **DEF-08** | 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성) | **HIGH · 빌드는 해결(2026-10-31)**, 헤드셋 실행 확인 남음. 창 팩토리 · 표면 없는 AndroidWindow · `android_main` · OpenXR 로더 · APK(Gradle 없이) | `src/core/Engine.cpp`, `src/platform/android/AndroidMain.cpp`, `cmake/HarukaAndroid.cmake` | `Engine::Engine`, `android_main` |
-| **DEF-09** | 멀티뷰 절반 구현 (피처만 켜지고 경로 없음) | **해결됨 · 2026-10-04** (원래 HIGH, 첫 단계는 눈마다 두 번 그리기. 셰이더 · UBO 는 두 눈 기준이라 멀티뷰는 Quest 이식 때 뷰 번호만 바꿔 켬) | `src/renderer/Renderer_render.cpp`, `shaders/include/haruka_shared.h` | `drawFrame` 의 눈 루프 |
+| **DEF-09** | 멀티뷰 절반 구현 (피처만 켜지고 경로 없음) | **해결됨 · 2026-10-04** (원래 HIGH, 첫 단계는 눈마다 두 번 그리기. 셰이더 · UBO 는 두 눈 기준이라 멀티뷰는 Quest 이식 때 뷰 번호만 바꿔 켬). **둘째 단계 멀티뷰 2026-11-18**(끝의 "멀티뷰" 절) | `src/renderer/Renderer_render.cpp`, `src/renderer/passes/GeometryPass.cpp`, `shaders/include/haruka_shared.h` | `drawFrame` 의 눈 루프 |
 | **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **해결됨 · 2026-10-14** (원래 MEDIUM, `Config/engine.ini` 의 render.maxDrawRows · render.maxLights · physics.maxBodies) | `src/core/EngineSettings.hpp`, `src/core/Engine.cpp` | `loadEngineLimits` |
 | **DEF-11** | 셰이더 빌드 파이프라인 결함 (DEPENDS 누락·하드코딩·고아·죽은 파일) | **해결됨 · 2026-10-04** (원래 MEDIUM) | `CMakeLists.txt`, `shaders/include/` | L94~108 |
 | **DEF-12** | `World::tick`이 에디터 Play 상태에서만 실행 | **해결됨 · 2026-10-19** (원래 MEDIUM, 엔진 앞단 인터페이스 + 게임 실행 파일 `HarukaGame`. 끝 "패키징 1단계 결과" 절) | `src/core/Engine.cpp`, `src/core/IEngineFrontend.hpp` | `Engine::run` |
@@ -2424,5 +2424,35 @@ P1 뒤 구간 1 ~ 7 을 이어 구현했습니다(사용자 "추천안대로 진
 |---|---|---|---|
 | DEF-168 | MEDIUM(VR 던지기) | 던진 물체가 손의 선속도만 받았습니다. 잡은 물체는 손과 같은 각속도로 도는 강체라 질량 중심 속도는 v_손 + ω × (질량 중심 − 손)인데 이 항이 빠져 손목을 튕기는 던지기가 약했고, 리그가 스틱으로 움직이는 속도도 더하지 않았습니다. 놓는 순간 한 프레임의 추적 값을 그대로 써 잡음도 받았습니다 | **해결(2026-11-17).** `hxr::throwVelocity` + 최근 5프레임 평균(`VelocityHistory`) + `RigLocomotionComponent::velocity`. 질량 중심은 잡을 때 Jolt 에서 읽어 액터 기준으로 기억. 던진 바디는 연속 충돌을 켬(얇은 벽 터널링 방지). 시험 `physics_lifecycle` · 헤드셋 확인 통과 |
 | DEF-169 | LOW(비균등 크기 + 노멀 맵) | 접선을 법선 행렬(역전치)로 옮겼습니다. 접선은 표면 위의 방향이라 모델 행렬로 옮겨야 하고, 비균등 크기에서 노멀 맵의 기울기 방향이 틀어졌습니다. 거울 변환에서 B 부호도 뒤집지 않았습니다. glTF 가져오기(`GltfLoader`)에도 같은 오류가 있었습니다 | **해결(2026-11-17).** `pbr.vert` 는 법선을 여인수 행렬 × 행렬식 부호로(정점마다 역행렬 없앰), 접선을 모델 행렬로, B 에 행렬식 부호. 가져오기도 같게 고치고 캐시 버전 7 → 8 |
-| DEF-170 | LOW(음수 크기) | 액터 크기가 음수이거나 glTF 노드가 거울 변환이면 삼각형 감기 방향이 뒤집히는데, 파이프라인은 늘 CCW 앞면 · 뒷면 컬링이라 안팎이 뒤집혀 보입니다. UE 는 드로마다 행렬식 부호로 앞면 방향을 바꿉니다 | **열림.** 고친다면 드로 목록에 부호를 넣고 파이프라인 두 벌 또는 동적 상태 frontFace(VK_EXT_extended_dynamic_state). 메시 충돌체도 지금은 크기 절댓값을 씀 |
+| DEF-170 | LOW(음수 크기) | 액터 크기가 음수이거나 glTF 노드가 거울 변환이면 삼각형 감기 방향이 뒤집히는데, 파이프라인은 늘 CCW 앞면 · 뒷면 컬링이라 안팎이 뒤집혀 보입니다. UE 는 드로마다 행렬식 부호로 앞면 방향을 바꿉니다 | **해결 · 2026-11-17.** 묶기 키에 거울 여부(모델 3×3 행렬식 < 0)를 넣어 거울 메시는 따로 묶고, 깊이 · 불투명 · 반투명 두 장 · 섀도 파이프라인마다 앞면 시계 방향 변형을 두어 거울 묶음이 나올 때만 바꿔 묶습니다(Vulkan 1.1 이라 동적 frontFace 대신 파이프라인 변형). 메시 · 볼록 충돌체는 크기 부호까지 곱하고 메시는 감기 방향을 되돌립니다. 확인: 묶기 시험 9절, 거울 크기 장면이 기준 화면과 최대 1단계 차이(수정을 끄면 43,522 화소가 크게 다름) |
 | DEF-171 | LOW(씬 파일) | 소리 컴포넌트가 `attenuation` · `occlusion` 키를 읽을 때 `fromText` 가 결과 구조체를 통째로 덮어써, 그보다 먼저 읽은 `silentBeyondMax` · `occlusionExtra` 값을 잃었습니다(키 순서가 바뀐 파일, 손으로 고친 파일) | **해결(2026-11-17).** 읽기 전에 다른 키가 정하는 값을 떠 두었다가 되돌립니다. 확인: 오디오 시험 2-1c(키 순서를 바꾼 파일) |
+
+## 멀티뷰 (2026-11-18, DEF-09 둘째 단계)
+사용자 지시("멀티뷰 쪽 해보자", 권장안 승인: 메인 패스만 멀티뷰 · `--no-multiview` 로 눈마다 경로 유지 · 메모리 증가 수용)로 두 눈의 메인
+패스를 멀티뷰로 바꿨습니다. UE 의 Mobile Multi-View 처럼 장면 패스만 멀티뷰이고, 전체 화면 패스(AO · 블룸 · 톤매핑)는 드로가 한두 개라
+눈마다 그대로 둡니다.
+
+| 항목 | 내용 |
+|---|---|
+| 장치 | 멀티뷰 기능을 늘 켭니다(`VkPhysicalDeviceMultiviewFeatures`, 1.1 코어 구조체를 기능 체인에, `VulkanNNFeatures` 는 여전히 잇지 않음). 1.1 에서 지원이 필수인 기능이고, 메인 패스 셰이더가 `gl_ViewIndex`(MultiView 능력)를 써서 없으면 장치가 맞지 않습니다(`VulkanBaseline.hpp`). Quest Pro 형 프로필은 지원(눈 수 최대 6) |
+| 셰이더 | 한 벌입니다. 눈 번호 `HARUKA_EYE_INDEX` = 푸시 상수 + `gl_ViewIndex`. 멀티뷰 패스는 푸시 상수 0 · `gl_ViewIndex` 0/1, 눈마다 경로(단안 · 반사 캡처 · `--no-multiview`)는 `gl_ViewIndex` 0 · 푸시 상수가 눈 번호입니다. 섀도 패스는 그 자리에 캐스케이드 번호를 넣으므로 `HARUKA_VIEW_INDEX`(푸시 상수만)를 그대로 씁니다 |
+| 렌더 패스 · 파이프라인 | 단안 패스와 멀티뷰 패스(서브패스마다 viewMask 0b11, correlation mask 0b11, 서브패스 사이 의존성 VIEW_LOCAL)를 둘 다 만들고 파이프라인도 두 벌(11개 × 2) 둡니다. 렌더 패스 호환성에 viewMask 가 들어가 같이 쓸 수 없습니다 |
+| 장면 타깃 | XR 출력이 붙어 있거나 스테레오 흉내인 동안 깊이 · MSAA · HDR 을 2층 배열로 만듭니다(`rc.sceneLayers`, 층 v = 눈 v). 헤드셋을 벗은 프레임처럼 단안 프레임이 섞여도 다시 만들지 않고 층 0 에 그립니다. 단안 데스크톱은 1층이라 메모리가 예전과 같습니다 |
+| 그리기 | 두 눈 프레임이면 메인 패스를 한 번 기록하고(드로 · 바인딩 · 머티리얼 푸시가 절반), AO · 블룸 · 톤매핑은 눈마다 그 층의 뷰를 읽습니다. 타임스탬프 칸은 그대로이고 Main 은 두 눈 합입니다 |
+| 렌더 확장 | `IRenderExtension::supportsMultiview()`(기본 거짓). 메인 패스 안 지점(OpaqueEnd · TransparentEnd)에 거짓인 확장이 있으면 그 프레임은 눈마다 그립니다. 참인 확장은 `HRenderDeviceInfo::mainPassMultiview` 용 파이프라인도 만들고, 멀티뷰 호출(`ctx.multiview`)에서 `gl_ViewIndex` 로 눈을 고릅니다. AfterScene 은 `hdrLayer` 를 받습니다 |
+| 진단 | `--no-multiview`(눈마다 경로), `--capture-eye=right`(합성 눈 오른쪽 층 PNG). 로그 `Multiview: on/off`, 두 눈 경로가 바뀔 때 `Main pass: multiview/per eye` |
+
+확인(비어 있는 GPU 1):
+- **화면**: 기준 PNG 기본 75125933 · UIPanelProbe 7788eb5f 그대로(왼눈). 오른눈은 멀티뷰와 눈마다 경로가 바이트까지 같습니다(기본 7390bd5b ·
+  UIPanelProbe 559660c0). Quest Pro 형 프로필(1.1.295, sync2 없음)에서도 두 경로의 두 눈이 같고(왼 f0f08952 · 오른 64bff1b9), Quest 품질
+  단계 PNG 2956ec3f · ce92e397 그대로입니다.
+- **검증**: Debug · 프로필 · `--settings-platform=android` 의 다섯 실행과 동기화 검증(`VK_LAYER_VALIDATE_SYNC=1`) 모두 오류 0. ctest 26/26
+  (Release · Debug, 검사 1,901), Android 빌드 통과.
+- **검증 레이어 보고 하나(우리 결함 아님, 우회함)**: SDK 1.4.357 검증 레이어가 멀티뷰 렌더 패스에서 서브패스가 바뀐 뒤의 드로를 "정점 ·
+  인덱스 버퍼 · 푸시 상수가 없음"(VUID-vkCmdDrawIndexed-None-04007 · 07312 · 08601)으로 보고했습니다. 규격상 바인딩은 서브패스가 바뀌어도
+  남고 화면도 같았습니다. 불투명 · 반투명 서브패스 시작에서 세 가지를 다시 넣어(명령 세 개) 보고를 없앴습니다(`GeometryPass::recordImpl`).
+- **PC 측정(RTX 3080, 두 눈 1024², 600 프레임)**: 메인 패스 GPU 가 작은 장면에서 약 4%(기본 0.140 → 0.135 ms), 상자 2,000 개 장면에서
+  약 11%(0.195 → 0.174 ms) 줄었습니다. CPU 프레임은 측정 잡음 안입니다. PC 의 큰 GPU 는 정점 · 드로 비용이 작아 차이가 작고, 이득의
+  대부분(타일 GPU 의 비닝 · 드라이버 CPU 비용)은 Quest 에서 재야 합니다. Quest 에서는 `--no-multiview` 와 같은 장면을 비교합니다.
+- **메모리**: 두 층인 동안 MSAA 깊이(지연 할당 불가, AO 가 읽음)와 프레임별 HDR 이 두 배입니다. Quest Pro 눈 크기(약 1800×1920) 기준
+  약 +110 MB 로 어림합니다. MSAA 색은 지연 할당이라 거의 늘지 않습니다. 깊이 resolve(1.2 기능)로 줄이는 일은 따로 다룹니다.

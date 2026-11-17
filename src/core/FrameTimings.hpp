@@ -29,6 +29,7 @@ struct FrameTimings {
 
     // ── Renderer::drawFrame 내부 구간 ────────────────────────────────────────
     Avg fenceWait;    // 프레임 슬롯 펜스 대기
+    Avg reflCapture;  // 반사 캡처 확인(찍는 프레임만 큼)
     Avg acquire;      // vkAcquireNextImageKHR
     Avg imgFence;     // imagesInFlight 펜스 대기
     Avg extract;      // extractRenderView + 컬 입력 업로드

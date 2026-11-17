@@ -13,7 +13,8 @@ layout(push_constant) uniform Params {
 void main() {
     ivec2 coord   = ivec2(inUV * screenSize);
     float rawDepth = texelFetch(msaaDepth, coord, 0).r;  // sample 0 of MSAA
-    // Linearize Vulkan NDC depth (0=near, 1=far)
-    float linearZ = nearPlane * farPlane / (farPlane - rawDepth * (farPlane - nearPlane));
+    // Reverse-Z 무한 원평면(C1, CameraComponent.cpp): 깊이 = near / 거리 → 거리 = near / 깊이. 지운 곳(0)과 zFar 너머는 zFar 로
+    // 보냅니다(ssao.frag · ssao_blur.frag 가 zFar 를 배경으로 봄).
+    float linearZ = rawDepth > 0.0 ? min(nearPlane / rawDepth, farPlane) : farPlane;
     outLinearDepth = linearZ;
 }

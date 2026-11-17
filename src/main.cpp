@@ -69,8 +69,10 @@ static bool redirectStdioIfHeadless() {
 //   --synthetic-eyes[=WxH] 헤드셋 없이 XR 프레임 경로로 두 눈을 그립니다(기본 512x512).
 //   --frames=N             N 프레임을 그리면 끝냅니다. --timeout=S 초 안에 못 그리면 종료 코드 2(기본 60초).
 //   --capture=path         끝낼 때 합성 눈 왼쪽 층을 PNG 로 남깁니다. 종료 코드 3 = 검증 오류(Debug), 4 = 빈 화면.
+//   --capture-eye=right    --capture 가 오른쪽 눈 층을 남깁니다(기본 left).
 //   --vk-no-sync2          synchronization2 가 있어도 Vulkan 1.0 배리어로 기록합니다(Quest 의 대체 경로 시험, DEF-04).
 //   --vk-dedicated-msaa    MSAA 컬러를 핵심 힙 밖 별도 할당으로 둡니다(Quest 의 지연 할당 경로를 PC 에서 시험, DEF-06).
+//   --no-multiview         두 눈의 메인 패스를 멀티뷰로 한 번에 그리지 않고 눈마다 그립니다(비교 · 진단).
 //   --ssao · --no-ssao     화면 공간 AO 를 켜거나 끕니다(AO 를 뺀 비교 · 끔 경로 시험). 프로젝트 설정 render.ao 를
 //                          덮어씁니다. 머티리얼 occlusion 텍스처는 그대로입니다.
 

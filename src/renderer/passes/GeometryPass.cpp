@@ -2,6 +2,7 @@
 #include "../Vertex.hpp"
 #include "../MaterialHandle.hpp"
 #include "../SpecConstants.hpp"
+#include "../GpuScene.hpp"
 #include <cassert>
 #include <cstring>
 #include <iterator>
@@ -35,7 +36,8 @@ static VkPipeline buildPBRPipeline(VkDevice device, VkPipelineCache cache,
                                    VkSampleCountFlagBits msaa, bool transparent,
                                    VkShaderModule vert, VkShaderModule frag,
                                    const VkSpecializationInfo* fragSpec,
-                                   VkCullModeFlags cullOverride = VK_CULL_MODE_FLAG_BITS_MAX_ENUM) {
+                                   VkCullModeFlags cullOverride = VK_CULL_MODE_FLAG_BITS_MAX_ENUM,
+                                   VkFrontFace frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE) {
     VkPipelineShaderStageCreateInfo stages[2] = {};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT; stages[0].module = vert; stages[0].pName = "main";
@@ -43,8 +45,8 @@ static VkPipeline buildPBRPipeline(VkDevice device, VkPipelineCache cache,
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module = frag; stages[1].pName = "main";
     stages[1].pSpecializationInfo = fragSpec;   // pbr.frag 특수화 상수(섀도 커널 등급 등)
 
-    auto binding    = Vertex::bindingDescription();
-    auto attributes = Vertex::attributeDescriptions();
+    auto binding    = PackedVertex::bindingDescription();
+    auto attributes = PackedVertex::attributeDescriptions();
     VkPipelineVertexInputStateCreateInfo vi{};
     vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vi.vertexBindingDescriptionCount = 1; vi.pVertexBindingDescriptions = &binding;
@@ -70,7 +72,7 @@ static VkPipeline buildPBRPipeline(VkDevice device, VkPipelineCache cache,
     // 호출자가 cullOverride 로 면을 지정합니다. 지정 없으면 기존 규칙(불투명 BACK, 투명 NONE).
     rs.cullMode = (cullOverride != VK_CULL_MODE_FLAG_BITS_MAX_ENUM) ? cullOverride
                 : (transparent ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
-    rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rs.frontFace = frontFace;   // 거울 변환 변형은 시계 방향(DEF-170)
 
     VkPipelineMultisampleStateCreateInfo ms{};
     ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -97,7 +99,7 @@ static VkPipeline buildPBRPipeline(VkDevice device, VkPipelineCache cache,
     ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     ds.depthTestEnable = VK_TRUE;
     ds.depthWriteEnable = VK_FALSE;   // both subpasses: depth read-only (pre-pass가 기록)
-    ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    ds.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;   // Reverse-Z(C1): 가까울수록 큼
 
     VkGraphicsPipelineCreateInfo ci{};
     ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -124,6 +126,16 @@ void GeometryPass::create(RenderContext& rc, VkPipelineLayout pbrLayout,
     pbrLayout_      = pbrLayout;
     frameSetLayout_ = frameSetLayout;
 
+    pass_   = createMainRenderPass(false);
+    mvPass_ = createMainRenderPass(true);
+    createLineBuffer();
+}
+
+// 단안과 멀티뷰 패스는 첨부 · 서브패스 · 의존성이 같고, 멀티뷰만 서브패스마다 viewMask 0b11 입니다. 멀티뷰 패스의 서브패스
+// 사이 의존성은 VIEW_LOCAL 입니다(눈 v 의 다음 서브패스는 눈 v 의 앞 서브패스만 기다림, 타일 GPU 가 눈마다 이어 그릴 수 있음).
+// correlation mask 0b11 은 두 눈이 거의 같은 화면이라는 힌트입니다(드라이버가 비닝 등을 함께 할 수 있음).
+VkRenderPass GeometryPass::createMainRenderPass(bool multiview) const {
+    const RenderContext& rc = *rc_;
     const VkFormat hdrFmt = kHdrFormat;
 
     VkAttachmentDescription atts[3] = {};
@@ -206,10 +218,24 @@ void GeometryPass::create(RenderContext& rc, VkPipelineLayout pbrLayout,
     rpci.attachmentCount = 3; rpci.pAttachments = atts;
     rpci.subpassCount = 3; rpci.pSubpasses = subpasses;
     rpci.dependencyCount = 4; rpci.pDependencies = deps;
-    if (vkCreateRenderPass(rc.device, &rpci, nullptr, &pass_) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create main render pass!");
 
-    createLineBuffer();
+    constexpr uint32_t kBothEyes = (1u << kMaxViews) - 1u;   // 0b11
+    const uint32_t viewMasks[3] = { kBothEyes, kBothEyes, kBothEyes };
+    VkRenderPassMultiviewCreateInfo mvci{ VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
+    if (multiview) {
+        deps[1].dependencyFlags |= VK_DEPENDENCY_VIEW_LOCAL_BIT;
+        deps[2].dependencyFlags |= VK_DEPENDENCY_VIEW_LOCAL_BIT;
+        mvci.subpassCount         = 3;
+        mvci.pViewMasks           = viewMasks;
+        mvci.correlationMaskCount = 1;
+        mvci.pCorrelationMasks    = &kBothEyes;
+        rpci.pNext = &mvci;   // pViewOffsets 없음 = VIEW_LOCAL 의존성의 눈 차이 0
+    }
+    VkRenderPass rp = VK_NULL_HANDLE;
+    if (vkCreateRenderPass(rc.device, &rpci, nullptr, &rp) != VK_SUCCESS)
+        throw std::runtime_error(multiview ? "Failed to create multiview main render pass!"
+                                           : "Failed to create main render pass!");
+    return rp;
 }
 
 void GeometryPass::createHostVertexBuffer(VkDeviceSize size, const char* what,
@@ -245,16 +271,39 @@ void GeometryPass::createLineBuffer() {
     }
 }
 
+VkImageView GeometryPass::createLayerView(VkImage img, VkFormat fmt, VkImageAspectFlags aspect, uint32_t baseLayer,
+                                          uint32_t layerCount) const {
+    VkImageViewCreateInfo ci{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    ci.image            = img;
+    ci.viewType         = layerCount > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+    ci.format           = fmt;
+    ci.subresourceRange = { aspect, 0, 1, baseLayer, layerCount };
+    VkImageView view = VK_NULL_HANDLE;
+    if (vkCreateImageView(rc_->device, &ci, nullptr, &view) != VK_SUCCESS)
+        throw std::runtime_error("Failed to create main pass image view!");
+    return view;
+}
+
 void GeometryPass::acquireSizeDependent() {
     const VkFormat hdrFmt = kHdrFormat;
     uint32_t w = rc_->renderExtent.width, h = rc_->renderExtent.height;
+    // 스테레오가 가능한 동안 두 층(층 v = 눈 v). 렌더러가 XR · 스테레오 흉내를 켜고 끌 때 다시 만듭니다.
+    layers_ = (rc_->sceneLayers >= 2) ? 2u : 1u;
+    static_assert(kMaxViews == 2, "scene targets hold at most two eye layers");
+
+    // 층별 2D 뷰와(두 층이면) 멀티뷰 프레임버퍼용 배열 뷰를 만듭니다.
+    auto makeViews = [&](VkImage img, VkFormat fmt, VkImageAspectFlags aspect,
+                         VkImageView (&layerViews)[kMaxViews], VkImageView& arrayView) {
+        for (uint32_t l = 0; l < layers_; ++l) layerViews[l] = createLayerView(img, fmt, aspect, l, 1);
+        if (layers_ == 2) arrayView = createLayerView(img, fmt, aspect, 0, 2);
+    };
 
     // Depth (MSAA)
-    depthImage_ = rc_->createImage(w, h, 1, 1, rc_->msaaSamples,
+    depthImage_ = rc_->createImage(w, h, 1, layers_, rc_->msaaSamples,
         rc_->depthFormat, VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         0, depthAlloc_);
-    depthView_ = rc_->createImageView(depthImage_, rc_->depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+    makeViews(depthImage_, rc_->depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, depthLayerView_, depthArrayView_);
     // 깊이는 따로 레이아웃을 바꾸지 않습니다. 메인 패스의 깊이 첨부가 UNDEFINED 에서 CLEAR 로 시작하고, 깊이를 읽는 AO 와
     // AfterScene 확장은 메인 패스 뒤에만 돕니다. 예전의 한 번짜리 전환은 하는 일이 없이 크기를 바꿀 때마다 큐 대기만
     // 일으켰고, 깊이 포맷이 스텐실을 가지면 DEPTH 단독 전환이 규칙 위반이었습니다(2026-10-31 결정, DEF-04 와 함께 지움).
@@ -263,53 +312,75 @@ void GeometryPass::acquireSizeDependent() {
     // 밖 별도 할당(DEF-06, Quest), 없으면 Zone B 입니다. 첨부 말고 다른 용도(복사 · 샘플 · 지우기)로 쓰면 깨집니다.
     // 위의 MSAA 깊이는 지연 할당할 수 없습니다: SAMPLED 이고 STORE 하며 최종 레이아웃이 READ_ONLY 입니다. AO 의 linDepth 와
     // 렌더 확장 AfterScene 이 읽습니다. 깊이 resolve 나 SSAO 끄기를 넣을 때 다시 판단합니다.
-    msaaImage_ = rc_->createImage(w, h, 1, 1, rc_->msaaSamples,
+    // 두 층이어도 지연 할당이면 실제 메모리가 거의 들지 않습니다(타일 안에서만 씀).
+    msaaImage_ = rc_->createImage(w, h, 1, layers_, rc_->msaaSamples,
         hdrFmt, VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
         0, msaaAlloc_, ImageMemory::LazyPreferred);
-    msaaView_ = rc_->createImageView(msaaImage_, hdrFmt, VK_IMAGE_ASPECT_COLOR_BIT);
+    makeViews(msaaImage_, hdrFmt, VK_IMAGE_ASPECT_COLOR_BIT, msaaLayerView_, msaaArrayView_);
 
     // HDR resolve targets (per frame-in-flight)
     for (int i = 0; i < MAX_FRAMES; i++) {
-        hdrImage_[i] = rc_->createImage(w, h, 1, 1, VK_SAMPLE_COUNT_1_BIT,
+        hdrImage_[i] = rc_->createImage(w, h, 1, layers_, VK_SAMPLE_COUNT_1_BIT,
             hdrFmt, VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
             VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
             0, hdrAlloc_[i]);
-        hdrView_[i] = rc_->createImageView(hdrImage_[i], hdrFmt, VK_IMAGE_ASPECT_COLOR_BIT);
+        makeViews(hdrImage_[i], hdrFmt, VK_IMAGE_ASPECT_COLOR_BIT, hdrLayerView_[i], hdrArrayView_[i]);
     }
 
-    // Framebuffers (hdr[i]별 1개)
-    framebufs_.resize(MAX_FRAMES);
-    for (int i = 0; i < MAX_FRAMES; i++) {
-        VkImageView atts[] = { msaaView_, depthView_, hdrView_[i] };
-        VkFramebufferCreateInfo fci{};
-        fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fci.renderPass = pass_;
+    // 단안 프레임버퍼: 프레임 슬롯 · 층마다 하나. 멀티뷰 프레임버퍼: 프레임 슬롯마다 하나(배열 뷰, layers 는 1 이어야 함).
+    auto makeFramebuffer = [&](VkRenderPass rp, VkImageView msaa, VkImageView depth, VkImageView hdr) {
+        VkImageView atts[] = { msaa, depth, hdr };
+        VkFramebufferCreateInfo fci{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+        fci.renderPass = rp;
         fci.attachmentCount = 3; fci.pAttachments = atts;
         fci.width = w; fci.height = h; fci.layers = 1;
-        if (vkCreateFramebuffer(rc_->device, &fci, nullptr, &framebufs_[i]) != VK_SUCCESS)
+        VkFramebuffer fb = VK_NULL_HANDLE;
+        if (vkCreateFramebuffer(rc_->device, &fci, nullptr, &fb) != VK_SUCCESS)
             throw std::runtime_error("Failed to create main framebuffer!");
-    }
+        return fb;
+    };
+    framebufs_.assign((size_t)MAX_FRAMES * kMaxViews, VK_NULL_HANDLE);
+    for (int i = 0; i < MAX_FRAMES; i++)
+        for (uint32_t l = 0; l < layers_; ++l)
+            framebufs_[(size_t)i * kMaxViews + l] = makeFramebuffer(pass_, msaaLayerView_[l], depthLayerView_[l],
+                                                                    hdrLayerView_[i][l]);
+    if (layers_ == 2 && mvPass_)
+        for (int i = 0; i < MAX_FRAMES; i++)
+            mvFramebufs_.push_back(makeFramebuffer(mvPass_, msaaArrayView_, depthArrayView_, hdrArrayView_[i]));
 }
 
 void GeometryPass::releaseSizeDependent() {
     if (!rc_) return;
-    for (auto fb : framebufs_) vkDestroyFramebuffer(rc_->device, fb, nullptr);
+    for (auto fb : framebufs_)   if (fb) vkDestroyFramebuffer(rc_->device, fb, nullptr);
+    for (auto fb : mvFramebufs_) if (fb) vkDestroyFramebuffer(rc_->device, fb, nullptr);
     framebufs_.clear();
+    mvFramebufs_.clear();
 
-    auto freeSlot = [&](VkImage& img, VkImageView& view, HarukaAllocation& alloc) {
+    auto freeView = [&](VkImageView& view) {
         if (view) { vkDestroyImageView(rc_->device, view, nullptr); view = VK_NULL_HANDLE; }
+    };
+    auto freeSlot = [&](VkImage& img, VkImageView (&layerViews)[kMaxViews], VkImageView& arrayView,
+                        HarukaAllocation& alloc) {
+        for (VkImageView& v : layerViews) freeView(v);
+        freeView(arrayView);
         if (img)  { vkDestroyImage(rc_->device, img, nullptr);      img  = VK_NULL_HANDLE; }
         if (alloc.isValid()) { rc_->allocator->freeB(alloc); alloc = {}; }
     };
-    freeSlot(msaaImage_, msaaView_, msaaAlloc_);
-    freeSlot(depthImage_, depthView_, depthAlloc_);
+    freeSlot(msaaImage_, msaaLayerView_, msaaArrayView_, msaaAlloc_);
+    freeSlot(depthImage_, depthLayerView_, depthArrayView_, depthAlloc_);
     for (int i = 0; i < MAX_FRAMES; i++)
-        freeSlot(hdrImage_[i], hdrView_[i], hdrAlloc_[i]);
+        freeSlot(hdrImage_[i], hdrLayerView_[i], hdrArrayView_[i], hdrAlloc_[i]);
 }
 
+// 단안 · 멀티뷰 두 벌을 만듭니다. 같은 셰이더 · 상태이고 렌더 패스만 다릅니다(viewMask 가 렌더 패스 호환성에 들어감).
 void GeometryPass::createPipelines() {
+    createPipelineSet(pass_, mono_);
+    if (mvPass_) createPipelineSet(mvPass_, mv_);
+}
+
+void GeometryPass::createPipelineSet(VkRenderPass rp, PipelineSet& ps) {
     // Depth pre-pass (subpass 0)
     {
         auto vert = rc_->createShaderModule(readFile("shaders/depth.vert.spv"));
@@ -321,8 +392,8 @@ void GeometryPass::createPipelines() {
         stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module = frag; stages[1].pName = "main";
 
-        auto binding    = Vertex::bindingDescription();
-        auto attributes = Vertex::attributeDescriptions();
+        auto binding    = PackedVertex::bindingDescription();
+        auto attributes = PackedVertex::attributeDescriptions();
         VkPipelineVertexInputStateCreateInfo vi{};
         vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
         vi.vertexBindingDescriptionCount = 1; vi.pVertexBindingDescriptions = &binding;
@@ -357,7 +428,7 @@ void GeometryPass::createPipelines() {
         VkPipelineDepthStencilStateCreateInfo ds{};
         ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
         ds.depthTestEnable = VK_TRUE; ds.depthWriteEnable = VK_TRUE;
-        ds.depthCompareOp = VK_COMPARE_OP_LESS;
+        ds.depthCompareOp = VK_COMPARE_OP_GREATER;   // Reverse-Z(C1)
 
         VkGraphicsPipelineCreateInfo ci{};
         ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -366,9 +437,12 @@ void GeometryPass::createPipelines() {
         ci.pViewportState = &vs; ci.pRasterizationState = &rs;
         ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
         ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
-        ci.layout = pbrLayout_; ci.renderPass = pass_; ci.subpass = 0;
-        if (vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &depthPipeline_) != VK_SUCCESS)
+        ci.layout = pbrLayout_; ci.renderPass = rp; ci.subpass = 0;
+        if (vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.depth) != VK_SUCCESS)
             throw std::runtime_error("Failed to create depth pipeline!");
+        rs.frontFace = VK_FRONT_FACE_CLOCKWISE;   // 거울 변환 메시(DEF-170)
+        if (vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.depthMirrored) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create mirrored depth pipeline!");
 
         vkDestroyShaderModule(rc_->device, vert, nullptr);
         vkDestroyShaderModule(rc_->device, frag, nullptr);
@@ -384,14 +458,25 @@ void GeometryPass::createPipelines() {
         SpecConstants sc;
         sc.addInt(HARUKA_SPEC_SHADOW_FILTER, shadowFilter_);
         const VkSpecializationInfo si = sc.info();
-        opaquePipeline_ = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                           pass_, 1, rc_->msaaSamples, false, vert, frag, &si);
-        transparentBackPipeline_  = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                                pass_, 2, rc_->msaaSamples, true, vert, frag, &si,
+        ps.opaque = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
+                                           rp, 1, rc_->msaaSamples, false, vert, frag, &si);
+        ps.transparentBack  = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
+                                                rp, 2, rc_->msaaSamples, true, vert, frag, &si,
                                                 VK_CULL_MODE_FRONT_BIT);   // 뒷면 먼저
-        transparentFrontPipeline_ = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                                pass_, 2, rc_->msaaSamples, true, vert, frag, &si,
+        ps.transparentFront = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
+                                                rp, 2, rc_->msaaSamples, true, vert, frag, &si,
                                                 VK_CULL_MODE_BACK_BIT);    // 앞면 나중
+        // 거울 변환(행렬식 < 0) 메시용 변형: 감기 방향이 뒤집혀 앞면을 시계 방향으로 봅니다(DEF-170).
+        constexpr VkFrontFace cw = VK_FRONT_FACE_CLOCKWISE;
+        ps.opaqueMirrored = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
+                                           rp, 1, rc_->msaaSamples, false, vert, frag, &si,
+                                           VK_CULL_MODE_FLAG_BITS_MAX_ENUM, cw);
+        ps.transparentBackMirrored  = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
+                                                rp, 2, rc_->msaaSamples, true, vert, frag, &si,
+                                                VK_CULL_MODE_FRONT_BIT, cw);
+        ps.transparentFrontMirrored = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
+                                                rp, 2, rc_->msaaSamples, true, vert, frag, &si,
+                                                VK_CULL_MODE_BACK_BIT, cw);
         vkDestroyShaderModule(rc_->device, vert, nullptr);
         vkDestroyShaderModule(rc_->device, frag, nullptr);
     }
@@ -478,8 +563,8 @@ void GeometryPass::createPipelines() {
         ci.pViewportState = &vs; ci.pRasterizationState = &rs;
         ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
         ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
-        ci.layout = linePipelineLayout_; ci.renderPass = pass_; ci.subpass = 2;
-        if (vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &linePipeline_) != VK_SUCCESS)
+        ci.layout = linePipelineLayout_; ci.renderPass = rp; ci.subpass = 2;
+        if (vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.line) != VK_SUCCESS)
             throw std::runtime_error("Failed to create line pipeline!");
 
         // 기즈모 삼각형 파이프라인 — 라인과 동일하되 토폴로지만 삼각형입니다.
@@ -488,7 +573,7 @@ void GeometryPass::createPipelines() {
         iaTri.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         VkGraphicsPipelineCreateInfo ciTri = ci;
         ciTri.pInputAssemblyState = &iaTri;
-        if (vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ciTri, nullptr, &triPipeline_) != VK_SUCCESS)
+        if (vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ciTri, nullptr, &ps.tri) != VK_SUCCESS)
             throw std::runtime_error("Failed to create gizmo tri pipeline!");
 
         vkDestroyShaderModule(rc_->device, vert, nullptr);
@@ -560,7 +645,7 @@ void GeometryPass::createPipelines() {
         // 장면 깊이로 가려지되 깊이는 쓰지 않습니다(이 서브패스의 깊이는 읽기 전용).
         VkPipelineDepthStencilStateCreateInfo ds{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
         ds.depthTestEnable = VK_TRUE; ds.depthWriteEnable = VK_FALSE;
-        ds.depthCompareOp  = VK_COMPARE_OP_LESS_OR_EQUAL;
+        ds.depthCompareOp  = VK_COMPARE_OP_GREATER_OR_EQUAL;   // Reverse-Z(C1)
 
         VkGraphicsPipelineCreateInfo ci{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
         ci.stageCount = 2; ci.pStages = stages;
@@ -568,40 +653,41 @@ void GeometryPass::createPipelines() {
         ci.pViewportState = &vs; ci.pRasterizationState = &rs;
         ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
         ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
-        ci.layout = panelLayout_; ci.renderPass = pass_; ci.subpass = 2;
-        const VkResult r = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &panelPipeline_);
+        ci.layout = panelLayout_; ci.renderPass = rp; ci.subpass = 2;
+        const VkResult r = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.panel);
         vkDestroyShaderModule(rc_->device, vert, nullptr);
         vkDestroyShaderModule(rc_->device, frag, nullptr);
         if (r != VK_SUCCESS) throw std::runtime_error("Failed to create UI panel pipeline!");
     }
 }
 
+void GeometryPass::destroySet(PipelineSet& set) {
+    set.forEach([&](VkPipeline& p) {
+        if (p) { vkDestroyPipeline(rc_->device, p, nullptr); p = VK_NULL_HANDLE; }
+    });
+}
+
 void GeometryPass::destroyPipelines() {
     if (!rc_) return;
-    if (depthPipeline_)       { vkDestroyPipeline(rc_->device, depthPipeline_, nullptr);       depthPipeline_       = VK_NULL_HANDLE; }
-    if (opaquePipeline_)      { vkDestroyPipeline(rc_->device, opaquePipeline_, nullptr);      opaquePipeline_      = VK_NULL_HANDLE; }
-    if (transparentBackPipeline_)  { vkDestroyPipeline(rc_->device, transparentBackPipeline_,  nullptr); transparentBackPipeline_  = VK_NULL_HANDLE; }
-    if (transparentFrontPipeline_) { vkDestroyPipeline(rc_->device, transparentFrontPipeline_, nullptr); transparentFrontPipeline_ = VK_NULL_HANDLE; }
-    if (linePipeline_)        { vkDestroyPipeline(rc_->device, linePipeline_, nullptr);        linePipeline_        = VK_NULL_HANDLE; }
-    if (triPipeline_)         { vkDestroyPipeline(rc_->device, triPipeline_, nullptr);         triPipeline_         = VK_NULL_HANDLE; }
-    if (panelPipeline_)       { vkDestroyPipeline(rc_->device, panelPipeline_, nullptr);       panelPipeline_       = VK_NULL_HANDLE; }
+    destroySet(mono_);
+    destroySet(mv_);
 }
 
 void GeometryPass::rebuildPipelines() {
     // 새 파이프라인을 다 만든 뒤에만 옛 것을 지웁니다. 하나라도 실패하면 새로 만든 것만 지우고
     // 옛 것을 되돌려, 핫 리로드가 실패해도 이전 파이프라인으로 계속 그립니다.
-    VkPipeline* slots[] = { &depthPipeline_, &opaquePipeline_, &transparentBackPipeline_,
-                            &transparentFrontPipeline_, &linePipeline_, &triPipeline_, &panelPipeline_ };
-    VkPipeline old[std::size(slots)];
-    for (size_t i = 0; i < std::size(slots); ++i) { old[i] = *slots[i]; *slots[i] = VK_NULL_HANDLE; }
+    PipelineSet oldMono = mono_, oldMv = mv_;
+    mono_ = PipelineSet{};
+    mv_   = PipelineSet{};
     try { createPipelines(); }
     catch (...) {
         destroyPipelines();
-        for (size_t i = 0; i < std::size(slots); ++i) *slots[i] = old[i];
+        mono_ = oldMono;
+        mv_   = oldMv;
         throw;
     }
-    for (VkPipeline p : old)
-        if (p) vkDestroyPipeline(rc_->device, p, nullptr);
+    destroySet(oldMono);
+    destroySet(oldMv);
 }
 
 void GeometryPass::destroy() {
@@ -620,27 +706,53 @@ void GeometryPass::destroy() {
         if (triVertMem_[i])  { vkFreeMemory(rc_->device, triVertMem_[i], nullptr);    triVertMem_[i] = VK_NULL_HANDLE; }
     }
     if (pass_)        { vkDestroyRenderPass(rc_->device, pass_, nullptr);    pass_        = VK_NULL_HANDLE; }
+    if (mvPass_)      { vkDestroyRenderPass(rc_->device, mvPass_, nullptr);  mvPass_      = VK_NULL_HANDLE; }
 }
 
 // ── record ─────────────────────────────────────────────────────────────────────
 void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
                           const Inputs& in, VkQueryPool tsPool, uint32_t tsQueryAfterMain) {
-    const GpuViewPush viewPush{ (int32_t)viewIndex };
+    const uint32_t layer = layerFor(viewIndex);
+    recordImpl(cmd, frameIdx, pass_, framebufs_[(size_t)frameIdx * kMaxViews + layer], mono_, viewIndex, in,
+               tsPool, tsQueryAfterMain);
+}
+
+// 푸시 상수의 눈 번호는 0 이고, 셰이더가 gl_ViewIndex 를 더해 눈을 고릅니다(HARUKA_EYE_INDEX). 드로 · 바인딩 · 머티리얼 푸시를
+// 한 번만 기록하고 GPU 가 두 층에 그립니다. 선 · 기즈모 · 패널도 두 눈에 함께 그려집니다.
+void GeometryPass::recordMultiview(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& in,
+                                   VkQueryPool tsPool, uint32_t tsQueryAfterMain) {
+    assert(multiviewReady() && "recordMultiview needs two scene layers and the multiview pipelines");
+    recordImpl(cmd, frameIdx, mvPass_, mvFramebufs_[frameIdx], mv_, 0, in, tsPool, tsQueryAfterMain);
+}
+
+void GeometryPass::recordImpl(VkCommandBuffer cmd, uint32_t frameIdx, VkRenderPass rp, VkFramebuffer fb,
+                              const PipelineSet& ps, uint32_t viewIndex, const Inputs& in,
+                              VkQueryPool tsPool, uint32_t tsQueryAfterMain) {
+    const GpuViewPush viewPush{ (int32_t)viewIndex, 1u };
+    // 라이트 채널(2026-11-17): 메시 채널이 바뀔 때만 푸시 상수를 다시 넣습니다(대부분 장면은 모두 기본 채널이라 늘지 않음).
+    uint32_t pushedChannels = 1u;
+    auto pushChannels = [&](uint8_t ch) {
+        if (ch == pushedChannels) return;
+        const GpuViewPush p{ (int32_t)viewIndex, ch };
+        vkCmdPushConstants(cmd, pbrLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(p), &p);
+        pushedChannels = ch;
+    };
     VkClearValue clearVals[3];
     clearVals[0].color        = {{0.18f, 0.20f, 0.25f, 1.0f}};
-    clearVals[1].depthStencil = {1.0f, 0};
+    clearVals[1].depthStencil = {0.0f, 0};   // Reverse-Z(C1): 무한히 먼 곳 = 0
     clearVals[2].color        = {{0.f, 0.f, 0.f, 0.f}};
 
     VkRenderPassBeginInfo rpbi{};
     rpbi.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpbi.renderPass      = pass_;
-    rpbi.framebuffer     = framebufs_[frameIdx];
-    rpbi.renderArea      = {{0,0}, rc_->renderExtent};
+    rpbi.renderPass      = rp;
+    rpbi.framebuffer     = fb;
+    const VkExtent2D ext = (in.area.width && in.area.height) ? in.area : rc_->renderExtent;
+    rpbi.renderArea      = {{0,0}, ext};
     rpbi.clearValueCount = 3; rpbi.pClearValues = clearVals;
     vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 
-    VkViewport vp{ 0, 0, (float)rc_->renderExtent.width, (float)rc_->renderExtent.height, 0.f, 1.f };
-    VkRect2D   sc{ {0,0}, rc_->renderExtent };
+    VkViewport vp{ 0, 0, (float)ext.width, (float)ext.height, 0.f, 1.f };
+    VkRect2D   sc{ {0,0}, ext };
     vkCmdSetViewport(cmd, 0, 1, &vp);
     vkCmdSetScissor (cmd, 0, 1, &sc);
 
@@ -650,7 +762,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
     // 통과한 집합이라 GPU 컬이 하나도 못 걸러 순수 오버헤드였습니다(dispatch·배리어·atomic).
     // 불투명 컬러(서브패스 1)와 같은 CPU 목록을 그리므로 '프리패스 집합==컬러 집합'이 자명합니다.
     // 깊이 전용이라 머티리얼 푸시는 필요 없습니다.
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, depthPipeline_);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ps.depth);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pbrLayout_, 0, 1, &in.frameSet, 0, nullptr);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -660,19 +772,47 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
     vkCmdPushConstants(cmd, pbrLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(viewPush), &viewPush);
 
+    // 인덱스 버퍼는 형식(32 · 16비트, O3)이 바뀔 때만 다시 바인딩합니다. -1 = 모름(처음 · 렌더 확장 뒤).
+    int boundIndex16 = -1;
+    auto bindIndexFor = [&](bool index16) {
+        if (boundIndex16 == (int)index16) return;
+        vkCmdBindIndexBuffer(cmd, in.indexBuffer, index16 ? kIdx16Base : 0, index16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+        boundIndex16 = (int)index16;
+    };
     {
         VkDeviceSize offV = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &in.vertexBuffer, &offV);
-        vkCmdBindIndexBuffer(cmd, in.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
     }
+    // 불투명 · 반투명 서브패스 시작에서 정점 · 인덱스 버퍼와 눈 번호 푸시 상수를 다시 넣습니다(명령 세 개). 규격상 바인딩은
+    // 서브패스가 바뀌어도 남지만, 검증 레이어(SDK 1.4.357)는 멀티뷰 렌더 패스에서 서브패스가 바뀐 뒤의 드로를 "아무것도
+    // 바인딩되지 않음"(VUID-vkCmdDrawIndexed-None-04007 · 07312 · 08601)으로 보고했습니다(2026-11-18, 화면은 같음). 다시 넣으면
+    // 보고가 사라지고, 드라이버의 상태 추적에 기대지 않게 됩니다.
+    auto rebindDrawState = [&]() {
+        vkCmdPushConstants(cmd, pbrLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(viewPush), &viewPush);
+        pushedChannels = 1u;
+        VkDeviceSize offV = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &in.vertexBuffer, &offV);
+        boundIndex16 = -1;
+    };
 
     // 머티리얼이 null 인 항목은 세 서브패스 모두에서 건너뜁니다. 컬러 패스에서만 빼면 깊이만
     // 남아 뒤에 있는 물체를 가립니다(DEF-28). Renderer 가 오류 머티리얼로 바꿔 넣으므로 정상
     // 경로에서는 일어나지 않습니다.
+    // 거울 변환 묶음(DEF-170)이 나올 때만 앞면 방향이 반대인 파이프라인으로 바꿉니다. 같은 레이아웃이라
+    // 디스크립터 세트와 푸시 상수는 그대로 남습니다. 거울 변환이 없는 장면은 바인딩이 늘지 않습니다.
+    auto bindFor = [&](bool& bound, bool mirrored, VkPipeline normal, VkPipeline flipped) {
+        if (mirrored == bound) return;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mirrored ? flipped : normal);
+        bound = mirrored;
+    };
     if (in.opaqueItems) {
+        bool boundMirrored = false;
         for (const auto& item : *in.opaqueItems) {
             assert(item.material && "DrawItem without material");
             if (!item.material) continue;
+            bindFor(boundMirrored, item.mirrored, ps.depth, ps.depthMirrored);
+            bindIndexFor(item.index16);
             vkCmdDrawIndexed(cmd, item.indexCount, item.instanceCount, item.firstIndex,
                              item.vertexOffset, item.firstInstance);
         }
@@ -680,7 +820,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
 
     // — Subpass 1: Opaque PBR (CPU draws with push descriptors) ———————————————
     vkCmdNextSubpass(cmd, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, opaquePipeline_);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ps.opaque);
     vkCmdSetViewport(cmd, 0, 1, &vp);
     vkCmdSetScissor (cmd, 0, 1, &sc);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -689,10 +829,15 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
         pbrLayout_, 2, 1, &in.transformSet, 0, nullptr);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pbrLayout_, 1, 1, &in.sceneSet, 0, nullptr);
+    rebindDrawState();
 
     if (in.opaqueItems) {
+        bool boundMirrored = false;
         for (const auto& item : *in.opaqueItems) {
             if (!item.material) continue;
+            bindFor(boundMirrored, item.mirrored, ps.opaque, ps.opaqueMirrored);
+            bindIndexFor(item.index16);
+            pushChannels(item.lightChannels);
             pushMaterialDesc(rc_->vk.push, cmd, pbrLayout_, item.material,
                              in.textureSampler, in.clampSampler);
             vkCmdDrawIndexed(cmd, item.indexCount, item.instanceCount, item.firstIndex,
@@ -708,9 +853,10 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
         (*in.subpassHook)(1);
         vkCmdPushConstants(cmd, pbrLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(viewPush), &viewPush);
+        pushedChannels = 1u;
         VkDeviceSize offV = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &in.vertexBuffer, &offV);
-        vkCmdBindIndexBuffer(cmd, in.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        boundIndex16 = -1;   // 확장이 인덱스 버퍼를 바꿨을 수 있음: 다음 드로에서 다시 바인딩
     }
 
     // — Subpass 2: Transparent PBR + line overlay ———————————————————————————
@@ -727,27 +873,31 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
             pbrLayout_, 2, 1, &in.transformSet, 0, nullptr);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             pbrLayout_, 1, 1, &in.sceneSet, 0, nullptr);
+        rebindDrawState();
 
-        auto drawAll = [&]{
+        auto drawAll = [&](VkPipeline normal, VkPipeline flipped) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, normal);
+            bool boundMirrored = false;
             for (const auto& item : *in.transparentItems) {
                 assert(item.material && "DrawItem without material");
                 if (!item.material) continue;
+                bindFor(boundMirrored, item.mirrored, normal, flipped);
+                bindIndexFor(item.index16);
+                pushChannels(item.lightChannels);
                 pushMaterialDesc(rc_->vk.push, cmd, pbrLayout_, item.material,
                                  in.textureSampler, in.clampSampler);
                 vkCmdDrawIndexed(cmd, item.indexCount, item.instanceCount, item.firstIndex,
                                  item.vertexOffset, item.firstInstance);
             }
         };
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparentBackPipeline_);
-        drawAll();   // 뒷면
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparentFrontPipeline_);
-        drawAll();   // 앞면
+        drawAll(ps.transparentBack, ps.transparentBackMirrored);     // 뒷면
+        drawAll(ps.transparentFront, ps.transparentFrontMirrored);   // 앞면
     }
 
     // 월드 UI 패널(3D UI P1b). 반투명 물체 뒤에 그려 패널 뒤의 유리가 비쳐 보이게 합니다(패널 앞의 반투명은 순서가
     // 어긋나지만 드뭅니다). 두 눈이 같은 텍스처를 읽습니다. 아직 한 번도 그리지 않은 패널(view 없음)은 건너뜁니다.
-    if (in.panels && !in.panels->empty() && panelPipeline_ && in.panelSampler) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, panelPipeline_);
+    if (in.panels && !in.panels->empty() && ps.panel && in.panelSampler) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ps.panel);
         vkCmdSetViewport(cmd, 0, 1, &vp);
         vkCmdSetScissor (cmd, 0, 1, &sc);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, panelLayout_, 0, 1, &in.frameSet, 0, nullptr);
@@ -778,11 +928,11 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
     // 기즈모 삼각형 오버레이 (subpass 2). 라인보다 먼저 그려서, 와이어 박스와
     // 회전 원호 같은 라인 핸들이 솔리드 화살표 위에 겹쳐 보이게 합니다.
     // 정점은 첫 눈에서만 복사합니다. 두 눈이 같은 프레임 슬롯의 같은 버퍼를 읽습니다.
-    if (triVertPtr_[frameIdx] && !pendingTris_.empty()) {
+    if (in.overlays && triVertPtr_[frameIdx] && !pendingTris_.empty()) {
         uint32_t count = std::min((uint32_t)pendingTris_.size(), kMaxTriVerts);
         if (viewIndex == 0)
             memcpy(triVertPtr_[frameIdx], pendingTris_.data(), count * sizeof(LineVertex));
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, triPipeline_);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ps.tri);
         vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &sc);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             linePipelineLayout_, 0, 1, &in.frameSet, 0, nullptr);
@@ -795,7 +945,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
 
     // Line overlay (in subpass 2)
     // 에디터 선 다음에 월드 UI 포인터 선(3D UI 구간 6)을 이어 올립니다. 정점 수는 선분 단위(짝수)로 자릅니다.
-    if (lineVertPtr_[frameIdx] && (!pendingLines_.empty() || !pendingPointerLines_.empty())) {
+    if (in.overlays && lineVertPtr_[frameIdx] && (!pendingLines_.empty() || !pendingPointerLines_.empty())) {
         const uint32_t editorCount  = std::min((uint32_t)pendingLines_.size(), kMaxLineVerts);
         const uint32_t pointerCount = std::min((uint32_t)pendingPointerLines_.size(), (kMaxLineVerts - editorCount) & ~1u);
         const uint32_t count        = editorCount + pointerCount;
@@ -804,7 +954,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
             if (editorCount)  memcpy(dst, pendingLines_.data(), editorCount * sizeof(LineVertex));
             if (pointerCount) memcpy(dst + editorCount, pendingPointerLines_.data(), pointerCount * sizeof(LineVertex));
         }
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, linePipeline_);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ps.line);
         vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &sc);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             linePipelineLayout_, 0, 1, &in.frameSet, 0, nullptr);

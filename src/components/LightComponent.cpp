@@ -1,4 +1,5 @@
 #include "LightComponent.hpp"
+#include "LightChannels.hpp"
 #include "../core/DebugDraw.hpp"
 #include "../core/Actor.hpp"
 #include "CameraComponent.hpp"
@@ -77,6 +78,11 @@ std::vector<PropDesc> LightComponent::buildProps() {
     if (lightType == LightType::Directional)
         props.push_back(makePropToggle("Cast Shadows",
             [p]{ return p->castShadows; }, [p](bool v){ p->castShadows = v; }));
+    if (lightType == LightType::Directional)
+        props.push_back(makePropFloat("Contact Shadow Length", PropColor::Neutral, 0.01f,
+            [p]{ return p->contactShadowLength; },
+            [p](float v){ p->contactShadowLength = std::clamp(v, 0.f, 2.f); }, PropUnit::Size));
+    hchan::addProps(props, &lightChannels);   // 라이트 채널(2026-11-17)
 
     return props;
 }
@@ -157,6 +163,8 @@ void LightComponent::writeFields(ComponentFieldWriter& w) const {
     w.b ("useTemperature",    useTemperature);
     w.f ("temperatureK",      temperatureK);
     w.b ("castShadows",       castShadows);
+    hchan::write(w, lightChannels);
+    if (contactShadowLength > 0.f) w.f("contactShadowLength", contactShadowLength);   // 2026-11-17. 끄면 쓰지 않음
 }
 
 bool LightComponent::readField(const std::string& key, const std::string& value) {
@@ -176,6 +184,12 @@ bool LightComponent::readField(const std::string& key, const std::string& value)
     else if (key == "useTemperature")    ok = fieldparse::toBool (value, useTemperature);
     else if (key == "temperatureK")      ok = fieldparse::toFloat(value, temperatureK);
     else if (key == "castShadows")       ok = fieldparse::toBool (value, castShadows);
+    else if (key == "lightChannels")     ok = hchan::read(value, lightChannels);
+    else if (key == "contactShadowLength") {
+        float v = 0.f;
+        ok = fieldparse::toFloat(value, v) && v >= 0.f && v <= 2.f;
+        if (ok) contactShadowLength = v;
+    }
     else return false;
     if (!ok) reportBadField(key, value);
     return true;

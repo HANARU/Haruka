@@ -17,8 +17,11 @@ struct SSAOData {
     float     zFar;       // ssao.frag 의 배경 조기 탈출용
     float     pad[2];     // 아래 proj 가 std140 정렬 위치(1120)에서 시작하도록 채움. 지우지 않습니다
     glm::mat4 proj;       // 샘플 투영 행렬(ssao.frag 의 data.proj)
+    glm::vec4 contact;        // 접촉 그림자: xyz = 뷰 공간 태양 방향, w = 광선 길이(m, 0 = 끔)
+    glm::vec4 contactParams;  // x = 두께(m), y = AO 항 계산(1/0), zw = 예약
 };
-static_assert(sizeof(SSAOData) == 1184, "SSAOData must match ssao.frag std140 block (1184 bytes)");
+static_assert(sizeof(SSAOData) == 1216, "SSAOData must match ssao.frag std140 block (1216 bytes)");
+static_assert(offsetof(SSAOData, contact) == 1184, "SSAOData.contact offset must match ssao.frag");
 static_assert(offsetof(SSAOData, proj) == 1120, "SSAOData.proj offset must match ssao.frag");
 
 // 단일 컬러 어태치먼트 + shader-read 종료 렌더패스 (linDepth/SSAO 공통 형태)
@@ -405,6 +408,8 @@ void AOPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex,
             ubo->invProj    = cam.invProj;
             ubo->proj       = cam.proj;
             ubo->zFar       = cam.zFar;
+            ubo->contact       = glm::vec4(cam.sunView, cam.contactLength);
+            ubo->contactParams = glm::vec4(kContactThickness, cam.aoTerm ? 1.f : 0.f, 0.f, 0.f);
             // half-res SSAO 타깃 기준으로 스케일합니다(hw=renderExtent/2). 4x4 노이즈가
             // half-res 4픽셀마다 한 번 반복되어(REPEAT) 픽셀당 회전이 제대로 흩어집니다.
             ubo->noiseScale = glm::vec2((float)hw / 4.f, (float)hh / 4.f);

@@ -37,8 +37,10 @@ struct FakeBuiltin : HPass {
 struct FakeExt : IRenderExtension {
     std::string name;
     uint32_t    mask;
-    FakeExt(std::string n, uint32_t m) : name(std::move(n)), mask(m) {}
+    bool        mv = false;
+    FakeExt(std::string n, uint32_t m, bool multiview = false) : name(std::move(n)), mask(m), mv(multiview) {}
     uint32_t stages() const override { return mask; }
+    bool supportsMultiview() const override { return mv; }
     void create(const HRenderDeviceInfo&) override {}
     void record(const HRenderStageContext& c) override {
         g_log.push_back(name + ".record" + std::to_string((uint32_t)c.stage) + "@" + std::to_string(c.viewIndex));
@@ -119,6 +121,23 @@ int main() {
         HRenderStageContext c; c.stage = HRenderStage::OpaqueEnd;
         reg.dispatch(c);
         check(joined() == "sky.record0@0", "남은 확장만 부름: " + joined());
+    }
+
+    std::printf("\n== 4b. 멀티뷰 메인 패스(2026-11-18) ==\n");
+    {
+        RenderExtensionRegistry r2;
+        check(!r2.blocksMultiview(), "확장이 없으면 멀티뷰를 막지 않음");
+        auto post2 = std::make_shared<FakeExt>("post2", stageBit(HRenderStage::AfterScene) | stageBit(HRenderStage::AfterTonemap));
+        r2.add(post2);
+        check(!r2.blocksMultiview(), "메인 패스 밖 지점(AfterScene · AfterTonemap)만 쓰는 확장은 막지 않음(눈마다 불림)");
+        auto sky2 = std::make_shared<FakeExt>("sky2", stageBit(HRenderStage::OpaqueEnd), true);
+        r2.add(sky2);
+        check(!r2.blocksMultiview(), "메인 패스 안 지점이라도 supportsMultiview 면 막지 않음");
+        auto glass = std::make_shared<FakeExt>("glass", stageBit(HRenderStage::TransparentEnd));
+        r2.add(glass);
+        check(r2.blocksMultiview(), "메인 패스 안 지점에 멀티뷰를 모르는 확장이 있으면 막음(그 프레임은 눈마다)");
+        r2.remove(glass.get());
+        check(!r2.blocksMultiview(), "그 확장을 빼면 다시 멀티뷰");
     }
 
     std::printf("\n== 5. 렌더러가 끝날 때 ==\n");

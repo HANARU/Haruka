@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 namespace hibl {
 
@@ -27,6 +28,34 @@ inline glm::vec3 cubeDir(int face, float u, float v) {
         default: return {0,0,1};
     }
 }
+
+// 방향 → 큐브 면과 UV([-1, 1]), cubeDir 의 역(반사 캡처, 2026-11-17). d 는 0 이 아닌 벡터.
+inline void dirToCube(const glm::vec3& d, int& face, float& u, float& v) {
+    const glm::vec3 a = glm::abs(d);
+    if (a.x >= a.y && a.x >= a.z) {
+        if (d.x > 0.f) { face = 0; u = -d.z / a.x; v = -d.y / a.x; }
+        else           { face = 1; u =  d.z / a.x; v = -d.y / a.x; }
+    } else if (a.y >= a.z) {
+        if (d.y > 0.f) { face = 2; u = d.x / a.y; v =  d.z / a.y; }
+        else           { face = 3; u = d.x / a.y; v = -d.z / a.y; }
+    } else {
+        if (d.z > 0.f) { face = 4; u =  d.x / a.z; v = -d.y / a.z; }
+        else           { face = 5; u = -d.x / a.z; v = -d.y / a.z; }
+    }
+}
+
+// CPU 큐브맵(면마다 res² RGB, 면 순서 · 텍셀 순서는 cubeDir 규약)의 가장 가까운 텍셀. 반사 캡처의 프리필터가 하늘 함수 대신 씁니다.
+struct CubeSampler {
+    const std::vector<glm::vec3>* faces = nullptr;   // [6]
+    int res = 0;
+    glm::vec3 operator()(const glm::vec3& d) const {
+        int f; float u, v;
+        dirToCube(d, f, u, v);
+        const int ix = std::clamp((int)((u * 0.5f + 0.5f) * (float)res), 0, res - 1);
+        const int iy = std::clamp((int)((v * 0.5f + 0.5f) * (float)res), 0, res - 1);
+        return faces[f][(size_t)iy * (size_t)res + (size_t)ix];
+    }
+};
 
 struct SH9Rgb { glm::vec3 c[9]{}; };
 

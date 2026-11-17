@@ -1,4 +1,5 @@
 #pragma once
+#include "../ShadowFit.hpp"
 #include <vulkan/vulkan.h>
 #include <vector>
 #include "HPass.hpp"
@@ -42,6 +43,11 @@ public:
 
     // resolution 은 2 의 거듭제곱, 256 ~ 4096, 장치 한도 이하여야 하며 아니면 경고 후 기본값을 씁니다.
     void create(RenderContext& rc, VkPipelineLayout pbrLayout, uint32_t resolution = kDefaultResolution);
+    // 품질 단계(2026-11-18, 성능 안정화 2-2). create 전에 부릅니다. cascades 1 이면 먼 단만 그리고(가까운 단 칸은 비운 채 둠),
+    // farRadius 는 먼 단의 반지름(그림자 거리, m)입니다. 범위 밖이면 기본값(kCascadeCount · kRadius)으로 둡니다.
+    void configure(int cascades, float farRadius);
+    int   cascades() const  { return cascades_; }
+    float farRadius() const { return farRadius_; }
     void destroy() override;
     void rebuildPipelines() override;
 
@@ -55,8 +61,10 @@ public:
     //    라이트 프러스텀에 캐스터가 없을 때 앞 프레임의 그림자가 남거나, 한 번도 안 그린 맵을 읽었습니다.
     //  - 캐스터 라이트가 없으면 셰이더는 맵을 읽지 않지만(miscParams.w < 0) 디스크립터는 정적으로
     //    쓰이므로, 레이아웃이 SHADER_READ_ONLY 가 되도록 처음 한 번만 비운 맵을 기록합니다.
+    // rowFlags[행](kRowMirrored · kRowIndex16, RenderTypes.hpp)로 드로마다 앞면 방향(DEF-170)과 인덱스 형식(O3)을 고릅니다.
+    // 묶음의 행은 모두 같은 값입니다.
     void record(VkCommandBuffer cmd, const DrawInputs& in,
-                const std::vector<GpuDrawCmd>& draws, bool casterActive);
+                const std::vector<GpuDrawCmd>& draws, const std::vector<uint8_t>& rowFlags, bool casterActive);
 
     bool        valid() const       { return image_ != VK_NULL_HANDLE; }
     VkImageView shadowView() const  { return view_; }
@@ -75,8 +83,11 @@ private:
     VkRenderPass     pass_        = VK_NULL_HANDLE;
     VkFramebuffer    framebuffer_ = VK_NULL_HANDLE;
     VkPipeline       pipeline_    = VK_NULL_HANDLE;
+    VkPipeline       pipelineMirrored_ = VK_NULL_HANDLE;   // 거울 변환 캐스터(앞면 시계 방향, DEF-170)
     VkFormat         format_        = VK_FORMAT_UNDEFINED;   // create 에서 조회해 고름
     uint32_t         resolution_    = kDefaultResolution;
+    int              cascades_      = hshadow::kCascadeCount;
+    float            farRadius_     = hshadow::kRadius;
     bool             linearCompare_ = false;
     bool             layoutReady_ = false;   // 렌더 패스를 한 번 이상 기록해 finalLayout 이 된 뒤인지
 };

@@ -27,6 +27,8 @@ public:
                         VkSampler iblSampler, VkImageView irradianceView,
                         VkImageView prefilterView,
                         VkSampler brdfSampler, VkImageView brdfView);
+    // 반사 캡처 큐브(scene set binding 5)를 바꿉니다. 장치가 쉬는 동안(캡처 직후)에만 부릅니다.
+    void writeCaptureView(VkImageView captureView);
 
     // 리사이즈 후: imagesInFlight 리셋 + 이미지 수 변경 시 renderDone 재생성
     void onSwapchainRecreated(uint32_t swapImageCount);
@@ -89,4 +91,5 @@ private:
     std::array<VkFence, MAX_FRAMES>         fences_{};
     std::vector<VkSemaphore>                semRenderDone_;   // 스왑체인 이미지당 1개
     std::vector<VkFence>                    imagesInFlight_;
+    VkSampler iblSampler_ = VK_NULL_HANDLE;   // binding 5 를 다시 쓸 때 쓰는 하늘 IBL 샘플러(Renderer 소유)
 };

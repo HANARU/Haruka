@@ -22,8 +22,12 @@ inline std::array<FrustumPlane, 6> extractFrustumPlanes(const glm::mat4& vp) {
     auto row = [&](int r) {
         return glm::vec4(vp[0][r], vp[1][r], vp[2][r], vp[3][r]);
     };
+    // 무한 원평면 투영(C1 Reverse-Z)은 먼 쪽 평면의 법선이 0 입니다(z_ndc ≥ 0 이 늘 참). 그 평면은 늘 통과하는 평면으로 두고,
+    // 카메라 컬링 거리는 replaceInfinitePlane 으로 따로 넣습니다. 평면 여섯 개의 집합은 표준 · 역 깊이 규약이 같습니다
+    // (가까운 면 · 먼 면의 이름만 바뀜).
     auto makePlane = [](glm::vec4 v) -> FrustumPlane {
         float len = glm::length(glm::vec3(v));
+        if (!(len > 1e-12f)) return { glm::vec3(0.f), 1.f };
         return { glm::vec3(v) / len, v.w / len };
     };
     auto r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3);
@@ -35,6 +39,20 @@ inline std::array<FrustumPlane, 6> extractFrustumPlanes(const glm::mat4& vp) {
         makePlane(r2),        // Near (Vulkan z=0)
         makePlane(r3 - r2),   // Far  (Vulkan z=1)
     };
+}
+
+// 법선이 0 인(무한히 먼) 평면을 카메라 앞 farDist 의 평면으로 바꿉니다. view 는 월드 → 눈(강체) 행렬이고, 눈은 -Z 를 봅니다.
+// 남는 평면: z_view ≥ −farDist  ⇔  (view 의 3행) · p + farDist ≥ 0.
+inline void replaceInfinitePlane(std::array<FrustumPlane, 6>& planes, const glm::mat4& view, float farDist) {
+    for (auto& p : planes) {
+        if (glm::dot(p.normal, p.normal) > 0.f) continue;
+        const glm::vec3 n(view[0][2], view[1][2], view[2][2]);
+        const float len = glm::length(n);
+        if (!(len > 1e-12f)) return;
+        p.normal = n / len;
+        p.d      = (view[3][2] + farDist) / len;
+        return;
+    }
 }
 
 // 월드 공간 바운딩 구 대 절두체 판정.

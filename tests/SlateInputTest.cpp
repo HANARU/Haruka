@@ -1264,8 +1264,11 @@ void testPanelPointer() {
 
     // (b) 광선 만들기: 화면 가운데는 카메라 앞쪽
     {
-        const glm::mat4 vp = glm::perspective(glm::radians(60.f), 1.5f, 0.1f, 100.f) *
-                             glm::lookAt(glm::vec3(0.f, 1.f, 3.f), glm::vec3(0.f, 1.f, 0.f), glm::vec3(0.f, 1.f, 0.f));
+        // 엔진 카메라 투영(Reverse-Z 무한 원평면, C1)과 같은 행렬
+        glm::mat4 proj(0.f);
+        const float fy = 1.f / std::tan(glm::radians(60.f) * 0.5f);
+        proj[0][0] = fy / 1.5f; proj[1][1] = -fy; proj[3][2] = 0.1f; proj[2][3] = -1.f;
+        const glm::mat4 vp = proj * glm::lookAt(glm::vec3(0.f, 1.f, 3.f), glm::vec3(0.f, 1.f, 0.f), glm::vec3(0.f, 1.f, 0.f));
         Ptr::Ray r;
         check(Ptr::rayFromScreen(vp, { 0.5f, 0.5f }, r) && glm::length(r.dir - glm::vec3(0.f, 0.f, -1.f)) < 1e-4f,
               "화면 가운데 광선 = 카메라 앞쪽");

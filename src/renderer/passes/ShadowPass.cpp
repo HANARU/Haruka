@@ -1,10 +1,16 @@
 #include "ShadowPass.hpp"
+#include "../GpuScene.hpp"
 #include "../Vertex.hpp"
 #include "../RendererLog.hpp"
 #include "../VulkanBaseline.hpp"
 #include "../ShadowFit.hpp"
 #include <stdexcept>
 #include <string>
+
+void ShadowPass::configure(int cascades, float farRadius) {
+    cascades_  = (cascades >= 1 && cascades <= hshadow::kCascadeCount) ? cascades : hshadow::kCascadeCount;
+    farRadius_ = (farRadius > hshadow::kNearRadius && farRadius <= 200.f) ? farRadius : hshadow::kRadius;
+}
 
 void ShadowPass::create(RenderContext& rc, VkPipelineLayout pbrLayout, uint32_t resolution) {
     rc_        = &rc;
@@ -14,7 +20,8 @@ void ShadowPass::create(RenderContext& rc, VkPipelineLayout pbrLayout, uint32_t 
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(rc.physDev, &props);
         const bool pow2 = resolution != 0 && (resolution & (resolution - 1)) == 0;
-        if (!pow2 || resolution < 256 || resolution > 4096 || resolution > props.limits.maxImageDimension2D) {
+        // 캐스케이드 두 칸을 가로로 놓으므로 이미지 가로는 해상도의 두 배입니다(CSM).
+        if (!pow2 || resolution < 256 || resolution > 4096 || resolution * hshadow::kCascadeCount > props.limits.maxImageDimension2D) {
             HLOG(LogRenderer, Warning) << "Shadow map resolution " << resolution
                 << " rejected (power of two in 256..4096 within the device limit); using " << kDefaultResolution;
             resolution = kDefaultResolution;
@@ -39,10 +46,16 @@ void ShadowPass::create(RenderContext& rc, VkPipelineLayout pbrLayout, uint32_t 
         HLOG(LogRenderer, Warning) << "Shadow map format has no SAMPLED_IMAGE_FILTER_LINEAR: hardware 2x2 PCF "
                                       "weights are not guaranteed (implementation-defined filtering)";
     {
-        const float texelMm = 2000.f * hshadow::kRadius / (float)resolution_;
-        HLOG(LogRenderer, Log) << "Shadow: " << resolution_ << "^2 over a " << hshadow::kRadius
-                               << " m radius around the head (texel " << texelMm << " mm), depth clamp "
-                               << (rc.vk.depthClamp ? "on" : "off");
+        const float texelMm = 2000.f * farRadius_ / (float)resolution_;
+        if (cascades_ >= 2)
+            HLOG(LogRenderer, Log) << "Shadow: " << cascades_ << " cascades of " << resolution_ << "^2 over "
+                                   << hshadow::kNearRadius << " m and " << farRadius_ << " m radii around the head (texel "
+                                   << 2000.f * hshadow::kNearRadius / (float)resolution_ << " / " << texelMm << " mm), depth clamp "
+                                   << (rc.vk.depthClamp ? "on" : "off");
+        else
+            HLOG(LogRenderer, Log) << "Shadow: 1 cascade of " << resolution_ << "^2 over a " << farRadius_
+                                   << " m radius around the head (texel " << texelMm << " mm), depth clamp "
+                                   << (rc.vk.depthClamp ? "on" : "off");
         if (!rc.vk.depthClamp)
             HLOG(LogRenderer, Log) << "Shadow: no depthClamp, the projection near is extended " << hshadow::kCasterReach
                                    << " m toward the sun instead";
@@ -54,8 +67,8 @@ void ShadowPass::create(RenderContext& rc, VkPipelineLayout pbrLayout, uint32_t 
                                           "nearly parallel to the sun may lose their shadow near the silhouette";
     }
 
-    // Shadow map: resolution_² depth-only(PC 4096², Quest 2048²)
-    image_ = rc.createImage(resolution_, resolution_, 1, 1, VK_SAMPLE_COUNT_1_BIT,
+    // Shadow map: 캐스케이드 두 칸(가로 2 × resolution_, 세로 resolution_), depth-only(PC 칸 4096², Quest 칸 2048²)
+    image_ = rc.createImage(resolution_ * hshadow::kCascadeCount, resolution_, 1, 1, VK_SAMPLE_COUNT_1_BIT,
         format_, VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         0, alloc_);
@@ -120,7 +133,7 @@ void ShadowPass::create(RenderContext& rc, VkPipelineLayout pbrLayout, uint32_t 
     VkFramebufferCreateInfo fci{};
     fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fci.renderPass = pass_; fci.attachmentCount = 1; fci.pAttachments = &view_;
-    fci.width = resolution_; fci.height = resolution_; fci.layers = 1;
+    fci.width = resolution_ * hshadow::kCascadeCount; fci.height = resolution_; fci.layers = 1;
     if (vkCreateFramebuffer(rc.device, &fci, nullptr, &framebuffer_) != VK_SUCCESS)
         throw std::runtime_error("Failed to create shadow framebuffer!");
 }
@@ -137,8 +150,8 @@ void ShadowPass::rebuildPipelines() {
     stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module = frag; stages[1].pName = "main";
 
-    auto binding    = Vertex::bindingDescription();
-    auto attributes = Vertex::attributeDescriptions();
+    auto binding    = PackedVertex::bindingDescription();
+    auto attributes = PackedVertex::attributeDescriptions();
     VkPipelineVertexInputStateCreateInfo vi{};
     vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vi.vertexBindingDescriptionCount = 1; vi.pVertexBindingDescriptions = &binding;
@@ -177,9 +190,9 @@ void ShadowPass::rebuildPipelines() {
     // FrameUBO.shadowParams.z(ShadowPass::kReceiverBiasTexels 를 NDC 로 바꾼 값)입니다.
     rs.depthBiasConstantFactor = 1.25f;
     rs.depthBiasSlopeFactor    = kSlopeBiasFactor;
-    const float texelWorld = 2.f * hshadow::kRadius / (float)resolution_;
+    const float texelWorld = 2.f * farRadius_ / (float)resolution_;
     rs.depthBiasClamp = rc_->vk.depthBiasClamp
-        ? kSlopeBiasClampTexels * texelWorld / hshadow::depthRangeFor(hshadow::kRadius, rc_->vk.depthClamp) : 0.f;
+        ? kSlopeBiasClampTexels * texelWorld / hshadow::depthRangeFor(farRadius_, rc_->vk.depthClamp) : 0.f;
 
     VkPipelineMultisampleStateCreateInfo ms{};
     ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -202,15 +215,22 @@ void ShadowPass::rebuildPipelines() {
     ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
     ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
     ci.layout = pbrLayout_; ci.renderPass = pass_; ci.subpass = 0;
-    VkPipeline fresh = VK_NULL_HANDLE;
-    const VkResult res = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &fresh);
+    VkPipeline fresh = VK_NULL_HANDLE, freshMirrored = VK_NULL_HANDLE;
+    VkResult res = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &fresh);
+    if (res == VK_SUCCESS) {
+        rs.frontFace = VK_FRONT_FACE_CLOCKWISE;   // 거울 변환 캐스터(DEF-170)
+        res = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &freshMirrored);
+        if (res != VK_SUCCESS) { vkDestroyPipeline(rc_->device, fresh, nullptr); fresh = VK_NULL_HANDLE; }
+    }
     if (res != VK_SUCCESS) {
         vkDestroyShaderModule(rc_->device, vert, nullptr);
         vkDestroyShaderModule(rc_->device, frag, nullptr);
         throw std::runtime_error("Failed to create shadow pipeline!");
     }
     if (pipeline_) vkDestroyPipeline(rc_->device, pipeline_, nullptr);
+    if (pipelineMirrored_) vkDestroyPipeline(rc_->device, pipelineMirrored_, nullptr);
     pipeline_ = fresh;
+    pipelineMirrored_ = freshMirrored;
 
     vkDestroyShaderModule(rc_->device, vert, nullptr);
     vkDestroyShaderModule(rc_->device, frag, nullptr);
@@ -225,12 +245,14 @@ void ShadowPass::destroy() {
     if (framebuffer_) { vkDestroyFramebuffer(rc_->device, framebuffer_, nullptr);  framebuffer_ = VK_NULL_HANDLE; }
     if (pass_)        { vkDestroyRenderPass(rc_->device, pass_, nullptr);          pass_        = VK_NULL_HANDLE; }
     if (pipeline_)    { vkDestroyPipeline(rc_->device, pipeline_, nullptr);        pipeline_    = VK_NULL_HANDLE; }
+    if (pipelineMirrored_) { vkDestroyPipeline(rc_->device, pipelineMirrored_, nullptr); pipelineMirrored_ = VK_NULL_HANDLE; }
     layoutReady_ = false;   // 다시 만들면 새 이미지는 UNDEFINED 부터 시작합니다
 }
 
 // ── record ─────────────────────────────────────────────────────────────────────
 void ShadowPass::record(VkCommandBuffer cmd, const DrawInputs& in,
-                        const std::vector<GpuDrawCmd>& draws, bool casterActive) {
+                        const std::vector<GpuDrawCmd>& draws, const std::vector<uint8_t>& rowFlags,
+                        bool casterActive) {
     if (!pass_) return;
     if (!casterActive && layoutReady_) return;   // 읽히지 않고 레이아웃도 이미 준비됨
 
@@ -239,7 +261,7 @@ void ShadowPass::record(VkCommandBuffer cmd, const DrawInputs& in,
     rpbi.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpbi.renderPass  = pass_;
     rpbi.framebuffer = framebuffer_;
-    rpbi.renderArea  = {{0,0},{resolution_,resolution_}};
+    rpbi.renderArea  = {{0,0},{resolution_ * hshadow::kCascadeCount, resolution_}};
     rpbi.clearValueCount = 1; rpbi.pClearValues = &depthClear;
     vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
     layoutReady_ = true;
@@ -248,10 +270,6 @@ void ShadowPass::record(VkCommandBuffer cmd, const DrawInputs& in,
     // 없을 수도 있으므로 바인딩도 하지 않습니다.
     if (draws.empty()) { vkCmdEndRenderPass(cmd); return; }
 
-    VkViewport vp{0, 0, (float)resolution_, (float)resolution_, 0.f, 1.f};
-    VkRect2D   sc{{0,0},{resolution_,resolution_}};
-    vkCmdSetViewport(cmd, 0, 1, &vp);
-    vkCmdSetScissor (cmd, 0, 1, &sc);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pbrLayout_, 0, 1, &in.frameSet, 0, nullptr);
@@ -261,13 +279,39 @@ void ShadowPass::record(VkCommandBuffer cmd, const DrawInputs& in,
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
         pbrLayout_, 1, 1, &in.sceneSet, 0, nullptr);
 
-    VkDeviceSize offV = 0, offI = 0;
+    VkDeviceSize offV = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &in.vertexBuffer, &offV);
-    vkCmdBindIndexBuffer(cmd, in.indexBuffer, offI, VK_INDEX_TYPE_UINT32);
 
-    for (const auto& dc : draws)
+    // 캐스케이드마다(CSM, 2026-11-17) 아틀라스의 그 칸을 뷰포트로 잡고 같은 캐스터 목록을 그립니다. 셰이더는 푸시 상수의 눈 번호
+    // 자리로 단을 고릅니다(0 = 가까운 단, 1 = 먼 단). 먼 단의 컬링 부피가 가까운 단을 품으므로 목록은 하나입니다.
+    // 거울 변환 묶음이 나오면 그때만 파이프라인을 바꿉니다(같은 레이아웃이라 디스크립터는 그대로 남음).
+    // 인덱스 버퍼는 형식(32 · 16비트, O3)이 바뀔 때만 다시 바인딩합니다.
+    bool boundMirrored = false;
+    int  boundIndex16  = -1;
+    // 품질 단계가 1 단이면 먼 단(오른쪽 칸)만 그립니다. 셰이더는 cascadeNear.y = 0 이라 가까운 단을 읽지 않습니다.
+    for (int cascade = hshadow::kCascadeCount - cascades_; cascade < hshadow::kCascadeCount; ++cascade) {
+    VkViewport vp{ (float)(resolution_ * (uint32_t)cascade), 0, (float)resolution_, (float)resolution_, 0.f, 1.f };
+    VkRect2D   sc{ { (int32_t)(resolution_ * (uint32_t)cascade), 0 }, { resolution_, resolution_ } };
+    vkCmdSetViewport(cmd, 0, 1, &vp);
+    vkCmdSetScissor (cmd, 0, 1, &sc);
+    const GpuViewPush cascadePush{ cascade, 1u };
+    vkCmdPushConstants(cmd, pbrLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(cascadePush), &cascadePush);
+    for (const auto& dc : draws) {
+        const uint8_t f = dc.firstInstance < rowFlags.size() ? rowFlags[dc.firstInstance] : 0;
+        const bool mirrored = (f & kRowMirrored) != 0;
+        const bool index16  = (f & kRowIndex16) != 0;
+        if (mirrored != boundMirrored) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mirrored ? pipelineMirrored_ : pipeline_);
+            boundMirrored = mirrored;
+        }
+        if (boundIndex16 != (int)index16) {
+            vkCmdBindIndexBuffer(cmd, in.indexBuffer, index16 ? kIdx16Base : 0, index16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+            boundIndex16 = (int)index16;
+        }
         vkCmdDrawIndexed(cmd, dc.indexCount, dc.instanceCount, dc.firstIndex,
                          dc.vertexOffset, dc.firstInstance);
+    }
+    }
 
     vkCmdEndRenderPass(cmd);
 }

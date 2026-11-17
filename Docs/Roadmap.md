@@ -255,3 +255,10 @@ UE식 용어 채택, **"명칭만" 결정**(내부 상대값, 물리 단위·노
    20 · 19 · 99 — **2026-10-04 코드 완료, 커밋 5d3a86b**: 카메라 자세 · 두 눈 렌더(눈마다 두 번) · 두 눈 컬링 · VR 입력 · 물리 API ·
    Kinematic 동기화 해결, DEF-32 보류, PC OpenXR 연결(`--xr`)과 스테레오 흉내 모드. 헤드셋 확인은 2026-10-15 Quest Link 로 완료(Play 동안만 VR). ⑤ Quest 이식 때 DEF-08 · 12 · 42 · 04 · 97 · 06 ⑥ 나머지 — **2026-10-14 DEF-16 자동 인스턴싱 완료**(행 예산 16384, 명시적 인스턴싱 컴포넌트는 파편장과 함께), **DEF-17 · 18 패스 확장 지점 완료**(고정 지점 넷 + `EngineContext::render`, 화면 확인은 사용자 지시로 일괄 점검 때), **DEF-22 직렬화 타입 등록 · DEF-101 완료**(씬 v4 · 프리팹 v2, `EngineContext::components`), **DEF-33 라이트 선택 · DEF-10 상한 설정 완료**(`Config/engine.ini`), DEF-34 · 13 보류(실측 뒤 · 첫 사용처), **같은 날 일괄 점검 완료**(미뤄 둔 화면 확인 모두 통과, 점검 중 찾은 DEF-106 최소화 멈춤 · DEF-107 얇은 상자 충돌 · DEF-108 회전 흔들림 · DEF-109 추가 버튼 잘림과 DEF-105 캐시 무효화 해결, DEF-34 는 PC 측정 뒤 Quest 측정까지 보류). 정본은 Core_Defects_Task_Spec.md 끝 절)
    → VR 첫걸음(PC OpenXR, Quest Link) → 에디터 Phase 4·렌더링 기능.
+
+- 2026-11-17 "전부 진행": 구현 필요 목록 1 ~ 15 와 16 의 O15 · C2 를 구현했습니다(미커밋). O9 클러스터드 · O12 Hi-Z · O14 BVH 는
+  결정이 필요한 항목으로 남겼습니다([Math_Reinforcement.md](Math_Reinforcement.md) 3절). 헤드셋 · Quest 측정 · 내려받기 항목은 그대로입니다.
+- 2026-11-18 멀티뷰(사용자 "멀티뷰 쪽 해보자", 권장안 승인, 미커밋). 두 눈의 메인 패스를 viewMask 0b11 로 한 번 그리고, 장면 타깃은 XR ·
+  스테레오 흉내 동안 2층 배열입니다. AO · 블룸 · 톤매핑은 눈마다입니다. `--no-multiview` 로 예전 경로, `--capture-eye=right` 로 오른눈 PNG.
+  두 눈 PNG 가 두 경로에서 바이트까지 같고 검증 0. PC 메인 패스 GPU 4 ~ 11% 감소(이득은 Quest 실측에서 확인). 자세한 것은
+  [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝의 "멀티뷰" 절.

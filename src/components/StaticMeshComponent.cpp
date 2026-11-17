@@ -1,4 +1,5 @@
 #include "StaticMeshComponent.hpp"
+#include "LightChannels.hpp"
 #include "../renderer/MeshHandle.hpp"
 #include "../assets/AssetManager.hpp"
 #include "../core/Actor.hpp"
@@ -21,6 +22,7 @@ MeshHandle* StaticMeshComponent::selectMeshForScreenSize(float screenSize) {
 std::vector<PropDesc> StaticMeshComponent::buildProps() {
     auto* p = this;
     std::vector<PropDesc> props{ SM_PROPS(p) };
+    hchan::addProps(props, &lightChannels);
     if (primitive) {
         PrimitiveMaterialDesc* m = &primitiveMaterial;
         props.push_back(makePropToggle("Checker", [m] { return m->checker; }, [m](bool v) { m->checker = v; }));
@@ -82,6 +84,7 @@ bool StaticMeshComponent::localBounds(glm::vec3& outMin, glm::vec3& outMax) cons
 void StaticMeshComponent::writeFields(ComponentFieldWriter& w) const {
     w.b("visible",     visible);
     w.b("transparent", transparent);
+    hchan::write(w, lightChannels);
     if (primitive) {
         w.s("prim",         primitive->toKey());
         w.s("primMaterial", primitiveMaterial.toText());
@@ -95,6 +98,8 @@ bool StaticMeshComponent::readField(const std::string& key, const std::string& v
     bool ok = true;
     if (key == "visible") {
         ok = fieldparse::toBool(value, visible);
+    } else if (key == "lightChannels") {
+        ok = hchan::read(value, lightChannels);
     } else if (key == "transparent") {
         ok = fieldparse::toBool(value, transparent);
         transparentLoaded_ = ok;

@@ -69,7 +69,7 @@
 | World / Actor / Component | 구현됨 | |
 | HSlate UI + 에디터 | 구현됨 | |
 | **OpenXR 세션 + 스테레오 스왑체인** | **구현 · 2026-10-04**(PC, 헤드셋 확인 2026-10-15) | VR 엔진의 핵심입니다. `src/xr/XrSystem` 이 렌더러보다 먼저 OpenXR 인스턴스를 만들고, 런타임이 고른 GPU 로 Vulkan 장치를 만듭니다(XR_KHR_vulkan_enable2). 세션, LOCAL 원점 공간(원점 = 활성 카메라의 위치 + 요), 두 층 배열 스왑체인 하나를 두고, 렌더러에는 `Renderer::attachXrSwapchain` 으로 이미지를 붙입니다. `--xr` 로 켜며 런타임이 없으면 데스크톱으로 계속합니다. 세션은 Play 동안만 엽니다(2026-10-15, DEF-111). Quest 단독 실행은 Android 진입점과 함께 합니다 |
-| **Multiview 스테레오 렌더링** | **첫 단계 구현 · 2026-10-04** (`DEF-09`) | 지금은 눈마다 두 번 그립니다. 셰이더는 `FrameUBO` 의 눈별 `viewProj[2]` · `eyePos[2]` 를 눈 번호(`HARUKA_VIEW_INDEX`, 푸시 상수)로 고르므로, 멀티뷰로 갈 때는 그 번호를 `gl_ViewIndex` 로 바꾸고 `viewMask` · 배열 층을 켭니다(Quest 이식 때). 쓰지 않던 멀티뷰 기능 요청은 지웠습니다 |
+| **Multiview 스테레오 렌더링** | **구현 · 2026-11-18** (`DEF-09` 둘째 단계, 첫 단계 눈마다 그리기는 2026-10-04) | 두 눈의 메인 패스를 viewMask 0b11 로 한 번 그립니다. 장면 타깃은 2층 배열(층 v = 눈 v), 셰이더는 눈 번호를 푸시 상수 + `gl_ViewIndex`(`HARUKA_EYE_INDEX`)로 고릅니다. AO · 블룸 · 톤매핑은 눈마다입니다. `--no-multiview` 로 눈마다 경로를 고를 수 있습니다. Quest 실측이 남았습니다 |
 | **스테레오 대응 컬링 (두 눈 절두체)** | **해결 · 2026-10-04** (`DEF-31`, 원래 HIGH) | 눈마다 절두체를 판정해 하나라도 통과하면 그립니다(`FrustumCull.hpp` 의 `sphereInAnyView`). 한쪽 눈에서만 물체가 사라지면 양안 경합이 되므로 VR 엔진의 필수 요소이며 도메인과 무관합니다. Quest 2·Pro·3 의 두 눈 시야는 평행하고 비대칭입니다(기울어진 canted 화면이 아님, 2026-10-04 정정). 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-1절 |
 | **재투영 여유분만큼의 절두체 부풀리기** | 보류 · 2026-10-04 (`DEF-32`, 원래 MEDIUM) | 한 프레임에 눈 자세를 한 번 받아 컬링 · 렌더 · 제출에 함께 쓰는 동안에는, 런타임이 재투영해도 렌더한 자세가 기준이라 여유분이 필요 없습니다. 늦은 자세 갱신이나 과주사를 넣을 때 다시 엽니다. 상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 9-2절 |
 | **Foveated Rendering (FFR)** | **미구현** | 선언만 있던 `Renderer.hpp` 의 멤버는 2026-10-04 에 지웠습니다. OpenXR 에서는 런타임이 밀도 맵 이미지를 주는 구조라 그 멤버와 모양이 맞지 않았습니다. Quest 이식 때 새로 둡니다 |
@@ -210,7 +210,7 @@ Carbon Engine 저장소를 원본으로 확인한 결과, **코어에 들어갈 
 **1단계: VR 엔진으로서의 코어 완성.** 이것이 엔진의 정의이므로 우주 기능보다 앞섭니다.
 - Quest 런타임 진입점 (`AndroidWindow` 인스턴스화, `IWindow` 팩토리, 별도 `main`)
 - OpenXR 세션과 XR 스왑체인, 스왑체인 주입 지점 (**PC OpenXR 완료 2026-10-04**, 헤드셋 확인 2026-10-15). `src/xr/XrSystem` 이 세션 · LOCAL 원점 공간 · 두 층 배열 스왑체인을 만들고, 렌더러에는 `Renderer::attachXrSwapchain` 으로 이미지를 붙입니다. Quest 단독 실행은 위 진입점과 함께 합니다.
-- Multiview 완성 (`viewMask`, 셰이더의 `gl_ViewIndex`, 이미지 `arrayLayers`). 첫 단계인 눈마다 두 번 그리기는 **완료 2026-10-04**(`DEF-09`)입니다. 셰이더 · UBO 가 두 눈 기준이라, 멀티뷰는 Quest 이식 때 뷰 번호만 바꿔 켭니다.
+- Multiview 완성 (`viewMask`, 셰이더의 `gl_ViewIndex`, 이미지 `arrayLayers`). 첫 단계인 눈마다 두 번 그리기는 **완료 2026-10-04**, 메인 패스 멀티뷰는 **완료 2026-11-18**(`DEF-09`)입니다. 이득은 Quest 에서 `--no-multiview` 와 비교해 잽니다.
 - 컬링의 스테레오 대응. `DEF-31` 은 **완료 2026-10-04**(두 눈 절두체를 각각 판정해 하나라도 통과하면 그림)이고, `DEF-32` 재투영 여유분은 한 프레임에 자세 하나로 컬링 · 렌더 · 제출하는 동안 필요 없어 **보류**했습니다. 상세는 [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md)와 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md)를 보십시오.
 - VR 입력 (아날로그 축, 6DOF 포즈) (**완료 2026-10-04**, `DEF-20`, 헤드셋 확인 2026-10-15)
 - 6DOF 카메라 자세 (**완료 2026-10-04**, `DEF-21`)

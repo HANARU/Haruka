@@ -284,10 +284,13 @@ set(RUNTIME_SOURCES
     src/components/UIPanelComponent.cpp
     src/components/UIPanelPointer.cpp
     src/components/HandPoseComponent.cpp
+    src/components/HeightFogComponent.cpp
+    src/components/ReflectionCaptureComponent.cpp
     src/xr/GraspSolver.cpp
     src/renderer/Renderer.cpp
     src/renderer/Renderer_swap.cpp
     src/renderer/Renderer_render.cpp
+    src/renderer/Renderer_capture.cpp
     src/renderer/GlfwSwapchain.cpp
     src/memory/HarukaAllocator.cpp
     src/renderer/RenderContext.cpp

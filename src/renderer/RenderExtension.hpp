@@ -12,14 +12,21 @@
 // 지점마다 눈별로 부릅니다(단안 1번, 스테레오 2번). 같은 지점에 확장이 여럿이면 등록한 순서대로 부릅니다.
 // 렌더러는 단일 스레드라(Threading.md) 등록 · 해제 · 기록이 모두 메인 스레드에서 일어납니다.
 //
+// 멀티뷰(2026-11-18). 스테레오면 메인 패스를 viewMask 0b11 로 한 번 그립니다. 그때 OpaqueEnd · TransparentEnd 는 두 눈에
+// 한 번만 불리고(ctx.multiview, viewIndex 0, renderPass = HRenderDeviceInfo::mainPassMultiview), 확장의 셰이더가
+// gl_ViewIndex(GL_EXT_multiview)로 눈을 골라야 합니다. 그렇게 짠 확장만 supportsMultiview() 에 참을 돌려주고, 두 렌더 패스
+// (mainPass · mainPassMultiview)용 파이프라인을 모두 만듭니다. 그 두 지점에 참이 아닌 확장이 하나라도 있으면 렌더러는 그
+// 프레임을 예전처럼 눈마다 그립니다(그 확장은 늘 mainPass 로 불림). AfterScene · AfterTonemap 은 언제나 눈마다입니다.
+//
 // Vulkan 범위 규약(2026-10-31, 패키징 2단계). 게임 코드는 엔진과 같은 실행 파일(Android 는 같은 .so)에 링크되므로, 확장
 // 하나가 아래를 어기면 Quest 에서 링크 · 로드부터 막힙니다. vulkan_imports 시험과 프로필 레이어 실행이 확인합니다.
 //   1. 이름으로 부를 수 있는 Vulkan 함수는 1.0 · 1.1 코어뿐입니다. *KHR 이름이나 1.2 이상 코어 이름을 링크하거나
 //      vkGetDeviceProcAddr 로 묻지 마십시오.
 //   2. push descriptor 는 rc->vk.push, 배리어는 rc->transitionImage · rc->pipelineBarrier · rc->memoryBarrier 로만
 //      기록합니다(RenderContext.hpp 를 포함). vkCmdPipelineBarrier2 를 직접 부르면 Quest 2 · Pro 에서 멈춥니다.
-//   3. 엔진이 켠 기능만 씁니다: rc->vk.sync2 · rc->vk.anisotropy 를 보고, 멀티뷰 · 동적 렌더링 · 타임라인 세마포어 ·
-//      버퍼 장치 주소 · 디스크립터 인덱싱은 없습니다.
+//   3. 엔진이 켠 기능만 씁니다: rc->vk.sync2 · rc->vk.anisotropy 를 보고, 멀티뷰는 늘 켜져 있습니다(정점 · 조각 셰이더의
+//      gl_ViewIndex 만, 기하 · 테셀레이션 멀티뷰 없음). 동적 렌더링 · 타임라인 세마포어 · 버퍼 장치 주소 · 디스크립터
+//      인덱싱은 없습니다.
 //   4. 셰이더는 SPIR-V 1.0(glslc --target-env=vulkan1.0)이고, 능력은 켠 기능 안에서만 씁니다.
 //   5. push descriptor 세트 레이아웃은 VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR, 바인딩은 32개 이하입니다.
 //   6. 렌더 패스는 VkRenderPass(1.0)입니다. renderpass2 는 쓰지 않습니다.
@@ -48,7 +55,8 @@ constexpr uint32_t stageBit(HRenderStage s) { return 1u << (uint32_t)s; }
 struct HRenderDeviceInfo {
     const RenderContext*  rc = nullptr;        // 장치 · 할당기 · 파이프라인 캐시 · MSAA 샘플 수 · 깊이 포맷 · 생성 헬퍼
     VkDescriptorSetLayout frameSetLayout = VK_NULL_HANDLE;   // set 0 (FrameUBO, shaders/include/haruka_shared.h)
-    VkRenderPass          mainPass = VK_NULL_HANDLE;         // OpaqueEnd · TransparentEnd 가 열려 있는 렌더 패스
+    VkRenderPass          mainPass = VK_NULL_HANDLE;         // OpaqueEnd · TransparentEnd 가 열려 있는 렌더 패스(눈마다)
+    VkRenderPass          mainPassMultiview = VK_NULL_HANDLE;   // 같은 구조에 viewMask 0b11(두 눈을 한 번에, 위 머리말)
     uint32_t              opaqueSubpass      = 1;
     uint32_t              transparentSubpass = 2;
     // 메인 패스 색 · AfterScene 의 HDR 이미지 포맷. HDR 의 알파 채널은 후처리 가중치입니다(3D UI 패널, 2026-11-16):
@@ -64,6 +72,9 @@ struct HRenderStageContext {
     uint32_t        frameIndex = 0;   // 프레임 슬롯(0 .. MAX_FRAMES-1). 프레임별 버퍼를 고를 때 씁니다
     uint32_t        viewIndex  = 0;   // 눈 번호(단안 0, 스테레오 0=왼쪽 · 1=오른쪽)
     bool            mirror     = false;   // XR 중 왼쪽 눈을 에디터 뷰포트에 다시 비추는 호출(AfterTonemap 만)
+    // OpaqueEnd · TransparentEnd 를 멀티뷰 메인 패스 안에서 두 눈에 한 번 부르는 호출입니다. viewIndex 는 0 이고, 아래
+    // view · proj · eyePos 는 왼눈 값입니다. 셰이더는 viewProj[viewIndex + gl_ViewIndex] 처럼 눈을 고릅니다.
+    bool            multiview  = false;
 
     glm::mat4 view{ 1.f };
     glm::mat4 proj{ 1.f };
@@ -83,7 +94,10 @@ struct HRenderStageContext {
     // 같은 레이아웃으로 돌려놓아야 합니다(레이아웃 전환은 rc->transitionImage 로). 깊이는 MSAA 이고
     // DEPTH_STENCIL_READ_ONLY_OPTIMAL(읽기 전용)입니다.
     // 렌더러가 이 지점 앞뒤에 그래픽 · 컴퓨트 전체 배리어를 둡니다.
+    // 스테레오의 장면 타깃은 2층 배열이고(층 v = 눈 v, 2026-11-18), hdrView · depthView 는 그 눈 층 하나의 2D 뷰입니다.
+    // hdrImage 를 직접 다룰 때(복사 · 레이아웃 전환)는 hdrLayer 층만 다루십시오.
     VkImage     hdrImage  = VK_NULL_HANDLE;
+    uint32_t    hdrLayer  = 0;
     VkImageView hdrView   = VK_NULL_HANDLE;
     VkImageView depthView = VK_NULL_HANDLE;
     VkExtent2D  sceneExtent{};
@@ -98,6 +112,8 @@ struct HRenderStageContext {
 class IRenderExtension : public HPass {
 public:
     virtual uint32_t stages() const = 0;   // stageBit(...) 의 합
+    // OpaqueEnd · TransparentEnd 를 멀티뷰 메인 패스에서 그릴 수 있는지(머리말). 기본은 거짓 = 눈마다 그림.
+    virtual bool supportsMultiview() const { return false; }
     virtual void create(const HRenderDeviceInfo& info) = 0;
     virtual void record(const HRenderStageContext& ctx) = 0;
 };

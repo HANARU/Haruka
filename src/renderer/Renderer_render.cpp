@@ -5,6 +5,7 @@
 #include "../components/SkinnedMeshComponent.hpp"
 #include "../assets/MeshSource.hpp"
 #include "../components/CameraComponent.hpp"
+#include "../components/HeightFogComponent.hpp"
 #include "../components/LightComponent.hpp"
 #include "../components/UIPanelComponent.hpp"
 #include "../core/FrameTimings.hpp"
@@ -85,6 +86,7 @@ uint32_t Renderer::updateLightSSBO(World& world) {
     auto* gpuLights = static_cast<GpuLight*>(frames_.lightPtr(frameIdx));
     uint32_t count  = 0;
     shadowCasterSlot_ = -1;                     // 이 프레임의 섀도 캐스터를 재선정
+    contactLength_    = 0.f;
 
     // 올릴 라이트를 고릅니다(DEF-33, LightSelection.hpp). 어느 눈에도 영향이 없는 점광원 · 스팟은 거르고,
     // 상한(render.maxLights)을 넘으면 방향광을 먼저, 나머지는 가까운 순으로 고릅니다. 상한 안이면 순서를
@@ -103,15 +105,21 @@ uint32_t Renderer::updateLightSSBO(World& world) {
     }
     std::array<std::array<FrustumPlane, 6>, kMaxViews> lightViewPlanes{};
     if (hasCamera_)
-        for (uint32_t i = 0; i < viewCount_; ++i)
+        for (uint32_t i = 0; i < viewCount_; ++i) {
             lightViewPlanes[i] = extractFrustumPlanes(views_[i].proj * views_[i].view);
+            replaceInfinitePlane(lightViewPlanes[i], views_[i].view, views_[i].zFar);   // 무한 원평면(C1) → 카메라 zFar
+        }
+    // 품질 단계의 라이트 상한(render.lightLimit, 2026-11-18)이 있으면 버퍼 상한(render.maxLights)과 둘 중 작은 값입니다.
+    const bool     qualityCap = quality_.lightLimit > 0 && quality_.lightLimit < maxLights_;
+    const uint32_t lightCap   = qualityCap ? quality_.lightLimit : maxLights_;
     const hlight::Result chosen = hlight::select(lightCands, hasCamera_ ? lightViewPlanes.data() : nullptr,
-                                                 hasCamera_ ? viewCount_ : 0, viewCenter_, maxLights_);
+                                                 hasCamera_ ? viewCount_ : 0, viewCenter_, lightCap);
     if (chosen.overBudget && !lightBudgetWarned_) {
         lightBudgetWarned_ = true;
-        HLOG(LogRenderer, Warning) << "Light budget render.maxLights=" << maxLights_ << " exceeded: "
-            << chosen.overBudget << " visible light(s) were dropped, keeping directional lights and the nearest ones"
-            << " (warned once; raise render.maxLights in Config/engine.ini)";
+        HLOG(LogRenderer, Warning) << "Light budget " << (qualityCap ? "render.lightLimit=" : "render.maxLights=") << lightCap
+            << " exceeded: " << chosen.overBudget << " visible light(s) were dropped, keeping directional lights and the nearest ones"
+            << (qualityCap ? " (warned once; render.lightLimit is a quality setting in assets/project.ini)"
+                           : " (warned once; raise render.maxLights in Config/engine.ini)");
     }
 
     for (uint32_t li : chosen.selected) {
@@ -124,6 +132,7 @@ uint32_t Renderer::updateLightSSBO(World& world) {
         if (lc->lightType == LightType::Directional && lc->castShadows && shadowCasterSlot_ < 0) {
             shadowCasterSlot_ = (int)slot;
             shadowCasterDir_  = -lc->emitDirection();   // 빛을 향하는 벡터(표면 → 태양)
+            contactLength_    = quality_.contactShadows ? lc->contactShadowLength : 0.f;
         }
         if (lc->lightType == LightType::Directional) {
             // 방향의 부호는 emitDirection()(발광 방향) 하나로 정합니다. 저장 형식은 그대로입니다.
@@ -131,13 +140,13 @@ uint32_t Renderer::updateLightSSBO(World& world) {
             gl.posOrDir  = glm::vec4(-toLight, 0.f);   // w=0 → directional. 셰이더가 다시 뒤집어 L = toLight 로 읽음
             gl.colorRange= glm::vec4(col, 0.f);
             gl.spotDir   = glm::vec4(toLight, 0.f);    // Directional 에서는 셰이더가 읽지 않음(SSBO 바이트 유지)
-            gl.spotParams= glm::vec4(0.f);
+            gl.spotParams= glm::vec4(0.f, 0.f, (float)lc->lightChannels, 0.f);
         } else if (lc->lightType == LightType::Point) {
             glm::vec3 pos = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
             gl.posOrDir  = glm::vec4(pos, 1.f);    // w=1 → point
             gl.colorRange= glm::vec4(col, std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius));
             gl.spotDir   = glm::vec4(0.f);
-            gl.spotParams= glm::vec4(0.f);
+            gl.spotParams= glm::vec4(0.f, 0.f, (float)lc->lightChannels, 0.f);
         } else { // Spot
             glm::vec3 pos = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
             const glm::vec3 emit = lc->emitDirection();   // 발광 방향(액터 회전 반영)
@@ -145,7 +154,7 @@ uint32_t Renderer::updateLightSSBO(World& world) {
             gl.colorRange= glm::vec4(col, std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius));
             gl.spotDir   = glm::vec4(emit, 0.f);   // pbr.frag 가 dot(-L, spotDir) 로 읽음
             const glm::vec2 cone = hlight::spotConeParams(lc->innerConeAngle, lc->outerConeAngle);
-            gl.spotParams= glm::vec4(cone.x, cone.y, 0.f, 0.f);
+            gl.spotParams= glm::vec4(cone.x, cone.y, (float)lc->lightChannels, 0.f);
         }
     }
     frameStats_.lights      = count;
@@ -159,12 +168,17 @@ uint32_t Renderer::updateLightSSBO(World& world) {
 PostPass::Params Renderer::postParams() const {
     PostPass::Params p{ lighting_calibration::kBaseAoStrength, lighting_calibration::kBaseBloomStrength,
                         lighting_calibration::kBaseExposure };
-    p.aoOn    = aoOn_;
+    // 접촉 그림자는 AO 패스에서 계산해 AO 와 함께 합성합니다. AO 를 끄고 접촉 그림자만 켜면 AO 패스를 돌리되 세기 1 로 그 결과만 곱합니다.
+    const bool contact = shadowCasterSlot_ >= 0 && contactLength_ > 0.f;
+    p.aoOn    = aoOn_ || contact;
+    if (!aoOn_ && contact) p.aoStrength = 1.f;
     p.bloomOn = bloomOn_;
+    // 카메라 노출 보정(EV, 2026-11-17 노출 배선): 기준 노출 × 2^EV. 카메라가 없거나 0 이면 기준 그대로.
+    p.exposure *= std::exp2(cameraExposureEv_);
     return p;
 }
 
-void Renderer::updateUBO(World& /*world*/, uint32_t lightCount) {
+void Renderer::updateUBO(World& world, uint32_t lightCount) {
     FrameUBO ubo{};
     const PostPass::Params post = postParams();
 
@@ -183,25 +197,55 @@ void Renderer::updateUBO(World& /*world*/, uint32_t lightCount) {
     // 고르지 않으므로 선택 기준이 갈릴 여지가 없습니다(DEF-26). 캐스터가 없으면 이전 VP 를 유지.
     // 행렬 계산과 단위 시험은 ShadowFit.hpp · HarukaLightTest 6절에 있습니다.
     if (shadowCasterSlot_ >= 0) {  // 액터 회전 반영 → Sun 을 돌리면 그림자도 회전
-        const hshadow::DirectionalFit fit = hshadow::fitDirectional(viewCenter_, shadowCasterDir_, hshadow::kRadius,
+        const hshadow::DirectionalFit fit = hshadow::fitDirectional(viewCenter_, shadowCasterDir_, shadow_.farRadius(),
                                                                     shadow_.resolution(), rc_.vk.depthClamp);
         lightViewProj_     = fit.viewProj;
-        lightCullViewProj_ = fit.cullViewProj;
+        lightCullViewProj_ = fit.cullViewProj;   // 먼 단의 컬링 부피가 가까운 단을 품으므로 캐스터 목록은 하나
+        if (shadow_.cascades() >= 2) {
+            const hshadow::DirectionalFit nearFit = hshadow::fitDirectional(viewCenter_, shadowCasterDir_, hshadow::kNearRadius,
+                                                                            shadow_.resolution(), rc_.vk.depthClamp);
+            lightViewProjNear_ = nearFit.viewProj;
+        }
     }
-    ubo.lightViewProj = lightViewProj_;
+    ubo.lightViewProj     = lightViewProj_;
+    ubo.lightViewProjNear = lightViewProjNear_;
+    if (shadow_.cascades() < 2) {
+        ubo.cascadeNear = glm::vec4(0.f);   // 1 단(품질 단계): 페이드 끝 0 이라 셰이더가 늘 먼 단을 읽음
+    } else {   // 가까운 캐스케이드 상수(CSM): 먼 단과 같은 규칙을 그 단의 텍셀 · 깊이 범위로 계산합니다.
+        const float nearTexel = 2.f * hshadow::kNearRadius / (float)shadow_.resolution();
+        const float nearRange = hshadow::depthRangeFor(hshadow::kNearRadius, rc_.vk.depthClamp);
+        ubo.cascadeNear = glm::vec4(hshadow::kFadeStartFrac * hshadow::kNearRadius,
+                                    hshadow::kNearRadius - hshadow::kFadeEndTexels * nearTexel,
+                                    hshadow::receiverBiasNdc(ShadowPass::kReceiverBiasTexels * nearTexel, nearRange),
+                                    ShadowPass::kNormalOffsetTexels * nearTexel);
+    }
     // 캐스터가 없어도 늘 채웁니다(셰이더는 miscParams.w < 0 이면 섀도맵을 읽지 않음). 값은 반지름 · 해상도 ·
     // depthClamp 로만 정해지므로 fitDirectional 의 결과와 같습니다.
     const float shadowRes        = (float)shadow_.resolution();
-    const float shadowTexelWorld = 2.f * hshadow::kRadius / shadowRes;
-    const float shadowDepthRange = hshadow::depthRangeFor(hshadow::kRadius, rc_.vk.depthClamp);
+    const float shadowRadius     = shadow_.farRadius();
+    const float shadowTexelWorld = 2.f * shadowRadius / shadowRes;
+    const float shadowDepthRange = hshadow::depthRangeFor(shadowRadius, rc_.vk.depthClamp);
     ubo.shadowParams = glm::vec4(shadowTexelWorld, 1.f / shadowRes,
                                  hshadow::receiverBiasNdc(ShadowPass::kReceiverBiasTexels * shadowTexelWorld, shadowDepthRange),
                                  ShadowPass::kNormalOffsetTexels * shadowTexelWorld);
-    ubo.shadowFade = glm::vec4(hshadow::kFadeStartFrac * hshadow::kRadius,
-                               hshadow::kRadius - hshadow::kFadeEndTexels * shadowTexelWorld, 0.f, 0.f);
+    ubo.shadowFade = glm::vec4(hshadow::kFadeStartFrac * shadowRadius,
+                               shadowRadius - hshadow::kFadeEndTexels * shadowTexelWorld, 0.f, 0.f);
 
     ubo.timeParams  = glm::vec4(shaderTime(), (float)frameNum_, lighting_calibration::kBloomThreshold,
                                 post.exposure);
+    // 반사 캡처(2026-11-17): 위치 · 반경(0 = 없음) · 밝기
+    ubo.capturePos    = capturePos_;
+    ubo.captureParams = glm::vec4(captureIntensity_, 0.f, 0.f, 0.f);
+    // 지수 고도 안개(2026-11-17): 켜진 첫 HeightFogComponent. 없으면 밀도 0(셰이더가 건너뜀).
+    ubo.fogColor  = glm::vec4(0.f);
+    ubo.fogParams = glm::vec4(0.f);
+    if (quality_.heightFog)
+    for (const HeightFogComponent* fog : world.componentsOf<HeightFogComponent>()) {
+        if (!fog->owner->activeInHierarchy() || !fog->isEnabled()) continue;
+        ubo.fogColor  = glm::vec4(fog->color, fog->maxOpacity);
+        ubo.fogParams = glm::vec4(fog->density, fog->heightFalloff, fog->owner->worldPosition().y, fog->startDistance);
+        break;
+    }
     // lights 개수는 updateLightSSBO가 실제로 채운 수를 쓴다(범위 밖 읽기 방지).
     // miscParams.w 는 이제 **섀도 캐스터의 슬롯 번호**다(<0 이면 섀도 없음). 셰이더가 슬롯 0 을
     // 가정하지 않고, 그 라이트의 기여에만 그림자를 곱하도록 바뀌었다(DEF-26).
@@ -219,6 +263,7 @@ void Renderer::buildDrawCommands(World& world,
                                   std::vector<GpuDrawCmd>& opaqueOut,
                                   std::vector<GpuDrawCmd>& transpOut,
                                   std::vector<const MaterialHandle*>& materialRowsOut,
+                                  std::vector<uint8_t>& rowFlagsOut,
                                   std::vector<GpuDrawCmd>& shadowOut) {
     // 눈마다 절두체를 뽑아, 하나라도 통과하면 그립니다(DEF-31). 예전에는 단안 절두체 하나로
     // 걸러 스테레오에서는 한쪽 눈에만 보이는 물체가 사라질 수 있었습니다. 같은 목록을 두 눈이
@@ -228,8 +273,10 @@ void Renderer::buildDrawCommands(World& world,
     std::array<std::array<FrustumPlane, 6>, kMaxViews> planes{};
     const bool hasCam = hasCamera_;
     if (hasCam)
-        for (uint32_t i = 0; i < viewCount_; ++i)
+        for (uint32_t i = 0; i < viewCount_; ++i) {
             planes[i] = extractFrustumPlanes(views_[i].proj * views_[i].view);
+            replaceInfinitePlane(planes[i], views_[i].view, views_[i].zFar);   // 무한 원평면(C1) → 카메라 zFar 까지만 그림
+        }
 
     // 섀도(라이트) 프러스텀 — 캐스터가 있을 때만. lightCullViewProj_ 는 updateUBO 가 이미
     // 채웠다(호출 순서: updateLightSSBO→updateUBO→buildDrawCommands). 이 ortho 박스로 캐스터를
@@ -268,6 +315,7 @@ void Renderer::buildDrawCommands(World& world,
     opaqueOut.clear();
     transpOut.clear();
     materialRowsOut.clear();
+    rowFlagsOut.clear();
     shadowOut.clear();
 
     // 1) 컬링과 LOD 선택: 카메라나 라이트에 보이는 메시만 후보로 모읍니다. 행은 여기서 배정하지 않습니다.
@@ -298,7 +346,7 @@ void Renderer::buildDrawCommands(World& world,
     // 스태틱 메시와 스킨 메시(2026-11-07)가 함께 씁니다.
     auto pushCandidate = [&](const MaterialHandle* material, const glm::mat4& model, const glm::vec3& boundCenter,
                              float boundRadius, uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset,
-                             float distSq, bool transparent) {
+                             float distSq, bool transparent, bool index16, uint8_t lightChannels) {
         const glm::vec3 wCenter = glm::vec3(model * glm::vec4(boundCenter, 1.f));
         const float     wRadius = boundRadius * maxAxisScale(model);
 
@@ -318,6 +366,10 @@ void Renderer::buildDrawCommands(World& world,
         c.inCam        = inCam;
         c.inLight      = inLight;
         c.transparent  = transparent;
+        c.index16      = index16;
+        c.lightChannels = lightChannels;
+        // 거울 변환(음수 크기 · 뒤집힌 노드)은 감기 방향이 뒤집힙니다. 앞면 방향이 반대인 파이프라인으로 그립니다(DEF-170).
+        c.mirrored     = glm::determinant(glm::mat3(model)) < 0.f;
         cands.push_back(c);
         models.push_back(model);
         materials.push_back(material);
@@ -339,21 +391,20 @@ void Renderer::buildDrawCommands(World& world,
         if (!mesh) continue;
 
         pushCandidate(material, model, mesh->boundCenter, mesh->boundRadius, mesh->indexCount, mesh->firstIndex,
-                      (int32_t)mesh->firstVertex, distSq, mc->transparent);
+                      (int32_t)mesh->firstVertex, distSq, mc->transparent, mesh->index16, mc->lightChannels);
     }
 
     // 스킨 메시(2026-11-07, Hand_Grasp_Design 4-1): 이 프레임 슬롯의 스킨 구간에 지금 자세로 CPU 스키닝한 정점을 직접 쓰고,
     // 그 자리를 정점 오프셋으로 그립니다. 이 함수는 슬롯 펜스를 기다린 뒤(extract 구간)에 불리므로 GPU 가 이 슬롯의 구간을
     // 읽고 있지 않습니다. Zone B 는 HOST_COHERENT 라 제출 시점에 쓰기가 보입니다. 인덱스는 쉬는 자세로 올린 메시의 것을 씁니다.
     {
-        uint32_t arenaFirst = 0, used = 0;
-        Vertex*  arena      = nullptr;
+        uint32_t      arenaFirst = 0, used = 0;
+        PackedVertex* arena      = nullptr;
         bool     asked      = false;
-        for (const auto& up : world.getActors()) {
-            const Actor* a = up.get();
+        for (const SkinnedMeshComponent* sk : world.componentsOf<SkinnedMeshComponent>()) {
+            const Actor* a = sk->owner;
             if (!a->activeInHierarchy()) continue;
-            const auto* sk = a->getComponent<SkinnedMeshComponent>();
-            if (!sk || !sk->isEnabled() || !sk->visible || !sk->loaded()) continue;
+            if (!sk->isEnabled() || !sk->visible || !sk->loaded()) continue;
             if (!asked) { arena = scene_.skinArena(frameIdx, arenaFirst); asked = true; }
             if (!arena) break;
             ++totalCnt;
@@ -369,12 +420,15 @@ void Renderer::buildDrawCommands(World& world,
             const MaterialHandle* material = resolveMaterial(sk->material, a);
             if (!material) continue;
             glm::vec3 bmin, bmax;
-            if (!sk->skinInto(reinterpret_cast<MeshSourceVertex*>(arena + used), bmin, bmax)) continue;
+            // CPU 스키닝은 Vertex(MeshSourceVertex)로 하고 GPU 형식으로 옮깁니다(QTangent, C2).
+            skinScratch_.resize(n);
+            if (!sk->skinInto(reinterpret_cast<MeshSourceVertex*>(skinScratch_.data()), bmin, bmax)) continue;
+            hqtan::packRange(skinScratch_.data(), arena + used, n);
             const glm::mat4 model = a->worldMatrix();
             const float distSq = glm::length2(camPos - glm::vec3(model[3]));
             pushCandidate(material, model, 0.5f * (bmin + bmax), 0.5f * glm::length(bmax - bmin),
                           sk->baseMesh->indexCount, sk->baseMesh->firstIndex, (int32_t)(arenaFirst + used),
-                          distSq, sk->transparent);
+                          distSq, sk->transparent, sk->baseMesh->index16, sk->lightChannels);
             used += n;
         }
     }
@@ -388,10 +442,13 @@ void Renderer::buildDrawCommands(World& world,
     // 3) 행마다 트랜스폼과 머티리얼을 기록합니다. 행 번호와 push 순서가 1:1이므로 materialRowsOut[row]
     // 가 곧 그 행의 머티리얼입니다. 섀도 전용 행에도 기록해 materialForRow 의 범위 계약을 지킵니다.
     materialRowsOut.reserve(batch.rowSource.size());
+    rowFlagsOut.reserve(batch.rowSource.size());
     for (uint32_t row = 0; row < (uint32_t)batch.rowSource.size(); ++row) {
         const uint32_t src = batch.rowSource[row];
-        tfData[row].model = models[src];
+        packAffine(models[src], tfData[row]);
         materialRowsOut.push_back(materials[src]);
+        rowFlagsOut.push_back((uint8_t)((cands[src].mirrored ? kRowMirrored : 0) | (cands[src].index16 ? kRowIndex16 : 0) |
+                                        ((cands[src].lightChannels & 7u) << kRowChannelShift)));
     }
 
     auto toCmds = [](const std::vector<hbatch::Run>& runs, std::vector<GpuDrawCmd>& out) {
@@ -420,6 +477,13 @@ void Renderer::buildDrawCommands(World& world,
 // 두 눈입니다(DEF-09). 눈 위치는 뷰 행렬의 역에서 읽습니다(예전 cameraPos 와 같은 식).
 void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
     CameraComponent* cam = world.getActiveCamera();
+    cameraExposureEv_ = cam ? cam->exposureEv : 0.f;
+    if (captureOverride_) {   // 반사 캡처 중: 큐브 한 면의 눈 하나(Renderer_capture.cpp)
+        hasCamera_ = true;
+        viewCount_ = 1;
+        views_[0]  = captureEye_;
+        return;
+    }
 
     // XR: 런타임이 준 두 눈 자세(원점 공간)를 활성 카메라의 XR 원점(위치 · 요)에 올립니다. 시야는
     // 런타임의 네 방향 각도로 눈마다 따로 만듭니다(DEF-21). 카메라가 없으면 월드 원점에 둡니다.
@@ -498,11 +562,10 @@ void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
 void Renderer::gatherUIPanels(World& world, std::vector<GeometryPass::PanelDraw>& out) {
     out.clear();
     std::vector<uint32_t> used;
-    for (const auto& up : world.getActors()) {
-        Actor* a = up.get();
+    for (UIPanelComponent* pc : world.componentsOf<UIPanelComponent>()) {
+        Actor* a = pc->owner;
         if (!a->activeInHierarchy()) continue;
-        auto* pc = a->getComponent<UIPanelComponent>();
-        if (!pc || !pc->isEnabled()) continue;
+        if (!pc->isEnabled()) continue;
 
         // 같은 핸들을 쥔 패널이 이미 있으면(컴포넌트를 값으로 복사한 경우) 이 패널은 새로 만듭니다.
         if (pc->gpuTarget && std::find(used.begin(), used.end(), pc->gpuTarget) != used.end())
@@ -556,7 +619,7 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
     // 순서 주의: 라이트 SSBO를 먼저 채워 실제 개수를 확정한 뒤 UBO에 싣는다.
     const uint32_t lightCount = updateLightSSBO(world);
     updateUBO(world, lightCount);
-    buildDrawCommands(world, v.opaqueDraws, v.transpDraws, v.materialRows, v.shadowDraws);
+    buildDrawCommands(world, v.opaqueDraws, v.transpDraws, v.materialRows, v.rowFlags, v.shadowDraws);
     frameStats_.drawCalls = (uint32_t)v.opaqueDraws.size();
     gatherUIPanels(world, v.panels);
 
@@ -567,6 +630,10 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
             v.aoCam[i].invProj = glm::inverse(views_[i].proj);
             v.aoCam[i].proj    = views_[i].proj;
             v.aoCam[i].valid   = true;
+            // 접촉 그림자(2026-11-17): 섀도 캐스터 방향광의 길이와 이 눈의 뷰 공간 태양 방향
+            v.aoCam[i].contactLength = shadowCasterSlot_ >= 0 ? contactLength_ : 0.f;
+            v.aoCam[i].sunView       = glm::normalize(glm::mat3(views_[i].view) * shadowCasterDir_);
+            v.aoCam[i].aoTerm        = aoOn_;
         }
     }
 
@@ -586,9 +653,11 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
                        std::vector<GeometryPass::DrawItem>& itemsOut) {
         itemsOut.reserve(draws.size());
         for (const auto& dc : draws) {
+            const uint8_t f = dc.firstInstance < v.rowFlags.size() ? v.rowFlags[dc.firstInstance] : 0;
             itemsOut.push_back({ materialForRow(dc.firstInstance), dc.indexCount,
                                  dc.firstIndex, dc.vertexOffset, dc.firstInstance,
-                                 dc.instanceCount });
+                                 dc.instanceCount, (f & kRowMirrored) != 0, (f & kRowIndex16) != 0,
+                                 (uint8_t)((f >> kRowChannelShift) & 7u) });
         }
     };
     toItems(v.opaqueDraws, v.opaqueItems);
@@ -627,6 +696,11 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     }
     // 이 슬롯을 마지막으로 쓴 제출(frameNum_ - MAX_FRAMES)이 끝났으니, 그 프레임까지만 쓰던 패널 텍스처를 지웁니다.
     panels_.beginFrame(frameNum_);
+    // 반사 캡처: 캡처 컴포넌트가 새로 생기거나 옮겨지면 이 자리에서 장치를 멈추고 6면을 찍습니다(드묾).
+    {
+        ScopedCpuTimer t(ft.reflCapture);
+        updateReflectionCapture(world);
+    }
 
     // Read previous frame's timestamps — skip until each slot has been written at least once
     if (timestampPool_ && frameNum_ >= MAX_FRAMES) {
@@ -742,7 +816,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     shadow_.record(cmd,
         { frames_.frameSet(fi), frames_.sceneSet(fi), frames_.transformSet(fi),
           scene_.vertexBuffer(), scene_.indexBuffer() },
-        view.shadowDraws, shadowCasterSlot_ >= 0);
+        view.shadowDraws, view.rowFlags, shadowCasterSlot_ >= 0);
 
     // Timestamp 1: after shadow
     if (timestampPool_)
@@ -751,10 +825,11 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     // A-4: GPU 컬링 dispatch 제거(순수 오버헤드였음). 깊이 프리패스·컬러 모두 CPU opaqueItems 를
     // 그립니다. GPU 구동 경로가 필요해지면 스테레오·인스턴스 기준으로 새로 설계합니다.
 
-    // ── 눈마다: 메인(3 서브패스) → AO → Bloom → 톤매핑 ─────────────────────────
-    // 첫 단계는 눈마다 두 번 그립니다(DEF-09). 위험을 나누려는 선택이고, 셰이더와 UBO 는 처음부터
-    // 두 눈 기준이라 멀티뷰로 옮길 때 뷰 번호만 gl_ViewIndex 로 바꾸면 됩니다. 섀도맵은 위에서 한 번
-    // 그린 것을 두 눈이 함께 씁니다. 중간 타깃(깊이 · HDR · AO · Bloom)은 두 눈이 번갈아 씁니다.
+    // ── 메인(3 서브패스) → 눈마다 AO → Bloom → 톤매핑 ───────────────────────────
+    // 두 눈이면 메인 패스를 멀티뷰로 한 번 그립니다(2026-11-18, DEF-09 둘째 단계). 깊이 · HDR 은 2층 배열이고 층 v 가
+    // 눈 v 입니다. AO · Bloom · 톤매핑은 눈마다 그 층을 읽고, 그 중간 타깃(AO · Bloom)은 두 눈이 번갈아 씁니다(UE 의
+    // Mobile Multi-View 도 장면 패스만 멀티뷰). --no-multiview 이거나 멀티뷰를 모르는 렌더 확장이 메인 패스 안에 있으면
+    // 예전처럼 눈마다 메인 패스를 그립니다(층 v 에). 섀도맵은 위에서 한 번 그린 것을 두 눈이 함께 씁니다.
     GeometryPass::Inputs gin{};
     gin.frameSet         = frames_.frameSet(fi);
     gin.sceneSet         = frames_.sceneSet(fi);
@@ -820,10 +895,23 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
                                VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
     };
 
+    // 멀티뷰로 그릴지는 프레임마다 정합니다. XR 이 붙어 있어도 헤드셋에 그리지 않는 프레임은 단안입니다.
+    const bool multiview = viewCount_ > 1 && multiview_ && geometry_.multiviewReady() &&
+                           !passRegistry_.blocksMultiview();
+    // 두 눈 프레임의 경로가 바뀔 때만 한 번 남깁니다(단안 프레임은 세지 않음).
+    if (viewCount_ > 1 && (int)multiview != stereoMainPassMode_) {
+        stereoMainPassMode_ = (int)multiview;
+        HLOG(LogRenderer, Log) << "Main pass: " << (multiview ? "multiview (both eyes at once)" : "per eye")
+                               << (multiview ? "" : !multiview_ ? " (--no-multiview)"
+                                                  : !geometry_.multiviewReady() ? " (scene targets have one layer)"
+                                                  : " (a render extension does not support multiview)");
+    }
+
     // XR 은 오른쪽 눈을 먼저 그립니다. 중간 타깃에 왼쪽 눈이 남아 있어야 아래에서 그것을 에디터
     // 뷰포트에 비출 수 있습니다.
     for (uint32_t k = 0; k < viewCount_; ++k) {
         const uint32_t v      = xrFrame ? viewCount_ - 1 - k : k;
+        const uint32_t layer  = geometry_.layerFor(v);   // 이 눈의 장면 타깃 층
         const uint32_t tsBase = fi * TS + 2 + kTsPerView * k;
         // 앞 눈이 쓰던 중간 타깃을 다음 눈이 다시 씁니다. 앞 눈의 읽기(AO 의 깊이, 톤매핑의 HDR ·
         // AO · Bloom)가 끝나고 쓰기가 보이도록 그래픽 단계 전체를 한 번 묶습니다. 눈이 둘뿐이라
@@ -833,29 +921,38 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
                                    VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, kTargetReads);
 
         // ── Main render pass (3 subpasses) ────────────────────────────────────
-        // 불투명 끝(서브패스 1)과 반투명 끝(서브패스 2)에서 확장을 부릅니다.
-        std::function<void(uint32_t)> geoHook;
-        if (extGeo)
-            geoHook = [&, v](uint32_t subpass) {
-                HRenderStageContext c = stageCtx(subpass == 1 ? HRenderStage::OpaqueEnd
-                                                               : HRenderStage::TransparentEnd, v);
-                c.renderPass  = geometry_.mainPass();
-                c.subpass     = subpass;
-                c.colorFormat = GeometryPass::kHdrFormat;
-                c.samples     = rc_.msaaSamples;
-                c.rect        = { { 0, 0 }, rc_.renderExtent };
-                passRegistry_.dispatch(c);
-            };
-        gin.subpassHook = extGeo ? &geoHook : nullptr;
-        geometry_.record(cmd, fi, v, gin, timestampPool_, tsBase + 0);
+        // 불투명 끝(서브패스 1)과 반투명 끝(서브패스 2)에서 확장을 부릅니다. 멀티뷰면 첫 눈 차례에 두 눈을 한 번에 그리고,
+        // 둘째 눈의 Main 칸에는 타임스탬프만 찍습니다(Main 시간 = 두 눈 합, 읽는 쪽은 그대로).
+        if (!multiview || k == 0) {
+            std::function<void(uint32_t)> geoHook;
+            if (extGeo)
+                geoHook = [&, v](uint32_t subpass) {
+                    HRenderStageContext c = stageCtx(subpass == 1 ? HRenderStage::OpaqueEnd
+                                                                   : HRenderStage::TransparentEnd, multiview ? 0 : v);
+                    c.multiview   = multiview;
+                    c.renderPass  = multiview ? geometry_.mainPassMultiview() : geometry_.mainPass();
+                    c.subpass     = subpass;
+                    c.colorFormat = GeometryPass::kHdrFormat;
+                    c.samples     = rc_.msaaSamples;
+                    c.rect        = { { 0, 0 }, rc_.renderExtent };
+                    passRegistry_.dispatch(c);
+                };
+            gin.subpassHook = extGeo ? &geoHook : nullptr;
+            if (multiview) geometry_.recordMultiview(cmd, fi, gin, timestampPool_, tsBase + 0);
+            else           geometry_.record(cmd, fi, v, gin, timestampPool_, tsBase + 0);
+            gin.subpassHook = nullptr;   // geoHook 은 이 블록 안에서만 삽니다
+        } else if (timestampPool_) {
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 0);
+        }
 
         // ── 렌더 확장: 메인 패스 뒤 · AO 앞(AfterScene) ─────────────────────────
         if (extScene) {
             fullBarrier();
             HRenderStageContext c = stageCtx(HRenderStage::AfterScene, v);
             c.hdrImage    = geometry_.hdrImage(fi);
-            c.hdrView     = geometry_.hdrView(fi);
-            c.depthView   = geometry_.depthView();
+            c.hdrLayer    = layer;
+            c.hdrView     = geometry_.hdrView(fi, layer);
+            c.depthView   = geometry_.depthView(layer);
             c.sceneExtent = rc_.renderExtent;
             passRegistry_.dispatch(c);
             fullBarrier();
@@ -864,13 +961,13 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
         // ── AO (linDepth + SSAO, half-res) ───────────────────────────────────
         // 끈 패스는 기록하지 않습니다. 타임스탬프는 조건 밖에서 늘 씁니다(비우면 결과 읽기가 VK_NOT_READY).
         if (post.aoOn)
-            ao_.record(cmd, fi, v, geometry_.depthView(), view.aoCam[v]);
+            ao_.record(cmd, fi, v, geometry_.depthView(layer), view.aoCam[v]);
         if (timestampPool_)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 1);
 
         // ── Bloom passes (threshold → down ×4 → up ×4) ───────────────────────
         if (post.bloomOn)
-            bloom_.record(cmd, geometry_.hdrView(fi), clampSampler_, bloomThresh);
+            bloom_.record(cmd, geometry_.hdrView(fi, layer), clampSampler_, bloomThresh);
         if (timestampPool_)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 2);
 
@@ -888,7 +985,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
                 c.rect        = out.rect;
                 passRegistry_.dispatch(c);
             };
-        post_.recordTonemap(cmd, out, post, geometry_.hdrView(fi), ao_.ssaoView(),
+        post_.recordTonemap(cmd, out, post, geometry_.hdrView(fi, layer), ao_.ssaoView(),
                             bloom_.resultView(), clampSampler_, extPost ? &postHook : nullptr);
         if (timestampPool_)
             vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool_, tsBase + 3);
@@ -926,7 +1023,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
                 c.rect        = mirror.rect;
                 passRegistry_.dispatch(c);
             };
-        post_.recordTonemap(cmd, mirror, post, geometry_.hdrView(fi), ao_.ssaoView(),
+        post_.recordTonemap(cmd, mirror, post, geometry_.hdrView(fi, geometry_.layerFor(0)), ao_.ssaoView(),
                             bloom_.resultView(), clampSampler_, extPost ? &mirrorHook : nullptr);
     }
 

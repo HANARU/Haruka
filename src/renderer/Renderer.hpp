@@ -88,10 +88,26 @@ public:
     void setForceNoSync2(bool on) { forceNoSync2_ = on; }
     // --vk-dedicated-msaa: MSAA 컬러를 핵심 힙 밖 별도 할당으로(지연 할당 타입이 없는 데스크톱에서 DEF-06 경로 시험).
     void setForceDedicatedMsaa(bool on) { forceDedicatedMsaa_ = on; }
+    // --no-multiview: 두 눈의 메인 패스를 멀티뷰로 한 번에 그리지 않고 눈마다 그립니다(진단 · 비교용, 2026-11-18).
+    // 장치의 멀티뷰 기능은 그래도 켭니다(셰이더가 gl_ViewIndex 를 씀). 언제든 부를 수 있고 다음 프레임부터 반영됩니다.
+    void setMultiview(bool on) { multiview_ = on; }
+    bool multiview() const     { return multiview_; }
     // 후처리 패스 켬/끔(project.ini render.ao · render.bloom, --ssao · --no-ssao). 끈 패스는 기록하지 않습니다.
     // 프레임마다 읽으므로 init 앞뒤 어느 때 불러도 됩니다. 프레임 단위 값입니다(블룸 이미지 한 벌을 두 눈이
     // 함께 쓰므로 눈마다 다르게 두지 않음).
     void setPostFeatures(bool ao, bool bloom) { aoOn_ = ao; bloomOn_ = bloom; }
+    // 품질 단계(2026-11-18, 성능 안정화 2-2). project.ini 의 render.* 품질 키(플랫폼 접미사 .android 로 Quest 값)에서 옵니다.
+    // init 전에 부릅니다(섀도 단 수 · 거리는 섀도 패스를 만들 때 정해짐). 기본값은 PC 화면 그대로입니다.
+    struct Quality {
+        int      csmCascades       = 2;      // 1 = 먼 단만(섀도 패스 하나)
+        float    shadowDistance    = 20.f;   // 먼 단 반지름(m, hshadow::kRadius)
+        bool     contactShadows    = true;   // 끄면 라이트의 Contact Shadow Length 를 무시
+        bool     heightFog         = true;   // 끄면 HeightFogComponent 를 무시
+        bool     reflectionCapture = true;   // 끄면 반사 캡처를 찍지 않고 하늘 IBL 만
+        uint32_t lightLimit        = 0;      // 0 = render.maxLights 그대로, 아니면 둘 중 작은 값
+    };
+    void setQuality(const Quality& q);
+    const Quality& quality() const { return quality_; }
     void setAoEnabled(bool on) { aoOn_ = on; }
     bool aoEnabled() const     { return aoOn_; }
     bool bloomEnabled() const  { return bloomOn_; }
@@ -222,11 +238,16 @@ private:
     bool               headless_ = false;   // 창이 표면을 주지 않음
     bool               forceNoSync2_ = false;   // --vk-no-sync2
     bool               forceDedicatedMsaa_ = false;   // --vk-dedicated-msaa
+    bool               multiview_ = true;             // --no-multiview 면 거짓(setMultiview)
+    int                stereoMainPassMode_ = -1;      // 직전 두 눈 프레임의 메인 패스(1 멀티뷰 · 0 눈마다, 로그용)
+    Quality            quality_;                      // 품질 단계(setQuality)
     // SSAO · 블룸 켜기의 유일한 출처. postParams() 가 PostPass push 상수와 FrameUBO(screenParams.w ·
     // miscParams.z)에 같은 값을 넣습니다.
     bool               aoOn_    = true;
     bool               bloomOn_ = true;
     PostPass::Params   postParams() const;   // 이번 프레임의 합성 값(세기 · 노출 · 켬/끔)
+    float              cameraExposureEv_ = 0.f;   // 활성 카메라의 노출 보정(gatherViews 가 채움)
+    float              contactLength_    = 0.f;   // 섀도 캐스터 방향광의 접촉 그림자 길이(updateLightSSBO 가 채움, 0 = 끔)
     hvk::DeviceCaps    deviceCaps_;         // 고른 장치에서 읽은 값
     hvk::DevicePlan    devicePlan_;         // 켤 확장 · 기능(장치 생성과 샘플러가 함께 읽음)
     hvk::QueueFamilies queueFamilies_;      // 고를 때 한 번 정함
@@ -277,6 +298,33 @@ private:
     VkSampler        iblSampler_         = VK_NULL_HANDLE;
     VkSampler        brdfSampler_        = VK_NULL_HANDLE;
 
+    // ── 반사 캡처(2026-11-17, Renderer_capture.cpp) ─────────────────────────────
+    static constexpr uint32_t kCaptureRes       = 128;   // 면마다 읽어 오는 해상도
+    // 면마다 그리는 정사각형 변(2×2 를 평균해 kCaptureRes). 예전에는 렌더 크기 전체(VR 은 눈마다 약 1800²)를 그리고 가운데를
+    // 줄였습니다. 렌더 크기가 이보다 작으면 kCaptureRes 로 그립니다.
+    static constexpr uint32_t kCaptureDrawRes   = 256;
+    static constexpr uint32_t kCapturePrefSize  = 64;    // 프리필터 mip 0(하늘과 같음)
+    static constexpr uint32_t kCapturePrefMips  = 5;
+    static constexpr float    kCaptureNear      = 0.05f;
+    static constexpr float    kCaptureFar       = 200.f;
+    struct CaptureKey {
+        uint64_t actor = 0; glm::vec3 pos{ 0.f }; float radius = 0.f; uint32_t version = 0; const void* world = nullptr; bool valid = false;
+        bool operator==(const CaptureKey& o) const {
+            return valid == o.valid && actor == o.actor && pos == o.pos && radius == o.radius && version == o.version && world == o.world;
+        }
+    };
+    void updateReflectionCapture(World& world);
+    void performReflectionCapture(World& world, const glm::vec3& pos);
+    CaptureKey       captureKey_;
+    glm::vec4        capturePos_{ 0.f };      // xyz 위치, w 반경(0 = 없음) → FrameUBO.capturePos
+    float            captureIntensity_ = 1.f;
+    bool             captureOverride_  = false;   // 캡처 중: gatherViews 가 captureEye_ 하나만 씀
+    EyeView          captureEye_;
+    VkImage          captureImage_ = VK_NULL_HANDLE;
+    VkImageView      captureView_  = VK_NULL_HANDLE;
+    HarukaAllocation captureAlloc_;
+    bool             captureEverUploaded_ = false;
+
     // ── 자산 GPU 자원 (메가버퍼 + 텍스처 슬롯) ────────────────────────────────
     GpuScene scene_;
 
@@ -287,6 +335,7 @@ private:
     std::unordered_set<uint64_t> noMaterialWarned_;
     bool                         dropWarned_    = false;   // 행 예산 초과 경고(한 번)
     bool                         skinOverflowWarned_ = false;   // 스킨 메시 정점 구간 초과 경고(한 번, 2026-11-07)
+    std::vector<Vertex>          skinScratch_;   // CPU 스키닝 결과(GPU 형식으로 옮기기 전, QTangent C2)
     bool                         lightBudgetWarned_ = false;   // 라이트 상한 초과 경고(한 번, DEF-33)
     uint32_t                     maxDrawRows_   = EngineLimits{}.maxDrawRows;   // setLimits(DEF-10)
     uint32_t                     maxLights_     = EngineLimits{}.maxLights;
@@ -304,6 +353,8 @@ private:
     bool     emulateStereo_ = false;
     void       gatherViews(World& world, const XrFrameTarget* xr);
     VkExtent2D desiredRenderExtent() const;   // 뷰포트와 모드로 정한 눈 하나의 렌더 크기
+    // 장면 타깃 층 수(rc_.sceneLayers)를 XR · 스테레오 흉내 상태에 맞춥니다. 바뀌었으면 참(부른 쪽이 타깃을 다시 만듦).
+    bool syncSceneLayers();
 
     // ── XR 출력 ────────────────────────────────────────────────────────────────
     // XR 스왑체인 이미지 i 의 눈 e 층을 가리키는 뷰 · 프레임버퍼는 [i * kMaxViews + e] 에 있습니다.
@@ -353,6 +404,7 @@ private:
     glm::vec3     shadowCasterDir_  = {0.f, -1.f, 0.f};
     glm::vec3     viewCenter_{ 0.f };      // 두 눈 위치 평균(단안이면 카메라, 없으면 원점). 라이트 선택 · LOD · 투명 정렬 공용
     glm::mat4     lightViewProj_{ 1.f };   // 섀도 VP. 캐스터가 없는 프레임은 이전 값을 유지(예전 파일 전역 static)
+    glm::mat4     lightViewProjNear_{ 1.f };   // 가까운 캐스케이드 VP(CSM, 2026-11-17). 갱신 규칙은 lightViewProj_ 와 같음
     glm::mat4     lightCullViewProj_{ 1.f };   // 섀도 캐스터 컬링 VP(near 를 빛 쪽으로 늘림, ShadowFit.hpp). 갱신 규칙은 위와 같음
 
     // ── UI overlay ────────────────────────────────────────────────────────────
@@ -411,6 +463,9 @@ private:
         // 행을 할당하는 바로 그 지점에서 채우므로 두 목록이 어긋날 수 없다. 인스턴스 묶음의
         // 행은 모두 같은 머티리얼이라 첫 행(firstInstance)의 머티리얼이 묶음의 머티리얼이다.
         std::vector<const MaterialHandle*>  materialRows;
+        // transform SSBO 행 → 그리기 상태 비트(kRowMirrored · kRowIndex16, RenderTypes.hpp). materialRows 와 같은 지점에서
+        // 채우고, 묶음의 행은 모두 같은 값입니다.
+        std::vector<uint8_t>                rowFlags;
         std::array<AOPass::CameraParams, kMaxViews> aoCam;   // 눈별(투영이 눈마다 다름)
         std::vector<GeometryPass::PanelDraw> panels;         // 월드 UI 패널(3D UI P1b)
     };
@@ -432,6 +487,7 @@ private:
                           std::vector<GpuDrawCmd>& opaqueOut,
                           std::vector<GpuDrawCmd>& transpOut,
                           std::vector<const MaterialHandle*>& materialRowsOut,
+                          std::vector<uint8_t>& rowFlagsOut,
                           std::vector<GpuDrawCmd>& shadowOut);
 
     // Low-level helpers — RenderContext로 위임 (1단계 마이그레이션)

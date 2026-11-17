@@ -30,8 +30,8 @@ using mat4  = glm::mat4;
 #define HARUKA_SHADOW_FILTER_HARD     1   // 하드웨어 쌍선형 비교 1탭
 
 // 프레임 상수 (set 0, binding 0). 셰이더에서는 블록 안의 ubo 로 둡니다.
-// 눈마다 다른 값(행렬 · 눈 위치)은 처음부터 [HARUKA_MAX_VIEWS] 로 둡니다(DEF-09). 멀티뷰로 옮길 때
-// 셰이더는 뷰 번호만 gl_ViewIndex 로 바꾸면 됩니다. 단안이면 [1] 은 [0] 과 같은 값입니다.
+// 눈마다 다른 값(행렬 · 눈 위치)은 [HARUKA_MAX_VIEWS] 로 둡니다(DEF-09). 셰이더는 HARUKA_EYE_INDEX(푸시 상수 +
+// gl_ViewIndex)로 고릅니다(멀티뷰 2026-11-18). 단안이면 [1] 은 [0] 과 같은 값입니다.
 // prevViewProj(가짜 TAA 용, 읽는 곳 없음)는 2026-10-04 에 지웠습니다(DEF-15). 진짜 TAA 나
 // Quest 의 프레임 합성(AppSW)에는 눈별 이전 행렬이 필요하므로 그때 viewProj 처럼 [2] 로 넣습니다.
 struct FrameUBO {
@@ -48,11 +48,25 @@ struct FrameUBO {
     // 그림자 거리 페이드(2026-11-02, ShadowFit.hpp). 머리(eyePos[0] · [1] 의 가운데)에서 화소까지의 거리로
     // x=페이드 시작(m), y=페이드 끝(m, 여기부터 섀도맵을 읽지 않음), zw=예약(0). 더 필요한 값은 이 뒤에 붙입니다.
     vec4  shadowFade;
+    // 지수 고도 안개(2026-11-17, HeightFogComponent). fogColor: rgb = 선형 HDR 안개 색, a = 최대 불투명도.
+    // fogParams: x = 밀도(0 이면 안개 없음), y = 높이 감쇠, z = 안개 기준 높이(월드 y), w = 시작 거리(m).
+    vec4  fogColor;
+    vec4  fogParams;
+    // 가까운 캐스케이드(CSM, 2026-11-17, ShadowFit.hpp). lightViewProj 는 먼 단(예전 단일 맵)이고 이것은 가까운 단입니다.
+    // 섀도 이미지는 가로 두 칸(왼쪽 = 가까운 단, 오른쪽 = 먼 단)이라 shadowParams.y 는 한 칸의 1/해상도입니다.
+    // cascadeNear: x = 가까운 단 페이드 시작(m), y = 페이드 끝(여기부터 먼 단만), z = 리시버 바이어스(섀도 NDC), w = 노멀 오프셋(m).
+    mat4  lightViewProjNear;
+    vec4  cascadeNear;
+    // 반사 캡처(2026-11-17, ReflectionCaptureComponent): x y z = 캡처 위치, w = 영향 반경(0 = 없음). captureParams.x = 밝기.
+    vec4  capturePos;
+    vec4  captureParams;
 };
 
 // 메시마다 월드 행렬 (set 2, binding 0). 행 번호 = gl_InstanceIndex.
+// 월드 행렬은 언제나 아핀이라 마지막 행 (0, 0, 0, 1) 을 빼고 위 세 행만 둡니다(수학 보강 O15, 64 → 48 B). rows[r] 는 행렬의
+// r 번째 행(열 우선 m 이면 (m[0][r], m[1][r], m[2][r], m[3][r]))입니다. 셰이더는 hkModel() 로 mat4 를 다시 만듭니다.
 struct GpuTransform {
-    mat4 model;
+    vec4 rows[3];
 };
 
 // 라이트 (set 1, binding 4).
@@ -60,18 +74,34 @@ struct GpuLight {
     vec4 posOrDir;    // xyz=pos or dir, w=type (0=dir, 1=point, 2=spot)
     vec4 colorRange;  // xyz=effectiveColor*intensity, w=attenuationRadius (항상 > 0)
     vec4 spotDir;     // xyz=spot forward direction (단위 길이, CPU 가 정규화)
-    vec4 spotParams;  // x=cosScale, y=cosOffset (스팟 원뿔 계수, SpotCone.hpp), zw=reserved
+    vec4 spotParams;  // x=cosScale, y=cosOffset (스팟 원뿔 계수, SpotCone.hpp), z=라이트 채널 비트(실수로 넣은 정수, 2026-11-17), w=reserved
 };
 
 #ifdef __cplusplus
 } // namespace hgpu
 #else
-// 뷰(눈) 번호. 지금은 눈마다 따로 그리므로(DEF-09 첫 단계) 렌더러가 푸시 상수로 넘깁니다.
-// 멀티뷰로 옮기면 HARUKA_VIEW_INDEX 를 gl_ViewIndex 로 바꾸고 푸시 상수를 지웁니다.
-// 뷰 번호가 필요한 셰이더는 본문 앞에 HARUKA_VIEW_PUSH_CONSTANT; 를 한 번 적습니다. 정점 · 조각
+// 뷰(눈) 번호 푸시 상수. 뷰 번호가 필요한 셰이더는 본문 앞에 HARUKA_VIEW_PUSH_CONSTANT; 를 한 번 적습니다. 정점 · 조각
 // 셰이더가 같은 선언을 쓰므로 범위는 두 단계에 걸칩니다(C++ 쪽 VkPushConstantRange 와 맞춤).
-#define HARUKA_VIEW_PUSH_CONSTANT layout(push_constant) uniform HarukaViewPush { int viewIndex; } hkView
+// lightChannels: 이 드로의 메시 라이트 채널 비트(2026-11-17, pbr.frag 만 읽음).
+#define HARUKA_VIEW_PUSH_CONSTANT layout(push_constant) uniform HarukaViewPush { int viewIndex; uint lightChannels; } hkView
+// 푸시 상수 그대로의 값입니다. 섀도 패스는 이 자리에 캐스케이드 번호를 넣습니다(shadow.vert).
 #define HARUKA_VIEW_INDEX hkView.viewIndex
+// 메인 패스의 눈 번호(멀티뷰, 2026-11-18). 두 눈을 멀티뷰(viewMask 0b11)로 한 번에 그리면 푸시 상수는 0 이고 gl_ViewIndex 가
+// 0 · 1 입니다. 눈마다 그리는 경로(단안 · --no-multiview · 반사 캡처)는 렌더 패스가 멀티뷰가 아니라 gl_ViewIndex 가 0 이고
+// 푸시 상수가 눈 번호입니다. 그래서 두 값을 더하면 어느 경로든 같은 셰이더로 맞는 눈을 고릅니다(파이프라인만 두 벌).
+// 쓰는 셰이더는 맨 앞에 #extension GL_EXT_multiview : require 를 둡니다(장치는 멀티뷰 기능을 늘 켭니다, VulkanBaseline.hpp).
+#define HARUKA_EYE_INDEX (hkView.viewIndex + int(gl_ViewIndex))
+// QTangent(C2) → 법선 · 접선 · 바이탱전트 손잡이. C++ 쪽 hqtan::decode 와 같은 식입니다.
+void hkDecodeQTangent(vec4 q, out vec3 n, out vec3 t, out float sgn) {
+    q = normalize(q);
+    t = vec3(1.0 - 2.0 * (q.y * q.y + q.z * q.z), 2.0 * (q.x * q.y + q.w * q.z), 2.0 * (q.x * q.z - q.w * q.y));
+    n = vec3(2.0 * (q.x * q.z + q.w * q.y), 2.0 * (q.y * q.z - q.w * q.x), 1.0 - 2.0 * (q.x * q.x + q.y * q.y));
+    sgn = q.w < 0.0 ? -1.0 : 1.0;
+}
+// 3 행 아핀 트랜스폼 → mat4 (O15). transpose 한 번은 정점마다 상수 비용입니다.
+mat4 hkModel(GpuTransform t) {
+    return transpose(mat4(t.rows[0], t.rows[1], t.rows[2], vec4(0.0, 0.0, 0.0, 1.0)));
+}
 #endif
 
 #endif // HARUKA_SHARED_H

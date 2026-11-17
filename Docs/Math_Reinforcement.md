@@ -38,19 +38,27 @@
 
 | ID | 항목 | 남긴 이유 |
 |---|---|---|
-| B1 | `src/math` 기본 도형 · 판정(Ray · Plane · Sphere · AABB · OBB), 허용 오차 정책 한 곳 | 범위 결정. 추천은 새 타입 + 기존 판정(UIPanelPointer · floorBelow · FrustumCull · ScreenSize)만 옮기기 |
-| B2 | 시간 독립 감쇠 · 임계 감쇠 스프링 · 이징 | 따라오는 패널 · 속도 추적 잡기(P5)와 함께 |
-| B3 · B4 | 곡선(Catmull-Rom · Hermite · Bezier), PCG32 · Perlin · 블루 노이즈 | 애니메이션 · 절차 생성을 시작할 때 |
-| C1 | Reverse-Z + 무한 원평면 | 기준 PNG 가 바뀌고 화면 → 광선 계산 두 곳을 함께 고쳐야 함(로드맵 6-4) |
-| C2 | QTangent 정점 압축 | 큰 공사(로드맵 6-2) |
-| D1 · D2 | 포즈 필터(One Euro) · 속도 추정, 두 뼈 IK · 스윙-트위스트 | 손 쥐기 C · D 와 함께 |
-| O2 · O3 · O15 | 아핀 역행렬 + 월드 행렬 캐시, 16비트 인덱스 · 정점 캐시 순서, 3×4 트랜스폼 | 다음 최적화 묶음 |
 | O4 · O8 · O10 · O11 | FP16, SSAO 샘플 수, 포비티드, 동적 해상도 | Quest 단독 실행 측정 먼저(RTX 3080 은 FP16 이득을 잴 수 없음) |
-| O9 · O12 · O14 | 클러스터드 라이트, Hi-Z 가림, BVH | 라이트 · 물체 수가 많아질 때 |
+| O9 | 클러스터드 라이트 | 지금은 CPU 가 라이트를 render.maxLights(256) 안으로 고르고 픽셀마다 전부 돕니다. 장면의 라이트가 수십 개를 넘을 때 효과가 있으며, 새 SSBO · 셰이더 경로 · 두 눈 처리를 함께 정해야 해서 결정이 필요합니다 |
+| O12 | Hi-Z 가림 | GPU 컬링이 있어야 이득이 나는데, GPU 컬링은 2026-10-04 에 일부러 지웠습니다. 되살릴지는 결정이 필요합니다(CPU 되읽기 방식은 한 프레임 늦어 VR 에서 튐) |
+| O14 | BVH | 매 프레임 다시 짓는 BVH 는 지금 물체 수에서 선형 구-절두체 판정보다 느립니다. 정적 물체를 따로 두는 구조(정적 기지와 같은 시점)와 함께 해야 이득이 납니다 |
 | O13 | 메시 단순화 LOD(이차 오차) | meshoptimizer 내려받기 허락 |
-| S1 · S2 · S4 ~ S6 | 도플러, 공기 흡수, 두께 투과, 차폐 표본 회전, dB · 로그 보간 | 다음 소리 묶음 |
-| P3 · P4 · P5 | 상자 충돌체 오프셋, 동적 바디 렌더 보간, 속도 추적 잡기(PD 제어) | 다음 물리 묶음 |
-| DEF-170 | 거울(음수 크기) 변환의 감기 방향 | 파이프라인 앞면 방향을 드로마다 바꿔야 함 |
 
-알려진 한계: Play 중 메시를 바꿔도 RigidBody 는 다시 만들지 않음, 메시 충돌체의 거울 크기는 절댓값, 평평한 메시(판 하나)는 볼록 껍질을 만들 수 없어
+## 4. 2차 적용(2026-11-17, "전부 진행")
+
+| ID | 내용 | 확인 |
+|---|---|---|
+| DEF-170 | 거울 변환 감기 방향: 묶기 키 mirrored, 파이프라인 앞면 CW 변형, 메시 · 볼록 충돌체 크기 부호 | 묶기 시험 9절, 거울 장면 기준과 최대 1단계 |
+| B1 · B2 | `src/math/{Tolerance, Geometry, Damping}.hpp`: Ray · Plane · Sphere · AABB · OBB 판정, 허용 오차, 시간 독립 감쇠 · 임계 감쇠 스프링 · 이징. 옮긴 판정: UIPanelPointer, EditorGizmo, floorBelow, FrustumPlane, 패널 따라오기 | HarukaMathTest |
+| B3 · B4 · D1 · D2 | `Curves`(Catmull-Rom · Hermite · Bezier), `Random`(PCG32 · Perlin · 블루 노이즈), `Filter`(One Euro · 속도 추정), `Ik`(두 뼈 IK · 스윙-트위스트) | HarukaMathTest(검사 84) |
+| P3 · P4 · P5 | 충돌체 중심 오프셋(RotatedTranslatedShape), 동적 바디 렌더 보간, 속도 추적 잡기(중력 0 + 연속 충돌, 상한 20 m/s · 40 rad/s) | 물리 시험 P3 ~ P5 절 |
+| O2 · O3 | 아핀 · 강체 역행렬, 월드 행렬 세대 스탬프 캐시, 16비트 인덱스(메가 인덱스 버퍼 뒤 절반), Forsyth 정점 캐시 순서(ACMR 2.98 → 0.71) | 액터 시험 O2 절, 기하 시험 O3 절, 기준 PNG 그대로 |
+| O15 | 월드 행렬을 3 행 아핀(48 B)으로 올리고 셰이더 `hkModel()` 로 되돌림 | 기준 PNG 최대 1단계 |
+| C1 | Reverse-Z + 무한 원평면(GREATER, 깊이 지우기 0, 화면 광선 NDC 깊이 1 · 0.5, 퇴화 평면은 zFar 평면으로) | 스테레오 · 슬레이트 시험, 기준 PNG 0.15 % · 최대 1단계 |
+| C2 | QTangent: CPU 정점(48 B)은 그대로, 메가 버퍼에만 28 B(`PackedVertex`, snorm16 쿼터니언 + w 부호 = 손잡이, w 바이어스 1/32767), `geometry/QTangent.hpp` · `hkDecodeQTangent` | 기하 시험 C2 절(오차 5e-5), 기준 PNG 기본 최대 1단계 · 패널 스치는 가장자리 최대 8단계 0.04 % |
+| S1 · S2 · S4 ~ S6 | 도플러, 공기 흡수, 두께 투과, 차폐 표본 회전, dB · 로그 보간(`audio/AudioPropagation.hpp`) | 오디오 시험 15b · 15c 절 |
+
+새 기준 PNG: 기본 75125933 · UIPanelProbe 7788eb5f(검증 오류 0).
+
+알려진 한계: Play 중 메시를 바꿔도 RigidBody 는 다시 만들지 않음, 평평한 메시(판 하나)는 볼록 껍질을 만들 수 없어
 Mesh 나 Box 를 씀, LOD 메시를 채우는 코드는 아직 없음(O6 은 선택 수학만).
