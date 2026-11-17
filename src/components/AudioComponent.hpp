@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Component.hpp"
 #include "../audio/AudioAttenuation.hpp"
+#include "../audio/AudioPropagation.hpp"
 #include <string>
 
 class AudioSystem;
@@ -17,6 +18,11 @@ public:
     bool        autoPlay = true;
     AudioAttenuationSettings attenuation;   // 3D 재생 설정(Spatialize·감쇠 모델·거리)
     AudioOcclusionSettings   occlusion;     // 차폐(2026-11-06, 기본 끔). 충돌체가 청취자와의 사이를 막으면 줄이고 먹먹하게
+    AudioPropagationSettings propagation;   // 도플러 · 공기 흡수(2026-11-17, 기본 끔)
+    // 사운드 단계 4(2026-11-17): 버스(볼륨 묶음), 긴 음악 스트리밍(통째로 디코딩하지 않고 재생하며 풂), 지향성 콘.
+    EAudioBus         bus    = EAudioBus::Sfx;
+    bool              stream = false;   // 바꾸면 다음 소리 만들 때(setFile · 다음 Play) 반영
+    AudioConeSettings cone;
     // 잔향(2026-11-06, Audio_Design.md 9-5). 청취자가 잔향 구역 안에 있을 때 공용 리버브로 보내는 양과 거리 규칙입니다.
     // 2D 소리(Spatialize 끔)는 보내지 않습니다(UE 의 2D 기본 센드 0 과 같음).
     float reverbSend  = 1.f;     // 0 ~ 2

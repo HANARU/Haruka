@@ -15,6 +15,7 @@
 #include "../src/audio/AudioSystem.hpp"
 #include "../src/audio/AudioAttenuation.hpp"
 #include "../src/audio/AudioOcclusion.hpp"
+#include "../src/audio/AudioPropagation.hpp"
 #include "../src/physics/PhysicsSystem.hpp"
 #include "../src/components/RigidBodyComponent.hpp"
 #include "../src/components/ReverbZoneComponent.hpp"
@@ -311,6 +312,103 @@ int main() {
         for (const auto& kv : fw.fields()) back.readField(kv.first, kv.second);
         check(back.attenuation.silentBeyondMax && back.attenuation.maxDistance == 10.f, "silentBeyondMax 가 씬 파일로 왕복");
         world.destroyActor(loud->owner);
+        sys.tick(kDt);
+    }
+
+    // 2-1c. 사운드 단계 4(2026-11-17): 버스 · 마스터 볼륨 · 지향성 콘 · 보이스 예산 · 한 번 재생 · 스트리밍
+    std::printf("\n== 2-1c. 버스 · 콘 · 보이스 예산 · 한 번 재생 · 스트리밍 ==\n");
+    {
+        AudioComponent* ac = spawnSound(world, "Bus", toneFile, { 0.f, 0.f, -1.f }, true, true);
+        const Level base = measure(sys);
+        sys.setBusVolume(EAudioBus::Sfx, 0.5f);
+        const Level half = measure(sys);
+        check(near(half.avg() / base.avg(), 0.5, 0.01), "SFX 버스 0.5 → 소리 절반");
+        sys.setBusVolume(EAudioBus::Music, 0.f);
+        check(near(measure(sys).avg() / base.avg(), 0.5, 0.01), "다른 버스(Music)는 영향 없음");
+        sys.setBusVolume(EAudioBus::Sfx, 1.f);
+        sys.setBusVolume(EAudioBus::Music, 1.f);
+        sys.setMasterVolume(0.25f);
+        check(near(measure(sys).avg() / base.avg(), 0.25, 0.01), "마스터 0.25 → 전체 1/4");
+        sys.setMasterVolume(1.f);
+        check(near(measure(sys).avg() / base.avg(), 1.0, 0.01), "되돌리면 예전 크기");
+
+        // 콘: 액터가 -Z(청취자 반대쪽)를 봄 → 청취자는 등 뒤(180°). 안쪽 60° · 바깥 120° · 바깥 게인 0.2
+        ac->cone = { 60.f, 120.f, 0.2f };
+        check(near(measure(sys).avg() / base.avg(), 0.2, 0.02), "콘 바깥(등 뒤) 청취자 → 바깥 게인 0.2");
+        ac->owner->setLocalRotation(glm::angleAxis(glm::radians(180.f), glm::vec3(0.f, 1.f, 0.f)));   // 청취자를 봄
+        check(near(measure(sys).avg() / base.avg(), 1.0, 0.02), "콘 안쪽(정면) 청취자 → 1");
+        ac->owner->setLocalRotation(glm::angleAxis(glm::radians(90.f), glm::vec3(0.f, 1.f, 0.f)));    // 옆(90°): 바깥 각 60° 밖
+        check(near(measure(sys).avg() / base.avg(), 0.2, 0.02), "콘 옆(90°)은 바깥 각(±60°) 밖이라 0.2");
+        check(near(hprop::coneGain(ac->cone, { 0, 0, -1 }, glm::normalize(glm::vec3(std::sin(glm::radians(45.f)), 0, -std::cos(glm::radians(45.f))))),
+                   0.2 + 0.8 * (std::cos(glm::radians(45.f)) - 0.5) / (std::cos(glm::radians(30.f)) - 0.5), 1e-5),
+              "콘 사이 각(45°)은 코사인 축 선형 보간");
+        ac->cone = {};
+        ac->owner->setLocalRotation(glm::quat(1.f, 0.f, 0.f, 0.f));
+        check(near(measure(sys).avg() / base.avg(), 1.0, 0.01), "콘을 끄면 예전 크기(기본 콘으로 되돌림)");
+        ComponentFieldWriter fw0;
+        ac->writeFields(fw0);
+        bool extra = false;
+        for (const auto& kv : fw0.fields()) extra = extra || kv.first == "bus" || kv.first == "cone" || kv.first == "stream";
+        check(!extra, "기본값이면 bus · cone · stream 을 쓰지 않음");
+        ac->bus = EAudioBus::Voice; ac->stream = true; ac->cone = { 40.f, 90.f, 0.1f };
+        ComponentFieldWriter fw1;
+        ac->writeFields(fw1);
+        AudioComponent back;
+        for (const auto& kv : fw1.fields()) back.readField(kv.first, kv.second);
+        check(back.bus == EAudioBus::Voice && back.stream && back.cone == ac->cone, "bus · stream · cone 왕복");
+        AudioConeSettings badCone;
+        check(!AudioConeSettings::fromText("90 60 0.1", badCone) && !AudioConeSettings::fromText("60 90 2", badCone) &&
+              !AudioConeSettings::fromText("60 90", badCone), "깨진 콘(바깥 < 안쪽, 게인 > 1, 토큰 부족)은 거부");
+        world.destroyActor(ac->owner);
+        sys.tick(kDt);
+
+        // 보이스 예산: 3개 중 예산 2 → 가장 작은(먼) 소리가 가상화, 예산을 풀면 이어 냄
+        std::vector<float> g{ 0.5f, 0.1f, 0.9f, 0.1f };
+        std::vector<bool> cut;
+        hprop::rankBudget(g, 2, cut);
+        check(!cut[0] && cut[1] && !cut[2] && cut[3], "순위: 큰 것 둘만 남김(같으면 번호 순)");
+        hprop::rankBudget(g, 0, cut);
+        check(!cut[0] && !cut[1] && !cut[2] && !cut[3], "예산 0 = 제한 없음");
+        AudioComponent* nearA = spawnSound(world, "NearA", toneFile, { 0.f, 0.f, -1.f }, true, true);
+        AudioComponent* nearB = spawnSound(world, "NearB", toneFile, { 1.f, 0.f, -1.f }, true, true);
+        AudioComponent* farC  = spawnSound(world, "FarC",  toneFile, { 0.f, 0.f, -8.f }, true, true);
+        sys.setVoiceBudget(2);
+        for (int i = 0; i < 3; ++i) { sys.tick(kDt); render(sys, 800); }
+        check(!sys.voiceVirtual(nearA->voice_) && !sys.voiceVirtual(nearB->voice_) && sys.voiceVirtual(farC->voice_) &&
+              sys.isVoicePlaying(farC->voice_), "예산 2: 먼 소리만 가상화(재생 중으로 보임)");
+        sys.setVoiceBudget(64);
+        for (int i = 0; i < 2; ++i) { sys.tick(kDt); render(sys, 800); }
+        check(!sys.voiceVirtual(farC->voice_), "예산을 풀면 이어 냄");
+        world.destroyActor(nearA->owner); world.destroyActor(nearB->owner); world.destroyActor(farC->owner);
+        sys.tick(kDt);
+
+        // 한 번 재생: 짧은 소리(0.1 초)를 내고 끝나면 스스로 정리
+        check(sys.playOneShot(shortFile.string().c_str(), { 0.f, 0.f, -1.f }), "한 번 재생 시작");
+        sys.tick(kDt);
+        const Block ob = render(sys, 480);
+        check(rms(ob.L) > 0.0 && sys.oneShotCount() == 1, "한 번 재생이 들림");
+        for (int i = 0; i < 12; ++i) { render(sys, 800); sys.tick(kDt); }
+        check(sys.oneShotCount() == 0, "끝나면 스스로 정리");
+        AudioAttenuationSettings farAt; farAt.model = EAudioAttenuation::Linear; farAt.maxDistance = 5.f;
+        check(!sys.playOneShot(shortFile.string().c_str(), { 0.f, 0.f, -50.f }, 1.f, EAudioBus::Sfx, farAt) && sys.oneShotCount() == 0,
+              "들리지 않을 자리의 한 번 재생은 만들지 않음");
+        bool allOk = true;
+        for (size_t i = 0; i < AudioSystem::kMaxOneShots; ++i) allOk = allOk && sys.playOneShot(toneFile.string().c_str(), { 0.f, 0.f, -1.f });
+        check(allOk && !sys.playOneShot(toneFile.string().c_str(), { 0.f, 0.f, -1.f }), "동시 한 번 재생은 상한(32)까지");
+        sys.onEndPlay();
+        check(sys.oneShotCount() == 0, "플레이가 끝나면 한 번 재생을 모두 정리");
+        sys.onBeginPlay();
+
+        // 스트리밍: 같은 파일을 통째로 디코딩한 소리와 같은 출력
+        AudioComponent* full = spawnSound(world, "Full", toneFile, { 0.f, 0.f, -1.f }, true, true);
+        const Level lf = measure(sys);
+        world.destroyActor(full->owner);
+        sys.tick(kDt);
+        AudioComponent* st = spawnSound(world, "Stream", toneFile, { 0.f, 0.f, -1.f }, true, true);
+        st->stream = true;   // 첫 틱 전에 정함(소리를 만들 때 반영)
+        const Level ls = measure(sys);
+        check(near(ls.avg(), lf.avg(), 1e-4 * lf.avg()), "스트리밍 소리도 같은 크기로 재생");
+        world.destroyActor(st->owner);
         sys.tick(kDt);
     }
 
@@ -983,8 +1081,152 @@ int main() {
         w3.destroyActor(side);
         w3.destroyActor(edge->owner);
 
+        // ── 15b. 전파(2026-11-17): 공기 흡수 S2 · 두께 투과 S4 · 표본 회전 S5 · 도플러 S1 ──
+        std::printf("\n-- 15b. 전파(도플러 · 공기 흡수 · 두께 · 표본 회전) --\n");
+        {
+            // 공기 흡수: 8 kHz 음원 6 m(최소 1 · 최대 7 m) → 차단 주파수 = 20 kHz 와 3 kHz 사이 로그 축 5/6 지점
+            auto airLevel = [&](bool air) {
+                AudioComponent* ac = makeSrc(highFile, srcPos, false);
+                ac->attenuation.maxDistance = 7.f;
+                ac->propagation.airAbsorption = air;
+                const Level l = meas3();
+                w3.destroyActor(ac->owner);
+                return l.avg();
+            };
+            const double dry = airLevel(false), wet = airLevel(true);
+            const double cutoff = std::exp(std::log(20000.0) + (std::log(3000.0) - std::log(20000.0)) * (5.0 / 6.0));
+            const double expAir = lpf2(8000.0, cutoff);
+            std::printf("    공기 흡수 8 kHz 6 m: %.4f (해석값 %.4f, 차단 %.0f Hz)\n", wet / dry, expAir, cutoff);
+            check(near(wet / dry, expAir, 0.05 * expAir), "공기 흡수: 먼 소리의 높은 음이 로그 축 차단 주파수만큼 깎임(해석값 ±5%)");
+            AudioComponent* nearSrc = makeSrc(highFile, { 0.f, 0.f, -0.5f }, false);
+            nearSrc->attenuation.maxDistance = 7.f;
+            const double nearDry = meas3().avg();
+            nearSrc->propagation.airAbsorption = true;
+            const double nearWet = meas3().avg();
+            std::printf("    (참고) 최소 거리 안: 끔 %.8f, 켬 %.8f\n", nearDry, nearWet);
+            check(near(nearWet, nearDry, 1e-4 * nearDry), "최소 거리 안에서는 공기 흡수 필터를 건너뜀(크기 그대로, 측정 창 차이만)");
+            w3.destroyActor(nearSrc->owner);
+
+            // 두께 투과: 20 cm 벽, 다 막히는 두께 40 cm → 차폐 0.5. 10 cm 로 두면 1.
+            Actor* wall2 = box("ThickWall", { 0.f, 0.f, -3.f }, { 2.f, 2.f, 0.1f });
+            AudioComponent* th = makeSrc(lowFile, srcPos, true);
+            th->occlusion.fullThickness = 0.4f;
+            settle();
+            std::printf("    두께 20 cm / 40 cm 차폐 = %.4f\n", th->occlusionAmount());
+            check(near(th->occlusionAmount(), 0.5, 0.01), "20 cm 벽은 다 막히는 두께 40 cm 의 절반만 막음");
+            th->occlusion.fullThickness = 0.1f;
+            settle();
+            check(th->occlusionAmount() == 1.f, "다 막히는 두께보다 두꺼우면 완전히 막힘");
+            w3.destroyActor(th->owner);
+            w3.destroyActor(wall2);
+
+            // 표본 회전: 모서리 벽(x ≤ −0.05) 뒤 반지름 0.5 m 음원. 고정 표본은 늘 3/9, 회전하면 판정마다 바뀌고 평균은 원 둘레의
+            // 막힌 비율(cos θ ≤ −0.208 인 43.3 %) × 8/9 = 0.385 에 가까워짐.
+            Actor* half2 = box("HalfWall2", { -5.05f, 0.f, -3.f }, { 5.f, 2.f, 0.1f });
+            AudioComponent* rot = makeSrc(lowFile, srcPos, true);
+            rot->occlusion.radius = 0.5f;
+            rot->occlusion.rotateSamples = true;
+            double sum = 0.0;
+            float mn = 1.f, mx = 0.f;
+            const int traces = 40;
+            for (int i = 0; i < traces; ++i) {
+                settle();
+                const float o = rot->occlusionAmount();
+                sum += o; mn = std::min(mn, o); mx = std::max(mx, o);
+            }
+            std::printf("    회전 표본 평균 %.4f (범위 %.3f ~ %.3f)\n", sum / traces, mn, mx);
+            check(mx > mn, "표본을 돌리면 판정마다 값이 바뀜");
+            check(near(sum / traces, 0.385, 0.05), "회전 표본의 평균이 둘레의 막힌 비율(0.385)에 가까움");
+            w3.destroyActor(rot->owner);
+            w3.destroyActor(half2);
+
+            // 도플러: 음원이 청취자 쪽으로 34.33 m/s(음속의 1/10) → 343.3 / (343.3 − 34.33) = 1.111
+            AudioComponent* dp = makeSrc(lowFile, { 0.f, 0.f, -40.f }, false);
+            dp->propagation.dopplerFactor = 1.f;
+            const float v = 34.33f;
+            for (int i = 0; i < 30; ++i) {
+                dp->owner->setLocalPosition(dp->owner->worldPosition() + glm::vec3(0.f, 0.f, v * kDt));
+                step();
+            }
+            const float approach = s3.voicePitch(dp->voice_);
+            for (int i = 0; i < 40; ++i) {   // 반대로 멀어짐 → 343.3 / 377.63 = 0.909
+                dp->owner->setLocalPosition(dp->owner->worldPosition() - glm::vec3(0.f, 0.f, v * kDt));
+                step();
+            }
+            const float recede = s3.voicePitch(dp->voice_);
+            std::printf("    도플러 다가옴 %.4f, 멀어짐 %.4f\n", approach, recede);
+            check(near(approach, 343.3 / (343.3 - 34.33), 0.003), "다가오는 음원은 음높이 1.111 배");
+            check(near(recede, 343.3 / (343.3 + 34.33), 0.003), "멀어지는 음원은 0.909 배");
+            dp->owner->setLocalPosition({ 0.f, 0.f, -500.f });   // 순간 이동: 속도 상한을 넘어 무시
+            step();
+            check(near(s3.voicePitch(dp->voice_), recede, 0.003), "순간 이동은 도플러로 들리지 않음");
+            dp->propagation.dopplerFactor = 0.f;
+            step();
+            check(s3.voicePitch(dp->voice_) == 1.f, "도플러를 끄면 음높이 1");
+            w3.destroyActor(dp->owner);
+        }
+
         s3.shutdown();
         ps.shutdown();
+    }
+
+    // 15c. 전파 순수 계산 · 설정 텍스트(2026-11-17)
+    std::printf("\n== 15c. 전파 계산(S1 · S2 · S4 · S5 · S6) ==\n");
+    {
+        check(near(hdb::gainToDb(0.5f), -6.0206, 1e-3) && near(hdb::dbToGain(-20.f), 0.1, 1e-6) && hdb::dbToGain(-200.f) == 0.f,
+              "dB 변환(0.5 = −6.02 dB, −20 dB = 0.1, 아주 작으면 0)");
+        check(near(hdb::lerpGainDb(1.f, 0.01f, 0.5f), 0.1, 1e-5), "dB 축 보간: 1 과 0.01 의 가운데는 0.1(−20 dB)");
+        check(near(hdb::lerpHzLog(100.f, 10000.f, 0.5f), 1000.0, 0.01), "로그 주파수 보간: 100 Hz 와 10 kHz 가운데 1 kHz");
+        using hprop::dopplerPitch;
+        const glm::vec3 L(0.f), Z(0.f);
+        check(dopplerPitch(L, Z, { 0, 0, -10 }, { 0, 0, 0 }, 1.f) == 1.f, "둘 다 멈춰 있으면 1");
+        check(near(dopplerPitch(L, Z, { 0, 0, -10 }, { 0, 0, 34.33f }, 1.f), 343.3 / 308.97, 1e-4), "음원이 다가오면 높아짐");
+        check(near(dopplerPitch(L, { 0, 0, -34.33f }, { 0, 0, -10 }, Z, 1.f), 377.63 / 343.3, 1e-4), "청취자가 다가가면 높아짐");
+        check(dopplerPitch(L, Z, { 0, 0, -10 }, { 50, 0, 0 }, 1.f) == 1.f, "옆으로 지나는 순간(방향 성분 0)은 1");
+        check(dopplerPitch(L, Z, { 0, 0, -10 }, { 0, 0, 34.33f }, 0.f) == 1.f, "factor 0 이면 끔");
+        check(dopplerPitch(L, Z, { 0, 0, -10 }, { 0, 0, 1000.f }, 1.f) == hprop::kMaxPitch, "음속을 넘으면 상한");
+        glm::vec3 vel(0.f);
+        for (int i = 0; i < 60; ++i) vel = hprop::trackVelocity({ 0, 0, 0 }, { 0.1f, 0, 0 }, 0.01f, vel);
+        check(near(vel.x, 10.f, 1e-3), "위치 차분 평활 속도가 10 m/s 로 수렴");
+        check(hprop::trackVelocity({ 0, 0, 0 }, { 100, 0, 0 }, 0.01f, vel) == vel, "순간 이동(상한 넘음)은 속도를 바꾸지 않음");
+        AudioAttenuationSettings at; at.minDistance = 1.f; at.maxDistance = 11.f;
+        AudioPropagationSettings pr; pr.airAbsorption = true; pr.airAbsorptionHz = 2000.f;
+        check(hprop::airCutoffHz(at, pr, 0.5f) == 20000.f && near(hprop::airCutoffHz(at, pr, 50.f), 2000.0, 0.01) &&
+              near(hprop::airCutoffHz(at, pr, 6.f), std::sqrt(20000.0 * 2000.0), 0.5), "공기 흡수 차단 주파수(가까움 20 kHz, 멂 2 kHz, 가운데 기하 평균)");
+        pr.airAbsorption = false;
+        check(hprop::airCutoffHz(at, pr, 50.f) == 20000.f, "공기 흡수를 끄면 20 kHz(필터 없음)");
+        check(hprop::blockFromThickness(0.f, 0.4f) == 0.f && hprop::blockFromThickness(0.1f, 0.4f) == 0.25f &&
+              hprop::blockFromThickness(1.f, 0.4f) == 1.f && hprop::blockFromThickness(0.01f, 0.f) == 1.f, "두께 → 막힘 정도");
+        check(hprop::ringPhase(0) == 0.f && hprop::ringPhase(1) != hprop::ringPhase(2), "표본 회전 위상이 판정마다 다름");
+
+        AudioPropagationSettings p2; p2.dopplerFactor = 0.75f; p2.airAbsorption = true; p2.airAbsorptionHz = 4500.f;
+        AudioPropagationSettings back;
+        check(AudioPropagationSettings::fromText(p2.toText(), back) && back == p2, "전파 설정 왕복(" + p2.toText() + ")");
+        const char* badP[] = { "0 0", "0 0 3000 1", "-1 0 3000", "9 0 3000", "0 2 3000", "0 1 5", "0 1 30000", "nan 0 3000" };
+        bool rejected = true;
+        for (const char* b : badP) rejected = rejected && !AudioPropagationSettings::fromText(b, back);
+        check(rejected, "깨진 전파 설정은 거부");
+        AudioOcclusionSettings oe;
+        check(oe.extraIsDefault() && oe.extraFromText("0.3 1") && oe.fullThickness == 0.3f && oe.rotateSamples, "차폐 추가 값 읽기");
+        check(!oe.extraFromText("11 0") && !oe.extraFromText("0.2") && oe.fullThickness == 0.3f, "깨진 추가 값은 거부(값 그대로)");
+        AudioComponent src;
+        ComponentFieldWriter w0;
+        src.writeFields(w0);
+        bool extraKeys = false;
+        for (const auto& kv : w0.fields()) extraKeys = extraKeys || kv.first == "propagation" || kv.first == "occlusionExtra";
+        check(!extraKeys, "기본값이면 propagation · occlusionExtra 를 쓰지 않음(기존 씬 그대로)");
+        src.propagation = p2;
+        src.occlusion.fullThickness = 0.25f;
+        src.occlusion.rotateSamples = true;
+        src.attenuation.silentBeyondMax = true;
+        ComponentFieldWriter w1;
+        src.writeFields(w1);
+        AudioComponent dst;
+        // occlusionExtra 가 occlusion 보다 먼저 와도 지켜지는지(키 순서를 뒤집어 읽음)
+        std::vector<std::pair<std::string, std::string>> kvs(w1.fields().begin(), w1.fields().end());
+        for (auto it = kvs.rbegin(); it != kvs.rend(); ++it) dst.readField(it->first, it->second);
+        check(dst.propagation == p2 && dst.occlusion == src.occlusion && dst.attenuation == src.attenuation,
+              "컴포넌트 왕복(키 순서와 무관, silentBeyondMax · occlusionExtra 가 먼저 와도 지켜짐)");
     }
 
     // 16. 잔향(2026-11-06, Audio_Design.md 9-5): 공용 리버브 하나 + 음원별 센드 + 청취자 위치의 잔향 구역.

@@ -63,11 +63,17 @@ struct AudioOcclusionSettings {
     float volume     = 0.4f;     // 완전히 막혔을 때의 볼륨 배율(0.4 ≈ -8 dB)
     float smoothTime = 0.1f;     // 막힘 ↔ 열림 전환의 시간 상수(초). 0 이면 판정 즉시 바뀝니다
     float radius     = 0.f;      // 음원 반지름(m). 0 = 레이 하나(막힘/열림 둘 중 하나), 0 보다 크면 원판 위 표본 9개(일부 차폐)
+    // 두께 투과(S4, 2026-11-17): 막은 물체의 두께가 이보다 얇으면 일부만 막힌 것으로 칩니다(m). 0 = 예전처럼 조금이라도 막히면
+    // 다 막힘. 표본마다 레이를 양쪽에서 쏴 두께를 재므로(레이 두 배) 켰을 때만 비용이 늘어납니다.
+    float fullThickness = 0.f;
+    // 표본 회전(S5): 판정할 때마다 원판 표본을 황금각만큼 돌려 평활과 함께 둘레를 촘촘하게 훑습니다. 끄면 표본 자리 고정.
+    bool  rotateSamples = false;
 
     static constexpr float kMinHz     = 20.f;
     static constexpr float kMaxHz     = 20000.f;
     static constexpr float kMaxSmooth = 10.f;
     static constexpr float kMaxRadius = 10.f;
+    static constexpr float kMaxThickness = 10.f;
 
     // 씬 파일 값입니다. 예: "1 1200 0.4 0.1 0.5" (enabled, lowPassHz, volume, smoothTime, radius).
     // AUDIO_3D 와 같이 토큰 수를 정확히 요구하고, 값이 늘면 다른 키로 추가합니다.
@@ -75,10 +81,15 @@ struct AudioOcclusionSettings {
     // 다섯 토큰이 모두 있고 범위가 맞아야 true 입니다(20 ≤ lowPassHz ≤ 20000, 0 ≤ volume ≤ 1, 0 ≤ smoothTime ≤ 10,
     // 0 ≤ radius ≤ 10, 유한값). 실패하면 out 을 건드리지 않습니다.
     static bool fromText(std::string_view text, AudioOcclusionSettings& out);
+    // 2026-11-17 에 더한 값(fullThickness, rotateSamples)은 다른 키("occlusionExtra", 예: "0.3 1")로 씁니다.
+    std::string extraToText() const;
+    bool        extraFromText(std::string_view text);   // 실패하면 값을 바꾸지 않음
+    bool        extraIsDefault() const { return fullThickness == 0.f && !rotateSamples; }
 
     bool operator==(const AudioOcclusionSettings& o) const {
         return enabled == o.enabled && lowPassHz == o.lowPassHz && volume == o.volume
-            && smoothTime == o.smoothTime && radius == o.radius;
+            && smoothTime == o.smoothTime && radius == o.radius && fullThickness == o.fullThickness
+            && rotateSamples == o.rotateSamples;
     }
 };
 

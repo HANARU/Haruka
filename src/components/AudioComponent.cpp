@@ -42,6 +42,10 @@ std::vector<PropDesc> AudioComponent::buildProps() {
         [p]{ return p->loop; }, [p](bool v){ p->loop = v; }));
     props.push_back(makePropToggle("AutoPlay",
         [p]{ return p->autoPlay; }, [p](bool v){ p->autoPlay = v; }));
+    props.push_back(makePropEnum("Bus", { "SFX", "Music", "Voice", "Ambient", "UI" },
+        [p]{ return (int)p->bus; }, [p](int v){ p->bus = (EAudioBus)std::clamp(v, 0, kAudioBusCount - 1); }));
+    props.push_back(makePropToggle("Stream",
+        [p]{ return p->stream; }, [p](bool v){ p->stream = v; }));
 
     // Spatialize 를 끄면 위치와 무관한 2D 소리라 아래 거리 행은 의미가 없어 숨깁니다.
     // 토글 행이 바뀌면 패널을 다시 만들므로 행이 곧바로 나타나고 사라집니다.
@@ -93,7 +97,35 @@ std::vector<PropDesc> AudioComponent::buildProps() {
             props.push_back(makePropFloat("Source Radius", PropColor::Neutral, 0.05f,
                 [p]{ return p->occlusion.radius; },
                 [p](float v){ p->occlusion.radius = std::clamp(v, 0.f, O::kMaxRadius); }, PropUnit::Size));
+            props.push_back(makePropFloat("Full Block Thickness", PropColor::Neutral, 0.01f,
+                [p]{ return p->occlusion.fullThickness; },
+                [p](float v){ p->occlusion.fullThickness = std::clamp(v, 0.f, O::kMaxThickness); }, PropUnit::Size));
+            props.push_back(makePropToggle("Rotate Samples",
+                [p]{ return p->occlusion.rotateSamples; }, [p](bool v){ p->occlusion.rotateSamples = v; }));
         }
+
+        // 지향성 콘(사운드 단계 4): 안쪽 각 360 이면 끔.
+        props.push_back(makePropFloat("Cone Inner", PropColor::Neutral, 1.f,
+            [p]{ return p->cone.innerDeg; },
+            [p](float v){ p->cone.innerDeg = std::clamp(v, 0.f, 360.f); p->cone.outerDeg = std::max(p->cone.outerDeg, p->cone.innerDeg); }));
+        props.push_back(makePropFloat("Cone Outer", PropColor::Neutral, 1.f,
+            [p]{ return p->cone.outerDeg; },
+            [p](float v){ p->cone.outerDeg = std::clamp(v, p->cone.innerDeg, 360.f); }));
+        props.push_back(makePropFloat("Cone Outer Gain", PropColor::Neutral, 0.01f,
+            [p]{ return p->cone.outerGain; },
+            [p](float v){ p->cone.outerGain = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+
+        // 전파(2026-11-17, S1 · S2): 도플러와 공기 흡수. 기본은 둘 다 꺼져 예전 소리 그대로입니다.
+        using P = AudioPropagationSettings;
+        props.push_back(makePropFloat("Doppler", PropColor::Neutral, 0.05f,
+            [p]{ return p->propagation.dopplerFactor; },
+            [p](float v){ p->propagation.dopplerFactor = std::clamp(v, 0.f, P::kMaxDoppler); }, PropUnit::Ratio));
+        props.push_back(makePropToggle("Air Absorption",
+            [p]{ return p->propagation.airAbsorption; }, [p](bool v){ p->propagation.airAbsorption = v; }));
+        if (propagation.airAbsorption)
+            props.push_back(makePropFloat("Air Absorption Hz", PropColor::Neutral, 50.f,
+                [p]{ return p->propagation.airAbsorptionHz; },
+                [p](float v){ p->propagation.airAbsorptionHz = std::clamp(v, P::kMinHz, P::kMaxHz); }));
     }
     return props;
 }
@@ -129,6 +161,11 @@ void AudioComponent::writeFields(ComponentFieldWriter& w) const {
     w.s("attenuation", attenuation.toText());
     if (attenuation.silentBeyondMax) w.b("silentBeyondMax", true);   // 2026-11-17. 켰을 때만(기존 씬 파일 그대로)
     w.s("occlusion",   occlusion.toText());   // 2026-11-06. 옛 파일에는 없고, 없으면 기본(끔)입니다
+    if (!occlusion.extraIsDefault()) w.s("occlusionExtra", occlusion.extraToText());       // 2026-11-17. 기본값이면 쓰지 않음
+    if (!(propagation == AudioPropagationSettings{})) w.s("propagation", propagation.toText());
+    if (bus != EAudioBus::Sfx) w.s("bus", audioBusName(bus));        // 2026-11-17 사운드 단계 4. 기본값이면 쓰지 않음
+    if (stream) w.b("stream", true);
+    if (cone.enabled()) w.s("cone", cone.toText());
     w.f("reverbSend",  reverbSend);           // 2026-11-06. 없으면 기본값
     w.f("reverbReach", reverbReach);
 }
@@ -141,17 +178,28 @@ bool AudioComponent::readField(const std::string& key, const std::string& value)
     else if (key == "autoPlay") ok = fieldparse::toBool (value, autoPlay);
     else if (key == "attenuation") {
         // 3D 설정이 깨진 것은 소리를 버릴 이유가 아닙니다. 기본 설정으로 두고 알립니다.
+        // fromText 는 결과 전체를 새 값으로 채우므로, 다른 키(silentBeyondMax)로 이미 읽은 값을 읽은 뒤에 되돌려 놓습니다
+        // (줄 순서와 상관없이 지킴).
         AudioAttenuationSettings a;
-        a.silentBeyondMax = attenuation.silentBeyondMax;   // 다른 키라 줄 순서와 상관없이 지킴
-        if (AudioAttenuationSettings::fromText(value, a)) attenuation = a;
-        else ok = false;
+        if (AudioAttenuationSettings::fromText(value, a)) {
+            a.silentBeyondMax = attenuation.silentBeyondMax;
+            attenuation = a;
+        } else ok = false;
     }
     else if (key == "silentBeyondMax") ok = fieldparse::toBool(value, attenuation.silentBeyondMax);
     else if (key == "occlusion") {
         AudioOcclusionSettings o;
-        if (AudioOcclusionSettings::fromText(value, o)) occlusion = o;
-        else ok = false;
+        if (AudioOcclusionSettings::fromText(value, o)) {
+            o.fullThickness = occlusion.fullThickness;   // 다른 키(occlusionExtra)라 줄 순서와 상관없이 지킴
+            o.rotateSamples = occlusion.rotateSamples;
+            occlusion = o;
+        } else ok = false;
     }
+    else if (key == "occlusionExtra") ok = occlusion.extraFromText(value);
+    else if (key == "propagation") ok = AudioPropagationSettings::fromText(value, propagation);
+    else if (key == "bus")         ok = audioBusFromName(value, bus);
+    else if (key == "stream")      ok = fieldparse::toBool(value, stream);
+    else if (key == "cone")        ok = AudioConeSettings::fromText(value, cone);
     else if (key == "reverbSend" || key == "reverbReach") {
         float v;
         const float hi = key == "reverbSend" ? kMaxReverbSend : 1.f;

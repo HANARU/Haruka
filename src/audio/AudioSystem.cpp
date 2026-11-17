@@ -3,6 +3,7 @@
 
 #include "AudioSystem.hpp"
 #include "AudioOcclusion.hpp"
+#include "AudioPropagation.hpp"
 #include "AudioReverb.hpp"
 #include "Verblib.hpp"
 #include "../physics/PhysicsSystem.hpp"
@@ -303,6 +304,16 @@ struct AudioVoice {
     // 가상화(게임 스레드 전용, S3): 들리지 않는 동안 멈춰 두고 재생 위치(원본 샘플률의 프레임)만 셉니다.
     bool   virtualized   = false;
     double virtualCursor = 0.0;
+
+    // 전파(게임 스레드 전용, S1 · S5)
+    glm::vec3 prevPos{ 0.f };
+    glm::vec3 velocity{ 0.f };
+    bool      hasPrev    = false;
+    float     pitch      = 1.f;   // 마지막으로 넣은 도플러 배율(1 이면 넣지 않음)
+    uint32_t  traceCount = 0;     // 표본 회전 위상
+    // 사운드 단계 4
+    bool      budgetCulled = false;   // 보이스 예산 밖(지난 틱 순위): 가상화
+    bool      coneSet      = false;   // 콘을 한 번이라도 넣었는지(끄면 기본으로 되돌림)
 };
 
 // ── 파일 읽기 (2026-10-24) ───────────────────────────────────────────────────────
@@ -677,6 +688,7 @@ void AudioSystem::checkOutput(float dt) {
 }
 
 void AudioSystem::releaseWorldSounds() {
+    releaseOneShots();
     if (!world_) return;
     for (auto& ap : world_->getActors())
         if (auto* ac = ap->getComponent<AudioComponent>(); ac && ac->voice_) {
@@ -713,10 +725,10 @@ void AudioSystem::updateListener() {
     ma_engine_listener_set_world_up(asEngine(engine_), 0, up.x, up.y, up.z);
 }
 
-void AudioSystem::applySettings(AudioVoice& voice, const AudioComponent& ac) {
+void AudioSystem::applySettings(AudioVoice& voice, const AudioComponent& ac) const {
     ma_sound* s = &voice.sound;
     const AudioAttenuationSettings& at = ac.attenuation;
-    ma_sound_set_volume(s, ac.volume);
+    ma_sound_set_volume(s, ac.volume * busVolume(ac.bus));   // 버스 볼륨(사운드 단계 4, 기본 1)
     ma_sound_set_looping(s, ac.loop ? MA_TRUE : MA_FALSE);
     ma_sound_set_spatialization_enabled(s, at.spatialize ? MA_TRUE : MA_FALSE);
     ma_sound_set_attenuation_model(s, (ma_attenuation_model)at.model);
@@ -730,18 +742,22 @@ void AudioSystem::tick(float dt) {
     checkOutput(dt);
     if (!world_) return;
     updateListener();
+    // 청취자 속도(도플러, S1). 처음 틱은 속도 0.
+    if (listenerHasPrev_) listenerVel_ = hprop::trackVelocity(listenerPrevPos_, listenerPos_, dt, listenerVel_);
+    listenerPrevPos_ = listenerPos_;
+    listenerHasPrev_ = true;
     updateReverb(dt);   // 청취자 위치로 잔향 구역을 고르고 리버브를 따라가게(9-5)
 
-    for (auto& actorPtr : world_->getActors()) {
-        Actor* a = actorPtr.get();
-        auto* ac = a->getComponent<AudioComponent>();
+    std::vector<std::pair<AudioVoice*, float>> budget;   // 보이스 예산 순위용(재생 중인 3D 소리와 들리는 크기)
+    for (AudioComponent* ac : world_->componentsOf<AudioComponent>()) {
+        Actor* a = ac->owner;
         // 실효 활성(컴포넌트 enabled && 액터 activeInHierarchy)일 때만 다룹니다. 렌더·틱과
         // 같은 기준이며, 꺼질 때 나오던 소리는 AudioComponent::onDisable 이 멈춥니다.
-        if (!ac || !ac->isLive()) continue;
+        if (!ac->isLive()) continue;
 
         bool created = false;
         if (!ac->voice_ && !ac->filePath.empty() && !ac->loadFailed_) {
-            if (AudioVoice* v = createVoice(ac->filePath.c_str(), ac->loop)) {
+            if (AudioVoice* v = createVoice(ac->filePath.c_str(), ac->loop, ac->stream)) {
                 ac->voice_    = v;
                 ac->audioSys_ = this;
                 created       = true;
@@ -756,9 +772,20 @@ void AudioSystem::tick(float dt) {
         applySettings(*ac->voice_, *ac);
         // 최대 거리 밖 무음(silentBeyondMax): miniaudio 곡선에 배율을 곱해 최대 거리에서 0 이 되게 합니다.
         if (ac->attenuation.spatialize && ac->attenuation.silentBeyondMax)
-            ma_sound_set_volume(&ac->voice_->sound,
-                                ac->volume * hvirt::silenceFactor(ac->attenuation, glm::length(pos - listenerPos_)));
+            ma_sound_set_volume(&ac->voice_->sound, ac->volume * busVolume(ac->bus) *
+                                hvirt::silenceFactor(ac->attenuation, glm::length(pos - listenerPos_)));
+        // 지향성 콘(사운드 단계 4): 액터 앞쪽(-Z). 쓰지 않는 소리는 한 번도 부르지 않습니다(예전 출력 그대로).
+        if (ac->cone.enabled() || ac->voice_->coneSet) {
+            const bool on = ac->cone.enabled();
+            ma_sound_set_cone(&ac->voice_->sound, on ? glm::radians(ac->cone.innerDeg) : 6.2831853f,
+                              on ? glm::radians(std::max(ac->cone.outerDeg, ac->cone.innerDeg)) : 6.2831853f,
+                              on ? ac->cone.outerGain : 0.f);
+            const glm::vec3 fwd = a->worldRotation() * glm::vec3(0.f, 0.f, -1.f);
+            ma_sound_set_direction(&ac->voice_->sound, fwd.x, fwd.y, fwd.z);
+            ac->voice_->coneSet = on;
+        }
         updateOcclusion(*ac->voice_, *ac, pos, dt);
+        updateDoppler(*ac->voice_, *ac, pos, dt);
         updateSend(*ac->voice_, *ac, pos);
         updateHrtf(*ac->voice_, *ac, pos);
         // 위치 · 설정 · 첫 차폐 판정 · HRTF 사슬을 넣은 뒤에 시작해야 첫 소리가 원점에서 나거나 막힌 소리가 열린 채로 튀지 않습니다
@@ -773,7 +800,79 @@ void AudioSystem::tick(float dt) {
         } else {
             updateVirtual(*ac->voice_, *ac, pos, dt);
         }
+        if (ac->attenuation.spatialize && isVoicePlaying(ac->voice_))
+            budget.emplace_back(ac->voice_, audibleGain(*ac->voice_, *ac, pos));
     }
+    applyBudget(budget);
+    tickOneShots();
+}
+
+// ── 사운드 단계 4: 버스 · 마스터 · 보이스 예산 · 한 번 재생 (2026-11-17) ─────────────────────────────
+void AudioSystem::setMasterVolume(float v) {
+    masterVolume_ = std::clamp(std::isfinite(v) ? v : 1.f, 0.f, 2.f);
+    if (engine_) ma_engine_set_volume(asEngine(engine_), masterVolume_);
+}
+
+void AudioSystem::setBusVolume(EAudioBus bus, float v) {
+    const int i = (int)bus;
+    if (i < 0 || i >= kAudioBusCount) return;
+    busVolume_[i] = std::clamp(std::isfinite(v) ? v : 1.f, 0.f, 2.f);
+}
+
+float AudioSystem::busVolume(EAudioBus bus) const {
+    const int i = (int)bus;
+    return (i >= 0 && i < kAudioBusCount) ? busVolume_[i] : 1.f;
+}
+
+// 들리는 크기 순위로 예산 밖의 보이스를 표시합니다. 다음 틱의 updateVirtual 이 표시된 보이스를 가상화하고, 예산 안으로 돌아오면
+// 그 위치에서 이어 냅니다.
+void AudioSystem::applyBudget(std::vector<std::pair<AudioVoice*, float>>& audible) {
+    std::vector<float> gains;
+    gains.reserve(audible.size());
+    for (const auto& [v, g] : audible) gains.push_back(g);
+    std::vector<bool> culled;
+    hprop::rankBudget(gains, voiceBudget_, culled);
+    for (size_t i = 0; i < audible.size(); ++i) audible[i].first->budgetCulled = culled[i];
+}
+
+bool AudioSystem::playOneShot(const char* filePath, const glm::vec3& position, float volume, EAudioBus bus,
+                              const AudioAttenuationSettings& attenuation) {
+    if (!engine_ || !filePath || !*filePath || oneShots_.size() >= kMaxOneShots) return false;
+    const float g = volume * busVolume(bus) *
+                    (attenuation.spatialize ? hvirt::distanceGain(attenuation, glm::length(position - listenerPos_)) : 1.f);
+    if (g < hvirt::kVirtualGain) return false;   // 들리지 않을 소리는 만들지 않음
+    AudioVoice* v = createVoice(filePath, false, false);
+    if (!v) return false;
+    ma_sound* s = &v->sound;
+    ma_sound_set_position(s, position.x, position.y, position.z);
+    ma_sound_set_spatialization_enabled(s, attenuation.spatialize ? MA_TRUE : MA_FALSE);
+    ma_sound_set_attenuation_model(s, (ma_attenuation_model)attenuation.model);
+    ma_sound_set_min_distance(s, attenuation.minDistance);
+    ma_sound_set_max_distance(s, attenuation.maxDistance);
+    ma_sound_set_rolloff(s, attenuation.rolloff);
+    ma_sound_set_volume(s, volume * busVolume(bus));
+    ma_sound_start(s);
+    oneShots_.push_back({ v, position, attenuation, volume, bus });
+    return true;
+}
+
+void AudioSystem::tickOneShots() {
+    for (size_t i = 0; i < oneShots_.size();) {
+        OneShot& o = oneShots_[i];
+        if (ma_sound_at_end(&o.voice->sound)) {
+            destroyVoice(o.voice);
+            oneShots_[i] = oneShots_.back();
+            oneShots_.pop_back();
+            continue;
+        }
+        ma_sound_set_volume(&o.voice->sound, o.volume * busVolume(o.bus));   // 버스 볼륨을 바꾸면 울리는 중에도 따라감
+        ++i;
+    }
+}
+
+void AudioSystem::releaseOneShots() {
+    for (OneShot& o : oneShots_) destroyVoice(o.voice);
+    oneShots_.clear();
 }
 
 void AudioSystem::onBeginPlay() {
@@ -788,6 +887,7 @@ void AudioSystem::onBeginPlay() {
 }
 
 void AudioSystem::onEndPlay() {
+    releaseOneShots();   // 한 번 재생은 플레이에 속함
     // 플레이가 끝나면 남은 소리를 멈춥니다. 에디터는 Stop 에서 월드를 되돌리며 사운드를 이미
     // 정리하므로 보통은 할 일이 없지만, 다른 경로로 끝나도 소리가 남지 않게 합니다.
     if (world_)
@@ -807,7 +907,7 @@ void AudioSystem::onPauseChanged(bool paused) {
     paused_ = paused;
 }
 
-AudioVoice* AudioSystem::createVoice(const char* filePath, bool loop) {
+AudioVoice* AudioSystem::createVoice(const char* filePath, bool loop, bool stream) {
     if (!engine_) return nullptr;
     ma_engine* eng = asEngine(engine_);
     auto v = std::make_unique<AudioVoice>();
@@ -843,7 +943,7 @@ AudioVoice* AudioSystem::createVoice(const char* filePath, bool loop) {
     // 설정은 ma_sound_init_from_file 과 같고(ma_sound_config_init_2), 붙는 곳만 그룹 대신 필터입니다.
     ma_sound_config sc = ma_sound_config_init_2(eng);
     sc.pFilePath                      = filePath;
-    sc.flags                          = MA_SOUND_FLAG_ASYNC;
+    sc.flags                          = MA_SOUND_FLAG_ASYNC | (stream ? MA_SOUND_FLAG_STREAM : 0u);
     sc.pInitialAttachment             = &v->filter.base;
     sc.initialAttachmentInputBusIndex = 0;
     if (const ma_result r = ma_sound_init_ex(eng, &sc, &v->sound); r != MA_SUCCESS) {
@@ -875,8 +975,14 @@ void AudioSystem::playVoice(AudioVoice* voice) {
 // ── 가상화 (S3) ───────────────────────────────────────────────────────────────
 float AudioSystem::audibleGain(const AudioVoice& v, const AudioComponent& ac, const glm::vec3& sourcePos) const {
     if (!ac.attenuation.spatialize) return 1.f;   // 2D 는 가상화하지 않음
-    float g = ac.volume * hvirt::distanceGain(ac.attenuation, glm::length(sourcePos - listenerPos_));
+    float g = ac.volume * busVolume(ac.bus) * masterVolume_ *
+              hvirt::distanceGain(ac.attenuation, glm::length(sourcePos - listenerPos_));
     if (ac.occlusion.enabled) g *= hocc::gain(v.occl, ac.occlusion);
+    if (ac.cone.enabled() && ac.owner) {
+        const glm::vec3 to = listenerPos_ - sourcePos;
+        const float len = glm::length(to);
+        if (len > 1e-4f) g *= hprop::coneGain(ac.cone, ac.owner->worldRotation() * glm::vec3(0.f, 0.f, -1.f), to / len);
+    }
     return g;
 }
 
@@ -888,7 +994,7 @@ void AudioSystem::updateVirtual(AudioVoice& v, const AudioComponent& ac, const g
     if (ma_sound_get_length_in_pcm_frames(s, &length) != MA_SUCCESS || length == 0 ||
         ma_sound_get_data_format(s, nullptr, nullptr, &rate, nullptr, 0) != MA_SUCCESS || rate == 0)
         return;   // 길이 · 샘플률을 아직 모름(비동기 디코딩 초기) → 가상화하지 않음
-    const bool want = hvirt::nextVirtual(v.virtualized, audibleGain(v, ac, sourcePos));
+    const bool want = hvirt::nextVirtual(v.virtualized, audibleGain(v, ac, sourcePos)) || v.budgetCulled;
     if (v.virtualized) {
         // 일시정지(월드 그룹 멈춤) 동안은 진짜 보이스처럼 위치가 멈춰 있습니다.
         if (!paused_) {
@@ -934,6 +1040,8 @@ void AudioSystem::stopVoice(AudioVoice* voice) {
     voice->traced = false;
 }
 
+float AudioSystem::voicePitch(const AudioVoice* voice) const { return voice ? voice->pitch : 1.f; }
+
 float AudioSystem::voiceOcclusion(const AudioVoice* voice) const {
     return voice ? voice->occl : 0.f;
 }
@@ -942,12 +1050,11 @@ float AudioSystem::voiceOcclusion(const AudioVoice* voice) const {
 
 void AudioSystem::updateOcclusion(AudioVoice& v, const AudioComponent& ac, const glm::vec3& sourcePos, float dt) {
     const AudioOcclusionSettings& s = ac.occlusion;
-    VoiceFilterNode& f = v.filter;
     if (!s.enabled || !ac.attenuation.spatialize || !physics_) {
-        // 꺼짐 · 2D · 물리 없음: 바로 열림(필터를 건너뜀). 켜고 끄는 순간의 차이는 들려도 괜찮은 편집 동작입니다.
+        // 꺼짐 · 2D · 물리 없음: 바로 열림. 켜고 끄는 순간의 차이는 들려도 괜찮은 편집 동작입니다. 공기 흡수(S2)는 따로 봅니다.
         v.occl = v.occlTarget = 0.f;
         v.traced = false;
-        f.active.store(false, std::memory_order_relaxed);
+        applyFilter(v, ac, sourcePos, false);
         return;
     }
     bool first = false;
@@ -968,15 +1075,38 @@ void AudioSystem::updateOcclusion(AudioVoice& v, const AudioComponent& ac, const
         }
     }
     if (!first) v.occl = hocc::smooth(v.occl, v.occlTarget, dt, s.smoothTime);
+    applyFilter(v, ac, sourcePos, first);
+}
 
-    if (v.occl <= 0.f) {
+// 보이스 필터 = 차폐(게인 + 저역 통과) 와 공기 흡수(저역 통과, S2)를 합친 것. 두 저역 통과는 차단 주파수가 낮은 쪽 하나로 겁니다
+// (같은 1차 두 단 필터라 둘을 곱하는 것보다 싸고, 차이는 두 차단 주파수가 가까울 때만 3 dB 안쪽). 둘 다 없으면 필터를 건너뜁니다
+// (예전 출력과 비트 단위로 같음).
+void AudioSystem::applyFilter(AudioVoice& v, const AudioComponent& ac, const glm::vec3& sourcePos, bool first) {
+    VoiceFilterNode& f = v.filter;
+    const bool  occluded = ac.occlusion.enabled && v.occl > 0.f;
+    const float airHz    = hprop::airCutoffHz(ac.attenuation, ac.propagation, glm::length(sourcePos - listenerPos_));
+    const bool  air      = airHz < AudioPropagationSettings::kMaxHz - 1.f;
+    if (!occluded && !air) {
         f.active.store(false, std::memory_order_relaxed);
         return;
     }
-    f.gain.store(hocc::gain(v.occl, s), std::memory_order_relaxed);
-    f.coef.store(hocc::onePoleCoef(hocc::cutoffHz(v.occl, s), (float)kSampleRate), std::memory_order_relaxed);
+    const float occHz = occluded ? hocc::cutoffHz(v.occl, ac.occlusion) : AudioPropagationSettings::kMaxHz;
+    f.gain.store(occluded ? hocc::gain(v.occl, ac.occlusion) : 1.f, std::memory_order_relaxed);
+    f.coef.store(hocc::onePoleCoef(std::min(occHz, airHz), (float)kSampleRate), std::memory_order_relaxed);
     if (first) f.snap.store(true, std::memory_order_relaxed);
     f.active.store(true, std::memory_order_release);
+}
+
+void AudioSystem::updateDoppler(AudioVoice& v, const AudioComponent& ac, const glm::vec3& sourcePos, float dt) {
+    if (v.hasPrev) v.velocity = hprop::trackVelocity(v.prevPos, sourcePos, dt, v.velocity);
+    v.prevPos = sourcePos;
+    v.hasPrev = true;
+    const float factor = ac.attenuation.spatialize ? ac.propagation.dopplerFactor : 0.f;
+    const float pitch  = hprop::dopplerPitch(listenerPos_, listenerVel_, sourcePos, v.velocity, factor);
+    if (pitch != v.pitch) {   // 바뀔 때만 넣음(도플러를 쓰지 않는 소리는 한 번도 부르지 않음)
+        ma_sound_set_pitch(&v.sound, pitch);
+        v.pitch = pitch;
+    }
 }
 
 // 청취자 → 음원(반지름이 있으면 음원 둘레 표본점마다 청취자 → 표본 → 음원)이 막혔는지 보고 막힌 표본의 비율을 돌려줍니다.
@@ -993,13 +1123,22 @@ float AudioSystem::traceOcclusion(const AudioComponent& ac, const glm::vec3& sou
     }
     for (Actor* p = listenerActor_; p; p = p->getParent()) ignore_.push_back(p);
 
-    hocc::samplePoints(listenerPos_, sourcePos, ac.occlusion.radius, samples_);
-    int blocked = 0;
+    const AudioOcclusionSettings& s = ac.occlusion;
+    const float phase = (s.rotateSamples && ac.voice_) ? hprop::ringPhase(ac.voice_->traceCount++) : 0.f;
+    hocc::samplePoints(listenerPos_, sourcePos, s.radius, samples_, phase);
+    float blocked = 0.f;
     for (size_t k = 0; k < samples_.size(); ++k) {
         const glm::vec3& p = samples_[k];
-        if (segmentBlocked(listenerPos_, p) || (k > 0 && segmentBlocked(p, sourcePos))) ++blocked;
+        if (s.fullThickness > 0.f) {
+            // 두께 투과(S4): 청취자 → 표본(→ 음원) 길을 막은 두께의 합으로 일부 막힘을 정합니다.
+            float th = segmentThickness(listenerPos_, p);
+            if (k > 0) th += segmentThickness(p, sourcePos);
+            blocked += hprop::blockFromThickness(th, s.fullThickness);
+        } else if (segmentBlocked(listenerPos_, p) || (k > 0 && segmentBlocked(p, sourcePos))) {
+            blocked += 1.f;
+        }
     }
-    return (float)blocked / (float)samples_.size();
+    return blocked / (float)samples_.size();
 }
 
 // ── 잔향 (2026-11-06, Docs/Audio_Design.md 9-5) ────────────────────────────────────────
@@ -1012,13 +1151,12 @@ void AudioSystem::updateReverb(float dt) {
     if (!r) return;
     const ReverbZoneComponent* best = nullptr;
     float bestW = 0.f;
-    for (auto& ap : world_->getActors()) {
-        const auto* z = ap->getComponent<ReverbZoneComponent>();
-        if (!z || !z->isLive()) continue;
+    for (const ReverbZoneComponent* z : world_->componentsOf<ReverbZoneComponent>()) {
+        if (!z->isLive()) continue;
         const float w = z->weightAt(listenerPos_);
         if (!(w > 0.f)) continue;
         const bool better = !best || z->priority > best->priority
-            || (z->priority == best->priority && (w > bestW || (w == bestW && ap->id < best->owner->id)));
+            || (z->priority == best->priority && (w > bestW || (w == bestW && z->owner->id < best->owner->id)));
         if (better) { best = z; bestW = w; }
     }
     if (best) {
@@ -1229,6 +1367,18 @@ bool AudioSystem::segmentBlocked(const glm::vec3& from, const glm::vec3& to) con
     if (len <= 2.f * kEnd) return false;
     PhysicsSystem::RaycastHit hit;
     return physics_->raycast(from, d, len - kEnd, hit, ignore_);
+}
+
+float AudioSystem::segmentThickness(const glm::vec3& from, const glm::vec3& to) const {
+    const glm::vec3 d   = to - from;
+    const float     len = glm::length(d);
+    constexpr float kEnd = 1e-3f;
+    if (len <= 2.f * kEnd) return 0.f;
+    PhysicsSystem::RaycastHit a, b;
+    if (!physics_->raycast(from, d, len - kEnd, a, ignore_)) return 0.f;
+    // 반대쪽에서 처음 닿는 곳까지. 반대쪽에서 못 맞추면(끝점이 물체 안) 들어간 곳부터 끝까지가 두께입니다.
+    const float back = physics_->raycast(to, -d, len - kEnd, b, ignore_) ? b.distance : 0.f;
+    return std::max(0.f, len - a.distance - back);
 }
 
 bool AudioSystem::isVoicePlaying(const AudioVoice* voice) const {

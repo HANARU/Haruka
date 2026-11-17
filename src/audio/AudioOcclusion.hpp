@@ -41,7 +41,9 @@ inline float smooth(float current, float target, float dt, float tau) {
 
 // 음원 쪽 표본점: 중심(음원 위치) 하나와, 청취자 → 음원 축에 수직인 반지름 radius 원판 둘레의 kRingSamples 개.
 // 반지름이 0 이거나 청취자와 음원이 겹치면 중심만 넣습니다. out 은 비우고 채웁니다.
-inline void samplePoints(const glm::vec3& listener, const glm::vec3& source, float radius, std::vector<glm::vec3>& out) {
+// phase(라디안)는 원판 표본의 시작 각입니다(S5 표본 회전, 0 = 예전 자리).
+inline void samplePoints(const glm::vec3& listener, const glm::vec3& source, float radius, std::vector<glm::vec3>& out,
+                         float phase = 0.f) {
     out.clear();
     out.push_back(source);
     const glm::vec3 axis = source - listener;
@@ -53,7 +55,7 @@ inline void samplePoints(const glm::vec3& listener, const glm::vec3& source, flo
     const glm::vec3 u   = glm::normalize(glm::cross(d, ref));
     const glm::vec3 v   = glm::cross(d, u);
     for (int k = 0; k < kRingSamples; ++k) {
-        const float t = 2.f * kPi * (float)k / (float)kRingSamples;
+        const float t = phase + 2.f * kPi * (float)k / (float)kRingSamples;
         out.push_back(source + radius * (std::cos(t) * u + std::sin(t) * v));
     }
 }

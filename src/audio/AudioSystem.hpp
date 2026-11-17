@@ -2,6 +2,7 @@
 #include "../core/IEngineModule.hpp"
 #include "AudioReverb.hpp"
 #include "AudioHrtf.hpp"
+#include "AudioPropagation.hpp"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -57,6 +58,8 @@ public:
     void setPhysics(const PhysicsSystem* p) { physics_ = p; }
     // 보이스의 지금 차폐 정도(0 = 열림, 1 = 완전히 막힘, 평활 뒤 값). 차폐가 꺼졌거나 보이스가 없으면 0 입니다.
     float voiceOcclusion(const AudioVoice* voice) const;
+    // 지금 넣은 도플러 음높이 배율(S1, 쓰지 않으면 1). 시험 · 디버그용.
+    float voicePitch(const AudioVoice* voice) const;
 
     // 잔향(2026-11-06, Docs/Audio_Design.md 9-5). 공용 리버브 하나가 월드 그룹 안에 있고, 청취자가 있는 잔향 구역이 매개변수를 정합니다.
     // 구역 밖이면 크기가 0 으로 줄어든 뒤 리버브를 멈춥니다(그동안 CPU 를 쓰지 않고, 출력이 잔향이 없던 때와 비트 단위로 같음).
@@ -96,7 +99,26 @@ public:
 
     // 보이스를 만들어 월드 그룹에 붙이고, 정리합니다. 만들기에 실패하면 이유를 로그로 남기고 nullptr 를 돌려줍니다.
     // 사슬은 ma_sound → 보이스 필터 → (HRTF 노드) → 월드 그룹입니다(AudioSystem.cpp 의 "음원별 노드 사슬").
-    AudioVoice* createVoice (const char* filePath, bool loop);
+    // stream 이면 통째로 디코딩하지 않고 재생하며 풉니다(긴 음악, MA_SOUND_FLAG_STREAM).
+    AudioVoice* createVoice (const char* filePath, bool loop, bool stream = false);
+
+    // ── 사운드 단계 4(2026-11-17): 버스 · 마스터 볼륨 · 한 번 재생 · 보이스 예산 ──────────────────────────────
+    // 마스터는 엔진 출력 전체(UI 소리 포함), 버스는 그 버스의 소리에 곱합니다. 0 ~ 2, 기본 1(예전 소리 그대로).
+    void  setMasterVolume(float v);
+    float masterVolume() const { return masterVolume_; }
+    void  setBusVolume(EAudioBus bus, float v);
+    float busVolume(EAudioBus bus) const;
+    // 한 번 재생: 위치에서 소리를 한 번 내고 끝나면 스스로 정리합니다(총소리 · 발소리 · 부딪힘). 엔진이 소유하므로 컴포넌트가
+    // 필요 없습니다. 차폐 · HRTF · 잔향은 걸지 않습니다(짧은 효과음용). 들리지 않을 만큼 멀거나(−60 dB 아래) 동시에
+    // kMaxOneShots 개가 이미 울리면 내지 않고 false. 월드 그룹에 붙어 일시정지를 따릅니다.
+    bool  playOneShot(const char* filePath, const glm::vec3& position, float volume = 1.f, EAudioBus bus = EAudioBus::Sfx,
+                      const AudioAttenuationSettings& attenuation = {});
+    size_t oneShotCount() const { return oneShots_.size(); }
+    static constexpr size_t kMaxOneShots = 32;
+    // 보이스 예산: 동시에 실제로 섞는 3D 소리 수의 상한. 넘으면 들리는 크기가 작은 것부터 가상화합니다(재생 위치는 셈, S3 와
+    // 같은 길). 0 = 제한 없음. 기본 64(Quest 에서 HRTF · 필터를 거는 보이스가 늘면 이 값으로 비용을 묶음).
+    void     setVoiceBudget(uint32_t n) { voiceBudget_ = n; }
+    uint32_t voiceBudget() const { return voiceBudget_; }
     void        destroyVoice(AudioVoice* voice);
 
     // headless 일 때만 동작합니다. 스테레오 interleaved float 를 frameCount 프레임 채웁니다.
@@ -140,15 +162,35 @@ private:
     void  updateOcclusion(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos, float dt);
     float traceOcclusion(const AudioComponent& ac, const glm::vec3& sourcePos);   // 막힌 표본의 비율
     bool  segmentBlocked(const glm::vec3& from, const glm::vec3& to) const;
+    // 선분을 막은 물체의 두께(m, S4): 양쪽 끝에서 레이를 쏴 처음 닿는 거리를 빼서 구합니다. 벽이 여럿이면 그 사이 공간까지 두께로
+    // 칩니다(보수적으로 더 막힘). 막히지 않으면 0.
+    float segmentThickness(const glm::vec3& from, const glm::vec3& to) const;
+    // 차폐 정도 · 공기 흡수를 합쳐 보이스 필터 값을 넣습니다(S2). first 면 보간 없이 그 값으로 시작.
+    void  applyFilter(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos, bool first);
+    // 도플러(S1): 위치 차분으로 속도를 추정해 음높이 배율을 넣습니다.
+    void  updateDoppler(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos, float dt);
     // 가상화(S3): 예상 게인과, 그에 따라 멈추고 · 위치를 세고 · 이어 내기.
     float audibleGain(const AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos) const;
     void  updateVirtual(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos, float dt);
     const PhysicsSystem* physics_ = nullptr;
     glm::vec3            listenerPos_{ 0.f };
+    glm::vec3            listenerPrevPos_{ 0.f };   // 도플러용 청취자 속도 추정(S1)
+    glm::vec3            listenerVel_{ 0.f };
+    bool                 listenerHasPrev_ = false;
     Actor*               listenerActor_ = nullptr;   // 레이에서 뺄 청취자 쪽 액터(활성 카메라의 액터)
     std::vector<Actor*>    ignore_;                   // 판정마다 다시 채우는 제외 목록(할당을 재사용)
     std::vector<glm::vec3> samples_;
     uint32_t               voiceSerial_ = 0;          // 판정 시점을 엇갈리게 하는 일련번호
+
+    // 사운드 단계 4
+    float    masterVolume_ = 1.f;
+    float    busVolume_[kAudioBusCount] = { 1.f, 1.f, 1.f, 1.f, 1.f };
+    uint32_t voiceBudget_  = 64;
+    struct OneShot { AudioVoice* voice; glm::vec3 pos; AudioAttenuationSettings at; float volume; EAudioBus bus; };
+    std::vector<OneShot> oneShots_;
+    void tickOneShots();
+    void releaseOneShots();
+    void applyBudget(std::vector<std::pair<AudioVoice*, float>>& audible);
 
     // 잔향(2026-11-06): 구역 고르기 · 매개변수 평활 · 리버브 시작과 멈춤, 소리마다 센드 양.
     void updateReverb(float dt);
@@ -177,7 +219,7 @@ private:
 
     // 컴포넌트 값(볼륨·Loop·3D 설정)을 사운드에 반영합니다. 매 틱 부르므로 플레이 중에
     // 디테일 패널에서 바꾼 값도 바로 적용됩니다.
-    static void applySettings(AudioVoice& voice, const AudioComponent& ac);
+    void applySettings(AudioVoice& voice, const AudioComponent& ac) const;
     // 월드에 남은 컴포넌트 사운드를 전부 정리하고 컴포넌트의 포인터를 비웁니다.
     void releaseWorldSounds();
 

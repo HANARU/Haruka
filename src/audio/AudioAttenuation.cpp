@@ -1,4 +1,5 @@
 #include "AudioAttenuation.hpp"
+#include "AudioPropagation.hpp"
 #include "../core/TextFloat.hpp"
 
 #include <array>
@@ -105,5 +106,59 @@ bool AudioOcclusionSettings::fromText(std::string_view text, AudioOcclusionSetti
     if (!(s.radius >= 0.f && s.radius <= kMaxRadius))         return false;
 
     out = s;
+    return true;
+}
+
+// ── 차폐 추가 값 · 전파 설정 (2026-11-17, S1 · S2 · S4 · S5) ──────────────────────────────
+
+std::string AudioOcclusionSettings::extraToText() const {
+    return floatToText(fullThickness) + " " + (rotateSamples ? "1" : "0");
+}
+
+bool AudioOcclusionSettings::extraFromText(std::string_view text) {
+    const std::vector<std::string> toks = splitTokens(text);
+    if (toks.size() != 2) return false;
+    float th = 0.f;
+    if (!parseFloatToken(toks[0], th) || !(th >= 0.f && th <= kMaxThickness)) return false;
+    bool rot = false;
+    if      (toks[1] == "1") rot = true;
+    else if (toks[1] == "0") rot = false;
+    else return false;
+    fullThickness = th;
+    rotateSamples = rot;
+    return true;
+}
+
+std::string AudioPropagationSettings::toText() const {
+    return floatToText(dopplerFactor) + " " + (airAbsorption ? "1" : "0") + " " + floatToText(airAbsorptionHz);
+}
+
+bool AudioPropagationSettings::fromText(std::string_view text, AudioPropagationSettings& out) {
+    const std::vector<std::string> toks = splitTokens(text);
+    if (toks.size() != 3) return false;
+    AudioPropagationSettings s;
+    if (!parseFloatToken(toks[0], s.dopplerFactor) || !(s.dopplerFactor >= 0.f && s.dopplerFactor <= kMaxDoppler)) return false;
+    if      (toks[1] == "1") s.airAbsorption = true;
+    else if (toks[1] == "0") s.airAbsorption = false;
+    else return false;
+    if (!parseFloatToken(toks[2], s.airAbsorptionHz) || !(s.airAbsorptionHz >= kMinHz && s.airAbsorptionHz <= kMaxHz)) return false;
+    out = s;
+    return true;
+}
+
+std::string AudioConeSettings::toText() const {
+    return floatToText(innerDeg) + " " + floatToText(outerDeg) + " " + floatToText(outerGain);
+}
+
+bool AudioConeSettings::fromText(std::string_view text, AudioConeSettings& out) {
+    const std::vector<std::string> toks = splitTokens(text);
+    if (toks.size() != 3) return false;
+    AudioConeSettings c;
+    if (!parseFloatToken(toks[0], c.innerDeg) || !parseFloatToken(toks[1], c.outerDeg) || !parseFloatToken(toks[2], c.outerGain))
+        return false;
+    if (!(c.innerDeg >= 0.f && c.innerDeg <= 360.f) || !(c.outerDeg >= c.innerDeg && c.outerDeg <= 360.f) ||
+        !(c.outerGain >= 0.f && c.outerGain <= 1.f))
+        return false;
+    out = c;
     return true;
 }
