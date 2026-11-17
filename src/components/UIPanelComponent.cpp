@@ -1,4 +1,5 @@
 #include "UIPanelComponent.hpp"
+#include "../math/Damping.hpp"
 #include "../core/Actor.hpp"
 #include "../core/ComponentFields.hpp"
 #include "../core/Reflect.hpp"
@@ -152,9 +153,11 @@ bool UIPanelComponent::stepFollow(const glm::vec3& headPos, const glm::quat& hea
     }
     if (!followMoving_) return false;
 
-    const float k = 1.f - std::exp(-kFollowRate * std::max(dt, 0.f));
-    const glm::vec3 pos = glm::mix(cur, target.position, k);
-    const glm::quat rot = glm::slerp(owner->worldRotation(), target.rotation, k);
+    // 프레임률 독립 지수 감쇠(공통 수학 hmath::damp, 시간 상수 1 / kFollowRate). 예전 식 1 − exp(−rate·dt) 와 같은 값입니다.
+    const float halfLife = hmath::halfLifeFromTau(1.f / kFollowRate);
+    const float dts = std::max(dt, 0.f);
+    const glm::vec3 pos = hmath::damp(cur, target.position, halfLife, dts);
+    const glm::quat rot = hmath::dampRotation(owner->worldRotation(), target.rotation, halfLife, dts);
     owner->setWorldPosition(pos);
     owner->setWorldRotation(rot);
     if (glm::length(target.position - pos) < 0.01f) followMoving_ = false;   // 1 cm 안이면 멈춤

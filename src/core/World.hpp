@@ -44,7 +44,34 @@ public:
     std::vector<LightComponent*>               getLights()        const;
     const std::vector<std::unique_ptr<Actor>>& getActors()        const { return actors; }
 
+    // 정확한 형 T 의 컴포넌트를 액터 순서대로 모은 목록입니다(액터마다 getComponent<T> 가 돌려주는 첫 것, 2026-11-18 성능
+    // 안정화 1-5). 렌더러 · 물리 · 소리가 프레임마다 액터 전체를 훑던 자리에 씁니다. 구조 버전(hcore::gStructureVersion)이
+    // 바뀔 때만 다시 모읍니다. 활성 · 켜짐은 거르지 않습니다(부르는 쪽이 지금처럼 거름).
+    // 목록을 도는 동안 액터 · 컴포넌트를 만들거나 지우지 마십시오(다시 모으면 도는 목록이 바뀌고, 지운 컴포넌트는 매달린
+    // 포인터가 됩니다). 그런 일을 하는 루프는 getActors() 를 쓰십시오.
+    template<class T>
+    const std::vector<T*>& componentsOf() const {
+        std::unique_ptr<TypeListBase>& slot = typeLists_[std::type_index(typeid(T))];
+        if (!slot) slot = std::make_unique<TypeList<T>>();
+        auto* list = static_cast<TypeList<T>*>(slot.get());
+        if (list->version != hcore::gStructureVersion) {
+            list->items.clear();
+            for (const auto& a : actors)
+                if (T* c = a->getComponent<T>()) list->items.push_back(c);
+            list->version = hcore::gStructureVersion;
+        }
+        return list->items;
+    }
+
 private:
+    struct TypeListBase {
+        virtual ~TypeListBase() = default;
+        uint64_t version = 0;   // 0 = 아직 모으지 않음(구조 버전은 1 부터)
+    };
+    template<class T>
+    struct TypeList : TypeListBase { std::vector<T*> items; };
+    mutable std::unordered_map<std::type_index, std::unique_ptr<TypeListBase>> typeLists_;
+
     std::vector<std::unique_ptr<Actor>> actors;
     std::unordered_map<uint64_t, Actor*> idMap_;
     std::vector<Actor*>                  pendingDestroy_;

@@ -276,6 +276,7 @@ std::vector<std::pair<std::string, std::string>> HInputSystem::defaultBindings()
         { "input.axis.MoveY",       "keys:W/S, xr:left.stick.y" },
         { "input.axis.MoveUp",      "keys:E/Q" },
         { "input.axis.TurnX",       "xr:right.stick.x" },
+        { "input.axis.Teleport",    "xr:right.stick.y" },
         { "input.axis.LookX",       "mouse:x" },
         { "input.axis.LookY",       "mouse:y" },
         { "input.action.GrabLeft",  "xr:left.grip" },

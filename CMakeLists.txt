@@ -284,6 +284,7 @@ set(RUNTIME_SOURCES
     src/components/UIPanelComponent.cpp
     src/components/UIPanelPointer.cpp
     src/components/HandPoseComponent.cpp
+    src/xr/GraspSolver.cpp
     src/renderer/Renderer.cpp
     src/renderer/Renderer_swap.cpp
     src/renderer/Renderer_render.cpp
@@ -712,6 +713,16 @@ if(NOT ANDROID)
         set_target_properties(HarukaStereoTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 공통 수학 테스트(src/math, 2026-11-17) -----------------------------
+    # 광선 · 도형 판정, 감쇠 · 스프링, 곡선, 시드 난수 · 노이즈, 포즈 필터, 두 뼈 IK 를 화면 없이 검산합니다. 헤더만 씁니다.
+    add_executable(HarukaMathTest tests/MathTest.cpp)
+    target_link_libraries(HarukaMathTest PRIVATE glm::glm)
+    target_include_directories(HarukaMathTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaMathTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaMathTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 자동 인스턴싱 테스트 ------------------------------------------------
     # 같은 지오메트리 · 머티리얼의 묶기와 transform 행 배정을 화면 없이 검산합니다(DEF-16).
     add_executable(HarukaBatchTest tests/DrawBatchingTest.cpp)
@@ -982,6 +993,10 @@ if(NOT ANDROID)
         src/components/RigidBodyComponent.cpp
         src/components/XrComponents.cpp
         src/components/CameraComponent.cpp
+        src/components/HandPoseComponent.cpp
+        src/components/SkinnedMeshComponent.cpp
+        src/assets/Skin.cpp
+        src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
         src/core/World.cpp
         src/core/Actor.cpp
@@ -1034,13 +1049,18 @@ if(NOT ANDROID)
         src/components/SkinnedMeshComponent.cpp
         src/components/HandPoseComponent.cpp
         src/components/CameraComponent.cpp
+        src/components/XrComponents.cpp
+        src/components/RigidBodyComponent.cpp
+        src/physics/PhysicsSystem.cpp
+        src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
         src/core/World.cpp
         src/core/Actor.cpp
         src/core/Component.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaHandTest PRIVATE HarukaVfs tinygltf glm::glm)
+    # 자동 맞춤 쥐기(손 쥐기 D)는 잡기(XrComponents) · Jolt 바디 판정을 함께 시험합니다.
+    target_link_libraries(HarukaHandTest PRIVATE HarukaVfs tinygltf glm::glm Jolt)
     target_include_directories(HarukaHandTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
     target_compile_definitions(HarukaHandTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     if(MSVC)
@@ -1053,7 +1073,7 @@ if(NOT ANDROID)
     set(HARUKA_TESTS HarukaPakTest HarukaGltfTest HarukaGeometryTest HarukaActorTest HarukaCommandTest HarukaActorUndoTest
         HarukaLogTest HarukaAudioTest HarukaSlateTest HarukaPhysicsTest HarukaStereoTest HarukaInputTest HarukaBatchTest
         HarukaRenderExtTest HarukaSceneTest HarukaLightTest HarukaAssetCacheTest HarukaSceneDocTest HarukaEditCmdTest
-        HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest)
+        HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest HarukaMathTest)
     if(WIN32)
         list(APPEND HARUKA_TESTS HarukaVkImportTest)
     endif()
@@ -1075,6 +1095,7 @@ if(NOT ANDROID)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
     add_test(NAME stereo_views         COMMAND HarukaStereoTest)
+    add_test(NAME math_common          COMMAND HarukaMathTest)
     add_test(NAME xr_input             COMMAND HarukaInputTest)
     add_test(NAME draw_batching        COMMAND HarukaBatchTest)
     add_test(NAME render_extensions    COMMAND HarukaRenderExtTest)

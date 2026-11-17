@@ -341,3 +341,13 @@ B 단계에서 헤드셋 확인용으로 장갑으로 바꿨고(10절), 기준 P
 | 헤드셋 | 통과(2026-11-16, Quest Pro · Air Link, 8항목 모두 정상, Touch 바인딩 재시도 경고 0 · 검증 0). 항목은 Editor_QA_Checklist.md "헤드셋 확인 (2026-11-07 손 쥐기 A · B 단계)" |
 
 Touch Pro 의 트리거 굽힘 · 밀기 · 근접(`curl_fb` · `slide_fb` · `proximity_fb`)은 아직 쓰지 않습니다. 헤드셋에서 검지 표현이 부족하면 더합니다.
+
+## 11. C · D 단계 구현 결과 (2026-11-17)
+
+- **C 볼록 껍질 질의**: `PhysicsSystem::raycastBody`(바디 하나의 셰이프에만 광선) · `capsulePenetration`(손가락 마디 캡슐과 바디의
+  최대 침투 깊이). 다른 바디는 보지 않으므로 잡은 물체에만 닿는지 봅니다.
+- **D 자동 맞춤**: `xr/GraspSolver`(순수 함수 `hgrasp::solve`, 손가락마다 굽힘 16단계 + 이분 3번, 손바닥이 닿고 엄지와 다른 손가락
+  하나 이상이 닿아야 성공), `HandPoseComponent::setGrasp` · `clearGrasp`(0.1 초 inOutCubic 섞기), `GrabInteractorComponent.autoFit`
+  (기본 켬): 잡는 순간 손바닥 노멀 방향으로 표면을 찾아(12 cm) 물체를 손바닥에 맞추고(최대 8 cm) 손가락을 물체 모양대로 감쌉니다.
+  맞추지 못하면 예전처럼 상대 자세를 지키는 잡기입니다.
+- **확인**: `hand_skinning` 89 → 108(장갑 + Jolt: 공을 2 cm 당김, 다섯 손가락 닿음, 침투 1.6 mm). 헤드셋 확인은 남았습니다.

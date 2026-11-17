@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Actor.hpp"
 #include "../core/Transform.hpp"
+#include "../math/Geometry.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -36,7 +37,7 @@ inline Transform localForWorld(const Actor* parent, const glm::vec3& worldPos, c
         t.setScale(worldScale);
         return t;
     }
-    t.setPosition(glm::vec3(glm::inverse(parent->worldMatrix()) * glm::vec4(worldPos, 1.f)));
+    t.setPosition(glm::vec3(hmath::affineInverse(parent->worldMatrix()) * glm::vec4(worldPos, 1.f)));
     t.setRotation(glm::normalize(glm::inverse(parent->worldRotation()) * worldRot));
     const glm::vec3 ps = parent->worldScale();
     auto div = [](float a, float b) { return std::abs(b) > 1e-12f ? a / b : a; };

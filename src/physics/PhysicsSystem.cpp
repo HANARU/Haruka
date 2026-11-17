@@ -17,6 +17,7 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
@@ -27,6 +28,7 @@
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Body/BodyFilter.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -91,6 +93,10 @@ struct JoltImpl {
     std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
     std::unique_ptr<JPH::JobSystemThreadPool> jobSystem;
     std::unique_ptr<JPH::PhysicsSystem>     physics;
+    // 캐릭터 컨트롤러(createCharacter). physics 보다 먼저 지워야 하므로 shutdown 이 비웁니다.
+    struct Character { JPH::Ref<JPH::CharacterVirtual> ch; float stepHeight = 0.35f; };
+    std::unordered_map<uint32_t, Character> characters;
+    uint32_t                                nextCharacter = 1;
 };
 
 static constexpr JPH::uint kBodyMutexes    = 0;     // auto-detect
@@ -119,6 +125,7 @@ void PhysicsSystem::startup() {
         impl_->bpLayerInterface, impl_->objVsBpFilter, impl_->objLayerPairFilter);
     impl_->physics->SetGravity(JPH::Vec3(0.f, -9.81f, 0.f));
 
+    current_ = this;
     HLOG(LogPhysics, Log) << "Jolt initialized";
 }
 
@@ -138,6 +145,8 @@ void PhysicsSystem::shutdown() {
         }
     }
 
+    impl_->characters.clear();
+    if (current_ == this) current_ = nullptr;
     impl_.reset();
     JPH::UnregisterTypes();
     delete JPH::Factory::sInstance;
@@ -263,6 +272,13 @@ void PhysicsSystem::setLinearVelocity(uint32_t body, const glm::vec3& v) {
     impl_->physics->GetBodyInterface().SetLinearVelocity(JPH::BodyID(body), toJ(v));
 }
 
+void PhysicsSystem::setGravityFactor(uint32_t body, float factor) {
+    if (!impl_ || body == 0xFFFFFFFFu) return;
+    auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::BodyID id(body);
+    if (bi.IsAdded(id)) bi.SetGravityFactor(id, factor);
+}
+
 void PhysicsSystem::setMotionKinematic(uint32_t body, bool kinematic) {
     if (!impl_ || body == 0xFFFFFFFFu) return;
     auto& bi = impl_->physics->GetBodyInterface();
@@ -351,6 +367,111 @@ bool PhysicsSystem::raycast(const glm::vec3& origin, const glm::vec3& dir, float
     return true;
 }
 
+bool PhysicsSystem::raycastBody(uint32_t body, const glm::vec3& origin, const glm::vec3& dir, float maxDistance,
+                                RaycastHit& out) const {
+    out = {};
+    if (!impl_ || body == 0xFFFFFFFFu || !(maxDistance > 0.f)) return false;
+    const float len = glm::length(dir);
+    if (len < 1e-8f) return false;
+    auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::BodyID id(body);
+    if (!bi.IsAdded(id)) return false;
+    const JPH::TransformedShape ts = bi.GetTransformedShape(id);
+    const glm::vec3 d = dir / len;
+    const JPH::RRayCast ray{ toJR(origin), toJ(d * maxDistance) };
+    JPH::RayCastResult hit;
+    if (!ts.CastRay(ray, hit)) return false;
+    out.distance = hit.mFraction * maxDistance;
+    out.point    = origin + d * out.distance;
+    out.normal   = toG(ts.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, ray.GetPointOnRay(hit.mFraction)));
+    return true;
+}
+
+uint32_t PhysicsSystem::createCharacter(const CharacterDesc& d, const glm::vec3& feet) {
+    if (!impl_) return 0;
+    const float r  = std::clamp(d.radius, 0.05f, 2.f);
+    const float h  = std::max(d.height, 2.f * r + 0.02f);
+    // 발이 원점에 오도록 캡슐을 반 높이만큼 올립니다(Jolt 캐릭터 예제와 같은 구성).
+    JPH::RotatedTranslatedShapeSettings shape(JPH::Vec3(0.f, 0.5f * h, 0.f), JPH::Quat::sIdentity(),
+                                              new JPH::CapsuleShape(0.5f * h - r, r));
+    auto made = shape.Create();
+    if (made.HasError()) {
+        HLOG(LogPhysics, Warning) << "Character shape failed: " << made.GetError().c_str();
+        return 0;
+    }
+    JPH::Ref<JPH::CharacterVirtualSettings> s = new JPH::CharacterVirtualSettings();
+    s->mShape          = made.Get();
+    s->mUp             = JPH::Vec3::sAxisY();
+    s->mMaxSlopeAngle  = glm::radians(std::clamp(d.maxSlopeDeg, 0.f, 89.f));
+    // 아래 반구에 닿은 접촉만 받침으로 봅니다(캡슐 옆면이 턱에 걸린 것은 바닥이 아님).
+    s->mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -r);
+    const uint32_t handle = impl_->nextCharacter++;
+    impl_->characters[handle] = { new JPH::CharacterVirtual(s, toJR(feet), JPH::Quat::sIdentity(), impl_->physics.get()),
+                                  std::clamp(d.stepHeight, 0.f, h) };
+    return handle;
+}
+
+void PhysicsSystem::destroyCharacter(uint32_t handle) {
+    if (impl_) impl_->characters.erase(handle);
+}
+
+bool PhysicsSystem::moveCharacter(uint32_t handle, const glm::vec3& feet, const glm::vec3& velocity, float dt,
+                                  CharacterMove& out, std::span<Actor* const> ignore) {
+    out = {};
+    out.position = feet;
+    if (!impl_) return false;
+    auto it = impl_->characters.find(handle);
+    if (it == impl_->characters.end()) return false;
+    JPH::CharacterVirtual& c = *it->second.ch;
+    c.SetPosition(toJR(feet));
+    c.SetLinearVelocity(toJ(velocity));
+    if (dt > 0.f) {
+        JPH::CharacterVirtual::ExtendedUpdateSettings us;
+        us.mWalkStairsStepUp = JPH::Vec3(0.f, it->second.stepHeight, 0.f);
+        const IgnoreActorsFilter bodies(ignore);
+        c.ExtendedUpdate(dt, impl_->physics->GetGravity(), us, JPH::BroadPhaseLayerFilter{}, JPH::ObjectLayerFilter{},
+                         bodies, JPH::ShapeFilter{}, *impl_->tempAllocator);
+    }
+    out.position     = toG(c.GetPosition());
+    out.onGround     = c.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround;
+    out.groundNormal = out.onGround ? toG(c.GetGroundNormal()) : glm::vec3(0.f, 1.f, 0.f);
+    return true;
+}
+
+float PhysicsSystem::capsulePenetration(uint32_t body, const glm::vec3& a, const glm::vec3& b, float radius) const {
+    if (!impl_ || body == 0xFFFFFFFFu || !(radius > 0.f)) return -1.f;
+    auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::BodyID id(body);
+    if (!bi.IsAdded(id)) return -1.f;
+    const JPH::TransformedShape ts = bi.GetTransformedShape(id);
+    const glm::vec3 ab  = b - a;
+    const float     len = glm::length(ab);
+    // 캡슐은 Y 축을 따라 놓이므로 Y 를 a → b 로 돌립니다.
+    JPH::Quat rot = JPH::Quat::sIdentity();
+    if (len > 1e-6f) {
+        const glm::vec3 y = ab / len;
+        const float c = y.y;
+        if (c < -0.999999f) rot = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::JPH_PI);
+        else {
+            const glm::vec3 axis = glm::cross(glm::vec3(0.f, 1.f, 0.f), y);
+            rot = JPH::Quat(axis.x, axis.y, axis.z, 1.f + c).Normalized();
+        }
+    }
+    const glm::vec3 center = 0.5f * (a + b);
+    JPH::SphereShape  sphere(radius);
+    JPH::CapsuleShape capsule(std::max(0.5f * len, 1e-4f), radius);
+    sphere.SetEmbedded();
+    capsule.SetEmbedded();
+    const JPH::Shape* probe = len > 1e-4f ? static_cast<const JPH::Shape*>(&capsule) : static_cast<const JPH::Shape*>(&sphere);
+    JPH::CollideShapeSettings settings;
+    JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> hits;
+    ts.CollideShape(probe, JPH::Vec3::sReplicate(1.f), JPH::RMat44::sRotationTranslation(rot, toJR(center)), settings,
+                    JPH::RVec3::sZero(), hits);
+    float depth = -1.f;
+    for (const auto& h : hits.mHits) depth = std::max(depth, h.mPenetrationDepth);
+    return depth;
+}
+
 void PhysicsSystem::overlapSphere(const glm::vec3& center, float radius, std::vector<Actor*>& out) const {
     out.clear();
     if (!impl_ || !world_ || radius <= 0.f) return;
@@ -392,10 +513,9 @@ void PhysicsSystem::tick(float dt) {
 
     auto& bi = impl_->physics->GetBodyInterface();
 
-    // Lazy body creation
-    for (auto& ap : world_->getActors()) {
-        Actor* a  = ap.get();
-        auto*  rb = a->getComponent<RigidBodyComponent>();
+    // Lazy body creation(형별 목록, 2026-11-18 성능 안정화 1-5. 바디를 만들 뿐 액터 · 컴포넌트 구조는 바꾸지 않음)
+    for (RigidBodyComponent* rb : world_->componentsOf<RigidBodyComponent>()) {
+        Actor* a  = rb->owner;
         // activeInHierarchy() 게이트(A-2): 비활성 액터(또는 비활성 부모 아래)는 바디를
         // 만들지 않습니다. 바디가 없으면 아래 sync 루프(bodyId_ 검사)도 자동으로 건너뛰어,
         // 렌더·틱과 물리가 일관되게 꺼집니다. 이미 만든 바디는 플레이 도중 꺼질 때
@@ -411,7 +531,8 @@ void PhysicsSystem::tick(float dt) {
         //
         // DEF-53: 로컬이 아니라 월드 스케일/회전을 씁니다. 부모가 없으면 로컬=월드라
         // 기존 동작이 그대로 유지되고, 부모가 생기면 콜라이더가 시각적 위치와 겹칩니다.
-        const glm::vec3 sc = glm::abs(a->worldScale());
+        const glm::vec3 signedSc = a->worldScale();   // 메시 충돌체는 부호까지 씀(거울, DEF-170)
+        const glm::vec3 sc = glm::abs(signedSc);
 
         // Sphere 와 Capsule 은 비균등 스케일에 해석적 대응이 없습니다.
         // Jolt 의 ScaledShape 도 이 둘에 균등 스케일을 요구합니다.
@@ -454,7 +575,9 @@ void PhysicsSystem::tick(float dt) {
             case EPhysicsShape::ConvexHull:
             case EPhysicsShape::Mesh: {
                 // 같은 액터의 메시 형상(P2, 2026-11-17). 점마다 월드 크기를 곱하므로 비균등 크기도 정확합니다. 음수 크기(거울)는
-                // 다른 셰이프와 같이 절댓값을 씁니다.
+                // 부호까지 곱해 화면과 같은 쪽에 두고, 메시는 감기 방향을 되돌려 법선이 바깥을 향하게 합니다(DEF-170).
+                const glm::vec3 ms = signedSc;
+                const bool flipWinding = ms.x * ms.y * ms.z < 0.f;
                 const CollisionMesh* cm = nullptr;
                 for (const auto& c : a->getComponents())
                     if (const CollisionMesh* m = c->collisionMesh(); m && !m->empty()) { cm = m; break; }
@@ -468,13 +591,14 @@ void PhysicsSystem::tick(float dt) {
                 if (asMesh) {
                     JPH::VertexList verts;
                     verts.reserve(cm->positions.size());
-                    for (const glm::vec3& p : cm->positions) verts.push_back(JPH::Float3(p.x * sc.x, p.y * sc.y, p.z * sc.z));
+                    for (const glm::vec3& p : cm->positions) verts.push_back(JPH::Float3(p.x * ms.x, p.y * ms.y, p.z * ms.z));
                     JPH::IndexedTriangleList tris;
                     tris.reserve(cm->indices.size() / 3);
                     const uint32_t n = (uint32_t)cm->positions.size();
                     for (size_t i = 0; i + 2 < cm->indices.size(); i += 3) {
                         const uint32_t i0 = cm->indices[i], i1 = cm->indices[i + 1], i2 = cm->indices[i + 2];
-                        if (i0 < n && i1 < n && i2 < n) tris.push_back(JPH::IndexedTriangle(i0, i1, i2, 0));
+                        if (i0 < n && i1 < n && i2 < n)
+                            tris.push_back(flipWinding ? JPH::IndexedTriangle(i0, i2, i1, 0) : JPH::IndexedTriangle(i0, i1, i2, 0));
                     }
                     if (tris.empty()) { noGeometry = "the mesh has no triangles"; break; }
                     made = JPH::MeshShapeSettings(std::move(verts), std::move(tris)).Create();   // 겹친 · 퇴화 삼각형은 Jolt 가 뺌
@@ -482,7 +606,7 @@ void PhysicsSystem::tick(float dt) {
                     // 껍질은 꼭짓점 256개 안으로 줄여 만듭니다(Jolt cMaxPointsInHull). 모서리 반경은 껍질이 작으면 Jolt 가 줄입니다.
                     JPH::Array<JPH::Vec3> pts;
                     pts.reserve(cm->positions.size());
-                    for (const glm::vec3& p : cm->positions) pts.push_back(JPH::Vec3(p.x * sc.x, p.y * sc.y, p.z * sc.z));
+                    for (const glm::vec3& p : cm->positions) pts.push_back(JPH::Vec3(p.x * ms.x, p.y * ms.y, p.z * ms.z));
                     made = JPH::ConvexHullShapeSettings(pts, JPH::cDefaultConvexRadius).Create();
                 }
                 break;
@@ -512,7 +636,16 @@ void PhysicsSystem::tick(float dt) {
                 << "); the actor has no physics body until its size is fixed";
             continue;
         }
-        const JPH::ShapeRefC shape = made.Get();
+        JPH::ShapeRefC shape = made.Get();
+        // 충돌체 중심 오프셋(P3): 기본 셰이프를 액터 로컬의 center(크기를 곱한 자리)로 옮깁니다. 메시 셰이프는 메시가 자리를 정합니다.
+        const bool primitiveShape = rb->shape == EPhysicsShape::Box || rb->shape == EPhysicsShape::Sphere ||
+                                    rb->shape == EPhysicsShape::Capsule;
+        if (primitiveShape && rb->center != glm::vec3(0.f)) {
+            const glm::vec3 off = rb->center * signedSc;
+            JPH::ShapeSettings::ShapeResult moved =
+                JPH::RotatedTranslatedShapeSettings(JPH::Vec3(off.x, off.y, off.z), JPH::Quat::sIdentity(), shape).Create();
+            if (!moved.HasError() && moved.Get() != nullptr) shape = moved.Get();
+        }
 
         // Motion type mapping
         JPH::EMotionType mt = JPH::EMotionType::Static;
@@ -562,11 +695,13 @@ void PhysicsSystem::tick(float dt) {
         rb->bodyId_       = body->GetID().GetIndexAndSequenceNumber();
         rb->physSys_      = this;
         // 편집 확정 때 바디를 다시 만들어야 하는지 이 값들과 비교합니다(RigidBodyComponent).
-        rb->createdScale_  = sc;
+        rb->createdScale_  = signedSc;
         rb->createdShape_  = rb->shape;
         rb->createdMotion_ = rb->motionType;
         rb->createdHalf_   = rb->halfExtent;
         rb->createdMass_   = rb->mass;
+        rb->createdCenter_ = rb->center;
+        rb->interpValid_   = false;
         rb->synced_        = false;   // 아직 물리가 액터에 쓴 적 없음
     }
 
@@ -576,16 +711,17 @@ void PhysicsSystem::tick(float dt) {
     // Kinematic 바디는 목표 자세(액터의 월드 자세)를 아래 스텝 루프에서 나눠 따라갑니다(DEF-99).
     struct KinematicMove { JPH::BodyID id; glm::vec3 p0, p1; glm::quat q0, q1; };
     std::vector<KinematicMove> kinematic;
-    for (auto& ap : world_->getActors()) {
-        Actor* a  = ap.get();
-        auto*  rb = a->getComponent<RigidBodyComponent>();
-        if (!rb || rb->bodyId_ == 0xFFFFFFFFu) continue;
+    for (RigidBodyComponent* rb : world_->componentsOf<RigidBodyComponent>()) {
+        Actor* a  = rb->owner;
+        if (rb->bodyId_ == 0xFFFFFFFFu) continue;
         const JPH::BodyID id(rb->bodyId_);
         if (rb->motionType == EMotionType::Dynamic) {
             const Transform& t = a->transform();
             // teleport 는 속도를 건드리지 않고, 옮기기 전후 자리의 잠든 바디도 깨웁니다.
-            if (rb->synced_ && (t.position() != rb->syncedLocalPos_ || t.rotation() != rb->syncedLocalRot_))
+            if (rb->synced_ && (t.position() != rb->syncedLocalPos_ || t.rotation() != rb->syncedLocalRot_)) {
                 teleport(rb->bodyId_, *a);
+                rb->interpValid_ = false;   // 순간 이동은 보간하지 않음(P4)
+            }
         } else if (rb->motionType == EMotionType::Kinematic) {
             const JPH::RVec3 bp = bi.GetPosition(id);
             const JPH::Quat  bq = bi.GetRotation(id);
@@ -603,10 +739,25 @@ void PhysicsSystem::tick(float dt) {
     }
     frameForces_.clear();
 
+    // 렌더 보간(P4)을 켠 Dynamic 바디. 마지막 스텝 직전 자세를 앞 자세로 기억합니다.
+    std::vector<RigidBodyComponent*> interpolated;
+    for (RigidBodyComponent* rb : world_->componentsOf<RigidBodyComponent>())
+        if (rb->interpolate && rb->bodyId_ != 0xFFFFFFFFu && rb->motionType == EMotionType::Dynamic)
+            interpolated.push_back(rb);
+    auto bodyPose = [&](const RigidBodyComponent* rb, glm::vec3& p, glm::quat& q) {
+        const JPH::BodyID id(rb->bodyId_);
+        const JPH::RVec3 bp = bi.GetPosition(id);
+        const JPH::Quat  bq = bi.GetRotation(id);
+        p = glm::vec3((float)bp.GetX(), (float)bp.GetY(), (float)bp.GetZ());
+        q = glm::quat(bq.GetW(), bq.GetX(), bq.GetY(), bq.GetZ());
+    };
+
     // ── Fixed-step simulation ─────────────────────────────────────────────────
     accumulator_ += dt;
     const int steps = (int)std::floor(accumulator_ / step_);
     for (int i = 0; i < steps; ++i) {
+        if (i == steps - 1)
+            for (RigidBodyComponent* rb : interpolated) bodyPose(rb, rb->interpPrevPos_, rb->interpPrevRot_);
         // Kinematic: 틱 시작 자세에서 목표까지 스텝마다 나눠 옮깁니다. 마지막 스텝에 정확히 목표에 닿고,
         // 그 속도로 부딪힌 Dynamic 바디를 밉니다.
         const float alpha = float(i + 1) / float(steps);
@@ -647,15 +798,27 @@ void PhysicsSystem::tick(float dt) {
     // 월드 세터로 씁니다. 부모가 있으면 부모의 지금 월드 트랜스폼으로 로컬을 구합니다(DEF-53). 잠든
     // 바디도 씁니다. 그래야 부모가 움직여도 자식 바디가 월드 자리에 남습니다. 쓴 로컬 값을 기억해 두었다가
     // 다음 틱에 게임 코드가 바꿨는지 비교합니다.
-    for (auto& ap : world_->getActors()) {
-        Actor* a  = ap.get();
-        auto*  rb = a->getComponent<RigidBodyComponent>();
-        if (!rb || rb->bodyId_ == 0xFFFFFFFFu || rb->motionType != EMotionType::Dynamic) continue;
-        const JPH::BodyID id(rb->bodyId_);
-        const JPH::RVec3 p = bi.GetPosition(id);
-        const JPH::Quat  r = bi.GetRotation(id);
-        a->setWorldPosition(glm::vec3((float)p.GetX(), (float)p.GetY(), (float)p.GetZ()));
-        a->setWorldRotation(glm::quat(r.GetW(), r.GetX(), r.GetY(), r.GetZ()));
+    for (RigidBodyComponent* rb : world_->componentsOf<RigidBodyComponent>()) {
+        Actor* a  = rb->owner;
+        if (rb->bodyId_ == 0xFFFFFFFFu || rb->motionType != EMotionType::Dynamic) continue;
+        glm::vec3 p; glm::quat r;
+        bodyPose(rb, p, r);
+        if (rb->interpolate) {
+            // 렌더 보간(P4, Fix Your Timestep): 마지막 두 스텝 사이를 남은 누적 시간 비율로 섞습니다. 스텝이 없던 틱은
+            // 지난 틱의 두 자세를 그대로 쓰고 비율만 늘립니다. 새 바디 · 순간 이동 뒤 첫 틱은 섞지 않습니다.
+            if (steps > 0) { rb->interpCurPos_ = p; rb->interpCurRot_ = r; }
+            if (!rb->interpValid_) {
+                rb->interpPrevPos_ = rb->interpCurPos_ = p;
+                rb->interpPrevRot_ = rb->interpCurRot_ = r;
+                rb->interpValid_   = true;
+            }
+            const float alpha = std::clamp(accumulator_ / step_, 0.f, 1.f);
+            p = glm::mix(rb->interpPrevPos_, rb->interpCurPos_, alpha);
+            const glm::quat to = glm::dot(rb->interpPrevRot_, rb->interpCurRot_) < 0.f ? -rb->interpCurRot_ : rb->interpCurRot_;
+            r = glm::normalize(glm::slerp(rb->interpPrevRot_, to, alpha));
+        }
+        a->setWorldPosition(p);
+        a->setWorldRotation(r);
         rb->syncedLocalPos_ = a->transform().position();
         rb->syncedLocalRot_ = a->transform().rotation();
         rb->synced_         = true;

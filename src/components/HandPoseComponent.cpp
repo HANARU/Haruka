@@ -6,6 +6,7 @@
 #include "../core/SceneLog.hpp"
 #include "../input/HInputSystem.hpp"
 #include "../xr/HandInputMap.hpp"
+#include "../math/Damping.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -59,19 +60,75 @@ bool HandPoseComponent::map(SkinnedMeshComponent& mesh) {
     return true;
 }
 
+void HandPoseComponent::writeFlex(SkinnedMeshComponent& mesh, const hgrasp::Flex& flex) {
+    for (int f = 0; f < hhand::kFingerCount; ++f)
+        for (int k = 0; k < 3; ++k) {
+            const int j = jointMap_[(int)hhand::kFingerFlexJoints[f][k]];
+            if (j < 0) continue;
+            const float angle = -glm::radians(maxFlexDeg[f][k]) * std::clamp(flex[f][k], 0.f, 1.f);
+            mesh.setJointRotation(j, mesh.restRotation(j) * glm::angleAxis(angle, glm::vec3(1.f, 0.f, 0.f)));
+        }
+}
+
+float HandPoseComponent::graspWeight() const {
+    return graspFrom_ + (graspTo_ - graspFrom_) * hmath::ease::inOutCubic(graspT_);
+}
+
 bool HandPoseComponent::apply() {
     if (!owner) return false;
     auto* mesh = owner->getComponent<SkinnedMeshComponent>();
     if (!mesh || !mesh->hasSkin() || !map(*mesh)) return false;
+    const float w = graspWeight();
+    hgrasp::Flex flex{};
     for (int f = 0; f < hhand::kFingerCount; ++f) {
         const float c = std::clamp(curl[f], 0.f, 1.f);
-        for (int k = 0; k < 3; ++k) {
-            const int j = jointMap_[(int)hhand::kFingerFlexJoints[f][k]];
-            if (j < 0) continue;
-            const float angle = -glm::radians(maxFlexDeg[f][k]) * c;
-            mesh->setJointRotation(j, mesh->restRotation(j) * glm::angleAxis(angle, glm::vec3(1.f, 0.f, 0.f)));
-        }
+        for (int k = 0; k < 3; ++k) flex[f][k] = c + (graspFlex_[f][k] - c) * w;
     }
+    writeFlex(*mesh, flex);
+    return true;
+}
+
+void HandPoseComponent::setGrasp(const hgrasp::Flex& flex, float blendTime) {
+    const float w = graspWeight();
+    graspFlex_  = flex;
+    graspFrom_  = w;
+    graspTo_    = 1.f;
+    graspBlend_ = blendTime;
+    graspT_     = blendTime > 0.f ? 0.f : 1.f;
+}
+
+void HandPoseComponent::clearGrasp(float blendTime) {
+    graspFrom_  = graspWeight();
+    graspTo_    = 0.f;
+    graspBlend_ = blendTime;
+    graspT_     = blendTime > 0.f ? 0.f : 1.f;
+}
+
+bool HandPoseComponent::jointWorldPositions(const hgrasp::Flex& flex, hgrasp::JointPos& out) {
+    if (!owner) return false;
+    auto* mesh = owner->getComponent<SkinnedMeshComponent>();
+    if (!mesh || !mesh->hasSkin() || !map(*mesh)) return false;
+    const glm::mat4 world = owner->worldMatrix();
+    std::vector<glm::quat> saved((size_t)mesh->jointCount());
+    for (int j = 0; j < mesh->jointCount(); ++j) saved[(size_t)j] = mesh->jointRotation(j);
+    writeFlex(*mesh, flex);
+    const std::vector<glm::mat4>& g = mesh->jointGlobals();
+    for (int i = 0; i < hhand::kJointCount; ++i) {
+        const int j = jointMap_[i];
+        out[(size_t)i] = j >= 0 && j < (int)g.size() ? glm::vec3(world * g[(size_t)j][3]) : glm::vec3(world[3]);
+    }
+    for (int j = 0; j < mesh->jointCount(); ++j) mesh->setJointRotation(j, saved[(size_t)j]);
+    return true;
+}
+
+bool HandPoseComponent::jointWorld(hhand::EJoint joint, glm::mat4& out) {
+    if (!owner) return false;
+    auto* mesh = owner->getComponent<SkinnedMeshComponent>();
+    if (!mesh || !mesh->hasSkin() || !map(*mesh)) return false;
+    const int j = jointMap_[(int)joint];
+    const std::vector<glm::mat4>& g = mesh->jointGlobals();
+    if (j < 0 || j >= (int)g.size()) return false;
+    out = owner->worldMatrix() * g[(size_t)j];
     return true;
 }
 
@@ -88,6 +145,7 @@ bool HandPoseComponent::updateFromInput(float dt) {
 
 void HandPoseComponent::tick(float dt) {
     updateFromInput(dt);
+    if (graspT_ < 1.f) graspT_ = graspBlend_ > 0.f ? std::min(1.f, graspT_ + dt / graspBlend_) : 1.f;
     apply();
 }
 

@@ -1,11 +1,16 @@
 #include "XrComponents.hpp"
 #include "RigidBodyComponent.hpp"
+#include "HandPoseComponent.hpp"
+#include "../physics/PhysicsSystem.hpp"
+#include "../xr/GraspSolver.hpp"
+#include "../math/Damping.hpp"
 #include "../core/Actor.hpp"
 #include "../core/ComponentRegistry.hpp"
 #include "../core/DebugDraw.hpp"
 #include "../core/Reflect.hpp"
 #include "../core/World.hpp"
 #include "../input/HInputSystem.hpp"
+#include "../math/Geometry.hpp"
 
 #include <algorithm>
 #include <cfloat>
@@ -54,7 +59,7 @@ bool hxr::floorBelow(const World& world, const glm::vec3& from, const Actor* ski
         for (const Actor* q = a; q; q = q->getParent())
             if (q == skip) { skipped = true; break; }
         if (skipped) continue;
-        glm::vec3 lo, hi;
+        glm::vec3 lo(0.f), hi(0.f);
         bool has = false;
         for (const auto& c : a->getComponents()) {
             glm::vec3 cmin, cmax;
@@ -66,25 +71,10 @@ bool hxr::floorBelow(const World& world, const glm::vec3& from, const Actor* ski
         }
         if (!has) continue;
         // 아래 방향 광선을 액터 로컬로 옮겨 OBB(로컬 AABB) 슬랩 판정을 합니다. 방향은 정규화하지 않으므로 t 는 월드 거리입니다.
-        const glm::mat4 wm  = a->worldMatrix();
-        const glm::mat4 inv = glm::inverse(wm);
-        const glm::vec3 ro  = glm::vec3(inv * glm::vec4(from, 1.f));
-        const glm::vec3 rd  = glm::vec3(inv * glm::vec4(0.f, -1.f, 0.f, 0.f));
-        float tmin = -FLT_MAX, tmax = FLT_MAX;
-        bool  hit  = true;
-        for (int k = 0; k < 3; ++k) {
-            if (std::fabs(rd[k]) < 1e-8f) {
-                if (ro[k] < lo[k] || ro[k] > hi[k]) { hit = false; break; }
-            } else {
-                float t1 = (lo[k] - ro[k]) / rd[k];
-                float t2 = (hi[k] - ro[k]) / rd[k];
-                if (t1 > t2) std::swap(t1, t2);
-                tmin = std::max(tmin, t1);
-                tmax = std::min(tmax, t2);
-            }
-        }
+        const hmath::Ray local = hmath::transformRay({ from, glm::vec3(0.f, -1.f, 0.f) }, hmath::affineInverse(a->worldMatrix()));
+        float tmin = 0.f, tmax = 0.f;
         // 들어가는 지점이 시작점 아래에 있는 것만 바닥 후보입니다(시작점을 감싼 바운드는 건너뜀).
-        if (!hit || tmin < 0.f || tmax < tmin) continue;
+        if (!hmath::intersectRayAabb(local, { lo, hi }, tmin, tmax) || tmin < 0.f) continue;
         if (tmin < bestT) bestT = tmin;
     }
     if (bestT == FLT_MAX) return false;
@@ -174,6 +164,45 @@ bool TrackedPoseComponent::readField(const std::string& key, const std::string& 
 }
 
 // ── 기본 이동 ─────────────────────────────────────────────────────────────────────
+namespace hxr {
+TeleportArc teleportArc(const glm::vec3& origin, const glm::vec3& dir, float speed, float gravity, float maxTime,
+                        float step, const ArcRay& ray) {
+    TeleportArc arc;
+    const float     len = glm::length(dir);
+    const glm::vec3 v0  = len > 1e-6f ? dir / len * speed : glm::vec3(0.f);
+    const glm::vec3 g{ 0.f, -gravity, 0.f };
+    step = std::max(step, 1e-3f);
+    arc.points.push_back(origin);
+    glm::vec3 prev = origin;
+    const int n = int(maxTime / step + 0.5f);
+    for (int i = 1; i <= n; ++i) {
+        const float     t   = step * float(i);
+        const glm::vec3 cur = origin + v0 * t + 0.5f * g * t * t;
+        glm::vec3 p, nrm;
+        if (ray && ray(prev, cur, p, nrm)) {
+            arc.points.push_back(p);
+            arc.hit    = true;
+            arc.point  = p;
+            arc.normal = nrm;
+            return arc;
+        }
+        arc.points.push_back(cur);
+        prev = cur;
+    }
+    return arc;
+}
+
+bool teleportValid(const TeleportArc& arc, float maxSlopeDeg) {
+    if (!arc.hit) return false;
+    const float l = glm::length(arc.normal);
+    return l > 1e-6f && arc.normal.y / l >= std::cos(glm::radians(maxSlopeDeg));
+}
+
+glm::vec3 teleportRigPosition(const glm::vec3& rigPos, const glm::vec3& headPos, const glm::vec3& target) {
+    return { rigPos.x + (target.x - headPos.x), target.y, rigPos.z + (target.z - headPos.z) };
+}
+} // namespace hxr
+
 Actor* RigLocomotionComponent::findHead(const Actor& rig) {
     for (Actor* c : rig.getChildren())
         if (auto* tp = c->getComponent<TrackedPoseComponent>(); tp && tp->source == ETrackedSource::Head) return c;
@@ -212,7 +241,13 @@ void RigLocomotionComponent::tick(float dt) {
     if (glm::length(move) > 1.f) move = glm::normalize(move);
     if (flying) move += up * std::clamp(in.axis("MoveUp"), -1.f, 1.f);
     velocity_ = move * moveSpeed;
-    if (glm::dot(move, move) > 0.f) rig.setWorldPosition(rig.worldPosition() + move * moveSpeed * dt);
+    if (collide && PhysicsSystem::current()) moveCollide(rig, headPos, move, dt);
+    else {
+        releaseCharacter();
+        if (glm::dot(move, move) > 0.f) rig.setWorldPosition(rig.worldPosition() + move * moveSpeed * dt);
+    }
+    if (teleport && xr.focused) tickTeleport(rig, head ? head->worldPosition() : rig.worldPosition());
+    else                        aiming_ = false;
 
     if (xr.focused) {
         // 스냅 회전: 스틱을 70% 넘게 기울이면 한 번, 30% 아래로 돌아오면 다시 받을 준비. 머리 둘레로 돌려 제자리에서 돕니다.
@@ -234,6 +269,98 @@ void RigLocomotionComponent::tick(float dt) {
     }
 }
 
+// 리그 자신(자식 포함)과 손에 든 물체는 캐릭터 · 텔레포트 판정에서 뺍니다.
+static void rigIgnoreList(Actor& rig, std::vector<Actor*>& out, std::vector<Actor*>& stack) {
+    out.clear();
+    stack.clear();
+    stack.push_back(&rig);
+    while (!stack.empty()) {
+        Actor* a = stack.back();
+        stack.pop_back();
+        out.push_back(a);
+        for (Actor* c : a->getChildren()) stack.push_back(c);
+    }
+    for (GrabbableComponent* g : GrabbableComponent::live())
+        if (g->holder() && g->owner) out.push_back(g->owner);
+}
+
+void RigLocomotionComponent::moveCollide(Actor& rig, const glm::vec3& headPos, const glm::vec3& move, float dt) {
+    PhysicsSystem* ps = PhysicsSystem::current();
+    // 캡슐은 머리 아래, 리그 바닥 높이에 섭니다(방 안에서 걸어간 자리를 따라감).
+    const glm::vec3 feet{ headPos.x, rig.worldPosition().y, headPos.z };
+    if (!character_) {
+        PhysicsSystem::CharacterDesc d;
+        d.radius = kBodyRadius;
+        d.height = kBodyHeight;
+        character_ = ps->createCharacter(d, feet);
+        fallSpeed_ = 0.f;
+        if (!character_) return;
+    }
+    glm::vec3 v = move * moveSpeed;
+    if (!flying) v.y = fallSpeed_;
+    std::vector<Actor*>& ignore = ignoreScratch_;
+    rigIgnoreList(rig, ignore, stackScratch_);
+    PhysicsSystem::CharacterMove m;
+    if (!ps->moveCharacter(character_, feet, v, dt, m, ignore)) { character_ = 0; return; }
+    rig.setWorldPosition(rig.worldPosition() + (m.position - feet));
+    if (dt > 0.f) velocity_ = (m.position - feet) / dt;
+    if (flying || m.onGround) fallSpeed_ = 0.f;
+    else fallSpeed_ = std::max(fallSpeed_ + ps->gravity().y * dt, -kMaxFallSpeed);
+}
+
+void RigLocomotionComponent::releaseCharacter() {
+    if (character_) {
+        if (PhysicsSystem* ps = PhysicsSystem::current()) ps->destroyCharacter(character_);
+        character_ = 0;
+    }
+    fallSpeed_ = 0.f;
+}
+
+void RigLocomotionComponent::onDisable() { releaseCharacter(); aiming_ = false; }
+RigLocomotionComponent::~RigLocomotionComponent() { releaseCharacter(); }
+
+void RigLocomotionComponent::tickTeleport(Actor& rig, const glm::vec3& headPos) {
+    HInputSystem& in = HInputSystem::get();
+    const float   t  = in.axis("Teleport");
+    Actor* hand = nullptr;
+    for (Actor* c : rig.getChildren())
+        if (auto* tp = c->getComponent<TrackedPoseComponent>(); tp && tp->source == ETrackedSource::RightHand) hand = c;
+    PhysicsSystem* ps = PhysicsSystem::current();
+    if (!hand || !ps) { aiming_ = false; return; }
+
+    if (!aiming_ && t > 0.7f) aiming_ = true;
+    if (!aiming_) return;
+
+    std::vector<Actor*>& ignore = ignoreScratch_;
+    rigIgnoreList(rig, ignore, stackScratch_);
+    const auto ray = [&](const glm::vec3& a, const glm::vec3& b, glm::vec3& point, glm::vec3& normal) {
+        PhysicsSystem::RaycastHit h;
+        const float len = glm::length(b - a);
+        if (len < 1e-6f || !ps->raycast(a, b - a, len, h, ignore)) return false;
+        point  = h.point;
+        normal = h.normal;
+        return true;
+    };
+    const glm::vec3 o   = hand->worldPosition();
+    const glm::vec3 dir = hand->worldRotation() * glm::vec3(0.f, 0.f, -1.f);
+    const hxr::TeleportArc arc = hxr::teleportArc(o, dir, kTeleportSpeed, -ps->gravity().y, kTeleportMaxTime,
+                                                  kTeleportStep, ray);
+    const bool ok = hxr::teleportValid(arc, kTeleportMaxSlope);
+
+    if (t < 0.3f) {                                   // 스틱을 놓음 → 옮기기
+        aiming_ = false;
+        if (ok) {
+            rig.setWorldPosition(hxr::teleportRigPosition(rig.worldPosition(), headPos, arc.point));
+            fallSpeed_ = 0.f;
+            if (const auto* tp = hand->getComponent<TrackedPoseComponent>()) in.haptic(tp->handIndex(), 0.3f, 0.03f);
+        }
+        return;
+    }
+    const glm::vec4 col = ok ? glm::vec4(0.3f, 0.9f, 1.f, 1.f) : glm::vec4(1.f, 0.3f, 0.3f, 1.f);
+    for (size_t i = 1; i < arc.points.size(); ++i) hdebug::line(arc.points[i - 1], arc.points[i], col);
+    if (arc.hit) hdebug::circle(arc.point + arc.normal * 0.01f, arc.normal, 0.3f, col);
+}
+
 std::vector<PropDesc> RigLocomotionComponent::buildProps() {
     auto* p = this;
     return {
@@ -244,6 +371,8 @@ std::vector<PropDesc> RigLocomotionComponent::buildProps() {
         makePropToggle("Flying", [p] { return p->flying; }, [p](bool v) { p->flying = v; }),
         makePropFloat("Look Sensitivity", PropColor::Neutral, 0.01f, [p] { return p->lookSensitivity; },
                       [p](float v) { p->lookSensitivity = std::clamp(v, 0.01f, 2.f); }),
+        makePropToggle("Collide", [p] { return p->collide; }, [p](bool v) { p->collide = v; }),
+        makePropToggle("Teleport", [p] { return p->teleport; }, [p](bool v) { p->teleport = v; }),
     };
 }
 
@@ -252,6 +381,8 @@ void RigLocomotionComponent::writeFields(ComponentFieldWriter& w) const {
     w.f("snapTurn", snapTurnDeg);
     w.b("flying", flying);
     w.f("lookSensitivity", lookSensitivity);
+    w.b("collide", collide);
+    w.b("teleport", teleport);
 }
 
 bool RigLocomotionComponent::readField(const std::string& key, const std::string& value) {
@@ -260,6 +391,8 @@ bool RigLocomotionComponent::readField(const std::string& key, const std::string
     else if (key == "snapTurn")        ok = fieldparse::toFloat(value, snapTurnDeg);
     else if (key == "flying")          ok = fieldparse::toBool(value, flying);
     else if (key == "lookSensitivity") ok = fieldparse::toFloat(value, lookSensitivity);
+    else if (key == "collide")         ok = fieldparse::toBool(value, collide);
+    else if (key == "teleport")        ok = fieldparse::toBool(value, teleport);
     else return false;
     if (!ok) reportBadField(key, value);
     return true;
@@ -284,17 +417,22 @@ void GrabbableComponent::onDisable() {
 GrabbableComponent::~GrabbableComponent() {
     auto& v = grabbables();
     v.erase(std::remove(v.begin(), v.end(), this), v.end());
-    if (holder_) { holder_->held_ = nullptr; holder_->wasDynamic_ = false; holder_ = nullptr; }
+    if (holder_) { holder_->held_ = nullptr; holder_->wasDynamic_ = false; holder_->tracking_ = false; holder_ = nullptr; }
 }
 
 std::vector<PropDesc> GrabbableComponent::buildProps() {
     auto* p = this;
-    return { makePropToggle("Throwable", [p] { return p->throwable; }, [p](bool v) { p->throwable = v; }) };
+    return { makePropToggle("Throwable", [p] { return p->throwable; }, [p](bool v) { p->throwable = v; }),
+             makePropToggle("Velocity Tracking", [p] { return p->velocityTracking; }, [p](bool v) { p->velocityTracking = v; }) };
 }
-void GrabbableComponent::writeFields(ComponentFieldWriter& w) const { w.b("throwable", throwable); }
+void GrabbableComponent::writeFields(ComponentFieldWriter& w) const {
+    w.b("throwable", throwable);
+    if (velocityTracking) w.b("velocityTracking", true);   // 기본값이면 쓰지 않음
+}
 bool GrabbableComponent::readField(const std::string& key, const std::string& value) {
-    if (key != "throwable") return false;
-    if (!fieldparse::toBool(value, throwable)) reportBadField(key, value);
+    bool* target = key == "throwable" ? &throwable : key == "velocityTracking" ? &velocityTracking : nullptr;
+    if (!target) return false;
+    if (!fieldparse::toBool(value, *target)) reportBadField(key, value);
     return true;
 }
 
@@ -312,7 +450,7 @@ static float distanceToActor(const glm::vec3& p, const Actor& a) {
     }
     if (!has) return glm::length(p - a.worldPosition());
     const glm::mat4 wm    = a.worldMatrix();
-    const glm::vec3 local = glm::vec3(glm::inverse(wm) * glm::vec4(p, 1.f));
+    const glm::vec3 local = glm::vec3(hmath::affineInverse(wm) * glm::vec4(p, 1.f));
     const glm::vec3 near  = glm::clamp(local, lo, hi);
     return glm::length(glm::vec3(wm * glm::vec4(near, 1.f)) - p);
 }
@@ -345,33 +483,130 @@ void GrabInteractorComponent::grab(GrabbableComponent* g, const glm::vec3& handP
     offPos_ = inv * (a.worldPosition() - handPos);
     offRot_ = glm::normalize(inv * a.worldRotation());
     wasDynamic_ = false;
+    tracking_   = false;
     comLocal_   = glm::vec3(0.f);
     velHistory_.clear();
     if (auto* rb = a.getComponent<RigidBodyComponent>()) {
         // 질량 중심을 액터 기준으로 기억합니다. 잡는 동안 Kinematic 바디는 액터를 한 스텝 늦게 따라가므로 놓을 때 바디에서
         // 다시 읽지 않고 액터의 그때 자세로 옮깁니다.
         comLocal_ = glm::inverse(a.worldRotation()) * (rb->centerOfMass() - a.worldPosition());
-        if (rb->motionType == EMotionType::Dynamic) wasDynamic_ = rb->setMotionRuntime(EMotionType::Kinematic);
+        if (rb->motionType == EMotionType::Dynamic) {
+            if (g->velocityTracking && rb->hasBody()) {
+                // Dynamic 그대로 두고 중력만 끕니다(손 아래로 처지지 않게). 막힌 동안 목표와 벌어진 거리만큼 속도가 커져
+                // 얇은 벽을 한 스텝에 지나갈 수 있으므로 잡는 동안 연속 충돌을 켭니다(P1).
+                tracking_ = true;
+                rb->setGravityFactorRuntime(0.f);
+                rb->setContinuousRuntime(true);
+            } else {
+                wasDynamic_ = rb->setMotionRuntime(EMotionType::Kinematic);
+            }
+        }
     }
     held_      = g;
     g->holder_ = this;
+    fitted_    = false;
+    fitT_      = 1.f;
+    if (autoFit) fitGrasp(handPos, handRot);
 }
 
-void GrabInteractorComponent::follow(const glm::vec3& handPos, const glm::quat& handRot) {
+void GrabInteractorComponent::fitGrasp(const glm::vec3& handPos, const glm::quat& handRot) {
+    if (!owner || !held_ || !held_->owner) return;
+    HandPoseComponent* hand = owner->getComponentInChildren<HandPoseComponent>();
+    auto* rb = held_->owner->getComponent<RigidBodyComponent>();
+    if (!hand || !rb || !rb->hasBody()) return;
+    const PhysicsSystem* ps = rb->physSys_;
+    glm::mat4 palmM;
+    if (!hand->jointWorld(hhand::EJoint::Palm, palmM)) return;
+    // 1. 손바닥 맞추기: 손바닥(관절 -Y 쪽)에서 표면을 찾고, 없으면 물체 중심 쪽으로 찾습니다. 표면이 손바닥 두께만큼 떨어지게
+    //    물체를 손바닥 노멀 방향으로 옮깁니다(이동만, 회전은 잡은 순간의 상대 회전 그대로).
+    const glm::vec3 palm   = glm::vec3(palmM[3]);
+    const glm::vec3 normal = -glm::normalize(glm::vec3(palmM[1]));
+    PhysicsSystem::RaycastHit hit;
+    glm::vec3 dir = normal;
+    bool found = ps->raycastBody(rb->bodyId_, palm, dir, kPalmReach, hit);
+    if (!found) {
+        dir   = rb->centerOfMass() - palm;
+        found = glm::length(dir) > 1e-4f && ps->raycastBody(rb->bodyId_, palm, dir, kPalmReach, hit);
+    }
+    glm::vec3 shift(0.f);
+    if (found) {
+        const glm::vec3 d = glm::normalize(dir);
+        shift = -d * std::clamp(hit.distance - kPalmThickness, -kMaxFitShift, kMaxFitShift);
+    }
+    // 2. 손가락 감싸기: 물체를 shift 만큼 옮긴 자리로 판정합니다(바디는 아직 옛 자리라 판정 쪽 캡슐을 반대로 옮김).
+    const hgrasp::Result r = hgrasp::solve(
+        [hand](const hgrasp::Flex& flex, hgrasp::JointPos& out) { hand->jointWorldPositions(flex, out); },
+        [ps, rb, shift](const glm::vec3& a, const glm::vec3& b, float radius) {
+            return ps->capsulePenetration(rb->bodyId_, a - shift, b - shift, radius);
+        });
+    if (!r.fitted) return;   // 맞춤 실패: 예전 잡기 그대로
+    hand->setGrasp(r.flex, kFitBlend);
+    fitted_  = true;
+    fitFrom_ = offPos_;
+    fitTo_   = offPos_ + glm::inverse(handRot) * shift;
+    fitT_    = 0.f;
+    (void)handPos;
+}
+
+void GrabInteractorComponent::trackingVelocity(const glm::vec3& comNow, const glm::quat& rotNow, const glm::vec3& comGoal,
+                                               const glm::quat& rotGoal, float dt, glm::vec3& linear, glm::vec3& angular) {
+    linear = angular = glm::vec3(0.f);
+    if (!(dt > 0.f)) return;
+    linear = (comGoal - comNow) / dt;
+    const float sp = glm::length(linear);
+    if (sp > kMaxTrackSpeed) linear *= kMaxTrackSpeed / sp;
+    // 회전 차이 goal · now⁻¹ 를 축-각으로(최단 경로). 각속도 = 축 × 각 / dt.
+    glm::quat d = glm::normalize(rotGoal * glm::inverse(rotNow));
+    if (d.w < 0.f) d = -d;
+    const glm::vec3 v(d.x, d.y, d.z);
+    const float s = glm::length(v);
+    if (s > 1e-7f) {
+        const float angle = 2.f * std::atan2(s, d.w);
+        angular = v / s * (angle / dt);
+        const float w = glm::length(angular);
+        if (w > kMaxTrackAngular) angular *= kMaxTrackAngular / w;
+    }
+}
+
+void GrabInteractorComponent::follow(const glm::vec3& handPos, const glm::quat& handRot, float dt) {
     if (!held_ || !held_->owner) return;
-    held_->owner->setWorldPosition(handPos + handRot * offPos_);
-    held_->owner->setWorldRotation(glm::normalize(handRot * offRot_));
+    if (fitT_ < 1.f) {   // 자동 맞춤 전환: 물체 상대 위치를 ease-in-out 으로 옮김
+        fitT_   = std::min(1.f, fitT_ + std::max(dt, 0.f) / kFitBlend);
+        offPos_ = glm::mix(fitFrom_, fitTo_, hmath::ease::inOutCubic(fitT_));
+    }
+    const glm::vec3 goalPos = handPos + handRot * offPos_;
+    const glm::quat goalRot = glm::normalize(handRot * offRot_);
+    if (tracking_) {
+        // 속도 추적(P5): 다음 틱까지 목표 자세에 닿는 속도를 넣습니다. 질량 중심 속도이므로 질량 중심끼리 비교합니다.
+        auto* rb = held_->owner->getComponent<RigidBodyComponent>();
+        if (!rb || !rb->hasBody() || !(dt > 0.f)) return;
+        glm::vec3 lin, ang;
+        trackingVelocity(rb->centerOfMass(), held_->owner->worldRotation(), goalPos + goalRot * comLocal_, goalRot, dt, lin, ang);
+        rb->setLinearVelocity(lin);
+        rb->setAngularVelocity(ang);
+        return;
+    }
+    held_->owner->setWorldPosition(goalPos);
+    held_->owner->setWorldRotation(goalRot);
 }
 
 void GrabInteractorComponent::release(const glm::vec3& linearVelocity, const glm::vec3& angularVelocity, bool throwIt) {
     if (!held_) return;
+    if (fitted_ && owner)
+        if (auto* hand = owner->getComponentInChildren<HandPoseComponent>()) hand->clearGrasp(kFitBlend);
+    fitted_ = false;
+    fitT_   = 1.f;
     GrabbableComponent* g = held_;
     held_      = nullptr;
     g->holder_ = nullptr;
     if (!g->owner) return;
     auto* rb = g->owner->getComponent<RigidBodyComponent>();
-    if (rb && wasDynamic_) {
-        rb->setMotionRuntime(EMotionType::Dynamic);
+    if (rb && tracking_) {
+        rb->setGravityFactorRuntime(1.f);
+        rb->setContinuousRuntime(rb->continuous);   // 던지면 아래에서 다시 켬
+    }
+    if (rb && (wasDynamic_ || tracking_)) {
+        if (wasDynamic_) rb->setMotionRuntime(EMotionType::Dynamic);
         // 잡은 동안 Kinematic 바디는 손을 따라가는 속도(MoveKinematic)를 갖고 있고, Dynamic 으로 돌려도 그 속도가 남습니다.
         // 던지지 않고 놓을 때(throwable=false, 다른 물체로 바꿔 잡기, 손 · 잡기 끄기)는 속도를 지워 그 자리에서 떨어지게
         // 합니다. 예전에는 남은 손 속도로 날아가서 throwable=false 가 사실상 동작하지 않았습니다(DEF-143).
@@ -382,6 +617,7 @@ void GrabInteractorComponent::release(const glm::vec3& linearVelocity, const glm
         if (toss) rb->setContinuousRuntime(true);
     }
     wasDynamic_ = false;
+    tracking_   = false;
 }
 
 void GrabInteractorComponent::drop() { release(glm::vec3(0.f), glm::vec3(0.f), false); }
@@ -392,7 +628,7 @@ void GrabInteractorComponent::onDisable() {
     prevHeld_ = false;
 }
 
-void GrabInteractorComponent::tick(float /*dt*/) {
+void GrabInteractorComponent::tick(float dt) {
     if (!owner) return;
     const auto* tp   = owner->getComponent<TrackedPoseComponent>();
     const int   hand = tp ? tp->handIndex() : -1;
@@ -422,7 +658,7 @@ void GrabInteractorComponent::tick(float /*dt*/) {
         in.haptic(hand, 0.3f, 0.02f);
     }
     prevHeld_ = held;
-    follow(hp, hr);
+    follow(hp, hr, dt);
 }
 
 std::vector<PropDesc> GrabInteractorComponent::buildProps() {

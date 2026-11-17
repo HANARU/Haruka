@@ -31,6 +31,14 @@ public:
     // 지나갈 수 있습니다. Jolt 는 움직임이 바디 안쪽 반지름의 75 % 를 넘는 스텝에서만 훑으므로 느릴 때는 비용이 거의 없습니다.
     // 던진 물체(GrabInteractor)는 이 값과 상관없이 놓는 순간 켜집니다.
     bool          continuous  = false;
+    // 충돌체 중심 오프셋(P3, 2026-11-17): 액터 로컬 좌표(액터 크기를 곱하기 전, m). Box · Sphere · Capsule 에 씁니다. 피벗이
+    // 물체 가운데가 아닌 메시(바닥에 피벗을 둔 상자 등)에 충돌체를 맞출 때 씁니다(UE Box Collision 의 상대 위치, Unity Center).
+    // Convex Hull · Mesh 는 메시 자체가 자리를 정하므로 쓰지 않습니다.
+    glm::vec3     center { 0.f };
+    // 렌더 보간(P4, 2026-11-17): 켜면 Dynamic 바디의 액터 자세를 마지막 두 물리 스텝 사이로 보간해 씁니다. 물리 스텝(기본
+    // 헤드셋 주사율)보다 화면이 자주 그려질 때(데스크톱 165 Hz 창 등) 물체가 계단처럼 움직이지 않습니다. 대신 한 스텝만큼
+    // 늦게 보입니다(Godot physics interpolation · Unity Rigidbody.interpolation 과 같은 방식). 물리 자체는 바뀌지 않습니다.
+    bool          interpolate = false;
 
     void onDestroy() override;
     void onDisable() override;              // 꺼지면 바디를 지웁니다(DEF-80)
@@ -65,6 +73,8 @@ public:
     bool setMotionRuntime(EMotionType m);
     // 살아 있는 바디의 연속 충돌만 켜고 끕니다(continuous 값은 바꾸지 않음, 바디를 다시 만들지 않음).
     void setContinuousRuntime(bool on);
+    // 살아 있는 바디의 중력 배율(1 = 보통). 속도 추적 잡기(P5)가 잡는 동안 0 으로 둡니다. 바디를 다시 만들면 1 로 돌아갑니다.
+    void setGravityFactorRuntime(float factor);
 
     // 살아 있는 바디를 지워, 다음 물리 틱에 지금 값으로 다시 만들게 합니다. 게임 코드가
     // shape·motionType·halfExtent·mass 필드를 직접 바꿨다면 이것을 불러야 반영됩니다.
@@ -83,11 +93,16 @@ public:
     bool           createFailed_ = false;
     // 바디를 만들 때 쓴 값입니다. 편집을 확정할 때 지금 값과 비교해, 실제로 달라졌을 때만
     // 바디를 다시 만듭니다(세터가 불렸다는 사실만으로는 다시 만들지 않음).
-    glm::vec3      createdScale_ { 1.f };   // 월드 스케일(절댓값)
+    glm::vec3      createdScale_ { 1.f };   // 월드 스케일(부호 포함, DEF-170)
     EPhysicsShape  createdShape_  = EPhysicsShape::Box;
     EMotionType    createdMotion_ = EMotionType::Dynamic;
     HalfExt        createdHalf_;
     float          createdMass_   = 1.f;
+    glm::vec3      createdCenter_ { 0.f };
+    // 렌더 보간 상태(P4): 마지막 스텝 앞 · 뒤의 바디 월드 자세. interpValid_ 가 거짓이면(새 바디 · 순간 이동) 앞 = 뒤.
+    glm::vec3      interpPrevPos_ { 0.f }, interpCurPos_ { 0.f };
+    glm::quat      interpPrevRot_ { 1.f, 0.f, 0.f, 0.f }, interpCurRot_ { 1.f, 0.f, 0.f, 0.f };
+    bool           interpValid_   = false;
     // 물리가 마지막으로 액터에 쓴 로컬 자세(Dynamic). 다음 틱에 액터의 로컬 자세가 이와 다르면 게임
     // 코드가 옮긴 것이라 바디를 그 자리로 순간 이동합니다(DEF-19).
     glm::vec3      syncedLocalPos_ { 0.f };

@@ -4,6 +4,7 @@
 #include "../core/Reflect.hpp"
 #include "../core/ComponentFields.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 void RigidBodyComponent::releaseBody() {
@@ -64,12 +65,17 @@ bool RigidBodyComponent::setMotionRuntime(EMotionType m) {
         physSys_->setMotionKinematic(bodyId_, m == EMotionType::Kinematic);
         createdMotion_ = m;   // 바디를 다시 만들 이유가 아님
         synced_        = false;   // 물리가 다음 틱에 쓴 자세부터 순간 이동 판정
+        interpValid_   = false;   // 손을 따라가던 자세에서 보간을 다시 시작(P4)
     }
     return true;
 }
 
 void RigidBodyComponent::setContinuousRuntime(bool on) {
     if (hasBody()) physSys_->setContinuous(bodyId_, on);
+}
+
+void RigidBodyComponent::setGravityFactorRuntime(float factor) {
+    if (hasBody()) physSys_->setGravityFactor(bodyId_, factor);
 }
 
 void RigidBodyComponent::rebuildBody() {
@@ -80,7 +86,7 @@ void RigidBodyComponent::rebuildBody() {
 bool RigidBodyComponent::bodyParamsChanged() const {
     return shape != createdShape_ || motionType != createdMotion_ || mass != createdMass_ ||
            halfExtent.x != createdHalf_.x || halfExtent.y != createdHalf_.y ||
-           halfExtent.z != createdHalf_.z;
+           halfExtent.z != createdHalf_.z || center != createdCenter_;
 }
 
 // 편집을 확정할 때 바디를 다시 만듭니다. 기준은 "세터가 불렸는가" 가 아니라 "만들 때 쓴 값과
@@ -95,10 +101,11 @@ void RigidBodyComponent::onTransformCommitted() {
     if (bodyId_ == 0xFFFFFFFFu || !physSys_ || !owner) return;
     // 콜라이더 치수는 스케일로 정해지므로(DEF-41) 스케일이 바뀌면 다시 만듭니다. 위치·회전만
     // 바뀌었으면 바디를 그 자리로 옮깁니다. 예전에는 플레이 중 기즈모로 옮겨도 바디가 남았습니다.
-    const glm::vec3 sc = glm::abs(owner->worldScale());
+    const glm::vec3 sc = owner->worldScale();   // 부호까지(거울로 뒤집으면 메시 충돌체를 다시 만듦, DEF-170)
     const glm::vec3 d  = glm::abs(sc - createdScale_);
     if (std::max({ d.x, d.y, d.z }) > 1e-5f) { rebuildBody(); return; }
     physSys_->teleport(bodyId_, *owner);
+    interpValid_ = false;
 }
 
 std::vector<PropDesc> RigidBodyComponent::buildProps() {
@@ -130,6 +137,9 @@ std::vector<PropDesc> RigidBodyComponent::buildProps() {
         makePropToggle("Continuous Collision",
             [p]{ return p->continuous; },
             [p](bool v){ p->continuous = v; if (p->hasBody()) p->physSys_->setContinuous(p->bodyId_, v); }),
+        makePropToggle("Interpolate",
+            [p]{ return p->interpolate; },
+            [p](bool v){ p->interpolate = v; p->interpValid_ = false; }),
         makePropFloat("Mass",        PropColor::Neutral, 0.1f,
             [p]{ return p->mass; },
             [p](float v){ p->mass = std::max(0.001f, v); }, PropUnit::Size),
@@ -142,6 +152,12 @@ std::vector<PropDesc> RigidBodyComponent::buildProps() {
         makePropFloat("HalfZ",       PropColor::Blue,  0.01f,
             [p]{ return p->halfExtent.z; },
             [p](float v){ p->halfExtent.z = std::max(0.001f, v); }, PropUnit::Size),
+        makePropFloat("CenterX",     PropColor::Red,   0.01f,
+            [p]{ return p->center.x; }, [p](float v){ p->center.x = v; }, PropUnit::Size),
+        makePropFloat("CenterY",     PropColor::Green, 0.01f,
+            [p]{ return p->center.y; }, [p](float v){ p->center.y = v; }, PropUnit::Size),
+        makePropFloat("CenterZ",     PropColor::Blue,  0.01f,
+            [p]{ return p->center.z; }, [p](float v){ p->center.z = v; }, PropUnit::Size),
     };
 }
 
@@ -206,6 +222,8 @@ void RigidBodyComponent::writeFields(ComponentFieldWriter& w) const {
     w.f ("mass",        mass);
     w.v3("halfExtent",  { halfExtent.x, halfExtent.y, halfExtent.z });
     if (continuous) w.b("continuous", true);   // 기본값이면 쓰지 않음(기존 씬 파일이 바뀌지 않게)
+    if (center != glm::vec3(0.f)) w.v3("center", center);
+    if (interpolate) w.b("interpolate", true);
 }
 
 bool RigidBodyComponent::readField(const std::string& key, const std::string& value) {
@@ -216,6 +234,12 @@ bool RigidBodyComponent::readField(const std::string& key, const std::string& va
     else if (key == "restitution") ok = fieldparse::toFloat(value, restitution);
     else if (key == "mass")        ok = fieldparse::toFloat(value, mass);
     else if (key == "continuous")  ok = fieldparse::toBool(value, continuous);
+    else if (key == "interpolate") ok = fieldparse::toBool(value, interpolate);
+    else if (key == "center") {
+        glm::vec3 c;
+        ok = fieldparse::toVec3(value, c) && std::isfinite(c.x) && std::isfinite(c.y) && std::isfinite(c.z);
+        if (ok) center = c;
+    }
     else if (key == "halfExtent") {
         glm::vec3 h;
         ok = fieldparse::toVec3(value, h);

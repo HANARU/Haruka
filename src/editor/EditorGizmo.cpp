@@ -312,7 +312,7 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
                 Actor* parent = selected->getParent();           // DEF-52
                 glm::vec3 localDel = worldDel;
                 if (parent)
-                    localDel = glm::vec3(glm::inverse(parent->worldMatrix()) * glm::vec4(worldDel, 0.f));
+                    localDel = glm::vec3(hmath::affineInverse(parent->worldMatrix()) * glm::vec4(worldDel, 0.f));
                 // 증분 누적이 아니라 시작 트랜스폼 기준의 절대 위치입니다. 축과 부모 행렬이
                 // 드래그 중 상수이므로, 스냅이 꺼져 있으면 궤적은 기존 증분식과 같습니다.
                 selected->setLocalPosition(undoSnap_.position() + localDel);

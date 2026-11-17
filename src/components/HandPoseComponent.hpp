@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Component.hpp"
 #include "../xr/HandSkeleton.hpp"
+#include "../xr/GraspSolver.hpp"
 
 #include <string>
 #include <vector>
@@ -30,7 +31,19 @@ public:
     HandPoseComponent();
 
     // 지금 굽힘 값을 메시 관절에 씁니다. 메시가 없거나 아직 불러오지 않았으면 아무것도 하지 않고 false.
+    // 쥐기 자세(setGrasp)가 걸려 있으면 관절마다 입력 굽힘과 쥐기 굽힘을 섞은 값을 씁니다.
     bool apply();
+
+    // ── 자동 맞춤 쥐기(손 쥐기 D, Hand_Grasp_Design 4-4) ──────────────────────────────────
+    // 관절별 굽힘(0 ~ 1)을 blendTime 초 동안 ease-in-out 으로 걸고, clearGrasp 는 입력 굽힘으로 되돌립니다. 0 이면 바로.
+    void setGrasp(const hgrasp::Flex& flex, float blendTime = 0.1f);
+    void clearGrasp(float blendTime = 0.1f);
+    float graspWeight() const;   // 지금 쥐기 자세의 비중(0 = 입력, 1 = 쥐기, ease 뒤)
+    // 굽힘 flex 일 때 26관절의 월드 위치(GraspSolver 의 자세 함수). 메시 자세를 잠깐 바꿨다가 지금 자세로 되돌립니다.
+    // 메시가 없으면 false.
+    bool jointWorldPositions(const hgrasp::Flex& flex, hgrasp::JointPos& out);
+    // 지금 자세의 관절 월드 행렬(손바닥 위치 · 방향 등). 없는 관절이면 false.
+    bool jointWorld(hhand::EJoint j, glm::mat4& out);
 
     // 진단(시험 · 에디터 정보): 찾은 관절 수(최대 26), 축 규약 위반 관절 이름들.
     int mappedJoints() const { return mapped_; }
@@ -51,6 +64,12 @@ public:
 private:
     bool map(SkinnedMeshComponent& mesh);   // 관절 번호 대응 · 축 확인. 같은 스킨이면 다시 하지 않음
 
+    void writeFlex(SkinnedMeshComponent& mesh, const hgrasp::Flex& flex);   // 관절별 굽힘을 메시에 씀
+    hgrasp::Flex graspFlex_{};
+    float        graspFrom_   = 0.f;   // 섞기 시작 비중
+    float        graspTo_     = 0.f;   // 목표 비중(0 / 1)
+    float        graspT_      = 1.f;   // 진행(0 ~ 1)
+    float        graspBlend_  = 0.1f;  // 섞는 시간(초)
     const void*              mappedSkin_ = nullptr;   // 대응을 만든 스킨(SkinSourceData*)
     int                      jointMap_[hhand::kJointCount];
     int                      mapped_ = 0;

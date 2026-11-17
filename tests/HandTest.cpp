@@ -25,6 +25,10 @@
 #include "../src/vfs/Vfs.hpp"
 #include "../src/xr/HandInputMap.hpp"
 #include "../src/xr/HandSkeleton.hpp"
+#include "../src/xr/GraspSolver.hpp"
+#include "../src/components/XrComponents.hpp"
+#include "../src/components/RigidBodyComponent.hpp"
+#include "../src/physics/PhysicsSystem.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -389,6 +393,157 @@ void testHandPoseInput() {
           "저장 왕복: 손 · 굽힘 값 · 최대 각");
 }
 
+// ── 6. 자동 맞춤 쥐기: 순수 계산(합성 손) ─────────────────────────────────────────
+// 손가락 다섯이 x 로 나란히, 손바닥(원점)에서 -Z 로 뻗은 마디 4 cm 셋. 굽힘은 관절마다 로컬 X 둘레로 최대 90° 아래(-Y)로.
+static void synthPose(const hgrasp::Flex& flex, hgrasp::JointPos& out) {
+    for (auto& p : out) p = glm::vec3(0.f);
+    out[(int)hhand::EJoint::Palm]  = glm::vec3(0.f);
+    out[(int)hhand::EJoint::Wrist] = glm::vec3(0.f, 0.f, 0.06f);
+    for (int f = 0; f < hhand::kFingerCount; ++f) {
+        glm::vec3 p(-0.04f + 0.02f * (float)f, 0.f, -0.04f);
+        out[(int)hhand::EJoint::MiddleProximal] = glm::vec3(0.f, 0.f, -0.04f);
+        float ang = 0.f;
+        for (int k = 0; k < 3; ++k) {
+            int a, b;
+            hgrasp::boneJoints(f, k, a, b);
+            out[a] = p;
+            ang += glm::radians(90.f) * flex[f][k];
+            const glm::vec3 dir(0.f, -std::sin(ang), -std::cos(ang));
+            p += 0.04f * dir;
+            out[b] = p;
+        }
+    }
+}
+
+void testGraspSolver() {
+    std::printf("== 6. 자동 맞춤 쥐기(순수 계산) ==\n");
+    hgrasp::Settings st;
+    // 손가락 아래 4 cm 의 바닥(y = -0.04). 침투 = 반지름 - (가장 낮은 점의 높이 - 바닥).
+    const float floorY = -0.04f;
+    auto floorOverlap = [&](const glm::vec3& a, const glm::vec3& b, float r) { return r - (std::min(a.y, b.y) - floorY); };
+    const hgrasp::Result r = hgrasp::solve(synthPose, floorOverlap, st);
+    bool allContact = true, partial = true, noDeep = true;
+    hgrasp::JointPos jp;
+    synthPose(r.flex, jp);
+    for (int f = 0; f < hhand::kFingerCount; ++f) {
+        allContact = allContact && r.fingerContact[f];
+        partial    = partial && r.flex[f][0] < 1.f;
+        for (int k = 0; k < 3; ++k) {
+            int a, b;
+            hgrasp::boneJoints(f, k, a, b);
+            noDeep = noDeep && floorOverlap(jp[a], jp[b], st.boneRadius) <= st.tolerance + 1e-6f;
+        }
+    }
+    std::printf("    검지 굽힘 %.3f %.3f %.3f, 판정 %d 번\n", r.flex[1][0], r.flex[1][1], r.flex[1][2], r.queries);
+    check(allContact && partial, "바닥에 닿을 때까지 굽히다 멈춤(모든 손가락 닿음, 뿌리 마디 < 1)");
+    check(noDeep, "맞춘 자세의 어느 마디도 허용 침투(2 mm)보다 깊이 박히지 않음");
+    check(r.fitted, "엄지와 다른 손가락이 닿으면 맞춤 잡기");
+    check(r.queries < 600, "판정 횟수가 잡을 때 수백 번 안쪽");
+
+    const hgrasp::Result none = hgrasp::solve(synthPose, [](const glm::vec3&, const glm::vec3&, float) { return -1.f; }, st);
+    bool fist = true;
+    for (int f = 0; f < hhand::kFingerCount; ++f)
+        for (int k = 0; k < 3; ++k) fist = fist && none.flex[f][k] == 1.f;
+    check(fist && !none.fitted && !none.palmContact, "닿는 것이 없으면 주먹을 쥐고 맞춤 아님(예전 잡기로)");
+
+    // 손바닥만 닿음(손바닥 캡슐 = 원점 → 중지 뿌리)
+    auto palmOnly = [](const glm::vec3& a, const glm::vec3& b, float r) {
+        return (a == glm::vec3(0.f) && b == glm::vec3(0.f, 0.f, -0.04f)) ? r : -1.f;
+    };
+    const hgrasp::Result palm = hgrasp::solve(synthPose, palmOnly, st);
+    check(palm.palmContact && palm.fitted, "손바닥이 닿으면 맞춤 잡기");
+
+    // 첫 마디부터 박힌 물체: 그 손가락은 굽히지 않음
+    auto inside = [&](const glm::vec3& a, const glm::vec3& b, float r) { return r - (std::min(a.y, b.y) + 0.001f); };
+    const hgrasp::Result in = hgrasp::solve(synthPose, inside, st);
+    check(in.fingerContact[1] && in.flex[1][0] == 0.f && in.flex[1][2] == 0.f, "편 손에서 이미 박힌 손가락은 그대로 둠");
+}
+
+// ── 7. 자동 맞춤 쥐기: 시험 장갑 + Jolt ────────────────────────────────────────────
+void testGraspGlove(const std::vector<MeshSourceData>& glove) {
+    std::printf("== 7. 자동 맞춤 쥐기(시험 장갑 + 물리) ==\n");
+    if (glove.empty() || !glove[0].skin) { check(false, "장갑이 없어 건너뜀"); return; }
+    World w;
+    PhysicsSystem ps;
+    ps.startup();
+    ps.setWorld(&w);
+    ps.setGravity({ 0.f, 0.f, 0.f });
+    Actor* handA = w.spawnActor("RightHand");
+    auto*  ia    = handA->addComponent<GrabInteractorComponent>();
+    Actor* gloveA = w.spawnActor("RightGlove");
+    gloveA->attachTo(handA);
+    auto* sk = gloveA->addComponent<SkinnedMeshComponent>();
+    auto* hp = gloveA->addComponent<HandPoseComponent>();
+    sk->setSkinData(glove[0].skin, std::make_shared<const std::vector<MeshSourceVertex>>(glove[0].vertices));
+    glm::mat4 palmM;
+    check(hp->jointWorld(hhand::EJoint::Palm, palmM), "손바닥 관절의 월드 자세");
+    const glm::vec3 palm   = glm::vec3(palmM[3]);
+    const glm::vec3 normal = -glm::normalize(glm::vec3(palmM[1]));
+    // 지름 7 cm 공을 손바닥 앞 2 cm 띄워 둠(공 표면 ~ 손바닥 = 두께 1.5 cm + 2 cm)
+    const float R = 0.035f;
+    Actor* ball = w.spawnActor("Ball");
+    ball->setLocalPosition(palm + normal * (GrabInteractorComponent::kPalmThickness + 0.02f + R));
+    ball->setLocalScale(glm::vec3(2.f * R));
+    auto* rb = ball->addComponent<RigidBodyComponent>();
+    rb->shape = EPhysicsShape::Sphere;
+    rb->motionType = EMotionType::Dynamic;
+    auto* g = ball->addComponent<GrabbableComponent>();
+    ps.tick(1.f / 90.f);
+    check(rb->hasBody(), "(준비) 공 바디");
+    PhysicsSystem::RaycastHit hit;
+    check(ps.raycastBody(rb->bodyId_, palm, normal, 0.2f, hit) && std::fabs(hit.distance - 0.035f) < 1e-3f,
+          "바디 하나 대상 광선: 손바닥에서 공 표면까지 3.5 cm");
+    check(ps.capsulePenetration(rb->bodyId_, ball->worldPosition() - glm::vec3(0.1f, 0, 0), ball->worldPosition() + glm::vec3(0.1f, 0, 0), 0.01f) > R,
+          "바디 하나 대상 캡슐: 공을 꿰뚫으면 침투가 반지름보다 깊음");
+    check(ps.capsulePenetration(rb->bodyId_, ball->worldPosition() + glm::vec3(0, 0.2f, 0), ball->worldPosition() + glm::vec3(0, 0.3f, 0), 0.01f) < 0.f,
+          "떨어진 캡슐은 음수(닿지 않음)");
+
+    const glm::vec3 before = ball->worldPosition();
+    ia->grab(g, handA->worldPosition(), handA->worldRotation());
+    check(ia->lastFitted(), "공을 잡으면 맞춤 잡기");
+    for (int i = 0; i < 18; ++i) {   // 0.2 초: 전환(0.1 초)이 끝남
+        ia->follow(handA->worldPosition(), handA->worldRotation(), 1.f / 90.f);
+        hp->tick(1.f / 90.f);
+        ps.tick(1.f / 90.f);
+    }
+    const float moved = glm::dot(before - ball->worldPosition(), normal);
+    std::printf("    공이 손바닥 쪽으로 %.4f m, 손가락 비중 %.2f\n", moved, hp->graspWeight());
+    check(std::fabs(moved - 0.02f) < 0.002f, "손바닥에 맞춰 공을 2 cm 당김(표면이 손바닥 두께 자리)");
+    check(std::fabs(hp->graspWeight() - 1.f) < 1e-5f, "0.1 초 전환 뒤 손가락은 맞춘 자세");
+    // 맞춘 자세의 마디가 공에 깊이 박히지 않음(지금 바디 자리 기준)
+    float deepest = -1.f;
+    int touching = 0;
+    for (int f = 0; f < hhand::kFingerCount; ++f) {
+        bool t = false;
+        for (int k = 0; k < 3; ++k) {
+            int a, b;
+            hgrasp::boneJoints(f, k, a, b);
+            glm::mat4 ma, mb;
+            hp->jointWorld((hhand::EJoint)a, ma);
+            hp->jointWorld((hhand::EJoint)b, mb);
+            const float d = ps.capsulePenetration(rb->bodyId_, glm::vec3(ma[3]), glm::vec3(mb[3]), 0.011f);
+            deepest = std::max(deepest, d);
+            t = t || d > -0.004f;
+        }
+        touching += t;
+    }
+    std::printf("    가장 깊은 마디 침투 %.4f m, 공에 닿은 손가락 %d\n", deepest, touching);
+    check(deepest < 0.0035f, "맞춘 손가락 마디가 공에 박히지 않음(허용 2 mm + 판정 오차)");
+    check(touching >= 2, "손가락 둘 이상이 공 표면에 닿음");
+    ia->release(glm::vec3(0.f), glm::vec3(0.f), false);
+    for (int i = 0; i < 18; ++i) hp->tick(1.f / 90.f);
+    check(hp->graspWeight() < 1e-5f && !ia->lastFitted(), "놓으면 0.1 초 동안 입력 자세로 돌아감");
+
+    // 멀리 있는 물체는 맞추지 못하고 예전 잡기. 놓은 바디는 다음 물리 틱부터 순간 이동을 판정하므로 한 틱 흘린 뒤 옮깁니다.
+    ps.tick(1.f / 90.f);
+    ball->setLocalPosition(palm + normal * 0.5f);
+    ps.tick(1.f / 90.f);
+    ia->grab(g, handA->worldPosition(), handA->worldRotation());
+    check(!ia->lastFitted(), "손이 닿지 않는 물체는 맞춤 없이 잡음(잡기는 실패하지 않음)");
+    ia->release(glm::vec3(0.f), glm::vec3(0.f), false);
+    ps.shutdown();
+}
+
 } // namespace
 
 int main() {
@@ -411,6 +566,8 @@ int main() {
     testHandPose(left, "왼손");
     testInputMapping();
     testHandPoseInput();
+    testGraspSolver();
+    testGraspGlove(right);
 
     hvfs::reset();
     fs::remove_all(tmp, ec);

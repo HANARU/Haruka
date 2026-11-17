@@ -1,4 +1,5 @@
 #include "EditorApp.hpp"
+#include "../math/Geometry.hpp"
 #include "../core/ComponentRegistry.hpp"
 #include "../core/FrameTimings.hpp"
 #include "../core/AppPaths.hpp"
@@ -4329,7 +4330,7 @@ void EditorApp::pickActor(float mx, float my, float winW, float winH) {
         Actor* a = ap.get();
         if (!a->activeInHierarchy()) continue;   // 눈으로 끈 액터는 픽에서도 제외
 
-        glm::vec3 lo, hi;
+        glm::vec3 lo(0.f), hi(0.f);
         bool hasBounds = false;
         for (const auto& comp : a->getComponents()) {
             glm::vec3 cmin, cmax;
@@ -4340,26 +4341,12 @@ void EditorApp::pickActor(float mx, float my, float winW, float winH) {
         }
         if (!hasBounds) continue;
 
-        const glm::mat4 wm  = a->worldMatrix();
-        const glm::mat4 inv = glm::inverse(wm);
-        const glm::vec3 ro  = glm::vec3(inv * glm::vec4(rayO, 1.f));
-        const glm::vec3 rd  = glm::vec3(inv * glm::vec4(rayD, 0.f));   // 로컬 광선(정규화 안 함)
-
-        float tmin = -std::numeric_limits<float>::max();
-        float tmax =  std::numeric_limits<float>::max();
-        bool  hit  = true;
-        for (int k = 0; k < 3; ++k) {
-            if (std::abs(rd[k]) < 1e-8f) {
-                if (ro[k] < lo[k] || ro[k] > hi[k]) { hit = false; break; }
-            } else {
-                float t1 = (lo[k] - ro[k]) / rd[k];
-                float t2 = (hi[k] - ro[k]) / rd[k];
-                if (t1 > t2) std::swap(t1, t2);
-                tmin = std::max(tmin, t1);
-                tmax = std::min(tmax, t2);
-            }
-        }
-        if (!hit || tmax < std::max(tmin, 0.f)) continue;
+        const glm::mat4  wm    = a->worldMatrix();
+        const hmath::Ray local = hmath::transformRay({ rayO, rayD }, hmath::affineInverse(wm));   // 로컬 광선(정규화 안 함)
+        const glm::vec3& ro    = local.origin;
+        const glm::vec3& rd    = local.dir;
+        float tmin = 0.f, tmax = 0.f;
+        if (!hmath::intersectRayAabb(local, { lo, hi }, tmin, tmax)) continue;
 
         const float     tHit     = (tmin >= 0.f) ? tmin : tmax;   // 안에서 시작하면 나가는 지점
         const glm::vec3 localHit = ro + rd * tHit;

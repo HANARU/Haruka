@@ -8,6 +8,14 @@
 #include "Transform.hpp"
 #include "Component.hpp"
 
+// 구조 버전(2026-11-18, 성능 안정화 1-5). 액터 생성 · 삭제 · ID 재배치와 컴포넌트 추가 · 제거 · 순서 변경 때 오릅니다.
+// World::componentsOf<T> 가 이 값이 바뀔 때만 목록을 다시 모읍니다. 모든 World 가 함께 쓰는 값이라(액터는 자기 World 를
+// 모름) 한 월드의 변경이 다른 월드의 목록도 다시 모으게 하지만, 틀리지는 않습니다. 메인 스레드에서만 바꿉니다.
+namespace hcore {
+inline uint64_t gStructureVersion = 1;
+inline void     bumpStructure() { ++gStructureVersion; }
+} // namespace hcore
+
 class Actor {
 public:
     uint64_t    id     = 0;   // assigned by World::spawnActor
@@ -28,15 +36,15 @@ public:
 
     // ── 로컬 트랜스폼 ────────────────────────────────────────────────────────
     // 읽기는 transform(), 쓰기는 아래 세터로만 합니다. transform_ 은 private 라
-    // 외부에서 필드를 직접 쓸 수 없습니다. 나중에 파생값 캐시를 되살릴 때, 이 세터
-    // 들이 무효화의 단일 통로가 됩니다 (Spatial_Representation_Design.md 5절).
+    // 외부에서 필드를 직접 쓸 수 없습니다. 이 세터들이 월드 행렬 캐시(O2)를 무효화하는 단일 통로입니다
+    // (localVersion_ 을 올림, Spatial_Representation_Design.md 5절).
     const Transform& transform() const { return transform_; }
 
-    void setLocalPosition(const glm::vec3& p) { transform_.setPosition(p); }
-    void setLocalRotation(const glm::quat& r) { transform_.setRotation(r); }
-    void setLocalScale   (const glm::vec3& s) { transform_.setScale(s);    }
-    void translateLocal  (const glm::vec3& d) { transform_.translate(d);   }
-    void setLocalTransform(const Transform& t){ transform_ = t;            }   // undo/redo·직렬화
+    void setLocalPosition(const glm::vec3& p) { transform_.setPosition(p); ++localVersion_; }
+    void setLocalRotation(const glm::quat& r) { transform_.setRotation(r); ++localVersion_; }
+    void setLocalScale   (const glm::vec3& s) { transform_.setScale(s);    ++localVersion_; }
+    void translateLocal  (const glm::vec3& d) { transform_.translate(d);   ++localVersion_; }
+    void setLocalTransform(const Transform& t){ transform_ = t;            ++localVersion_; }   // undo/redo·직렬화
 
     // 이름 호환용 별칭. DefaultGameModule/물리가 씁니다.
     void setPosition(const glm::vec3& p) { setLocalPosition(p); }
@@ -54,6 +62,7 @@ public:
         // emplace preserves first-added component on duplicate type
         componentCache_.emplace(std::type_index(typeid(T)), ptr);
         components.push_back(std::move(comp));
+        hcore::bumpStructure();
         return ptr;
     }
 
@@ -65,6 +74,29 @@ public:
 
     const std::vector<std::unique_ptr<Component>>& getComponents() const { return components; }
 
+    // T(또는 T 를 상속한 형)인 컴포넌트를 붙은 순서대로 모두(2026-11-17, Roadmap A-3). getComponent<T> 는 정확한 형의 첫 것만 찾습니다.
+    template<typename T>
+    std::vector<T*> getComponents() const {
+        std::vector<T*> out;
+        for (const auto& c : components)
+            if (auto* t = dynamic_cast<T*>(c.get())) out.push_back(t);
+        return out;
+    }
+
+    // 자신부터 자손까지(너비 우선, 자식 순서대로) 처음 찾은 T(정확한 형). includeInactive 가 거짓이면 꺼진 액터(activeInHierarchy
+    // 거짓)는 건너뜁니다(Unity GetComponentInChildren 과 같은 규칙). 손 액터가 자식 장갑의 손 자세를 찾을 때 씁니다.
+    template<typename T>
+    T* getComponentInChildren(bool includeInactive = false) const {
+        std::vector<const Actor*> queue{ this };
+        for (size_t i = 0; i < queue.size(); ++i) {
+            const Actor* a = queue[i];
+            if (!includeInactive && !a->activeInHierarchy()) continue;
+            if (T* t = a->getComponent<T>()) return t;
+            for (const Actor* c : a->children_) queue.push_back(c);
+        }
+        return nullptr;
+    }
+
     // 이 컴포넌트를 지웁니다(템플릿판과 같은 순서: 끄기 → onDestroy → 해제). 에디터의 컴포넌트 제거 Undo 가
     // 타입이 아니라 그 컴포넌트 하나를 지울 때 씁니다(2026-10-15). 없으면 false.
     bool removeComponent(Component* c);
@@ -72,24 +104,25 @@ public:
     int  componentIndex(const Component* c) const;
     void moveComponent(Component* c, size_t index);
 
+    // 첫 T 를 지웁니다. 캐시 갱신은 포인터판이 맡아, 같은 형이 하나 더 있으면 남은 첫 것이 getComponent<T> 의 답이 됩니다
+    // (Roadmap A-3: 예전에는 캐시를 지우기만 해 남은 것을 찾지 못했음).
     template<typename T>
     bool removeComponent() {
-        componentCache_.erase(std::type_index(typeid(T)));
         auto it = std::find_if(components.begin(), components.end(),
             [](const auto& c){ return dynamic_cast<T*>(c.get()) != nullptr; });
         if (it == components.end()) return false;
-        if ((*it)->isEnabled()) (*it)->setEnabled(false);
-        (*it)->onDestroy();
-        components.erase(it);
-        return true;
+        return removeComponent(it->get());
     }
 
     void tick(float dt) {
         for (auto& c : components) c->tickIfReady(dt);
     }
 
-    // ── World-space transform (온디맨드 유도, 캐시 없음) ──────────────────────
+    // ── World-space transform (세대 스탬프 캐시, O2 2026-11-17) ─────────────────
+    // worldMatrix 는 부모 사슬의 캐시를 확인하며 바뀐 곳만 다시 곱합니다(Actor.cpp 주석). 값은 캐시 없는 계산과 같습니다.
     glm::mat4 worldMatrix()   const;
+    // 캐시 없이 다시 계산(시험 · 검증용).
+    glm::mat4 worldMatrixUncached() const;
     glm::vec3 worldPosition() const;
     glm::quat worldRotation() const;
     glm::vec3 worldScale()    const;
@@ -134,6 +167,14 @@ private:
     std::unordered_map<std::type_index, Component*> componentCache_;
 
     Transform           transform_;
+    // 월드 행렬 캐시(O2). 로컬 세터가 localVersion_ 을 올리고, 캐시는 (로컬 버전, 부모, 부모 캐시 스탬프)가 모두 같을 때만
+    // 씁니다. 스탬프는 다시 계산할 때마다 전역에서 새 값을 받으므로, 조상 어디가 바뀌어도 자손의 비교가 어긋나 다시 계산됩니다.
+    uint32_t            localVersion_ = 0;
+    mutable glm::mat4   worldCache_ { 1.f };
+    mutable uint64_t    worldStamp_       = 0;   // 0 = 캐시 없음
+    mutable uint32_t    cacheLocalVer_    = 0;
+    mutable uint64_t    cacheParentStamp_ = 0;
+    mutable const Actor* cacheParent_     = nullptr;
     Actor*              parent_   = nullptr;
     std::vector<Actor*> children_;
     bool                activeSelf_ = true;

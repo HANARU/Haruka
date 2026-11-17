@@ -80,6 +80,8 @@ public:
     bool      centerOfMass      (uint32_t body, glm::vec3& out) const;
     // 연속 충돌(Jolt EMotionQuality::LinearCast)을 켜고 끕니다. 바디가 없으면 아무 일도 하지 않습니다.
     void      setContinuous     (uint32_t body, bool on);
+    // 중력 배율(Jolt GravityFactor, 1 = 보통). 속도 추적으로 잡은 물체가 손 아래로 처지지 않게 0 으로 둡니다(P5).
+    void      setGravityFactor  (uint32_t body, float factor);
     bool      isContinuous      (uint32_t body) const;
     // Dynamic ↔ Kinematic 을 바디를 다시 만들지 않고 바꿉니다(Jolt SetMotionType, 2026-10-15). VR 손으로 잡는 동안
     // Kinematic 으로 손을 따라가게 했다가, 놓는 순간 Dynamic 으로 돌리고 손 속도를 넣는 데 씁니다(바디를 다시 만들면
@@ -101,7 +103,41 @@ public:
     // 구와 겹치는 바디의 액터를 모읍니다(VR 손으로 잡을 물체 찾기). out 은 비우고 채웁니다.
     void overlapSphere(const glm::vec3& center, float radius, std::vector<Actor*>& out) const;
 
+    // ── 바디 하나만 대상으로 하는 질의(손 쥐기 C, Hand_Grasp_Design 4-3) ──────────────────────────────
+    // 다른 바디는 보지 않고 그 바디의 셰이프와만 판정합니다(Jolt TransformedShape). 쥐는 손의 마디가 잡은 물체에만 닿는지 볼 때 씁니다.
+    // 광선: origin 에서 dir 방향(길이 상관없음) maxDistance 안의 첫 표면. 바디가 없거나 못 맞추면 false(out.actor 는 비움).
+    bool raycastBody(uint32_t body, const glm::vec3& origin, const glm::vec3& dir, float maxDistance, RaycastHit& out) const;
+    // 캡슐(선분 a-b, 반지름 radius)과 바디의 최대 침투 깊이(m). 닿지 않으면 음수(−1). a == b 면 구로 봅니다.
+    float capsulePenetration(uint32_t body, const glm::vec3& a, const glm::vec3& b, float radius) const;
+
+    // ── 캐릭터 컨트롤러(2026-11-17, Jolt CharacterVirtual) ─────────────────────────────────────────────
+    // 바디가 아닌 가상 캡슐로 "미끄러지며 막히기(collide and slide)"를 합니다. 벽을 따라 미끄러지고, 비탈은 maxSlopeDeg 까지
+    // 걸어 오르며, stepHeight 이하 턱은 올라섭니다(UE CharacterMovement · Unity CharacterController 와 같은 역할). 다른 바디를
+    // 밀지는 않습니다(가상 캐릭터). 위쪽은 언제나 월드 +Y 입니다.
+    struct CharacterDesc {
+        float radius      = 0.25f;   // m
+        float height      = 1.5f;    // m, 발에서 머리 끝까지(2·radius 이상)
+        float maxSlopeDeg = 45.f;
+        float stepHeight  = 0.35f;   // m
+    };
+    struct CharacterMove {
+        glm::vec3 position{ 0.f };       // 움직인 뒤 발 위치
+        bool      onGround = false;      // 걸을 수 있는 바닥 위
+        glm::vec3 groundNormal{ 0.f, 1.f, 0.f };
+    };
+    // 발 위치(캡슐 바닥) 기준. 실패하면 0, 성공하면 0 이 아닌 핸들.
+    uint32_t createCharacter(const CharacterDesc& d, const glm::vec3& feet);
+    void     destroyCharacter(uint32_t handle);
+    // feet 에서 시작해 velocity(m/s, 중력은 호출자가 넣음)로 dt 동안 움직입니다. ignore 액터의 바디는 통과합니다(리그 자신 ·
+    // 손에 든 물체). 바닥에 붙어 내려가기와 계단 오르기를 함께 합니다. 핸들이 없으면 false.
+    bool     moveCharacter(uint32_t handle, const glm::vec3& feet, const glm::vec3& velocity, float dt,
+                           CharacterMove& out, std::span<Actor* const> ignore = {});
+
+    // 지금 살아 있는 물리 시스템(엔진에 하나). 컴포넌트가 질의에 씁니다. startup ~ shutdown 사이에만 null 이 아닙니다.
+    static PhysicsSystem* current() { return current_; }
+
 private:
+    static inline PhysicsSystem* current_ = nullptr;
     std::unique_ptr<JoltImpl> impl_;
     World* world_ = nullptr;
 

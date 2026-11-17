@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Transform.hpp"
 #include "../renderer/RenderTypes.hpp"
+#include "../math/Geometry.hpp"
 #include <functional>
 #include <vector>
 #include <cmath>

@@ -21,13 +21,18 @@
 #include "../src/components/XrComponents.hpp"
 #include "../src/components/CameraComponent.hpp"
 #include "../src/input/HInputSystem.hpp"
+#include "../src/assets/AssetManager.hpp"
 #include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
 #include <memory>
+#include <span>
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// 잡기(XrComponents)가 손 자세 · 스킨 메시를 참조합니다. SkinnedMeshComponent::onFieldsLoaded 의 자리만 채웁니다.
+std::vector<AssetPair> AssetManager::loadAll(const std::string&) { return {}; }
 
 namespace {
 
@@ -571,6 +576,160 @@ int main() {
         check(xc < 0.85f, "연속 충돌을 켜면 벽 앞에서 막힘");
     }
 
+    // ── P3: 충돌체 중심 오프셋 ──────────────────────────────────────────────────────
+    {
+        std::printf("\n-- P3: 충돌체 중심 오프셋 --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        Actor* a = w.spawnActor("Offset");
+        a->setLocalScale({ 2.f, 2.f, 2.f });
+        auto* rb = a->addComponent<RigidBodyComponent>();
+        rb->motionType = EMotionType::Static;
+        rb->center     = { 0.f, 2.f, 0.f };   // 로컬 2 m 위 × 크기 2 = 월드 4 m 위, 반높이 0.5 × 2 = 1
+        run(ps, 1);
+        PhysicsSystem::RaycastHit hit;
+        const bool got = ps.raycast({ 0.f, 10.f, 0.f }, { 0.f, -1.f, 0.f }, 20.f, hit);
+        check(got && std::fabs(hit.point.y - 5.f) < 1e-3f, "오프셋 상자 윗면이 y = 5(중심 × 크기 + 반높이 × 크기)");
+        check(std::fabs(a->worldPosition().y) < 1e-6f, "액터는 제자리(오프셋은 충돌체만 옮김)");
+        // 편집으로 오프셋을 바꾸면 바디를 다시 만듦
+        const uint32_t before = rb->bodyId_;
+        for (auto& pd : rb->buildProps())
+            if (std::string(pd.label) == "CenterY" && pd.setF) pd.setF(0.f);
+        rb->onPropsCommitted();
+        run(ps, 1);
+        PhysicsSystem::RaycastHit hit2;
+        ps.raycast({ 0.f, 10.f, 0.f }, { 0.f, -1.f, 0.f }, 20.f, hit2);
+        check(rb->hasBody() && std::fabs(hit2.point.y - 1.f) < 1e-3f, "오프셋을 0 으로 바꾸면 다시 만들어 윗면 y = 1");
+        (void)before;
+        Actor* sph = w.spawnActor("OffsetSphere");
+        sph->setLocalPosition({ 5.f, 0.f, 0.f });
+        auto* rs = sph->addComponent<RigidBodyComponent>();
+        rs->shape = EPhysicsShape::Sphere;
+        rs->motionType = EMotionType::Static;
+        rs->center = { 0.f, 0.f, -3.f };
+        run(ps, 1);
+        PhysicsSystem::RaycastHit hs;
+        check(ps.raycast({ 5.f, 10.f, -3.f }, { 0.f, -1.f, 0.f }, 20.f, hs) && std::fabs(hs.point.y - 0.5f) < 1e-3f,
+              "구도 오프셋 자리(z = −3)에 있음");
+        ComponentFieldWriter fw;
+        rs->interpolate = true;
+        rs->writeFields(fw);
+        RigidBodyComponent back;
+        for (const auto& kv : fw.fields()) back.readField(kv.first, kv.second);
+        check(back.center == glm::vec3(0.f, 0.f, -3.f) && back.interpolate, "center · interpolate 직렬화 왕복");
+        RigidBodyComponent plain;
+        ComponentFieldWriter fw2;
+        plain.writeFields(fw2);
+        bool extra = false;
+        for (const auto& kv : fw2.fields()) extra = extra || kv.first == "center" || kv.first == "interpolate";
+        check(!extra, "기본값(오프셋 0 · 보간 끔)이면 쓰지 않음");
+        RigidBodyComponent bad;
+        check(bad.readField("center", "1 nan 2") && bad.center == glm::vec3(0.f), "깨진 오프셋은 기본값 유지");
+        ps.shutdown();
+    }
+
+    // ── P4: 동적 바디 렌더 보간 ─────────────────────────────────────────────────────
+    {
+        std::printf("\n-- P4: 렌더 보간 --\n");
+        auto slide = [](bool interp, std::vector<float>& xs, float& teleX) {
+            World w;
+            PhysicsSystem ps;
+            ps.startup();
+            ps.setWorld(&w);
+            ps.setGravity({ 0.f, 0.f, 0.f });
+            ps.setStepRate(60.f);
+            Actor* b = w.spawnActor("Slider");
+            b->setLocalScale({ 0.2f, 0.2f, 0.2f });
+            auto* rb = b->addComponent<RigidBodyComponent>();
+            rb->motionType  = EMotionType::Dynamic;
+            rb->interpolate = interp;
+            ps.tick(1.f / 60.f);
+            rb->setLinearVelocity({ 6.f, 0.f, 0.f });
+            for (int i = 0; i < 30; ++i) { ps.tick(1.f / 180.f); xs.push_back(b->worldPosition().x); }   // 화면 180 Hz, 물리 60 Hz
+            b->setLocalPosition({ 5.f, 0.f, 0.f });   // 게임 코드가 옮김(순간 이동)
+            ps.tick(1.f / 180.f);
+            teleX = b->worldPosition().x;
+            ps.shutdown();
+        };
+        std::vector<float> xi, xn;
+        float ti = 0.f, tn = 0.f;
+        slide(true, xi, ti);
+        slide(false, xn, tn);
+        int still = 0;
+        for (size_t i = 1; i < xn.size(); ++i) still += std::fabs(xn[i] - xn[i - 1]) < 1e-6f;
+        bool even = true;
+        for (size_t i = 6; i < xi.size(); ++i) {
+            const float d = xi[i] - xi[i - 1];
+            even = even && d > 0.02f && d < 0.047f;   // 6 m/s ÷ 180 Hz = 0.033 m
+        }
+        std::printf("  (참고) 보간 끔: 제자리 틱 %d / %zu\n", still, xn.size() - 1);
+        check(still >= 15, "(준비) 보간을 끄면 물리 스텝 사이 틱에서 물체가 멈춤(계단)");
+        check(even, "보간을 켜면 틱마다 고르게 움직임");
+        check(xi.back() <= xn.back() + 1e-5f && xn.back() - xi.back() < 0.11f, "보간한 자리는 바디보다 한 스텝 안쪽 뒤");
+        check(std::fabs(ti - 5.f) < 0.12f, "순간 이동은 보간하지 않고 바로 그 자리");
+        (void)tn;
+    }
+
+    // ── P5: 속도 추적 잡기 ──────────────────────────────────────────────────────────
+    {
+        std::printf("\n-- P5: 속도 추적 잡기 --\n");
+        glm::vec3 lin, ang;
+        GrabInteractorComponent::trackingVelocity(glm::vec3(0.f), glm::quat(1.f, 0.f, 0.f, 0.f), { 0.1f, 0.f, 0.f },
+                                                  glm::quat(1.f, 0.f, 0.f, 0.f), 0.01f, lin, ang);
+        check(glm::length(lin - glm::vec3(10.f, 0.f, 0.f)) < 1e-4f && glm::length(ang) < 1e-6f, "목표까지 10 cm, dt 10 ms → 10 m/s");
+        GrabInteractorComponent::trackingVelocity(glm::vec3(0.f), glm::quat(1.f, 0.f, 0.f, 0.f), { 5.f, 0.f, 0.f },
+                                                  glm::angleAxis(glm::radians(90.f), glm::vec3(0.f, 1.f, 0.f)), 0.1f, lin, ang);
+        check(std::fabs(glm::length(lin) - GrabInteractorComponent::kMaxTrackSpeed) < 1e-3f, "먼 목표는 상한 속도로 자름");
+        check(glm::length(ang - glm::vec3(0.f, glm::radians(90.f) / 0.1f, 0.f)) < 1e-3f, "90° 를 0.1 s 에 → y 축 15.7 rad/s");
+
+        auto carry = [](bool tracking, float& endX, float& gravityDrop) {
+            World w;
+            PhysicsSystem ps;
+            ps.startup();
+            ps.setWorld(&w);
+            ps.setStepRate(90.f);
+            Actor* wall = w.spawnActor("Wall");   // x = 1 의 벽(두께 10 cm)
+            wall->setLocalPosition({ 1.f, 1.f, 0.f });
+            wall->setLocalScale({ 0.1f, 2.f, 2.f });
+            wall->addComponent<RigidBodyComponent>()->motionType = EMotionType::Static;
+            Actor* cube = w.spawnActor("Held");
+            cube->setLocalPosition({ 0.f, 1.f, 0.f });
+            cube->setLocalScale({ 0.1f, 0.1f, 0.1f });
+            auto* rb = cube->addComponent<RigidBodyComponent>();
+            rb->motionType = EMotionType::Dynamic;
+            rb->mass = 0.3f;
+            auto* g = cube->addComponent<GrabbableComponent>();
+            g->velocityTracking = tracking;
+            Actor* handA = w.spawnActor("Hand");
+            auto* ia = handA->addComponent<GrabInteractorComponent>();
+            ps.tick(1.f / 90.f);
+            const glm::quat hr(1.f, 0.f, 0.f, 0.f);
+            glm::vec3 hand(0.f, 1.f, 0.f);
+            ia->grab(g, hand, hr);
+            // 손을 가만히 둔 0.5 초: 속도 추적이면 중력이 꺼져 처지지 않아야 함
+            for (int i = 0; i < 45; ++i) { ia->follow(hand, hr, 1.f / 90.f); ps.tick(1.f / 90.f); }
+            gravityDrop = 1.f - cube->worldPosition().y;
+            // 손을 벽 너머(x = 2)로 1 초에 걸쳐 옮김
+            for (int i = 0; i < 90; ++i) {
+                hand.x = 2.f * float(i + 1) / 90.f;
+                ia->follow(hand, hr, 1.f / 90.f);
+                ps.tick(1.f / 90.f);
+            }
+            endX = cube->worldPosition().x;
+            ia->release(glm::vec3(0.f), glm::vec3(0.f), false);
+            ps.shutdown();
+        };
+        float xt = 0.f, xk = 0.f, dt0 = 0.f, dk = 0.f;
+        carry(true, xt, dt0);
+        carry(false, xk, dk);
+        std::printf("  (참고) 속도 추적 x = %.3f, Kinematic x = %.3f, 처짐 %.4f m\n", xt, xk, dt0);
+        check(xk > 1.9f, "(준비) Kinematic 잡기는 벽을 뚫고 손을 따라감");
+        check(xt < 0.95f, "속도 추적 잡기는 벽에 막힘");
+        check(std::fabs(dt0) < 0.01f, "속도 추적 중에는 중력으로 처지지 않음");
+    }
+
     // ── 직렬화(DEF-22): 이름 붙은 값의 왕복 ─────────────────────────────────────
     {
         std::printf("\n-- DEF-22: RigidBody 값이 이름으로 왕복 --\n");
@@ -967,6 +1126,120 @@ int main() {
         check(f5.y < -0.2f, "아래로 끌면 머리를 숙임");
         in.setLookDelta(0.f, 0.f);
         in.clearBindings();
+    }
+
+    // ── 캐릭터 컨트롤러 · 텔레포트 (2026-11-17) ─────────────────────────────────────
+    {
+        std::printf("\n-- 캐릭터 컨트롤러(Jolt CharacterVirtual) --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        check(PhysicsSystem::current() == &ps, "startup 뒤 current() 가 이 시스템");
+        auto staticBox = [&](const char* name, const glm::vec3& pos, const glm::vec3& size) {
+            Actor* a = w.spawnActor(name);
+            a->setLocalPosition(pos);
+            a->setLocalScale(size);
+            a->addComponent<RigidBodyComponent>()->motionType = EMotionType::Static;
+            return a;
+        };
+        staticBox("Floor", { 0.f, 0.f, 0.f }, { 20.f, 1.f, 20.f });          // 윗면 y = 0.5
+        Actor* wall = staticBox("Wall", { 2.f, 1.5f, 0.f }, { 0.2f, 2.f, 6.f });   // 앞면 x = 1.9
+        staticBox("LowStep",  { -3.f, 0.6f, 0.f },  { 2.f, 0.2f, 2.f });     // 윗면 0.7(턱 0.2 m)
+        staticBox("HighStep", { 0.f, 0.8f, -3.f },  { 2.f, 0.6f, 2.f });     // 윗면 1.1(턱 0.6 m)
+        run(ps, 1);
+
+        PhysicsSystem::CharacterDesc d;
+        const uint32_t ch = ps.createCharacter(d, { 0.f, 0.5f, 0.f });
+        check(ch != 0, "캐릭터를 만듦");
+        // 걷기: 수평 속도 + 떨어지는 속도(호출자가 중력을 넣음, RigLocomotion 과 같은 식)
+        auto walk = [&](glm::vec3 feet, const glm::vec3& v, int frames, PhysicsSystem::CharacterMove& m,
+                        std::span<Actor* const> ignore = {}) {
+            float fall = 0.f;
+            for (int i = 0; i < frames; ++i) {
+                ps.moveCharacter(ch, feet, { v.x, fall, v.z }, kDt, m, ignore);
+                feet = m.position;
+                fall = m.onGround ? 0.f : fall - 9.81f * kDt;
+            }
+            return feet;
+        };
+        PhysicsSystem::CharacterMove m;
+        glm::vec3 p = walk({ 0.f, 0.5f, 0.f }, { 3.f, 0.f, 0.f }, 60, m);
+        std::printf("  (참고) 벽으로 1 초: 발 = (%.3f, %.3f, %.3f), 바닥 %d\n", p.x, p.y, p.z, int(m.onGround));
+        check(std::fabs(p.x - (1.9f - d.radius)) < 0.05f, "벽 앞(반지름만큼 떨어진 곳)에서 막힘");
+        check(std::fabs(p.y - 0.5f) < 0.03f && m.onGround, "바닥 위에 서 있음");
+        p = walk(p, { 3.f, 0.f, 2.f }, 30, m);
+        check(p.x < 1.9f - d.radius + 0.05f && p.z > 0.8f, "벽에 비스듬히 밀면 벽을 따라 미끄러짐");
+        p = walk({ 0.f, 3.f, 1.f }, { 0.f, 0.f, 0.f }, 90, m);
+        check(std::fabs(p.y - 0.5f) < 0.03f && m.onGround, "공중에서 떨어져 바닥에 섬");
+        p = walk({ 0.f, 0.5f, 0.f }, { -3.f, 0.f, 0.f }, 60, m);
+        std::printf("  (참고) 낮은 턱 쪽으로 1 초: 발 = (%.3f, %.3f, %.3f)\n", p.x, p.y, p.z);
+        check(p.x < -2.2f && std::fabs(p.y - 0.7f) < 0.05f, "0.2 m 턱은 올라섬");
+        p = walk({ 0.f, 0.5f, 0.f }, { 0.f, 0.f, -3.f }, 60, m);
+        check(p.z > -2.f + 0.05f && std::fabs(p.y - 0.5f) < 0.05f, "0.6 m 턱은 막힘");
+        Actor* ign[] = { wall };
+        p = walk({ 0.f, 0.5f, 0.f }, { 3.f, 0.f, 0.f }, 60, m, ign);
+        check(p.x > 2.5f, "ignore 에 넣은 액터는 통과");
+
+        // 리그 이동(collide): 스틱 앞으로 → 높은 턱(−Z) 앞에서 막힘
+        std::printf("\n-- 리그 충돌 이동 · 텔레포트 --\n");
+        HInputSystem& in = HInputSystem::get();
+        in.clearBindings();
+        std::string err;
+        for (const auto& [k, v] : HInputSystem::defaultBindings()) in.applyBinding(k, v, err);
+        Actor* rig  = w.spawnActor("Rig");
+        rig->setLocalPosition({ 0.f, 0.5f, 0.f });
+        auto*  loco = rig->addComponent<RigLocomotionComponent>();
+        loco->collide = true;
+        Actor* head = w.spawnActor("Head");
+        head->attachTo(rig);
+        head->setLocalPosition({ 0.f, 1.6f, 0.f });
+        head->addComponent<TrackedPoseComponent>()->source = ETrackedSource::Head;
+        HXrInputState s;
+        s.focused = true;                // 머리 자세는 TrackedPose 를 틱하지 않으므로 그대로
+        s.hands[0].thumbstick = { 0.f, 1.f };
+        in.setXrInput(s);
+        in.update(0.f, [](int) { return false; });
+        for (int i = 0; i < 90; ++i) loco->tick(kDt);
+        std::printf("  (참고) 리그 = (%.3f, %.3f, %.3f)\n", rig->worldPosition().x, rig->worldPosition().y, rig->worldPosition().z);
+        check(rig->worldPosition().z > -2.f && rig->worldPosition().z < -1.5f, "충돌 이동이 높은 턱 앞에서 멈춤");
+        check(std::fabs(rig->worldPosition().y - 0.5f) < 0.05f, "리그가 바닥 높이를 지킴");
+        loco->collide = false;
+        for (int i = 0; i < 30; ++i) loco->tick(kDt);
+        check(rig->worldPosition().z < -2.2f, "collide 를 끄면 예전처럼 통과");
+        s.hands[0].thumbstick = { 0.f, 0.f };
+        in.setXrInput(s);
+        in.update(0.f, [](int) { return false; });
+
+        ps.shutdown();
+        check(PhysicsSystem::current() == nullptr, "shutdown 뒤 current() 는 null");
+        ps.destroyCharacter(ch);   // 지운 뒤 불러도 안전
+    }
+    {
+        std::printf("\n-- 텔레포트 포물선(순수 함수) --\n");
+        // 바닥 y = 0 평면만 있는 광선
+        const hxr::ArcRay ground = [](const glm::vec3& a, const glm::vec3& b, glm::vec3& pt, glm::vec3& n) {
+            if (a.y < 0.f || b.y >= 0.f) return false;
+            const float t = a.y / (a.y - b.y);
+            pt = a + (b - a) * t;
+            n  = { 0.f, 1.f, 0.f };
+            return true;
+        };
+        const hxr::TeleportArc arc = hxr::teleportArc({ 0.f, 1.5f, 0.f }, { 0.f, 0.f, -1.f }, 8.f, 9.81f, 2.f, 0.04f, ground);
+        const float expect = 8.f * std::sqrt(2.f * 1.5f / 9.81f);
+        std::printf("  (참고) 수평 8 m/s, 높이 1.5 m: 착지 z = %.3f (식 %.3f), 점 %zu개\n", -arc.point.z, expect, arc.points.size());
+        check(arc.hit && std::fabs(-arc.point.z - expect) < 0.02f, "수평으로 던지면 식대로 v·sqrt(2h/g) 앞에 떨어짐");
+        check(arc.points.back() == arc.point, "꺾은선이 맞은 점에서 끝남");
+        check(hxr::teleportValid(arc, 40.f), "평평한 바닥은 내릴 수 있음");
+        hxr::TeleportArc wallArc = arc;
+        wallArc.normal = { 1.f, 0.f, 0.f };
+        check(!hxr::teleportValid(wallArc, 40.f), "벽(법선 수평)은 내릴 수 없음");
+        wallArc.normal = glm::vec3(std::sin(glm::radians(30.f)), std::cos(glm::radians(30.f)), 0.f);
+        check(hxr::teleportValid(wallArc, 40.f), "30° 비탈은 내릴 수 있음(한계 40°)");
+        const hxr::TeleportArc up = hxr::teleportArc({ 0.f, 1.5f, 0.f }, { 0.f, 1.f, 0.f }, 8.f, 9.81f, 0.5f, 0.04f, ground);
+        check(!up.hit && !hxr::teleportValid(up, 40.f), "maxTime 안에 맞지 않으면 내릴 곳 없음");
+        const glm::vec3 r = hxr::teleportRigPosition({ 1.f, 0.f, 1.f }, { 1.3f, 1.6f, 0.8f }, { 5.f, 2.f, 5.f });
+        check(glm::length(r - glm::vec3(4.7f, 2.f, 5.2f)) < 1e-5f, "텔레포트 뒤 머리 수평 위치가 대상 위, 리그 바닥 = 대상 높이");
     }
 
     // ── 보이지 않는 리그 · 리그 높이 (2026-10-16) ─────────────────────────────────

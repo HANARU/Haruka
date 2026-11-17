@@ -348,10 +348,9 @@ void Engine::updateFollowPanels(float dt) {
         headRot = glm::quat_cast(glm::mat3(glm::normalize(glm::vec3(m[0])), glm::normalize(glm::vec3(m[1])),
                                            glm::normalize(glm::vec3(m[2]))));
     }
-    for (const auto& ap : world_.getActors()) {
-        if (!ap->activeInHierarchy()) continue;
-        auto* pc = ap->getComponent<UIPanelComponent>();
-        if (pc && pc->isEnabled() && pc->placement == UIPanelComponent::Placement::FollowHead)
+    for (UIPanelComponent* pc : world_.componentsOf<UIPanelComponent>()) {
+        if (!pc->owner->activeInHierarchy()) continue;
+        if (pc->isEnabled() && pc->placement == UIPanelComponent::Placement::FollowHead)
             pc->stepFollow(headPos, headRot, dt);
     }
 }
@@ -373,10 +372,8 @@ void Engine::updateWorldUiPointers(IEngineFrontend& front, const WorldUiPointerI
 
     // 보이는 패널(렌더러가 그리는 것과 같은 조건: 켜진 액터의 켜진 첫 패널)
     std::vector<UIPanelComponent*> panels;
-    for (const auto& ap : world_.getActors()) {
-        if (!ap->activeInHierarchy()) continue;
-        if (auto* pc = ap->getComponent<UIPanelComponent>(); pc && pc->isEnabled()) panels.push_back(pc);
-    }
+    for (UIPanelComponent* pc : world_.componentsOf<UIPanelComponent>())
+        if (pc->owner->activeInHierarchy() && pc->isEnabled()) panels.push_back(pc);
 
     // 가림은 물리 레이캐스트로 봅니다. 플레이어(활성 카메라의 맨 위 조상) 아래의 액터는 모두 뺍니다. 광선이 몸 · 리그 · 손의
     // 충돌체 안에서 출발하면 거리 0 으로 맞기 때문입니다(Jolt 기본 동작).

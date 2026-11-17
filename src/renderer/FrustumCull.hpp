@@ -4,6 +4,8 @@
 #include <array>
 #include <cstdint>
 
+#include "../math/Geometry.hpp"
+
 // ── 절두체 컬링 ────────────────────────────────────────────────────────────────
 // Renderer 의 CPU 컬링이 쓰는 판정입니다. Vulkan 도 Renderer 도 없이 시험할 수 있도록 glm 만
 // 쓰는 헤더로 뺐습니다(tests/StereoViewTest.cpp).
@@ -12,10 +14,8 @@
 // 2026-10-04 에 코드도 지웠습니다). 예전에는 CPU 가 AABB 를, GPU 가 구를 써서 두 판정이
 // 갈렸습니다(DEF-25). 구는 회전에 불변이므로 그 흔들림이 없습니다.
 
-struct FrustumPlane {
-    glm::vec3 normal;
-    float     d;
-};
+// 절두체 평면은 공통 평면(hmath::Plane, dot(normal, p) + d = 0, 법선 쪽이 안)입니다(B1).
+using FrustumPlane = hmath::Plane;
 
 // Gribb-Hartmann 평면 추출(Vulkan NDC z=[0,1]). 법선은 안쪽을 향합니다.
 inline std::array<FrustumPlane, 6> extractFrustumPlanes(const glm::mat4& vp) {

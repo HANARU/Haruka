@@ -1,5 +1,6 @@
 #include "UIPanelPointer.hpp"
 #include "../core/Actor.hpp"
+#include "../math/Geometry.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -9,13 +10,12 @@ bool UIPanelPointer::intersect(const UIPanelComponent& panel, const glm::vec3& o
                                Hit& out, bool bounded) {
     const Actor* a = panel.owner;
     if (!a || panel.width <= 0.f || panel.height <= 0.f) return false;
-    const glm::mat4 world = a->worldMatrix();
-    const glm::mat4 inv   = glm::inverse(world);
-    const glm::vec3 ro    = glm::vec3(inv * glm::vec4(origin, 1.f));
-    const glm::vec3 rd    = glm::vec3(inv * glm::vec4(dir, 0.f));
-    if (std::fabs(rd.z) < 1e-8f) return false;          // 평면과 나란함
-    const float t = -ro.z / rd.z;
-    if (!(t >= 0.f)) return false;                      // 뒤쪽(NaN 포함)
+    const glm::mat4   world = a->worldMatrix();
+    const hmath::Ray  local = hmath::transformRay({ origin, dir }, hmath::affineInverse(world));   // 패널 로컬(판은 z = 0)
+    float t = 0.f;
+    if (!hmath::intersectRayPlane(local, { glm::vec3(0.f, 0.f, 1.f), 0.f }, t)) return false;   // 나란함 · 뒤쪽 · NaN
+    const glm::vec3& rd = local.dir;
+    const glm::vec3& ro = local.origin;
     const bool front = rd.z < 0.f;                      // +Z 쪽에서 들어옴
     if (bounded && !front && !panel.twoSided) return false;
 

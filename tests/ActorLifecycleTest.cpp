@@ -12,6 +12,8 @@
 #include "../src/components/CameraComponent.hpp"
 
 #include <cmath>
+#include "../src/math/Geometry.hpp"
+#include <glm/gtc/matrix_transform.hpp>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -232,6 +234,72 @@ int main() {
         const glm::mat4 v = sc->viewMatrix();
         check(std::fabs(glm::length(glm::vec3(v[0])) - 1.f) < 1e-6f &&
               std::fabs(glm::length(glm::vec3(v[2])) - 1.f) < 1e-6f, "액터 크기는 뷰 행렬에 들어가지 않음");
+    }
+
+    std::printf("\n== 컴포넌트 찾기(Roadmap A-3) ==\n");
+    {
+        Actor root, child, grand, off;
+        child.attachTo(&root);
+        grand.attachTo(&child);
+        off.attachTo(&root);
+        auto* p1 = root.addComponent<Probe>();
+        auto* p2 = root.addComponent<Probe>();
+        check(root.getComponents<Probe>().size() == 2 && root.getComponents<Probe>()[1] == p2, "getComponents<T> 가 같은 형을 붙은 순서대로 모두");
+        check(root.getComponents<Component>().size() == 2, "기반 형으로도 모두 찾음");
+        check(root.removeComponent<Probe>() && root.getComponent<Probe>() == p2, "첫 것을 지우면 남은 것이 getComponent 의 답(캐시 다시 맞춤)");
+        (void)p1;
+        auto* deep = grand.addComponent<Probe>();
+        auto* side = off.addComponent<Probe>();
+        Actor lone;
+        auto* own = lone.addComponent<Probe>();
+        check(lone.getComponentInChildren<Probe>() == own, "자신에게 있으면 자신의 것");
+        check(child.getComponentInChildren<Probe>() == deep, "자손(손자)의 것을 찾음");
+        off.setActive(false);
+        check(root.getComponentInChildren<Probe>() == p2, "자신이 먼저");
+        root.removeComponent<Probe>();
+        check(root.getComponentInChildren<Probe>() == deep, "꺼진 자식(off)은 건너뛰고 켜진 손자의 것");
+        check(root.getComponentInChildren<Probe>(true) == side, "includeInactive 면 너비 우선으로 먼저 만난 꺼진 자식의 것");
+        grand.detach(); off.detach(); child.detach();
+    }
+
+    std::printf("\n== 월드 행렬 캐시(O2) ==\n");
+    {
+        Actor ga, pa, ca, oa;
+        Actor* g = &ga;
+        Actor* p = &pa;
+        Actor* c = &ca;
+        p->attachTo(g);
+        c->attachTo(p);
+        auto same = [](const glm::mat4& a, const glm::mat4& b) {
+            for (int i = 0; i < 4; ++i)
+                if (glm::length(a[i] - b[i]) > 1e-5f) return false;
+            return true;
+        };
+        auto agree = [&] { return same(c->worldMatrix(), c->worldMatrixUncached()) && same(p->worldMatrix(), p->worldMatrixUncached()); };
+        g->setLocalPosition({ 1.f, 2.f, 3.f });
+        p->setLocalRotation(glm::angleAxis(0.5f, glm::vec3(0.f, 1.f, 0.f)));
+        c->setLocalScale({ 2.f, 1.f, 0.5f });
+        check(agree(), "처음 계산이 캐시 없는 값과 같음");
+        const glm::mat4 before = c->worldMatrix();
+        g->setLocalPosition({ 4.f, 2.f, 3.f });   // 조부모만 바꿈
+        check(agree() && !same(before, c->worldMatrix()), "조부모를 옮기면 손자의 캐시가 다시 계산됨");
+        Transform t = c->transform();
+        t.setPosition({ 0.f, 5.f, 0.f });
+        c->setLocalTransform(t);                  // 되돌리기 · 불러오기 경로
+        check(agree(), "setLocalTransform 도 캐시를 무효화(DEF-49 경로)");
+        Actor* other = &oa;
+        other->setLocalPosition({ -10.f, 0.f, 0.f });
+        c->attachTo(other);                       // 부모 바꿈
+        check(agree() && same(c->worldMatrix(), c->worldMatrixUncached()), "부모를 바꾸면 새 부모 기준으로 계산");
+        c->detach();
+        check(same(c->worldMatrix(), c->transform().matrix()), "떼어 내면 로컬이 곧 월드");
+        c->attachTo(p);
+        p->setWorldPosition({ 7.f, 7.f, 7.f });
+        check(glm::length(p->worldPosition() - glm::vec3(7.f)) < 1e-4f && agree(), "월드 세터(아핀 역) 뒤에도 일치");
+        const glm::mat4 m = glm::scale(glm::rotate(glm::translate(glm::mat4(1.f), { 1, 2, 3 }), 0.9f, glm::vec3(1, 1, 0)), { 2.f, 0.5f, 3.f });
+        check(same(hmath::affineInverse(m), glm::inverse(m)), "아핀 역 = 일반 역(비균등 크기)");
+        const glm::mat4 rt = glm::rotate(glm::translate(glm::mat4(1.f), { -4, 1, 2 }), 1.3f, glm::vec3(0, 1, 1));
+        check(same(hmath::rigidInverse(rt), glm::inverse(rt)), "강체 역 = 일반 역(회전 + 이동)");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

@@ -1,9 +1,17 @@
 #include "Actor.hpp"
 #include "SceneLog.hpp"
+#include "../math/Geometry.hpp"
 #include <algorithm>
 
-// ── 월드 트랜스폼 — 온디맨드 유도 ─────────────────────────────────────────────
+// ── 월드 트랜스폼 — 세대 스탬프 캐시 (O2, 2026-11-17) ───────────────────────────
 //
+// 캐시가 유효한 조건: 로컬 버전이 같고, 부모 포인터가 같고, 부모의 캐시 스탬프가 같음. 부모를 먼저 검사(재귀)하므로 조상
+// 어디가 바뀌어도 그 아래는 새 스탬프를 보고 다시 곱합니다. 쓰기 쪽은 로컬 세터가 버전을 올리는 것뿐이라, 예전 DEF-49
+// (더티 플래그를 세우지 않는 쓰기 경로) 같은 누락이 생기려면 transform_ 을 세터 밖에서 써야 하는데 transform_ 은 private
+// 이고 Actor 안의 쓰기는 모두 세터를 거칩니다. 엔진 데이터는 메인 스레드 전용이라(Docs/Threading.md 규칙 1) 잠금이 없습니다.
+// 부모가 있는 액터의 worldMatrix 비용: 바뀐 것이 없으면 사슬 길이만큼의 비교, 바뀌었으면 그 아래 곱셈만.
+//
+// 아래는 예전(캐시 없음) 판단 기록입니다.
 // 예전에는 cachedWorld_ / worldDirty_ 로 캐싱했는데, 에디터 편집이 원본 transform 을
 // 직접 쓰면서 더티 플래그를 세우지 않아 렌더러가 낡은 캐시를 읽었습니다(DEF-49).
 // 즉 편집이 화면에 반영되지 않았습니다.
@@ -14,9 +22,28 @@
 // 세대 스탬프 방식으로 올립니다(Docs/Transform_Design.md 5-1절 안 나). worldMatrix()
 // 시그니처가 그대로라 소급이 쉽습니다.
 
+static uint64_t g_worldStamp = 0;   // 메인 스레드 전용
+
 glm::mat4 Actor::worldMatrix() const {
-    return parent_ ? parent_->worldMatrix() * transform_.matrix()
-                   : transform_.matrix();
+    uint64_t parentStamp = 0;
+    const glm::mat4* parentWorld = nullptr;
+    if (parent_) {
+        parent_->worldMatrix();   // 부모 캐시를 먼저 맞춤
+        parentStamp = parent_->worldStamp_;
+        parentWorld = &parent_->worldCache_;
+    }
+    if (worldStamp_ != 0 && cacheLocalVer_ == localVersion_ && cacheParent_ == parent_ && cacheParentStamp_ == parentStamp)
+        return worldCache_;
+    worldCache_       = parentWorld ? *parentWorld * transform_.matrix() : transform_.matrix();
+    worldStamp_       = ++g_worldStamp;
+    cacheLocalVer_    = localVersion_;
+    cacheParent_      = parent_;
+    cacheParentStamp_ = parentStamp;
+    return worldCache_;
+}
+
+glm::mat4 Actor::worldMatrixUncached() const {
+    return parent_ ? parent_->worldMatrixUncached() * transform_.matrix() : transform_.matrix();
 }
 
 glm::vec3 Actor::worldPosition() const {
@@ -38,13 +65,13 @@ glm::vec3 Actor::worldScale() const {
 }
 
 void Actor::setWorldPosition(const glm::vec3& p) {
-    if (!parent_) { transform_.setPosition(p); return; }
-    transform_.setPosition(glm::vec3(glm::inverse(parent_->worldMatrix()) * glm::vec4(p, 1.f)));
+    if (!parent_) { setLocalPosition(p); return; }
+    setLocalPosition(glm::vec3(hmath::affineInverse(parent_->worldMatrix()) * glm::vec4(p, 1.f)));
 }
 
 void Actor::setWorldRotation(const glm::quat& q) {
-    if (!parent_) { transform_.setRotation(q); return; }
-    transform_.setRotation(glm::normalize(glm::inverse(parent_->worldRotation()) * q));
+    if (!parent_) { setLocalRotation(q); return; }
+    setLocalRotation(glm::normalize(glm::inverse(parent_->worldRotation()) * q));
 }
 
 void Actor::setActive(bool v) {
@@ -98,6 +125,7 @@ bool Actor::removeComponent(Component* comp) {
     if (comp->isEnabled()) comp->setEnabled(false);
     comp->onDestroy();
     components.erase(it);
+    hcore::bumpStructure();
     if (componentCache_.find(type) == componentCache_.end())
         for (auto& c : components)
             if (std::type_index(typeid(*c)) == type) { componentCache_.emplace(type, c.get()); break; }
@@ -117,6 +145,7 @@ void Actor::moveComponent(Component* comp, size_t index) {
     components.erase(components.begin() + from);
     const size_t at = std::min(index, components.size());
     components.insert(components.begin() + (std::ptrdiff_t)at, std::move(owned));
+    hcore::bumpStructure();
     // 같은 타입이 여럿이면 캐시는 "먼저 붙은 것"이라 순서가 바뀌면 다시 고릅니다.
     const std::type_index type(typeid(*comp));
     componentCache_.erase(type);

@@ -11,6 +11,7 @@ Actor* World::spawnActor(const std::string& name) {
     Actor* ptr   = actor.get();
     idMap_[ptr->id] = ptr;
     actors.push_back(std::move(actor));
+    hcore::bumpStructure();
     onActorSpawned.broadcast(ptr);
     return ptr;
 }
@@ -50,6 +51,7 @@ void World::destroyImmediate(Actor* actor) {
     actors.erase(std::remove_if(actors.begin(), actors.end(),
         [actor](const auto& a) { return a.get() == actor; }),
         actors.end());
+    hcore::bumpStructure();
 }
 
 void World::flushDestroyQueue() {
@@ -93,35 +95,32 @@ bool World::reassignId(Actor* actor, uint64_t newId) {
     auto at = std::lower_bound(actors.begin(), actors.end(), newId,
         [](const std::unique_ptr<Actor>& a, uint64_t id) { return a->id < id; });
     actors.insert(at, std::move(moved));
+    hcore::bumpStructure();
     return true;
 }
 
 CameraComponent* World::getActiveCamera() const {
     if (editorCam_ && !playing_) return editorCam_;
-    for (auto& a : actors)
-        if (a->activeInHierarchy())
-            if (auto* c = a->getComponent<CameraComponent>())
-                if (c != editorCam_ && c->isEnabled() && c->primary) return c;
+    for (CameraComponent* c : componentsOf<CameraComponent>())
+        if (c->owner->activeInHierarchy())
+            if (c != editorCam_ && c->isEnabled() && c->primary) return c;
     return editorCam_;
 }
 
 std::vector<StaticMeshComponent*> World::getVisibleMeshes() const {
     std::vector<StaticMeshComponent*> result;
-    for (auto& a : actors)
-        if (a->activeInHierarchy())
-            if (auto* m = a->getComponent<StaticMeshComponent>())
-                // 머티리얼은 거르지 않습니다. 없으면 렌더러가 오류 머티리얼로 그립니다(DEF-28).
-                if (m->isEnabled() && m->visible && m->mesh)
-                    result.push_back(m);
+    for (StaticMeshComponent* m : componentsOf<StaticMeshComponent>())
+        if (m->owner->activeInHierarchy())
+            // 머티리얼은 거르지 않습니다. 없으면 렌더러가 오류 머티리얼로 그립니다(DEF-28).
+            if (m->isEnabled() && m->visible && m->mesh)
+                result.push_back(m);
     return result;
 }
 
 std::vector<LightComponent*> World::getLights() const {
     std::vector<LightComponent*> result;
-    for (auto& a : actors)
-        if (a->activeInHierarchy())
-            if (auto* l = a->getComponent<LightComponent>())
-                if (l->isEnabled())
-                    result.push_back(l);
+    for (LightComponent* l : componentsOf<LightComponent>())
+        if (l->owner->activeInHierarchy() && l->isEnabled())
+            result.push_back(l);
     return result;
 }
