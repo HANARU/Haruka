@@ -11,6 +11,7 @@
 #include <memory>
 #include <array>
 #include <cstdint>
+#include <cmath>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -182,6 +183,13 @@ public:
     // 월드 UI 포인터의 레이저 · 커서(3D UI 구간 6). 엔진이 프레임마다 넣고, 없으면 빈 목록을 넣습니다.
     void setPointerLines(std::vector<LineVertex> lines) { geometry_.setPointerLines(std::move(lines)); }
 
+    // 셰이더 시간(FrameUBO.timeParams.x)을 엔진 틱 시간만큼 진행합니다(수학 보강 A2, 2026-11-17). 엔진이 drawFrame 전에
+    // 루프마다 부릅니다. 예전에는 프레임 번호 ÷ 60 이라 90 Hz 헤드셋에서 1.5배 빨리 흘렀습니다. double 로 쌓고 셰이더에는
+    // kShaderTimeWrap 초로 접어 넘깁니다(float 간격이 접기 직전 약 0.24 ms, 접는 순간 한 번 0 으로 돌아감).
+    static constexpr double kShaderTimeWrap = 3600.0;
+    void   advanceTime(float dt) { if (dt > 0.f) timeSec_ += dt; }
+    double timeSeconds() const { return timeSec_; }
+    float  shaderTime() const { return (float)std::fmod(timeSec_, kShaderTimeWrap); }
 
     VkCommandBuffer beginOneTimeCmd()                { return rc_.beginOneTimeCmd(); }
     void            endOneTimeCmd(VkCommandBuffer c) { rc_.endOneTimeCmd(c); }
@@ -334,7 +342,7 @@ private:
     VkCommandPool cmdPool   = VK_NULL_HANDLE;
     uint32_t      frameIdx  = 0;
     uint32_t      frameNum_ = 0;  // monotonically increasing frame counter
-    float         time_     = 0.f;
+    double        timeSec_  = 0.0;   // advanceTime 으로 쌓은 엔진 시간(초)
 
     // ── 섀도 캐스터 선택 (DEF-26) ─────────────────────────────────────────────
     // updateLightSSBO 가 라이트를 채우면서 섀도를 던지는 라이트(첫 Directional +

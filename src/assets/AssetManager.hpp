@@ -11,6 +11,7 @@ struct MeshHandle;
 struct MaterialHandle;
 struct MeshSourceVertex;
 struct SkinSourceData;
+struct CollisionMesh;
 class  Renderer;
 
 struct AssetPair {
@@ -27,6 +28,8 @@ struct AssetPair {
     // 스킨 없이 그려도(StaticMeshComponent) 쉬는 자세로 보입니다. 매 프레임 자세는 SkinnedMeshComponent 가 씁니다.
     std::shared_ptr<const std::vector<MeshSourceVertex>> bindVertices;
     std::shared_ptr<const SkinSourceData>                skin;
+    // 충돌용 CPU 형상(위치 · 인덱스, 로컬 공간, 2026-11-17 P2). 볼록 껍질 · 메시 충돌체가 씁니다. 스킨 메시는 쉬는 자세입니다.
+    std::shared_ptr<const CollisionMesh>                 collision;
 };
 
 class AssetManager {

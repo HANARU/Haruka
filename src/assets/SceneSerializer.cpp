@@ -158,6 +158,7 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
             if (pair.mesh) {
                 auto* mc              = a->addComponent<StaticMeshComponent>();
                 mc->mesh              = pair.mesh;
+                mc->collision         = pair.collision;
                 mc->material          = assets.acquirePrimitiveMaterial(d.primMat);
                 mc->primitive         = d.prim;
                 mc->primitiveMaterial = d.primMat;
@@ -176,6 +177,7 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
                 int idx = std::min(d.meshIndex, (int)pairs.size() - 1);
                 auto* mc        = a->addComponent<StaticMeshComponent>();
                 mc->mesh        = pairs[idx].mesh;
+                mc->collision   = pairs[idx].collision;
                 mc->material    = pairs[idx].material;
                 mc->modelPath   = d.model;
                 mc->meshIndex   = idx;

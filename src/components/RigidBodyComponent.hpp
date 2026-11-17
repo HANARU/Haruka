@@ -10,7 +10,10 @@ class PhysicsSystem;
 
 // 값은 옛 씬 파일의 `RIGID:` 순번과 같습니다. 지금은 이름으로 기록하지만(DEF-44) 옛 파일의
 // 숫자도 읽으므로, 기존 항목의 값을 바꾸지 말고 새 항목은 끝에 명시값으로 붙이십시오.
-enum class EPhysicsShape { Box = 0, Sphere = 1, Capsule = 2 };
+// ConvexHull · Mesh(2026-11-17, 수학 보강 P2)는 같은 액터의 메시 형상(Component::collisionMesh)으로 만듭니다. 크기는 액터 월드
+// 크기를 점마다 곱해 비균등 크기도 정확합니다(halfExtent 는 쓰지 않음). Mesh(삼각형 그대로, 오목 가능)는 Static · Kinematic
+// 전용이고, Dynamic 이면 경고하고 볼록 껍질로 만듭니다(Jolt · UE · Unity 모두 움직이는 오목 메시 충돌을 지원하지 않음).
+enum class EPhysicsShape { Box = 0, Sphere = 1, Capsule = 2, ConvexHull = 3, Mesh = 4 };
 enum class EMotionType   { Static = 0, Dynamic = 1, Kinematic = 2 };
 
 struct HalfExt { float x = 0.5f, y = 0.5f, z = 0.5f; };
@@ -23,6 +26,11 @@ public:
     float         restitution = 0.3f;
     float         mass        = 1.f;
     HalfExt       halfExtent;   // used for Box; radius = halfExtent.x for Sphere/Capsule
+    // 연속 충돌(CCD, 수학 보강 P1, 2026-11-17): 켜면 한 스텝에 많이 움직이는 바디가 그 경로를 훑어(Jolt LinearCast) 얇은 벽을
+    // 뚫지 않습니다. 끄면(기본) 스텝 끝 자리만 봅니다. 90 Hz 에서 10 m/s 는 스텝당 11 cm 라, 그보다 얇은 것 사이를 작은 물체가
+    // 지나갈 수 있습니다. Jolt 는 움직임이 바디 안쪽 반지름의 75 % 를 넘는 스텝에서만 훑으므로 느릴 때는 비용이 거의 없습니다.
+    // 던진 물체(GrabInteractor)는 이 값과 상관없이 놓는 순간 켜집니다.
+    bool          continuous  = false;
 
     void onDestroy() override;
     void onDisable() override;              // 꺼지면 바디를 지웁니다(DEF-80)
@@ -49,10 +57,14 @@ public:
     glm::vec3 linearVelocity() const;
     void      setAngularVelocity(const glm::vec3& w);
     glm::vec3 angularVelocity() const;
+    // 질량 중심의 월드 위치. 바디가 없으면 액터의 월드 위치를 돌려줍니다.
+    glm::vec3 centerOfMass() const;
 
     // Dynamic ↔ Kinematic 을 바디를 유지한 채 바꿉니다(VR 잡기, 2026-10-15). 바디가 아직 없으면 값만 바꿔 다음 틱에
     // 그 종류로 만들어집니다. Static 과는 오가지 않습니다(false).
     bool setMotionRuntime(EMotionType m);
+    // 살아 있는 바디의 연속 충돌만 켜고 끕니다(continuous 값은 바꾸지 않음, 바디를 다시 만들지 않음).
+    void setContinuousRuntime(bool on);
 
     // 살아 있는 바디를 지워, 다음 물리 틱에 지금 값으로 다시 만들게 합니다. 게임 코드가
     // shape·motionType·halfExtent·mass 필드를 직접 바꿨다면 이것을 불러야 반영됩니다.

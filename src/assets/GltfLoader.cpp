@@ -520,8 +520,11 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
             if (ref.skin >= 0)
                 d.skin = readSkin(model, ref.skin, prim, posCount, nodeGlobal, nodeParent, path);
             const glm::mat4 worldMat = d.skin ? glm::mat4(1.f) : ref.world;
-            // Inverse-transpose for transforming normals and tangents under non-uniform scale
-            const glm::mat3 normalMat = glm::mat3(glm::transpose(glm::inverse(worldMat)));
+            // Normals use the inverse-transpose (stay perpendicular under non-uniform scale). Tangents lie in the surface,
+            // so they use the plain upper 3x3; a mirroring transform (negative determinant) flips the bitangent sign.
+            const glm::mat3 linearMat = glm::mat3(worldMat);
+            const glm::mat3 normalMat = glm::transpose(glm::inverse(linearMat));
+            const float     mirrorSign = glm::determinant(linearMat) < 0.f ? -1.f : 1.f;
 
             for (size_t i = 0; i < posCount; ++i) {
                 glm::vec4 lp(readF(posBase, i, posStride, 0),
@@ -567,11 +570,11 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
                     glm::vec3 lt(readF(base, i, stride, 0),
                                  readF(base, i, stride, 1),
                                  readF(base, i, stride, 2));
-                    glm::vec3 wt = glm::normalize(normalMat * lt);
+                    glm::vec3 wt = glm::normalize(linearMat * lt);
                     d.vertices[i].tangent[0] = wt.x;
                     d.vertices[i].tangent[1] = wt.y;
                     d.vertices[i].tangent[2] = wt.z;
-                    d.vertices[i].tangent[3] = readF(base, i, stride, 3); // handedness unchanged
+                    d.vertices[i].tangent[3] = readF(base, i, stride, 3) * mirrorSign;
                 }
             }
 

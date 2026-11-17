@@ -50,6 +50,11 @@ void RigidBodyComponent::setAngularVelocity(const glm::vec3& w) {
 glm::vec3 RigidBodyComponent::angularVelocity() const {
     return hasBody() ? physSys_->angularVelocity(bodyId_) : glm::vec3(0.f);
 }
+glm::vec3 RigidBodyComponent::centerOfMass() const {
+    glm::vec3 c(0.f);
+    if (hasBody() && physSys_->centerOfMass(bodyId_, c)) return c;
+    return owner ? owner->worldPosition() : glm::vec3(0.f);
+}
 
 bool RigidBodyComponent::setMotionRuntime(EMotionType m) {
     if (m == EMotionType::Static || motionType == EMotionType::Static) return false;
@@ -61,6 +66,10 @@ bool RigidBodyComponent::setMotionRuntime(EMotionType m) {
         synced_        = false;   // 물리가 다음 틱에 쓴 자세부터 순간 이동 판정
     }
     return true;
+}
+
+void RigidBodyComponent::setContinuousRuntime(bool on) {
+    if (hasBody()) physSys_->setContinuous(bodyId_, on);
 }
 
 void RigidBodyComponent::rebuildBody() {
@@ -106,7 +115,7 @@ std::vector<PropDesc> RigidBodyComponent::buildProps() {
     };
 
     return {
-        makePropEnum("Shape", {"Box", "Sphere", "Capsule"},
+        makePropEnum("Shape", {"Box", "Sphere", "Capsule", "Convex Hull", "Mesh"},
             [p]{ return (int)p->shape; },
             [p](int v){ p->shape = (EPhysicsShape)v; }),
         makePropEnum("Motion", {"Static", "Dynamic", "Kinematic"},
@@ -118,6 +127,9 @@ std::vector<PropDesc> RigidBodyComponent::buildProps() {
         makePropFloat("Restitution", PropColor::Neutral, 0.01f,
             [p]{ return p->restitution; },
             [p, applyMaterial](float v){ p->restitution = std::clamp(v, 0.f, 1.f); applyMaterial(); }, PropUnit::Ratio),
+        makePropToggle("Continuous Collision",
+            [p]{ return p->continuous; },
+            [p](bool v){ p->continuous = v; if (p->hasBody()) p->physSys_->setContinuous(p->bodyId_, v); }),
         makePropFloat("Mass",        PropColor::Neutral, 0.1f,
             [p]{ return p->mass; },
             [p](float v){ p->mass = std::max(0.001f, v); }, PropUnit::Size),
@@ -138,6 +150,8 @@ const char* RigidBodyComponent::shapeName(EPhysicsShape s) {
     switch (s) {
         case EPhysicsShape::Sphere:  return "sphere";
         case EPhysicsShape::Capsule: return "capsule";
+        case EPhysicsShape::ConvexHull: return "convex";
+        case EPhysicsShape::Mesh:    return "mesh";
         default:                     return "box";
     }
 }
@@ -164,6 +178,8 @@ bool RigidBodyComponent::shapeFromText(const std::string& t, EPhysicsShape& out)
     if (t == "box")     { out = EPhysicsShape::Box;     return true; }
     if (t == "sphere")  { out = EPhysicsShape::Sphere;  return true; }
     if (t == "capsule") { out = EPhysicsShape::Capsule; return true; }
+    if (t == "convex")  { out = EPhysicsShape::ConvexHull; return true; }
+    if (t == "mesh")    { out = EPhysicsShape::Mesh;    return true; }
     int v = 0;
     if (!legacyOrdinal(t, 3, v)) return false;
     out = (EPhysicsShape)v;
@@ -189,6 +205,7 @@ void RigidBodyComponent::writeFields(ComponentFieldWriter& w) const {
     w.f ("restitution", restitution);
     w.f ("mass",        mass);
     w.v3("halfExtent",  { halfExtent.x, halfExtent.y, halfExtent.z });
+    if (continuous) w.b("continuous", true);   // 기본값이면 쓰지 않음(기존 씬 파일이 바뀌지 않게)
 }
 
 bool RigidBodyComponent::readField(const std::string& key, const std::string& value) {
@@ -198,6 +215,7 @@ bool RigidBodyComponent::readField(const std::string& key, const std::string& va
     else if (key == "friction")    ok = fieldparse::toFloat(value, friction);
     else if (key == "restitution") ok = fieldparse::toFloat(value, restitution);
     else if (key == "mass")        ok = fieldparse::toFloat(value, mass);
+    else if (key == "continuous")  ok = fieldparse::toBool(value, continuous);
     else if (key == "halfExtent") {
         glm::vec3 h;
         ok = fieldparse::toVec3(value, h);

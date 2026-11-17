@@ -3150,6 +3150,7 @@ void EditorApp::rebuildBottomPanel() {
                                     Actor* a  = ctx_.world->spawnActor(nm);
                                     auto*  mc = a->addComponent<StaticMeshComponent>();
                                     mc->mesh        = pairs[i].mesh;
+                                    mc->collision   = pairs[i].collision;
                                     mc->material    = pairs[i].material;
                                     mc->modelPath   = path;
                                     mc->meshIndex   = i;

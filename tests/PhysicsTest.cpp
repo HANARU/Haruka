@@ -16,6 +16,7 @@
 #include "../src/core/Actor.hpp"
 #include "../src/components/RigidBodyComponent.hpp"
 #include "../src/physics/PhysicsSystem.hpp"
+#include "../src/geometry/CollisionMesh.hpp"
 #include "../src/core/ComponentFields.hpp"
 #include "../src/components/XrComponents.hpp"
 #include "../src/components/CameraComponent.hpp"
@@ -23,6 +24,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
+#include <memory>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -58,6 +60,20 @@ public:
         lo = glm::vec3(-0.5f);
         hi = glm::vec3(0.5f);
         return true;
+    }
+};
+
+// 충돌용 메시 형상만 내놓는 시험용 컴포넌트입니다(P2). GPU 메시 없이 ConvexHull · Mesh 충돌체를 시험합니다.
+class MeshProbe : public Component {
+public:
+    std::shared_ptr<CollisionMesh> mesh = std::make_shared<CollisionMesh>();
+    const char* typeName() const override { return "MeshProbe"; }
+    const CollisionMesh* collisionMesh() const override { return mesh.get(); }
+    // y 높이의 수평 사각형 [x0, x1] × [0, 1] 을 위(+Y)를 보는 삼각형 둘로 더합니다.
+    void addQuad(float x0, float x1, float y) {
+        const uint32_t b = (uint32_t)mesh->positions.size();
+        mesh->positions.insert(mesh->positions.end(), { { x0, y, 0.f }, { x1, y, 0.f }, { x1, y, 1.f }, { x0, y, 1.f } });
+        mesh->indices.insert(mesh->indices.end(), { b, b + 3, b + 2, b, b + 2, b + 1 });
     }
 };
 
@@ -460,6 +476,101 @@ int main() {
         ps.shutdown();
     }
 
+    // ── 메시 충돌체(수학 보강 P2): 볼록 껍질 · 오목 메시 ─────────────────────────────
+    {
+        std::printf("\n-- P2: 볼록 껍질 · 메시 충돌체 --\n");
+        World w;
+        PhysicsSystem ps;
+        ps.startup();
+        ps.setWorld(&w);
+        ps.setGravity({ 0.f, 0.f, 0.f });
+        // 높이가 다른 두 사각형: x [0,1] 은 y 0, x [2,3] 은 y 1. 가운데 x [1,2] 는 비어 있음(오목).
+        auto twoSteps = [&](const char* name, EPhysicsShape shape, EMotionType motion, float xOffset) {
+            Actor* a = w.spawnActor(name);
+            a->setLocalPosition({ xOffset, 0.f, 0.f });
+            a->setLocalScale({ 1.f, 2.f, 1.f });   // 비균등 크기: 높은 판이 y 2 로
+            auto* probe = a->addComponent<MeshProbe>();
+            probe->addQuad(0.f, 1.f, 0.f);
+            probe->addQuad(2.f, 3.f, 1.f);
+            auto* rb = a->addComponent<RigidBodyComponent>();
+            rb->shape      = shape;
+            rb->motionType = motion;
+            return rb;
+        };
+        RigidBodyComponent* meshRb = twoSteps("MeshSteps", EPhysicsShape::Mesh, EMotionType::Static, 0.f);
+        RigidBodyComponent* hullRb = twoSteps("HullSteps", EPhysicsShape::ConvexHull, EMotionType::Static, 10.f);
+        RigidBodyComponent* dynRb  = twoSteps("DynMesh", EPhysicsShape::Mesh, EMotionType::Dynamic, 20.f);
+        Actor* bare = w.spawnActor("NoMesh");
+        bare->setLocalPosition({ 30.f, 0.f, 0.f });
+        auto* bareRb = bare->addComponent<RigidBodyComponent>();
+        bareRb->shape = EPhysicsShape::ConvexHull;
+        run(ps, 1);
+        check(meshRb->hasBody() && hullRb->hasBody() && dynRb->hasBody(), "메시 형상으로 Mesh · ConvexHull 바디를 만듦");
+        check(!bareRb->hasBody(), "메시 형상이 없는 액터의 ConvexHull 은 바디를 만들지 않음(경고)");
+
+        auto downHit = [&](float x, float& y) {   // 위(y 10)에서 아래로 쏜 광선이 맞은 높이
+            PhysicsSystem::RaycastHit h;
+            if (!ps.raycast({ x, 10.f, 0.5f }, { 0.f, -1.f, 0.f }, 20.f, h)) return false;
+            y = h.point.y;
+            return true;
+        };
+        float y = 0.f;
+        check(downHit(0.5f, y) && std::fabs(y - 0.f) < 1e-3f, "Mesh: 낮은 판(x 0.5)은 y 0");
+        check(downHit(2.5f, y) && std::fabs(y - 2.f) < 1e-3f, "Mesh: 높은 판은 비균등 크기(y × 2)로 y 2");
+        check(!downHit(1.5f, y), "Mesh: 가운데 빈 곳(x 1.5)은 뚫려 있음(오목)");
+        check(downHit(11.5f, y) && y > 0.5f && y < 2.f + 1e-3f, "ConvexHull: 같은 곳(x 11.5)은 껍질 경사면에 맞음");
+        check(!downHit(13.5f, y), "ConvexHull: 껍질 밖(x 13.5)은 빈 곳(충돌체가 원점 중심이 아니라 메시 자리에 있음)");
+        check(downHit(21.5f, y) && y > 0.5f, "Dynamic 인 Mesh 는 볼록 껍질로 대신 만듦(가운데도 막힘)");
+        ps.shutdown();
+
+        RigidBodyComponent src;
+        src.shape = EPhysicsShape::ConvexHull;
+        ComponentFieldWriter fw;
+        src.writeFields(fw);
+        RigidBodyComponent dst;
+        for (const auto& kv : fw.fields()) dst.readField(kv.first, kv.second);
+        EPhysicsShape m = EPhysicsShape::Box;
+        check(dst.shape == EPhysicsShape::ConvexHull && RigidBodyComponent::shapeFromText("mesh", m) && m == EPhysicsShape::Mesh,
+              "셰이프 이름 convex · mesh 왕복");
+    }
+
+    // ── 연속 충돌(수학 보강 P1): 빠르고 작은 공이 얇은 벽을 뚫지 않음 ──────────────────
+    {
+        std::printf("\n-- P1: 연속 충돌(LinearCast) --\n");
+        auto shoot = [](bool continuous, float& outX, bool& outFlag) {
+            World w;
+            PhysicsSystem ps;
+            ps.startup();
+            ps.setWorld(&w);
+            ps.setGravity({ 0.f, 0.f, 0.f });
+            ps.setStepRate(90.f);
+            Actor* wall = w.spawnActor("Wall");   // 두께 2 cm 벽(x = 0.85): 스텝 끝 자리 0.667 · 1.0 사이라 겹치는 순간이 없음
+            wall->setLocalPosition({ 0.85f, 0.f, 0.f });
+            wall->setLocalScale({ 0.02f, 2.f, 2.f });
+            wall->addComponent<RigidBodyComponent>()->motionType = EMotionType::Static;
+            Actor* ball = w.spawnActor("Ball");   // 지름 5 cm 공
+            ball->setLocalScale({ 0.05f, 0.05f, 0.05f });
+            auto* rb = ball->addComponent<RigidBodyComponent>();
+            rb->shape      = EPhysicsShape::Sphere;
+            rb->motionType = EMotionType::Dynamic;
+            rb->continuous = continuous;
+            run(ps, 1);
+            outFlag = ps.isContinuous(rb->bodyId_);
+            rb->setLinearVelocity({ 30.f, 0.f, 0.f });   // 스텝(1/90 s)당 33 cm
+            run(ps, 12);                                  // 0.2 초
+            outX = ball->worldPosition().x;
+            ps.shutdown();
+        };
+        float xd = 0.f, xc = 0.f;
+        bool  fd = true, fc = false;
+        shoot(false, xd, fd);
+        shoot(true, xc, fc);
+        std::printf("  (참고) 끔: 공 x = %.3f m, 켬: 공 x = %.3f m\n", xd, xc);
+        check(!fd && fc, "continuous 값대로 바디의 연속 충돌이 정해짐");
+        check(xd > 1.5f, "(준비) 연속 충돌을 끄면 30 m/s 공이 2 cm 벽을 뚫음");
+        check(xc < 0.85f, "연속 충돌을 켜면 벽 앞에서 막힘");
+    }
+
     // ── 직렬화(DEF-22): 이름 붙은 값의 왕복 ─────────────────────────────────────
     {
         std::printf("\n-- DEF-22: RigidBody 값이 이름으로 왕복 --\n");
@@ -479,6 +590,15 @@ int main() {
         bool named = false;
         for (const auto& kv : w.fields()) if (kv.first == "shape") named = (kv.second == "capsule");
         check(named, "셰이프는 이름(capsule)으로 씀");
+        bool hasCont = false;
+        for (const auto& kv : w.fields()) hasCont = hasCont || kv.first == "continuous";
+        check(!hasCont, "연속 충돌이 기본값(끔)이면 쓰지 않음(기존 씬 파일 그대로)");
+        src.continuous = true;
+        ComponentFieldWriter w2;
+        src.writeFields(w2);
+        RigidBodyComponent dst2;
+        for (const auto& kv : w2.fields()) dst2.readField(kv.first, kv.second);
+        check(dst2.continuous, "연속 충돌을 켜면 continuous 로 왕복");
         RigidBodyComponent legacy;
         check(legacy.readField("motion", "2") && legacy.motionType == EMotionType::Kinematic, "옛 순번(2)도 받음");
         check(legacy.readField("mass", "heavy") && legacy.mass == 1.f, "깨진 값은 기본값 유지");
@@ -651,6 +771,54 @@ int main() {
         check(rb4->motionType == EMotionType::Dynamic && glm::length(rb4->linearVelocity()) < 1e-5f,
               "바꿔 잡으면 먼저 잡던 물체는 속도 없이 놓임");
         ia->release(glm::vec3(0.f), glm::vec3(0.f), false);
+
+        // 던지기 속도(수학 보강 A1): 강체 속도장 v(p) = v_손 + ω × (p − 손) + 리그 속도, 최근 프레임 평균.
+        {
+            const auto t0 = hxr::throwVelocity({ 0.f, 0.f, 0.f }, { 0.f, 0.f, 2.f }, { 0.f, 1.f, 0.f },
+                                               { 0.5f, 1.f, 0.f }, { 0.f, 0.f, 0.f });
+            check(glm::length(t0.linear - glm::vec3(0.f, 1.f, 0.f)) < 1e-6f && t0.angular == glm::vec3(0.f, 0.f, 2.f),
+                  "손목만 돌려도(손 선속도 0) 0.5m 앞 질량 중심은 ω × r = 1 m/s 로 날아감");
+            const auto t1 = hxr::throwVelocity({ 3.f, 0.f, 0.f }, { 0.f, 0.f, 0.f }, { 0.f, 1.f, 0.f },
+                                               { 0.f, 1.f, 0.f }, { 0.f, 0.f, -2.f });
+            check(glm::length(t1.linear - glm::vec3(3.f, 0.f, -2.f)) < 1e-6f, "리그 이동 속도를 더함");
+            const auto t2 = hxr::throwVelocity({ 1.f, 2.f, 3.f }, { 0.f, 0.f, 5.f }, { 1.f, 1.f, 1.f },
+                                               { 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f });
+            check(glm::length(t2.linear - glm::vec3(1.f, 2.f, 3.f)) < 1e-6f, "질량 중심이 손 원점이면 손 속도 그대로");
+
+            hxr::VelocityHistory h;
+            glm::vec3 l, a;
+            check(!h.mean(l, a) && l == glm::vec3(0.f), "표본이 없으면 평균 없음(0)");
+            h.push({ 1.f, 0.f, 0.f }, { 0.f, 2.f, 0.f });
+            h.push({ 3.f, 0.f, 0.f }, { 0.f, 4.f, 0.f });
+            check(h.mean(l, a) && std::fabs(l.x - 2.f) < 1e-6f && std::fabs(a.y - 3.f) < 1e-6f, "표본 둘의 평균");
+            for (int i = 0; i < 7; ++i) h.push({ float(10 + i), 0.f, 0.f }, { 0.f, 0.f, 0.f });   // 10 ~ 16
+            h.mean(l, a);
+            check(h.count == hxr::VelocityHistory::kSize && std::fabs(l.x - 14.f) < 1e-5f,
+                  "창을 넘으면 최근 kSize 개(12 ~ 16)만 평균");
+
+            // 질량 중심 조회: 상자는 가운데. 바디가 없으면 액터 위치.
+            Actor* box5 = w.spawnActor("Box5");
+            box5->setLocalPosition({ -3.f, 2.f, 1.f });
+            box5->setLocalScale({ 0.3f, 0.1f, 0.2f });
+            auto* rb5 = box5->addComponent<RigidBodyComponent>();
+            rb5->motionType = EMotionType::Dynamic;
+            check(rb5->centerOfMass() == box5->worldPosition(), "바디가 생기기 전에는 액터 위치");
+            run(ps, 1);
+            check(rb5->hasBody() && glm::length(rb5->centerOfMass() - box5->worldPosition()) < 1e-4f,
+                  "상자 바디의 질량 중심은 액터 위치");
+
+            // 손목 튕기기 던지기: 손 원점은 가만히 있고 z 축으로 4 rad/s 돌면, 손 0.3m 앞(+x) 물체는 +y 로 1.2 m/s.
+            const glm::vec3 hand5 = box5->worldPosition() - glm::vec3(0.3f, 0.f, 0.f);
+            ia->grab(box5->addComponent<GrabbableComponent>(), hand5, hr);
+            check(!ps.isContinuous(rb5->bodyId_), "(준비) 잡기 전 바디는 연속 충돌 꺼짐(기본)");
+            const auto tv = hxr::throwVelocity(glm::vec3(0.f), { 0.f, 0.f, 4.f }, hand5, rb5->centerOfMass(), glm::vec3(0.f));
+            ia->release(tv.linear, tv.angular, true);
+            check(glm::length(rb5->linearVelocity() - glm::vec3(0.f, 1.2f, 0.f)) < 1e-3f &&
+                      glm::length(rb5->angularVelocity() - glm::vec3(0.f, 0.f, 4.f)) < 1e-3f,
+                  "놓은 물체가 ω × r 선속도와 손 각속도를 받음");
+            check(ps.isContinuous(rb5->bodyId_) && !rb5->continuous,
+                  "던지면 그 바디만 연속 충돌을 켬(P1, 저장 값 continuous 는 그대로)");
+        }
 
         // 월드를 통째로 지우면 onDisable 없이 해제됩니다. 다른 월드의 손도 해제된 컴포넌트를 가리키지 않아야 합니다.
         {

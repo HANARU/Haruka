@@ -13,6 +13,7 @@
 #include "LightSelection.hpp"
 #include "SpotCone.hpp"
 #include "ShadowFit.hpp"
+#include "ScreenSize.hpp"
 #include "LightingCalibration.hpp"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
@@ -199,7 +200,7 @@ void Renderer::updateUBO(World& /*world*/, uint32_t lightCount) {
     ubo.shadowFade = glm::vec4(hshadow::kFadeStartFrac * hshadow::kRadius,
                                hshadow::kRadius - hshadow::kFadeEndTexels * shadowTexelWorld, 0.f, 0.f);
 
-    ubo.timeParams  = glm::vec4(time_, (float)frameNum_, lighting_calibration::kBloomThreshold,
+    ubo.timeParams  = glm::vec4(shaderTime(), (float)frameNum_, lighting_calibration::kBloomThreshold,
                                 post.exposure);
     // lights 개수는 updateLightSSBO가 실제로 채운 수를 쓴다(범위 밖 읽기 방지).
     // miscParams.w 는 이제 **섀도 캐스터의 슬롯 번호**다(<0 이면 섀도 없음). 셰이더가 슬롯 0 을
@@ -250,6 +251,20 @@ void Renderer::buildDrawCommands(World& world,
     // 다른 그리기 순서를 보게 됩니다. 단안이면 카메라 위치 그대로입니다.
     const glm::vec3 camPos = viewCenter_;
 
+    // 화면 크기(수학 보강 O6 · O7, ScreenSize.hpp): 눈 가운데에서 잰 거리와, 눈 중 가장 크게 보는 투영의 y 배율로 셉니다.
+    // 카메라가 없으면 재지 않습니다(가장 고운 LOD, 작은 물체 컬링 없음).
+    float projY = 0.f;
+    if (hasCam)
+        for (uint32_t i = 0; i < viewCount_; ++i) projY = std::max(projY, std::fabs(views_[i].proj[1][1]));
+    const bool  sizeOk   = hasCam && projY > 0.f && rc_.renderExtent.height > 0;
+    const float heightPx = (float)rc_.renderExtent.height;
+    auto sphereScreenSize = [&](const glm::vec3& wCenter, float wRadius) {
+        return sizeOk ? hscreen::screenSize(wRadius, glm::length(wCenter - camPos), projY) : 1e9f;
+    };
+    auto maxAxisScale = [](const glm::mat4& m) {
+        return std::max({ glm::length(glm::vec3(m[0])), glm::length(glm::vec3(m[1])), glm::length(glm::vec3(m[2])) });
+    };
+
     opaqueOut.clear();
     transpOut.clear();
     materialRowsOut.clear();
@@ -284,15 +299,13 @@ void Renderer::buildDrawCommands(World& world,
     auto pushCandidate = [&](const MaterialHandle* material, const glm::mat4& model, const glm::vec3& boundCenter,
                              float boundRadius, uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset,
                              float distSq, bool transparent) {
-        const float sx = glm::length(glm::vec3(model[0]));
-        const float sy = glm::length(glm::vec3(model[1]));
-        const float sz = glm::length(glm::vec3(model[2]));
-        const float maxScale = std::max({sx, sy, sz});
         const glm::vec3 wCenter = glm::vec3(model * glm::vec4(boundCenter, 1.f));
-        const float     wRadius = boundRadius * maxScale;
+        const float     wRadius = boundRadius * maxAxisScale(model);
 
-        // 카메라 가시성과 라이트(섀도) 가시성을 따로 판정한다.
-        const bool inCam   = !hasCam   || sphereInAnyView(planes.data(), viewCount_, wCenter, wRadius);
+        // 카메라 가시성과 라이트(섀도) 가시성을 따로 판정한다. 카메라 쪽은 화소 하나보다 작게 보이는 물체도 뺍니다(O7).
+        // 그림자 목록은 그대로라 작은 캐스터의 그림자는 남습니다.
+        const bool inCam   = !hasCam || (sphereInAnyView(planes.data(), viewCount_, wCenter, wRadius) &&
+                                         !(sizeOk && hscreen::tooSmall(sphereScreenSize(wCenter, wRadius), heightPx)));
         const bool inLight = hasShadow && sphereInFrustum(lightPlanes, wCenter, wRadius);
         if (!inCam && !inLight) return;
 
@@ -317,9 +330,12 @@ void Renderer::buildDrawCommands(World& world,
 
         glm::mat4 model = mc->owner ? mc->owner->worldMatrix() : glm::mat4(1.f);
 
-        // LOD selection
-        float distSq = glm::length2(camPos - glm::vec3(model[3]));
-        MeshHandle* mesh = mc->getMeshForDistanceSq(distSq);
+        // LOD: 가장 고운 메시(mc->mesh)의 바운딩 구가 화면에서 차지하는 크기로 고릅니다(O6). distSq 는 투명 정렬 키입니다.
+        const float distSq = glm::length2(camPos - glm::vec3(model[3]));
+        MeshHandle* mesh   = mc->mesh;
+        if (!mc->lodMeshes.empty())
+            mesh = mc->selectMeshForScreenSize(sphereScreenSize(glm::vec3(model * glm::vec4(mc->mesh->boundCenter, 1.f)),
+                                                                mc->mesh->boundRadius * maxAxisScale(model)));
         if (!mesh) continue;
 
         pushCandidate(material, model, mesh->boundCenter, mesh->boundRadius, mesh->indexCount, mesh->firstIndex,
@@ -978,7 +994,6 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
 
     frameIdx  = (frameIdx + 1) % MAX_FRAMES;
     frameNum_++;
-    time_     = (float)frameNum_ / 60.f;
     lastFrameDesktop_ = desktop;
     // 파이프라인을 새로 만든 뒤 처음 그린 프레임에서 캐시를 저장합니다(DEF-153). 정리 경로를 거치지 않고 끝나는 실행(Android
     // 백그라운드 종료)에서도 다음 실행이 다시 컴파일하지 않습니다.

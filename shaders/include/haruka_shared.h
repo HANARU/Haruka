@@ -39,7 +39,7 @@ struct FrameUBO {
     mat4  lightViewProj;                // shadow camera VP (두 눈 공용)
     vec4  eyePos[HARUKA_MAX_VIEWS];     // xyz=눈의 월드 위치, w=nearPlane
     vec4  screenParams;    // xy=눈 하나의 렌더 크기, z=farPlane, w=aoStrength
-    vec4  timeParams;      // x=time, y=frame, z=bloomThreshold, w=exposure
+    vec4  timeParams;      // x=engine time in seconds (wraps every 3600 s), y=frame, z=bloomThreshold, w=exposure
     ivec4 miscParams;      // x=lightCount, y=frame, z=ssaoEnabled, w=shadowLightIndex(<0=none)
     // 섀도맵 상수(2026-11-01). x=텍셀 하나의 월드 크기(m), y=1/해상도(텍셀 하나의 UV 크기, 정사각 맵),
     // z=리시버 상수 깊이 바이어스(섀도 NDC, sampleShadow 가 proj.z 에서 뺌),

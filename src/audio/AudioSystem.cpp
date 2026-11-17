@@ -299,6 +299,10 @@ struct AudioVoice {
     float occlTarget = 0.f;     // 마지막 판정 값
     float retrace    = 0.f;     // 다음 판정까지 남은 시간(초)
     bool  traced     = false;   // 이번 재생에서 판정했는지(멈추면 다시 false: 다음 틱에 바로 판정하고 그 값으로 시작)
+
+    // 가상화(게임 스레드 전용, S3): 들리지 않는 동안 멈춰 두고 재생 위치(원본 샘플률의 프레임)만 셉니다.
+    bool   virtualized   = false;
+    double virtualCursor = 0.0;
 };
 
 // ── 파일 읽기 (2026-10-24) ───────────────────────────────────────────────────────
@@ -750,12 +754,25 @@ void AudioSystem::tick(float dt) {
         const glm::vec3 pos = a->worldPosition();
         ma_sound_set_position(&ac->voice_->sound, pos.x, pos.y, pos.z);
         applySettings(*ac->voice_, *ac);
+        // 최대 거리 밖 무음(silentBeyondMax): miniaudio 곡선에 배율을 곱해 최대 거리에서 0 이 되게 합니다.
+        if (ac->attenuation.spatialize && ac->attenuation.silentBeyondMax)
+            ma_sound_set_volume(&ac->voice_->sound,
+                                ac->volume * hvirt::silenceFactor(ac->attenuation, glm::length(pos - listenerPos_)));
         updateOcclusion(*ac->voice_, *ac, pos, dt);
         updateSend(*ac->voice_, *ac, pos);
         updateHrtf(*ac->voice_, *ac, pos);
         // 위치 · 설정 · 첫 차폐 판정 · HRTF 사슬을 넣은 뒤에 시작해야 첫 소리가 원점에서 나거나 막힌 소리가 열린 채로 튀지 않습니다
-        // (UE 의 비동기 트레이스는 첫 결과가 오기 전에 소리가 바뀌는 문제가 알려져 있음).
-        if (created && ac->autoPlay) ma_sound_start(&ac->voice_->sound);
+        // (UE 의 비동기 트레이스는 첫 결과가 오기 전에 소리가 바뀌는 문제가 알려져 있음). 처음부터 들리지 않으면 가상으로 시작합니다.
+        if (created && ac->autoPlay) {
+            if (hvirt::nextVirtual(false, audibleGain(*ac->voice_, *ac, pos))) {
+                ac->voice_->virtualized   = true;
+                ac->voice_->virtualCursor = 0.0;
+            } else {
+                ma_sound_start(&ac->voice_->sound);
+            }
+        } else {
+            updateVirtual(*ac->voice_, *ac, pos, dt);
+        }
     }
 }
 
@@ -850,8 +867,57 @@ void AudioSystem::destroyVoice(AudioVoice* voice) {
 }
 
 void AudioSystem::playVoice(AudioVoice* voice) {
-    if (voice) ma_sound_start(&voice->sound);
+    // 가상 보이스는 이미 재생 중입니다(재생 중인 소리에 ma_sound_start 를 부른 것처럼 아무 일도 하지 않음). 들리게 되면
+    // updateVirtual 이 이어 냅니다.
+    if (voice && !voice->virtualized) ma_sound_start(&voice->sound);
 }
+
+// ── 가상화 (S3) ───────────────────────────────────────────────────────────────
+float AudioSystem::audibleGain(const AudioVoice& v, const AudioComponent& ac, const glm::vec3& sourcePos) const {
+    if (!ac.attenuation.spatialize) return 1.f;   // 2D 는 가상화하지 않음
+    float g = ac.volume * hvirt::distanceGain(ac.attenuation, glm::length(sourcePos - listenerPos_));
+    if (ac.occlusion.enabled) g *= hocc::gain(v.occl, ac.occlusion);
+    return g;
+}
+
+void AudioSystem::updateVirtual(AudioVoice& v, const AudioComponent& ac, const glm::vec3& sourcePos, float dt) {
+    if (!v.soundOk) return;
+    ma_sound* s      = &v.sound;
+    ma_uint64 length = 0;
+    ma_uint32 rate   = 0;
+    if (ma_sound_get_length_in_pcm_frames(s, &length) != MA_SUCCESS || length == 0 ||
+        ma_sound_get_data_format(s, nullptr, nullptr, &rate, nullptr, 0) != MA_SUCCESS || rate == 0)
+        return;   // 길이 · 샘플률을 아직 모름(비동기 디코딩 초기) → 가상화하지 않음
+    const bool want = hvirt::nextVirtual(v.virtualized, audibleGain(v, ac, sourcePos));
+    if (v.virtualized) {
+        // 일시정지(월드 그룹 멈춤) 동안은 진짜 보이스처럼 위치가 멈춰 있습니다.
+        if (!paused_) {
+            bool ended = false;
+            v.virtualCursor = hvirt::advanceCursor(v.virtualCursor, (double)dt * rate * ma_sound_get_pitch(s), length,
+                                                   ac.loop, ended);
+            if (ended) {   // 들리지 않는 채로 끝남: 진짜 보이스가 끝까지 간 것처럼 멈춘 상태로 둠
+                v.virtualized = false;
+                ma_sound_seek_to_pcm_frame(s, length);
+                return;
+            }
+        }
+        if (!want) {
+            ma_sound_seek_to_pcm_frame(s, (ma_uint64)v.virtualCursor);
+            v.filter.reset.store(true, std::memory_order_release);   // 멈추기 전 필터 상태를 이어 쓰지 않음
+            if (v.hrtf) v.hrtf->reset.store(true, std::memory_order_release);
+            v.virtualized = false;
+            ma_sound_start(s);
+        }
+    } else if (want && ma_sound_is_playing(s)) {
+        ma_uint64 cursor = 0;
+        if (ma_sound_get_cursor_in_pcm_frames(s, &cursor) != MA_SUCCESS) return;
+        ma_sound_stop(s);
+        v.virtualized   = true;
+        v.virtualCursor = (double)cursor;
+    }
+}
+
+bool AudioSystem::voiceVirtual(const AudioVoice* voice) const { return voice && voice->virtualized; }
 
 void AudioSystem::stopVoice(AudioVoice* voice) {
     if (!voice) return;
@@ -860,6 +926,8 @@ void AudioSystem::stopVoice(AudioVoice* voice) {
     // 적용됩니다.
     ma_sound_stop(&voice->sound);
     ma_sound_seek_to_pcm_frame(&voice->sound, 0);
+    voice->virtualized   = false;
+    voice->virtualCursor = 0.0;
     // 필터 상태를 비우고, 다음 틱에 차폐를 바로 다시 판정해 그 값으로 시작합니다(멈춘 동안 벽이 생기거나 사라졌을 수 있음).
     voice->filter.reset.store(true, std::memory_order_release);
     if (voice->hrtf) voice->hrtf->reset.store(true, std::memory_order_release);   // 지난 소리의 FIFO · 필터 꼬리를 비움
@@ -1165,7 +1233,7 @@ bool AudioSystem::segmentBlocked(const glm::vec3& from, const glm::vec3& to) con
 
 bool AudioSystem::isVoicePlaying(const AudioVoice* voice) const {
     if (!voice) return false;
-    return ma_sound_is_playing(&voice->sound) == MA_TRUE;
+    return voice->virtualized || ma_sound_is_playing(&voice->sound) == MA_TRUE;   // 가상 보이스도 재생 중
 }
 
 bool AudioSystem::renderHeadless(float* outStereo, uint32_t frameCount) {

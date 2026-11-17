@@ -224,6 +224,96 @@ int main() {
         world.destroyActor(ac->owner);
     }
 
+    // 2-1b. 들리지 않는 소리의 가상화(수학 보강 S3, 2026-11-17): 예상 게인이 −60 dB 아래면 믹싱을 멈추고 위치만 세다가,
+    // 들리게 되면 그 위치에서 이어 냅니다.
+    std::printf("\n== 2-1b. 들리지 않는 소리의 가상화(S3) ==\n");
+    {
+        AudioAttenuationSettings at;   // Inverse, min 1, max 100, rolloff 1
+        check(near(hvirt::distanceGain(at, 0.5f), 1.0, 1e-6) && near(hvirt::distanceGain(at, 10.f), 0.1, 1e-6) &&
+              near(hvirt::distanceGain(at, 1000.f), 0.01, 1e-6),
+              "Inverse: 최소 거리 안 1, 10m 0.1, 최대 거리 밖은 최대 거리 값 0.01(miniaudio 와 같음)");
+        at.model = EAudioAttenuation::Linear;
+        check(hvirt::distanceGain(at, 100.f) == 0.f && near(hvirt::distanceGain(at, 50.5f), 0.5, 1e-6),
+              "Linear: 최대 거리에서 0, 가운데 0.5");
+        at.model = EAudioAttenuation::Exponential;
+        check(near(hvirt::distanceGain(at, 4.f), 0.25, 1e-6), "Exponential: (4/1)^-1 = 0.25");
+        check(hvirt::nextVirtual(false, 0.0009f) && !hvirt::nextVirtual(false, 0.0011f) &&
+              hvirt::nextVirtual(true, 0.0015f) && !hvirt::nextVirtual(true, 0.0021f),
+              "−60 dB 아래로 가상, −54 dB 위로 복귀(그 사이는 지금 상태 유지)");
+        bool ended = false;
+        check(near(hvirt::advanceCursor(900.0, 300.0, 1000, true, ended), 200.0, 1e-9) && !ended, "반복이면 길이로 접음");
+        check(hvirt::advanceCursor(900.0, 300.0, 1000, false, ended) == 1000.0 && ended, "반복이 아니면 끝에서 멈추고 끝남");
+
+        // 램프(값 = 프레임 × 1e-5)로 이어 낸 위치를 잽니다. Linear · 최대 10m 라 20m 에서는 게인 0.
+        AudioComponent* ac = spawnSound(world, "Far", rampFile, { 0.f, 0.f, -20.f }, false, true);
+        ac->attenuation.model       = EAudioAttenuation::Linear;
+        ac->attenuation.maxDistance = 10.f;
+        sys.tick(kDt);
+        check(ac->voice_ && sys.voiceVirtual(ac->voice_) && sys.isVoicePlaying(ac->voice_),
+              "들리지 않는 자리에서 자동 재생하면 가상으로 시작(재생 중으로 보임)");
+        for (int i = 0; i < 30; ++i) { sys.tick(kDt); render(sys, 800); }   // 0.5 초
+        check(sys.voiceVirtual(ac->voice_), "들리지 않는 동안 가상 유지");
+        ac->owner->setLocalPosition({ 0.f, 0.f, -1.f });   // 최소 거리: 게인 1
+        sys.tick(kDt);
+        check(!sys.voiceVirtual(ac->voice_), "들리는 자리로 오면 이어 냄");
+        render(sys, 480);   // 게인 평활(360 프레임)이 끝나게 흘림
+        const Block b = render(sys, 16);
+        // 정면 음원의 채널 게인은 0.5(2-2 절). 31틱(24,800 프레임) + 흘린 480 프레임 근처여야 합니다(처음부터였다면 약 500).
+        const double frames = b.L[0] / (0.5 * kStep);
+        check(frames > 24000.0 && frames < 26500.0,
+              "가상 동안 센 위치에서 이어 냄(" + std::to_string((int)frames) + " 프레임, 기대 약 25,280)");
+        sys.stopVoice(ac->voice_);
+        check(!sys.voiceVirtual(ac->voice_) && !sys.isVoicePlaying(ac->voice_), "stop 은 가상 상태도 풂");
+        world.destroyActor(ac->owner);
+
+        // 반복이 아닌 짧은 소리가 들리지 않는 채로 끝나면 재생이 끝난 것으로 봅니다.
+        AudioComponent* shortFar = spawnSound(world, "ShortFar", shortFile, { 0.f, 0.f, -20.f }, false, true);
+        shortFar->attenuation.model       = EAudioAttenuation::Linear;
+        shortFar->attenuation.maxDistance = 10.f;
+        sys.tick(kDt);
+        const bool startedVirtual = sys.voiceVirtual(shortFar->voice_);
+        for (int i = 0; i < 12; ++i) { sys.tick(kDt); render(sys, 800); }   // 0.2 초 > 0.1 초
+        check(startedVirtual && !sys.voiceVirtual(shortFar->voice_) && !sys.isVoicePlaying(shortFar->voice_),
+              "들리지 않는 채로 끝까지 가면 재생이 끝남");
+        world.destroyActor(shortFar->owner);
+
+        // 2D 소리는 거리와 무관해 가상화하지 않습니다.
+        AudioComponent* flat = spawnSound(world, "Flat2D", toneFile, { 0.f, 0.f, -500.f }, true, false);
+        sys.tick(kDt);
+        check(flat->voice_ && !sys.voiceVirtual(flat->voice_) && sys.isVoicePlaying(flat->voice_), "2D 소리는 가상화하지 않음");
+        world.destroyActor(flat->owner);
+        sys.tick(kDt);
+
+        // 최대 거리 밖 무음(silentBeyondMax): Inverse min 1 · max 10 이면 g(5) = 0.2, g_max = 0.1 → (0.2 − 0.1)/0.9 = 0.111.
+        AudioAttenuationSettings sa;
+        sa.maxDistance     = 10.f;
+        sa.silentBeyondMax = true;
+        check(near(hvirt::distanceGain(sa, 5.f), 0.1 / 0.9, 1e-6) && hvirt::distanceGain(sa, 10.f) == 0.f &&
+              hvirt::distanceGain(sa, 50.f) == 0.f && hvirt::distanceGain(sa, 0.5f) == 1.f,
+              "무음 곡선: 5m 0.111, 최대 거리에서 0, 밖도 0, 최소 거리 안 1");
+        check(near(hvirt::silenceFactor(sa, 5.f), (0.1 / 0.9) / 0.2, 1e-6), "miniaudio 게인에 곱할 배율 = 0.556");
+        sa.rolloff = 0.f;
+        check(hvirt::distanceGain(sa, 9.f) == 1.f && hvirt::distanceGain(sa, 11.f) == 0.f, "rolloff 0 이면 최대 거리 안 1, 밖 0");
+
+        AudioComponent* loud = spawnSound(world, "Silent", toneFile, { 0.f, 0.f, -5.f }, true, true);
+        loud->attenuation.maxDistance = 10.f;
+        const Level plain = measure(sys);
+        loud->attenuation.silentBeyondMax = true;
+        const Level quiet = measure(sys);
+        check(near(quiet.avg() / plain.avg(), (0.1 / 0.9) / 0.2, 0.01),
+              "켜면 5m 소리가 배율(0.556)만큼 작아짐 (" + std::to_string(quiet.avg() / plain.avg()) + ")");
+        loud->owner->setLocalPosition({ 0.f, 0.f, -40.f });   // 끄면 −20 dB(0.1)에 머무는 거리
+        const Level beyond = measure(sys);
+        check(beyond.avg() < 1e-6 && sys.voiceVirtual(loud->voice_), "최대 거리 밖에서는 무음이고 가상화됨");
+        ComponentFieldWriter fw;
+        loud->writeFields(fw);
+        AudioComponent back;
+        for (const auto& kv : fw.fields()) back.readField(kv.first, kv.second);
+        check(back.attenuation.silentBeyondMax && back.attenuation.maxDistance == 10.f, "silentBeyondMax 가 씬 파일로 왕복");
+        world.destroyActor(loud->owner);
+        sys.tick(kDt);
+    }
+
     // 2-2. 스테레오 패닝 값(DEF-166, 2026-11-06): miniaudio 는 스테레오 출력의 스피커를 정확히 좌우(±X)에 둡니다
     // (ma_get_default_channel_map_for_spatializer). 채널 게인은 음원 방향과 스피커 방향의 내적을 0~1 로 옮긴 값(최소 0.2)이라,
     // 정면 · 뒤 · 바로 위 음원은 두 채널 모두 0.5 이고 앞뒤 · 위아래를 구분하지 못합니다. 예전 문서는 스피커를 앞쪽 ±45° 로 보고

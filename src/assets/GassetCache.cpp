@@ -22,7 +22,9 @@ static constexpr uint32_t kMagic   = 0x47415354u; // "GAST"
 // 6: 5 다음에 alphaMask(u8) · alphaCutoff(f32)를 둡니다. 버전 5 이하 캐시는 다시 만듭니다(2026-11-02).
 // 7: 메시마다 인덱스 뒤에 스킨(u8 유무, 있으면 관절 · 정점별 관절 번호 · 무게)을 둡니다. 버전 6 이하 캐시는 다시
 //    만듭니다(2026-11-07, Hand_Grasp_Design 4-1).
-static constexpr uint32_t kVersion = 7u;
+// 8: 내용 형식은 7 과 같습니다. 가져오기가 접선을 법선 행렬 대신 모델 행렬로 옮기고 거울 변환이면 손잡이를 뒤집도록
+//    고쳐(수학 보강 O1, 2026-11-17) 버전 7 이하 캐시는 다시 만듭니다.
+static constexpr uint32_t kVersion = 8u;
 // 머리: magic(4) version(4) mtime(8) size(8) hash(8) meshCount(4)
 static constexpr std::streamoff kMtimeOffset = 8;
 

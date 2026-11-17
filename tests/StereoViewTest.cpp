@@ -8,6 +8,7 @@
 #include "../src/components/CameraComponent.hpp"
 #include "../src/renderer/FrustumCull.hpp"
 #include "../src/xr/SyntheticEyes.hpp"
+#include "../src/renderer/ScreenSize.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>
@@ -143,6 +144,36 @@ int main() {
         const std::array<XrEyePose, 2> wide = hxr::syntheticEyes(ipd, tanUp, 4.f / 3.f, 0.f);
         check(wide[0].angleLeft < e[0].angleLeft && wide[0].position.y == 0.f,
               "화면 비율이 넓으면 가로 시야가 넓어짐, 리그가 없으면 높이 0");
+    }
+
+    // 화면 크기 · LOD · 작은 물체(수학 보강 O6 · O7).
+    std::printf("\n== 화면 크기 · LOD 이력 띠 · 작은 물체 컬링 ==\n");
+    {
+        // 시야 90°(projY = 1): 거리 10m 의 반지름 1m 구는 지름 ÷ 높이 = 0.1.
+        CameraComponent cam;
+        cam.fovY = 90.f;
+        const float py = std::fabs(cam.projMatrix(1.f)[1][1]);
+        check(std::fabs(py - 1.f) < 1e-5f, "시야 90° 투영의 y 배율은 1");
+        const float s = hscreen::screenSize(1.f, 10.f, py);
+        check(std::fabs(s - 0.1f) < 1e-6f, "거리 10m · 반지름 1m · 시야 90° → 화면 크기 0.1");
+        const float edge = std::tan(std::asin(1.f / 10.f));   // 구의 실제 투영 가장자리(tan 공간, 시선 위)
+        check(std::fabs(s - edge) / edge < 0.01f, "시선 가까이에서 근사 오차 1% 미만");
+        check(hscreen::screenSize(1.f, 0.5f, py) == 1.f, "카메라가 구 안이면 화면을 덮음(1 · projY)");
+        cam.fovY = 45.f;
+        check(hscreen::screenSize(1.f, 10.f, std::fabs(cam.projMatrix(1.f)[1][1])) > s, "시야가 좁으면 같은 물체가 더 크게 보임");
+
+        const float th[2] = { 0.5f, 0.2f };
+        int lod = 0;
+        lod = hscreen::selectLod(0.6f, th, lod);   check(lod == 0, "크기 0.6 → LOD 0");
+        lod = hscreen::selectLod(0.47f, th, lod);  check(lod == 0, "경계 0.5 아래라도 띠(0.45 ~ 0.55) 안이면 유지");
+        lod = hscreen::selectLod(0.44f, th, lod);  check(lod == 1, "0.45 아래로 내려가면 LOD 1");
+        lod = hscreen::selectLod(0.53f, th, lod);  check(lod == 1, "다시 0.5 를 넘어도 띠 안이면 LOD 1 유지(깜빡임 없음)");
+        lod = hscreen::selectLod(0.56f, th, lod);  check(lod == 0, "0.55 를 넘으면 LOD 0 으로");
+        lod = hscreen::selectLod(0.01f, th, lod);  check(lod == 2, "아주 작으면 가장 거친 단계(경계 수)");
+        lod = hscreen::selectLod(0.9f, th, lod);   check(lod == 0, "아주 크면 한 번에 가장 고운 단계");
+
+        check(hscreen::tooSmall(0.0004f, 1920.f) && !hscreen::tooSmall(0.0006f, 1920.f),
+              "높이 1920 화소에서 지름 1 화소(크기 약 0.00052)를 경계로 작은 물체를 가름");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

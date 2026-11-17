@@ -746,6 +746,7 @@ int Engine::run() {
         float dt  = std::chrono::duration<float>(now - prev).count();
         prev      = now;
         dt        = std::min(dt, 0.05f);
+        renderer.advanceTime(dt);
 
         int winW, winH;
         win.getWindowSize(winW, winH);

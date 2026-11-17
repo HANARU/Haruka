@@ -31,11 +31,18 @@ void main() {
     fragWorldPos  = worldPos.xyz;
     fragUV        = inUV;
 
-    mat3 normalMat = transpose(inverse(mat3(model)));
-    vec3 N = normalize(normalMat * inNormal);
-    vec3 T = normalize(normalMat * inTangent.xyz);
+    // 법선 · 접선 변환(수학 보강 O1, 2026-11-17).
+    //  - 법선은 역전치 행렬로 옮깁니다. 역전치 = 여인수 행렬 ÷ 행렬식이고 정규화하면 크기는 사라지므로, 정점마다 역행렬을
+    //    구하지 않고 외적 셋(여인수)과 행렬식의 부호만 씁니다. 부호는 거울(음수 크기) 변환에서 법선이 뒤집히지 않게 합니다.
+    //  - 접선은 표면 위의 방향이라 모델 행렬 그대로 옮깁니다. 예전에는 법선 행렬로 옮겨 비균등 크기에서 노멀 맵의 기울기
+    //    방향이 틀어졌습니다. 거울 변환이면 외적의 손잡이가 바뀌므로 B 에 행렬식의 부호를 곱합니다.
+    mat3  m3   = mat3(model);
+    mat3  cof  = mat3(cross(m3[1], m3[2]), cross(m3[2], m3[0]), cross(m3[0], m3[1]));
+    float detS = dot(m3[0], cof[0]) < 0.0 ? -1.0 : 1.0;
+    vec3 N = normalize(cof * inNormal * detS);
+    vec3 T = normalize(m3 * inTangent.xyz);
     T = normalize(T - dot(T, N) * N);
-    vec3 B = cross(N, T) * inTangent.w;
+    vec3 B = cross(N, T) * (inTangent.w * detS);
     fragT = T; fragB = B; fragN = N;
 
     // Shadow clip-space coordinate (perspective divide done in frag)

@@ -65,6 +65,8 @@ std::vector<PropDesc> AudioComponent::buildProps() {
         props.push_back(makePropFloat("Rolloff", PropColor::Neutral, 0.05f,
             [p]{ return p->attenuation.rolloff; },
             [p](float v){ p->attenuation.rolloff = std::max(0.f, v); }));
+        props.push_back(makePropToggle("Silent Beyond Max",
+            [p]{ return p->attenuation.silentBeyondMax; }, [p](bool v){ p->attenuation.silentBeyondMax = v; }));
 
         // 잔향 센드(2026-11-06). 잔향 구역(Reverb Zone)이 없으면 들리지 않습니다.
         props.push_back(makePropFloat("Reverb Send", PropColor::Neutral, 0.01f,
@@ -125,6 +127,7 @@ void AudioComponent::writeFields(ComponentFieldWriter& w) const {
     w.b("loop",        loop);
     w.b("autoPlay",    autoPlay);
     w.s("attenuation", attenuation.toText());
+    if (attenuation.silentBeyondMax) w.b("silentBeyondMax", true);   // 2026-11-17. 켰을 때만(기존 씬 파일 그대로)
     w.s("occlusion",   occlusion.toText());   // 2026-11-06. 옛 파일에는 없고, 없으면 기본(끔)입니다
     w.f("reverbSend",  reverbSend);           // 2026-11-06. 없으면 기본값
     w.f("reverbReach", reverbReach);
@@ -139,9 +142,11 @@ bool AudioComponent::readField(const std::string& key, const std::string& value)
     else if (key == "attenuation") {
         // 3D 설정이 깨진 것은 소리를 버릴 이유가 아닙니다. 기본 설정으로 두고 알립니다.
         AudioAttenuationSettings a;
+        a.silentBeyondMax = attenuation.silentBeyondMax;   // 다른 키라 줄 순서와 상관없이 지킴
         if (AudioAttenuationSettings::fromText(value, a)) attenuation = a;
         else ok = false;
     }
+    else if (key == "silentBeyondMax") ok = fieldparse::toBool(value, attenuation.silentBeyondMax);
     else if (key == "occlusion") {
         AudioOcclusionSettings o;
         if (AudioOcclusionSettings::fromText(value, o)) occlusion = o;

@@ -2,6 +2,7 @@
 #include "../core/World.hpp"
 #include "../core/Actor.hpp"
 #include "../components/RigidBodyComponent.hpp"
+#include "../geometry/CollisionMesh.hpp"
 
 // Jolt headers
 #include <Jolt/Jolt.h>
@@ -14,6 +15,8 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
@@ -284,6 +287,29 @@ glm::vec3 PhysicsSystem::angularVelocity(uint32_t body) const {
     const auto& bi = impl_->physics->GetBodyInterface();
     return bi.IsAdded(JPH::BodyID(body)) ? toG(bi.GetAngularVelocity(JPH::BodyID(body))) : glm::vec3(0.f);
 }
+void PhysicsSystem::setContinuous(uint32_t body, bool on) {
+    if (!impl_ || body == 0xFFFFFFFFu) return;
+    auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::BodyID jid(body);
+    if (bi.IsAdded(jid))
+        bi.SetMotionQuality(jid, on ? JPH::EMotionQuality::LinearCast : JPH::EMotionQuality::Discrete);
+}
+bool PhysicsSystem::isContinuous(uint32_t body) const {
+    if (!impl_ || body == 0xFFFFFFFFu) return false;
+    const auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::BodyID jid(body);
+    return bi.IsAdded(jid) && bi.GetMotionQuality(jid) == JPH::EMotionQuality::LinearCast;
+}
+
+bool PhysicsSystem::centerOfMass(uint32_t body, glm::vec3& out) const {
+    if (!impl_ || body == 0xFFFFFFFFu) return false;
+    const auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::BodyID jid(body);
+    if (!bi.IsAdded(jid)) return false;
+    const JPH::RVec3 c = bi.GetCenterOfMassPosition(jid);
+    out = { (float)c.GetX(), (float)c.GetY(), (float)c.GetZ() };
+    return true;
+}
 
 namespace {
 // 바디의 사용자 값(액터 ID, createBody 의 mUserData)으로 거릅니다. 잠근 바디에서 읽어야 하므로 ShouldCollideLocked 를 씁니다.
@@ -405,7 +431,8 @@ void PhysicsSystem::tick(float dt) {
         // 오류 문자열과 결과를 같은 자리에 담아, 실패한 결과를 Get() 으로 꺼내면 쓰레기 포인터가 나옵니다.
         // 예전에는 확인하지 않아 두께 10cm 인 상자만 있어도 Play 에서 엔진이 죽었습니다(DEF-107).
         JPH::ShapeSettings::ShapeResult made;
-        const char* tooSmall = nullptr;
+        const char* tooSmall   = nullptr;
+        const char* noGeometry = nullptr;   // ConvexHull · Mesh 인데 쓸 메시 형상이 없음
         switch (rb->shape) {
             case EPhysicsShape::Sphere: {
                 const float r = rb->halfExtent.x * uniformScale("Sphere");
@@ -424,6 +451,42 @@ void PhysicsSystem::tick(float dt) {
                                                  rb->halfExtent.x * s).Create();
                 break;
             }
+            case EPhysicsShape::ConvexHull:
+            case EPhysicsShape::Mesh: {
+                // 같은 액터의 메시 형상(P2, 2026-11-17). 점마다 월드 크기를 곱하므로 비균등 크기도 정확합니다. 음수 크기(거울)는
+                // 다른 셰이프와 같이 절댓값을 씁니다.
+                const CollisionMesh* cm = nullptr;
+                for (const auto& c : a->getComponents())
+                    if (const CollisionMesh* m = c->collisionMesh(); m && !m->empty()) { cm = m; break; }
+                if (!cm) { noGeometry = "no mesh on this actor"; break; }
+                bool asMesh = rb->shape == EPhysicsShape::Mesh;
+                if (asMesh && rb->motionType == EMotionType::Dynamic) {
+                    HLOG(LogPhysics, Warning) << "'" << a->name << "': Mesh collider cannot be Dynamic; using its convex hull "
+                                              << "(set Motion to Static or Kinematic for a concave mesh)";
+                    asMesh = false;
+                }
+                if (asMesh) {
+                    JPH::VertexList verts;
+                    verts.reserve(cm->positions.size());
+                    for (const glm::vec3& p : cm->positions) verts.push_back(JPH::Float3(p.x * sc.x, p.y * sc.y, p.z * sc.z));
+                    JPH::IndexedTriangleList tris;
+                    tris.reserve(cm->indices.size() / 3);
+                    const uint32_t n = (uint32_t)cm->positions.size();
+                    for (size_t i = 0; i + 2 < cm->indices.size(); i += 3) {
+                        const uint32_t i0 = cm->indices[i], i1 = cm->indices[i + 1], i2 = cm->indices[i + 2];
+                        if (i0 < n && i1 < n && i2 < n) tris.push_back(JPH::IndexedTriangle(i0, i1, i2, 0));
+                    }
+                    if (tris.empty()) { noGeometry = "the mesh has no triangles"; break; }
+                    made = JPH::MeshShapeSettings(std::move(verts), std::move(tris)).Create();   // 겹친 · 퇴화 삼각형은 Jolt 가 뺌
+                } else {
+                    // 껍질은 꼭짓점 256개 안으로 줄여 만듭니다(Jolt cMaxPointsInHull). 모서리 반경은 껍질이 작으면 Jolt 가 줄입니다.
+                    JPH::Array<JPH::Vec3> pts;
+                    pts.reserve(cm->positions.size());
+                    for (const glm::vec3& p : cm->positions) pts.push_back(JPH::Vec3(p.x * sc.x, p.y * sc.y, p.z * sc.z));
+                    made = JPH::ConvexHullShapeSettings(pts, JPH::cDefaultConvexRadius).Create();
+                }
+                break;
+            }
             default: {
                 const JPH::Vec3 he(rb->halfExtent.x * sc.x, rb->halfExtent.y * sc.y, rb->halfExtent.z * sc.z);
                 if (!(he.ReduceMin() >= kMinColliderHalf)) { tooSmall = "half extent"; break; }
@@ -434,6 +497,12 @@ void PhysicsSystem::tick(float dt) {
                 made = JPH::BoxShapeSettings(he, cr).Create();
                 break;
             }
+        }
+        if (noGeometry) {
+            rb->createFailed_ = true;
+            HLOG(LogPhysics, Warning) << "'" << a->name << "': collider could not be created (" << noGeometry
+                                      << "); the actor has no physics body until a mesh is added";
+            continue;
         }
         if (tooSmall || made.HasError() || made.Get() == nullptr) {
             rb->createFailed_ = true;
@@ -468,6 +537,7 @@ void PhysicsSystem::tick(float dt) {
         bcs.mFriction    = rb->friction;
         bcs.mRestitution = rb->restitution;
         bcs.mUserData    = a->id;   // 레이캐스트 · 겹침 질의에서 액터를 찾을 때 씁니다
+        bcs.mMotionQuality = rb->continuous ? JPH::EMotionQuality::LinearCast : JPH::EMotionQuality::Discrete;
         // Kinematic 으로 만든 바디도 질량을 지정해 둡니다. 잡기가 끝나 Dynamic 으로 바꾸면 그 질량을 씁니다(2026-10-15).
         if (mt != JPH::EMotionType::Static) {
             bcs.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;

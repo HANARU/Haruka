@@ -76,6 +76,11 @@ public:
     glm::vec3 linearVelocity    (uint32_t body) const;
     void      setAngularVelocity(uint32_t body, const glm::vec3& w);   // rad/s
     glm::vec3 angularVelocity   (uint32_t body) const;
+    // 질량 중심의 월드 위치(Jolt 는 선속도를 이 점의 속도로 다룹니다). 바디가 없으면 false.
+    bool      centerOfMass      (uint32_t body, glm::vec3& out) const;
+    // 연속 충돌(Jolt EMotionQuality::LinearCast)을 켜고 끕니다. 바디가 없으면 아무 일도 하지 않습니다.
+    void      setContinuous     (uint32_t body, bool on);
+    bool      isContinuous      (uint32_t body) const;
     // Dynamic ↔ Kinematic 을 바디를 다시 만들지 않고 바꿉니다(Jolt SetMotionType, 2026-10-15). VR 손으로 잡는 동안
     // Kinematic 으로 손을 따라가게 했다가, 놓는 순간 Dynamic 으로 돌리고 손 속도를 넣는 데 씁니다(바디를 다시 만들면
     // 다음 틱까지 바디가 없어 속도를 넣을 수 없음). Static 바디와 오가지는 않습니다. kinematic 이면 true.

@@ -4,17 +4,18 @@
 #include "../core/Actor.hpp"
 #include "../core/ComponentFields.hpp"
 #include "../core/SceneLog.hpp"
+#include "../renderer/ScreenSize.hpp"
 #include <algorithm>
 #include <exception>
 #include <cstdio>
 
-MeshHandle* StaticMeshComponent::getMeshForDistanceSq(float distSq) const {
-    MeshHandle* result = mesh;
-    for (size_t i = 0; i < lodDistancesSq.size() && i < lodMeshes.size(); ++i) {
-        if (distSq > lodDistancesSq[i] && lodMeshes[i])
-            result = lodMeshes[i];
-    }
-    return result;
+MeshHandle* StaticMeshComponent::selectMeshForScreenSize(float screenSize) {
+    const size_t n = std::min(lodScreenSizes.size(), lodMeshes.size());
+    lodCurrent_    = hscreen::selectLod(screenSize, std::span<const float>(lodScreenSizes.data(), n), lodCurrent_);
+    // 비어 있는 단계는 더 고운 쪽으로 물러납니다.
+    for (int i = lodCurrent_; i > 0; --i)
+        if (lodMeshes[i - 1]) return lodMeshes[i - 1];
+    return mesh;
 }
 
 std::vector<PropDesc> StaticMeshComponent::buildProps() {
@@ -103,6 +104,7 @@ void StaticMeshComponent::onFieldsLoaded(const ComponentLoadContext& ctx) {
             AssetPair pair = ctx.assets->acquirePrimitive(*primitive);
             if (pair.mesh) {
                 mesh      = pair.mesh;
+                collision = pair.collision;
                 material  = ctx.assets->acquirePrimitiveMaterial(primitiveMaterial);
                 vertCount = pair.vertCount;
                 triCount  = pair.triCount;
@@ -116,6 +118,7 @@ void StaticMeshComponent::onFieldsLoaded(const ComponentLoadContext& ctx) {
             if (!pairs.empty()) {
                 const int idx = std::clamp(meshIndex, 0, (int)pairs.size() - 1);
                 mesh      = pairs[idx].mesh;
+                collision = pairs[idx].collision;
                 material  = pairs[idx].material;
                 meshIndex = idx;
                 vertCount = pairs[idx].vertCount;

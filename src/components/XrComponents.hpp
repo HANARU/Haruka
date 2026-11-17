@@ -51,6 +51,35 @@ namespace hxr {
 // 합집합(에디터 픽과 같은 기준)에 광선-OBB 판정을 하고, 안에서 시작하는 바운드(광선 시작점을 감싼 것)는 건너뜁니다.
 // skip 과 그 자식은 보지 않습니다(카메라 자신 등). 아래에 아무것도 없으면 false.
 bool floorBelow(const World& world, const glm::vec3& from, const Actor* skip, float& outY);
+
+// 던지기 속도(수학 보강 A1, 2026-11-17). 잡은 물체는 손에 단단히 붙어 손과 같은 각속도 ω 로 돕니다. 그래서 질량 중심은
+// 손 원점(grip)보다 ω × (질량 중심 − 손) 만큼 더 빠르게 움직입니다(강체 속도장 v(p) = v₀ + ω × (p − p₀)). 손 속도는 리그
+// 기준이라 리그가 움직이는 속도도 더합니다. 예전에는 손 선속도만 넣어 손목을 튕기는 던지기가 약했습니다.
+struct ThrowVelocity { glm::vec3 linear{ 0.f }, angular{ 0.f }; };
+ThrowVelocity throwVelocity(const glm::vec3& handLinear, const glm::vec3& handAngular, const glm::vec3& handPos,
+                            const glm::vec3& centerOfMass, const glm::vec3& rigLinear);
+
+// 최근 몇 프레임의 손 속도(월드) 평균. 놓는 순간 한 프레임 값은 추적 잡음과 손을 펴는 동작의 감속을 그대로 받으므로
+// 짧은 창(kSize 프레임, 90 Hz 에서 약 55 ms)의 평균을 씁니다(SteamVR · Unity XRI 도 여러 프레임 추정을 씀).
+struct VelocityHistory {
+    static constexpr int kSize = 5;
+    glm::vec3 linear[kSize]{}, angular[kSize]{};
+    int       count = 0, next = 0;
+    void clear() { count = 0; next = 0; }
+    void push(const glm::vec3& lin, const glm::vec3& ang) {
+        linear[next] = lin; angular[next] = ang;
+        next = (next + 1) % kSize;
+        if (count < kSize) ++count;
+    }
+    // 표본이 없으면 false(값은 0).
+    bool mean(glm::vec3& lin, glm::vec3& ang) const {
+        lin = glm::vec3(0.f); ang = glm::vec3(0.f);
+        if (count == 0) return false;
+        for (int i = 0; i < count; ++i) { lin += linear[i]; ang += angular[i]; }
+        lin /= float(count); ang /= float(count);
+        return true;
+    }
+};
 } // namespace hxr
 
 enum class ETrackedSource { Head = 0, LeftHand = 1, RightHand = 2 };
@@ -117,8 +146,11 @@ public:
     static Actor* findHead(const Actor& rig);
     // 리그를 pivot(월드) 둘레로 axis 방향 angleRad 만큼 돌립니다. 스냅 회전이 머리 자리를 지키는 데 씁니다.
     static void rotateRigAbout(Actor& rig, const glm::vec3& pivot, const glm::vec3& axis, float angleRad);
+    // 이번 틱에 스틱 이동으로 낸 리그 속도(월드, m/s). 스냅 회전 · 순간 이동은 넣지 않습니다(던지기에 더함).
+    const glm::vec3& velocity() const { return velocity_; }
 
 private:
+    glm::vec3 velocity_{ 0.f };
     bool  snapArmed_ = true;
     float pitchDeg_  = 0.f;
 };
@@ -176,6 +208,8 @@ private:
     GrabbableComponent* held_       = nullptr;
     glm::vec3           offPos_     { 0.f };
     glm::quat           offRot_     { 1.f, 0.f, 0.f, 0.f };
+    glm::vec3           comLocal_   { 0.f };   // 잡을 때 잰 질량 중심(액터 위치 · 회전 기준, 크기는 바디 모양에 이미 들어감)
+    hxr::VelocityHistory velHistory_;          // 손 속도(월드) 최근 표본
     bool                wasDynamic_ = false;
     bool                prevHeld_   = false;
 };

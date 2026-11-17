@@ -7,10 +7,21 @@
 #include "../renderer/Renderer.hpp"
 #include "../renderer/Vertex.hpp"
 #include "../geometry/PrimitiveBuilder.hpp"
+#include "../geometry/CollisionMesh.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+
+// 충돌용 CPU 형상(P2): 위치와 인덱스만 남깁니다.
+static std::shared_ptr<const CollisionMesh> makeCollisionMesh(const std::vector<MeshSourceVertex>& v,
+                                                              const std::vector<uint32_t>& indices) {
+    auto cm = std::make_shared<CollisionMesh>();
+    cm->positions.reserve(v.size());
+    for (const auto& sv : v) cm->positions.emplace_back(sv.pos[0], sv.pos[1], sv.pos[2]);
+    cm->indices = indices;
+    return cm;
+}
 
 std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
     auto it = cache.find(path);
@@ -77,6 +88,7 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
             p.bindVertices = std::make_shared<const std::vector<MeshSourceVertex>>(data.vertices);
         }
         p.mesh      = renderer->uploadMesh(verts, data.indices);
+        p.collision = makeCollisionMesh(*src, data.indices);
         p.material  = renderer->uploadMaterial(
             data.albedo, data.normalMap, data.metalRough, data.ao, data.emissive);
         p.name      = std::move(data.name);
@@ -162,6 +174,7 @@ AssetPair AssetManager::acquirePrimitive(const PrimitiveDesc& descIn) {
 
     AssetPair p;
     p.mesh      = renderer->uploadMesh(verts, src.indices, &mb);
+    p.collision = makeCollisionMesh(src.vertices, src.indices);
     p.material  = defaultPrimitiveMaterial();
     p.name      = key;
     p.isBlend   = false;

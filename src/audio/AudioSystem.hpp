@@ -90,7 +90,9 @@ public:
     // AudioComponent::play()/stop() 이 부릅니다. stopVoice 는 처음으로 되감습니다.
     void playVoice (AudioVoice* voice);
     void stopVoice (AudioVoice* voice);
-    bool isVoicePlaying(const AudioVoice* voice) const;
+    bool isVoicePlaying(const AudioVoice* voice) const;   // 가상 보이스(아래)도 재생 중으로 봅니다
+    // 들리지 않아(예상 게인 −60 dB 미만, AudioAttenuation.hpp hvirt) 믹싱을 멈추고 재생 위치만 세는 중인지(S3, 2026-11-17).
+    bool voiceVirtual(const AudioVoice* voice) const;
 
     // 보이스를 만들어 월드 그룹에 붙이고, 정리합니다. 만들기에 실패하면 이유를 로그로 남기고 nullptr 를 돌려줍니다.
     // 사슬은 ma_sound → 보이스 필터 → (HRTF 노드) → 월드 그룹입니다(AudioSystem.cpp 의 "음원별 노드 사슬").
@@ -138,6 +140,9 @@ private:
     void  updateOcclusion(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos, float dt);
     float traceOcclusion(const AudioComponent& ac, const glm::vec3& sourcePos);   // 막힌 표본의 비율
     bool  segmentBlocked(const glm::vec3& from, const glm::vec3& to) const;
+    // 가상화(S3): 예상 게인과, 그에 따라 멈추고 · 위치를 세고 · 이어 내기.
+    float audibleGain(const AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos) const;
+    void  updateVirtual(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos, float dt);
     const PhysicsSystem* physics_ = nullptr;
     glm::vec3            listenerPos_{ 0.f };
     Actor*               listenerActor_ = nullptr;   // 레이에서 뺄 청취자 쪽 액터(활성 카메라의 액터)

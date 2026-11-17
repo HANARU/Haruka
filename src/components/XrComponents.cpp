@@ -211,6 +211,7 @@ void RigLocomotionComponent::tick(float dt) {
     glm::vec3 move = right * in.axis("MoveX") + fwd * in.axis("MoveY");
     if (glm::length(move) > 1.f) move = glm::normalize(move);
     if (flying) move += up * std::clamp(in.axis("MoveUp"), -1.f, 1.f);
+    velocity_ = move * moveSpeed;
     if (glm::dot(move, move) > 0.f) rig.setWorldPosition(rig.worldPosition() + move * moveSpeed * dt);
 
     if (xr.focused) {
@@ -316,6 +317,14 @@ static float distanceToActor(const glm::vec3& p, const Actor& a) {
     return glm::length(glm::vec3(wm * glm::vec4(near, 1.f)) - p);
 }
 
+hxr::ThrowVelocity hxr::throwVelocity(const glm::vec3& handLinear, const glm::vec3& handAngular, const glm::vec3& handPos,
+                                      const glm::vec3& centerOfMass, const glm::vec3& rigLinear) {
+    ThrowVelocity t;
+    t.angular = handAngular;
+    t.linear  = handLinear + glm::cross(handAngular, centerOfMass - handPos) + rigLinear;
+    return t;
+}
+
 GrabbableComponent* GrabInteractorComponent::pick(const glm::vec3& hand, float radius) {
     GrabbableComponent* best  = nullptr;
     float               bestD = radius;
@@ -336,8 +345,14 @@ void GrabInteractorComponent::grab(GrabbableComponent* g, const glm::vec3& handP
     offPos_ = inv * (a.worldPosition() - handPos);
     offRot_ = glm::normalize(inv * a.worldRotation());
     wasDynamic_ = false;
-    if (auto* rb = a.getComponent<RigidBodyComponent>(); rb && rb->motionType == EMotionType::Dynamic)
-        wasDynamic_ = rb->setMotionRuntime(EMotionType::Kinematic);
+    comLocal_   = glm::vec3(0.f);
+    velHistory_.clear();
+    if (auto* rb = a.getComponent<RigidBodyComponent>()) {
+        // 질량 중심을 액터 기준으로 기억합니다. 잡는 동안 Kinematic 바디는 액터를 한 스텝 늦게 따라가므로 놓을 때 바디에서
+        // 다시 읽지 않고 액터의 그때 자세로 옮깁니다.
+        comLocal_ = glm::inverse(a.worldRotation()) * (rb->centerOfMass() - a.worldPosition());
+        if (rb->motionType == EMotionType::Dynamic) wasDynamic_ = rb->setMotionRuntime(EMotionType::Kinematic);
+    }
     held_      = g;
     g->holder_ = this;
 }
@@ -363,6 +378,8 @@ void GrabInteractorComponent::release(const glm::vec3& linearVelocity, const glm
         const bool toss = throwIt && g->throwable;
         rb->setLinearVelocity(toss ? linearVelocity : glm::vec3(0.f));
         rb->setAngularVelocity(toss ? angularVelocity : glm::vec3(0.f));
+        // 던진 물체는 빠르고 작아 얇은 벽을 뚫기 쉬우므로 연속 충돌을 켭니다(P1). 느려지면 Jolt 가 훑지 않아 비용이 거의 없습니다.
+        if (toss) rb->setContinuousRuntime(true);
     }
     wasDynamic_ = false;
 }
@@ -385,16 +402,23 @@ void GrabInteractorComponent::tick(float /*dt*/) {
     const bool held = in.held(hand == 0 ? "GrabLeft" : "GrabRight");
     const glm::vec3 hp = owner->worldPosition();
     const glm::quat hr = owner->worldRotation();
+    // 손 속도는 리그(부모) 기준이라 월드로 돌립니다. 잡고 있는 동안 표본을 모읍니다(놓는 틱 포함).
+    const Actor*    rig  = owner->getParent();
+    const glm::quat rigR = rig ? rig->worldRotation() : glm::quat(1.f, 0.f, 0.f, 0.f);
+    if (held_) velHistory_.push(rigR * xr.hands[hand].linearVelocity, rigR * xr.hands[hand].angularVelocity);
     if (held && !prevHeld_) {
         if (GrabbableComponent* g = pick(hp, radius)) {
             grab(g, hp, hr);
             in.haptic(hand, 0.6f, 0.04f);
         }
     } else if (!held && prevHeld_ && held_) {
-        // 손 속도는 리그(부모) 기준이라 월드로 돌립니다.
-        const Actor*    rig = owner->getParent();
-        const glm::quat r   = rig ? rig->worldRotation() : glm::quat(1.f, 0.f, 0.f, 0.f);
-        release(r * xr.hands[hand].linearVelocity, r * xr.hands[hand].angularVelocity, true);
+        glm::vec3 lin, ang;
+        velHistory_.mean(lin, ang);
+        const auto*     loco   = rig ? rig->getComponent<RigLocomotionComponent>() : nullptr;
+        // 물체는 아직 지난 틱의 손 자세에 있으므로 지금 손 자세로 질량 중심을 구합니다(follow 와 같은 식).
+        const glm::vec3 com    = hp + hr * (offPos_ + offRot_ * comLocal_);
+        const auto      v      = hxr::throwVelocity(lin, ang, hp, com, loco ? loco->velocity() : glm::vec3(0.f));
+        release(v.linear, v.angular, true);
         in.haptic(hand, 0.3f, 0.02f);
     }
     prevHeld_ = held;

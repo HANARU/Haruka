@@ -75,8 +75,14 @@ float specularAARoughness(float perceptualRoughness, vec3 geomN) {
 // 섀도 커널 등급. 파이프라인을 만들 때 정하는 특수화 상수라 분기는 드라이버가 접습니다(GeometryPass::setShadowFilter).
 layout(constant_id = HARUKA_SPEC_SHADOW_FILTER) const int kShadowFilter = HARUKA_SHADOW_FILTER_LEGACY9;
 
-// 기본(LEGACY9)은 하드웨어 쌍선형 비교 9탭(정수 오프셋 3x3)입니다. 실효 커널은 지지폭 3~4 텍셀의 끝이
+// 기본(LEGACY9)은 하드웨어 쌍선형 비교 9탭(정수 오프셋 3x3)과 같은 커널입니다. 실효 커널은 지지폭 3~4 텍셀의 끝이
 // 매끈한 사다리꼴입니다(PC 하드웨어 PCF 전제). HARD 는 1탭(지지폭 2텍셀)입니다.
+//
+// 4탭으로 같은 커널(수학 보강 O5, 2026-11-17, Castaño "Shadow Mapping Summary" 의 최적화 PCF): 9탭의 텍셀 가중치는
+// 축마다 텍셀 i-1 .. i+2 에 (1-f, 1, 1, f)/3 이고(i = floor(p), f = fract(p), p = uv × 크기 - 0.5) 두 축의 곱입니다.
+// 앞 두 텍셀(합 2-f)과 뒤 두 텍셀(합 1+f)을 각각 쌍선형 탭 하나로 읽으면, 탭 위치를 두 텍셀 사이 무게 비율에 두어
+// 같은 가중치가 나옵니다. 비교는 텍셀마다 한 뒤 섞으므로(하드웨어 PCF) 선형이라 그대로 성립합니다. 다른 점은
+// 하드웨어 쌍선형 가중치의 소수 비트 반올림뿐입니다.
 float sampleShadow(vec4 coord) {
     vec3 proj = coord.xyz / coord.w;
     proj.xy   = proj.xy * 0.5 + 0.5;
@@ -87,13 +93,20 @@ float sampleShadow(vec4 coord) {
     proj.z -= ubo.shadowParams.z;
     if (kShadowFilter == HARUKA_SHADOW_FILTER_HARD)
         return textureLod(shadowMap, proj, 0.0);
-    float shadow   = 0.0;
-    vec2  texelSz  = vec2(ubo.shadowParams.y);
-    for (int x = -1; x <= 1; x++)
-        for (int y = -1; y <= 1; y++)
-            // 비균일 흐름(라이트 기여가 0 이 아닐 때만 호출) 안이라 암시적 미분이 정의되지
-            // 않으므로 LOD 0 을 명시합니다. 섀도 샘플러는 mip 하나 · maxLod 0 이라 결과는 같습니다.
-            shadow += textureLod(shadowMap, vec3(proj.xy + vec2(x, y) * texelSz, proj.z), 0.0);
+    vec2  texelSz = vec2(ubo.shadowParams.y);
+    vec2  p   = proj.xy / texelSz - 0.5;
+    vec2  i   = floor(p);
+    vec2  f   = p - i;
+    vec2  wA  = 2.0 - f;                     // 텍셀 i-1, i
+    vec2  wB  = 1.0 + f;                     // 텍셀 i+1, i+2
+    vec2  uvA = (i - 0.5 + 1.0 / wA) * texelSz;   // 텍셀 i-1 중심(i - 0.5)에서 1/(2-f) 만큼
+    vec2  uvB = (i + 1.5 + f / wB) * texelSz;     // 텍셀 i+1 중심(i + 1.5)에서 f/(1+f) 만큼
+    // 비균일 흐름(라이트 기여가 0 이 아닐 때만 호출) 안이라 암시적 미분이 정의되지 않으므로 LOD 0 을 명시합니다.
+    // 섀도 샘플러는 mip 하나 · maxLod 0 이라 결과는 같습니다.
+    float shadow = wA.x * wA.y * textureLod(shadowMap, vec3(uvA.x, uvA.y, proj.z), 0.0)
+                 + wB.x * wA.y * textureLod(shadowMap, vec3(uvB.x, uvA.y, proj.z), 0.0)
+                 + wA.x * wB.y * textureLod(shadowMap, vec3(uvA.x, uvB.y, proj.z), 0.0)
+                 + wB.x * wB.y * textureLod(shadowMap, vec3(uvB.x, uvB.y, proj.z), 0.0);
     return shadow / 9.0;
 }
 
