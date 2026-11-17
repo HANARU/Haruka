@@ -423,7 +423,7 @@ $$\mathbf{P}_{\text{RevZ}} = \begin{bmatrix}
 
 ```cpp
 #pragma once
-#include "../core/Component.hpp"
+#include "../scene/Component.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>

@@ -2,7 +2,7 @@
 #include "PrefabRules.hpp"
 #include "AssetLog.hpp"
 #include "SceneSerializer.hpp"
-#include "../core/Actor.hpp"
+#include "../scene/Actor.hpp"
 #include "../core/FileUtil.hpp"
 #include "../core/ProjectPaths.hpp"
 #include "../vfs/Vfs.hpp"

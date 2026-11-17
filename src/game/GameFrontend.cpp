@@ -3,9 +3,9 @@
 //
 // 시작 씬을 열고 처음부터 Play 상태로 돕니다. 에디터의 Play 와 같은 경로(World::setPlaying, 엔진의 BeginPlay 통지)를
 // 쓰므로 게임 코드는 두 실행 형태를 구별하지 않습니다. 실행 규칙은 2026-10-19 사용자 결정입니다(policy()).
-#include "../core/IEngineFrontend.hpp"
-#include "../core/World.hpp"
-#include "../core/Actor.hpp"
+#include "../runtime/IEngineFrontend.hpp"
+#include "../scene/World.hpp"
+#include "../scene/Actor.hpp"
 #include "../core/HLog.hpp"
 #include "../core/ProjectSettings.hpp"
 #include "../vfs/Vfs.hpp"

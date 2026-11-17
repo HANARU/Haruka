@@ -7,7 +7,7 @@
 //
 // 실행: build/Release/HarukaActorTest.exe
 
-#include "../src/core/Actor.hpp"
+#include "../src/scene/Actor.hpp"
 #include "../src/components/LightComponent.hpp"
 #include "../src/components/CameraComponent.hpp"
 

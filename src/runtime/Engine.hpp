@@ -1,10 +1,10 @@
 #pragma once
-#include "World.hpp"
+#include "../scene/World.hpp"
 #include "ModuleManager.hpp"
-#include "ProjectSettings.hpp"
+#include "../core/ProjectSettings.hpp"
 #include "IEngineFrontend.hpp"
 #include "EngineOptions.hpp"
-#include "FramePacing.hpp"
+#include "../core/FramePacing.hpp"
 #include <chrono>
 #include <cstdint>
 #include <memory>

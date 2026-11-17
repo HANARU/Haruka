@@ -1,6 +1,6 @@
 #include "CoreComponents.hpp"
 
-#include "../core/ComponentRegistry.hpp"
+#include "../scene/ComponentRegistry.hpp"
 #include "AudioComponent.hpp"
 #include "CameraComponent.hpp"
 #include "HandPoseComponent.hpp"

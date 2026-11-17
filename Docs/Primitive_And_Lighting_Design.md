@@ -102,7 +102,7 @@
 | DEF-43 | `RigidBodyComponent.cpp:18-25, 43-51` | `resetIfLive`가 세터 안에 있어 슬라이더 드래그 중 매 프레임 Jolt 바디를 파괴하고 재생성합니다. 7-4절 | LOW | **미검증 · 착수 전 실측 필요** |
 | DEF-44 | `SceneSerializer.cpp:63` | `RIGID:`가 enum 서수를 그대로 기록해 `EPhysicsShape`에 값을 중간 삽입하면 기존 씬이 조용히 깨집니다 | LOW | **미검증 · 착수 전 실측 필요** |
 | DEF-45 | `GpuScene.cpp:45, 51-53` | `new MeshHandle()`이 용량 검사보다 앞서 있어 오버플로 throw 시 핸들이 누수됩니다 | LOW | 코드 대조 완료 |
-| DEF-46 | `src/core/Reflect.hpp` `PropDesc::step` | 에디터 float 스텝이 `0.01f`로 **선언 시점에 고정**되어 미터 단위에서 1 cm 미만을 편집할 수 없습니다. 반대로 100 m 구조물에는 지나치게 잘습니다. 7-7절 | MEDIUM | **해결 2026-10-04** |
+| DEF-46 | `src/scene/Reflect.hpp` `PropDesc::step` | 에디터 float 스텝이 `0.01f`로 **선언 시점에 고정**되어 미터 단위에서 1 cm 미만을 편집할 수 없습니다. 반대로 100 m 구조물에는 지나치게 잘습니다. 7-7절 | MEDIUM | **해결 2026-10-04** |
 
 > **미검증 네 건(DEF-39, DEF-40, DEF-43, DEF-44)은 설계 검토자가 제시한 주장이며 아직 코드로 직접 대조하지 않았습니다.** 담당자는 착수 전에 해당 지점을 먼저 실측하고, 주장이 성립하지 않으면 기각으로 처리하십시오. 나머지 일곱 건은 코드 대조를 마쳤습니다.
 >
@@ -303,7 +303,7 @@ penetration slop, convex radius, speculative contact distance, collision toleran
 
 #### 그래서 실제 문제는 무엇이었는가
 
-사용자가 겪은 불편은 단위가 아니라 **에디터에서 1 cm 미만을 입력할 수 없다는 것**이었습니다. 원인은 `src/core/Reflect.hpp`의 `PropDesc::step`이 `0.01f`로 선언 시점에 고정되어 있다는 점이며, 이것이 `DEF-46`입니다. **단위 문제가 아니라 UI 문제이므로 UI에서 풉니다.** 해법은 7-7절입니다.
+사용자가 겪은 불편은 단위가 아니라 **에디터에서 1 cm 미만을 입력할 수 없다는 것**이었습니다. 원인은 `src/scene/Reflect.hpp`의 `PropDesc::step`이 `0.01f`로 선언 시점에 고정되어 있다는 점이며, 이것이 `DEF-46`입니다. **단위 문제가 아니라 UI 문제이므로 UI에서 풉니다.** 해법은 7-7절입니다.
 
 ### 3-6. 파생 규칙
 
@@ -912,7 +912,7 @@ public:
 #### 권고: `PropDesc`에 커밋 훅을 추가합니다 (가산 변경)
 
 ```cpp
-// src/core/Reflect.hpp  (가산)
+// src/scene/Reflect.hpp  (가산)
 struct PropDesc {
     // ... 기존 필드 그대로 ...
     std::function<void()> onCommit;   // 편집 확정 시 1회. 드래그 중에는 호출하지 않습니다.
@@ -1019,7 +1019,7 @@ struct MeshHandle {
 
 #### 문제
 
-`src/core/Reflect.hpp`의 `PropDesc`에 `float step {0.01f};` 필드가 있고, `XPROP_Float`, `XPROP_FloatMin`, `XPROP_FloatClamp` 매크로가 이 스텝을 **선언 시점에 고정합니다.** 미터 단위에서 0.01은 1 cm이므로 결과는 두 방향 모두에서 나쁩니다.
+`src/scene/Reflect.hpp`의 `PropDesc`에 `float step {0.01f};` 필드가 있고, `XPROP_Float`, `XPROP_FloatMin`, `XPROP_FloatClamp` 매크로가 이 스텝을 **선언 시점에 고정합니다.** 미터 단위에서 0.01은 1 cm이므로 결과는 두 방향 모두에서 나쁩니다.
 
 | 상황 | 증상 |
 |---|---|
@@ -1796,8 +1796,8 @@ DEF-26과 DEF-27을 수정합니다.
 | `shaders/pbr.frag` | `sampler2DShadow` 선언, `sampleShadow` 바이어스와 조기 반환, `Lo *= shadow`, 감쇠식, IBL 앰비언트 |
 | `shaders/post.frag` | ACES 와 감마 2.2, exposure 곱 |
 | `src/core/Transform.hpp` | `T*R*S`, `GLM_FORCE_DEPTH_ZERO_TO_ONE` |
-| `src/core/Reflect.hpp` | `PropDesc` 필드 전체, `makePropEnum` 존재, XPROP 매크로에 콜백 없음, `float step {0.01f}`와 `XPROP_Float` / `XPROP_FloatMin` / `XPROP_FloatClamp`의 선언 시점 스텝 고정 (DEF-46) |
-| `src/core/World.cpp` | `getVisibleMeshes`의 `mesh && material` 요구, `getLights` 순서 |
+| `src/scene/Reflect.hpp` | `PropDesc` 필드 전체, `makePropEnum` 존재, XPROP 매크로에 콜백 없음, `float step {0.01f}`와 `XPROP_Float` / `XPROP_FloatMin` / `XPROP_FloatClamp`의 선언 시점 스텝 고정 (DEF-46) |
+| `src/scene/World.cpp` | `getVisibleMeshes`의 `mesh && material` 요구, `getLights` 순서 |
 | `src/components/LightComponent.hpp` | `LIGHT_PROPS` 목록, 기본값, `direction` 과 `lightType` 미노출 |
 | `src/components/CameraComponent.hpp` / `.cpp` | zNear 와 zFar, forward 식, `proj[1][1] *= -1` |
 | `src/components/RigidBodyComponent.hpp` / `.cpp` | `EPhysicsShape`, `HalfExt` 기본 0.5, `resetIfLive` 세터 캡처 |

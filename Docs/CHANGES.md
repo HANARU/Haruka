@@ -18,13 +18,13 @@ Vulkan 1.4 기반 Haruka 엔진의 에디터 기능을 강화했습니다.
 
 ## 2. 파일별 변경 내역
 
-### 2-1. `src/core/Component.hpp`
+### 2-1. `src/scene/Component.hpp`
 - `virtual const char* typeName() const { return "Component"; }` 추가  
   → 런타임 컴포넌트 타입명 반환 (RTTI 없이 UI 표시용)
 
 ---
 
-### 2-2. `src/core/Actor.hpp`
+### 2-2. `src/scene/Actor.hpp`
 - `#include <algorithm>` 추가
 - `getComponents()` 추가:
   ```cpp

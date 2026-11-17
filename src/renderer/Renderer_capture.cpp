@@ -11,8 +11,8 @@
 #include "RendererLog.hpp"
 #include "../components/CameraComponent.hpp"
 #include "../components/ReflectionCaptureComponent.hpp"
-#include "../core/Actor.hpp"
-#include "../core/World.hpp"
+#include "../scene/Actor.hpp"
+#include "../scene/World.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/packing.hpp>

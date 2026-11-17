@@ -12,12 +12,12 @@
 //
 // 실행: build/Release/HarukaPhysicsTest.exe
 
-#include "../src/core/World.hpp"
-#include "../src/core/Actor.hpp"
+#include "../src/scene/World.hpp"
+#include "../src/scene/Actor.hpp"
 #include "../src/components/RigidBodyComponent.hpp"
 #include "../src/physics/PhysicsSystem.hpp"
 #include "../src/geometry/CollisionMesh.hpp"
-#include "../src/core/ComponentFields.hpp"
+#include "../src/scene/ComponentFields.hpp"
 #include "../src/components/XrComponents.hpp"
 #include "../src/components/CameraComponent.hpp"
 #include "../src/input/HInputSystem.hpp"

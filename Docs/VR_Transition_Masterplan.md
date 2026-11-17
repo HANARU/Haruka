@@ -73,7 +73,7 @@ graph LR
         H_Phys["physics / components<br/>(ZeroGControllerComponent)"]
         H_Render["renderer/passes<br/>(Reverse-Z & GeometryPass)"]
         H_Cull["renderer/passes/CullPass<br/>(Debris Field GPU Culling)"]
-        H_Space["core/World.hpp<br/>(Floating Origin 우주 씬)"]
+        H_Space["scene/World.hpp<br/>(Floating Origin 우주 씬)"]
     end
 
     C_Math ==>|"쿼터니언 자세 표현 및 Slerp"| H_Core

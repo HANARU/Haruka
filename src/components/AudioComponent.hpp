@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/Component.hpp"
+#include "../scene/Component.hpp"
 #include "../audio/AudioAttenuation.hpp"
 #include "../audio/AudioPropagation.hpp"
 #include <string>

@@ -1,7 +1,7 @@
 #include "Renderer.hpp"
 #include "LightingCalibration.hpp"
 #include "SkyIbl.hpp"
-#include "../core/World.hpp"
+#include "../scene/World.hpp"
 #include "../core/AppPaths.hpp"
 #include "../ui/slate/HSlateRenderer.hpp"
 #include "../assets/GltfLoader.hpp"

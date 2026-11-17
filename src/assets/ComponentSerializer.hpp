@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-#include "../core/ComponentFields.hpp"
+#include "../scene/ComponentFields.hpp"
 
 class Actor;
 

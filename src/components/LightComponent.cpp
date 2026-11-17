@@ -1,12 +1,12 @@
 #include "LightComponent.hpp"
 #include "LightChannels.hpp"
 #include "../core/DebugDraw.hpp"
-#include "../core/Actor.hpp"
+#include "../scene/Actor.hpp"
 #include "CameraComponent.hpp"
-#include "../core/Actor.hpp"
-#include "../core/Reflect.hpp"
-#include "../core/ComponentFields.hpp"
-#include "../core/SceneLog.hpp"
+#include "../scene/Actor.hpp"
+#include "../scene/Reflect.hpp"
+#include "../scene/ComponentFields.hpp"
+#include "../scene/SceneLog.hpp"
 #include <algorithm>
 #include <cmath>
 

@@ -1,8 +1,8 @@
 #pragma once
 // 프리팹 파일의 이름 검사 · 머리 줄 판별 · 꺼내다 실패한 액터 정리(2026-11-06, DEF-140 · 141 · 142).
 // PrefabManager 와 에디터가 쓰고, 화면 없이 검산합니다(editor_commands 테스트).
-#include "../core/Actor.hpp"
-#include "../core/World.hpp"
+#include "../scene/Actor.hpp"
+#include "../scene/World.hpp"
 
 #include <cctype>
 #include <string>

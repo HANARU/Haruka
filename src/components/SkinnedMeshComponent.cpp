@@ -4,9 +4,9 @@
 #include "../assets/MeshSource.hpp"
 #include "../assets/Skin.hpp"
 #include "../renderer/MeshHandle.hpp"
-#include "../core/Actor.hpp"
-#include "../core/ComponentFields.hpp"
-#include "../core/SceneLog.hpp"
+#include "../scene/Actor.hpp"
+#include "../scene/ComponentFields.hpp"
+#include "../scene/SceneLog.hpp"
 
 #include <algorithm>
 #include <cstdio>

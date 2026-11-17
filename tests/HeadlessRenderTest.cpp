@@ -6,7 +6,7 @@
 //
 // 실행: build/Release/HarukaHeadlessTest.exe
 
-#include "../src/core/EngineOptions.hpp"
+#include "../src/runtime/EngineOptions.hpp"
 #include "../src/core/FramePacing.hpp"
 #include "../src/platform/android/AndroidWindow.hpp"
 #include "../src/platform/headless/HeadlessWindow.hpp"

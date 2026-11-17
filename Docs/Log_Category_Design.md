@@ -292,7 +292,7 @@ struct HLogRecord {
 | `Vulkan` | `[Vulkan]` | `Renderer.cpp` (static) | Log | 없음. 콜백의 심각도 플래그를 Error·Warning 으로 대응합니다 |
 | `Asset` | `[Asset]`, `[AssetManager]`, `[GassetCache]`, `[Prefab]` | `assets/AssetLog.hpp` (inline) | Log | 캐시 적중, 머티리얼 덤프 |
 | `Primitive` | `[Primitive]` | `geometry/PrimitiveLog.hpp` (inline) | Log | |
-| `Scene` | `[Scene]`(SceneSerializer), `[Actor]` | `core/SceneLog.hpp` (inline) | Log | |
+| `Scene` | `[Scene]`(SceneSerializer), `[Actor]` | `scene/SceneLog.hpp` (inline) | Log | |
 | `Game` | `[DefaultGameModule]`, `[Scene]`(DefaultGameModule) | `DefaultGameModule.cpp` (static) | Log | |
 | `Physics` | `[Physics]` | `PhysicsSystem.cpp` (static) | Log | |
 | `Audio` | `[Audio]` | `AudioSystem.cpp` (static) | Log | |

@@ -1,7 +1,7 @@
 #include "PhysicsSystem.hpp"
 #include "../core/FrameTimings.hpp"
-#include "../core/World.hpp"
-#include "../core/Actor.hpp"
+#include "../scene/World.hpp"
+#include "../scene/Actor.hpp"
 #include "../components/RigidBodyComponent.hpp"
 #include "../geometry/CollisionMesh.hpp"
 

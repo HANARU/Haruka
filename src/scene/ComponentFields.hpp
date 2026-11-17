@@ -17,8 +17,8 @@
 
 #include <glm/glm.hpp>
 
-#include "FieldParse.hpp"
-#include "TextFloat.hpp"
+#include "../core/FieldParse.hpp"
+#include "../core/TextFloat.hpp"
 
 class AssetManager;
 

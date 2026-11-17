@@ -1,6 +1,6 @@
 #pragma once
-#include "../core/Component.hpp"
-#include "../core/ComponentFields.hpp"
+#include "../scene/Component.hpp"
+#include "../scene/ComponentFields.hpp"
 #include "../core/ProjectSettings.hpp"
 
 #define GLM_FORCE_RADIANS

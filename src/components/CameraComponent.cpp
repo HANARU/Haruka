@@ -1,7 +1,7 @@
 #include "CameraComponent.hpp"
 #include "../core/DebugDraw.hpp"
-#include "../core/Actor.hpp"
-#include "../core/ComponentFields.hpp"
+#include "../scene/Actor.hpp"
+#include "../scene/ComponentFields.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 

@@ -18,10 +18,10 @@
 #include "../src/ui/slate/HSlate.hpp"
 #include "../src/components/UIPanelComponent.hpp"
 #include "../src/components/UIPanelPointer.hpp"
-#include "../src/core/Actor.hpp"
+#include "../src/scene/Actor.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include "../src/core/ComponentFields.hpp"
+#include "../src/scene/ComponentFields.hpp"
 
 #include <algorithm>
 #include <cmath>

@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/Actor.hpp"
+#include "../scene/Actor.hpp"
 #include "../core/Transform.hpp"
 #include "../math/Geometry.hpp"
 

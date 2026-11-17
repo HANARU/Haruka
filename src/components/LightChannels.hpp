@@ -7,8 +7,8 @@
 // 전달: 라이트 마스크는 GpuLight.spotParams.z(실수로 넣은 정수), 메시 마스크는 드로마다 푸시 상수(GpuViewPush.lightChannels)입니다.
 // 같은 지오메트리 · 머티리얼이라도 채널이 다르면 다른 묶음입니다(DrawBatching).
 
-#include "../core/ComponentFields.hpp"
-#include "../core/Reflect.hpp"
+#include "../scene/ComponentFields.hpp"
+#include "../scene/Reflect.hpp"
 
 #include <cstdint>
 #include <string>

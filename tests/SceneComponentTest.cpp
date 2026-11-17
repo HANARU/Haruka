@@ -11,10 +11,10 @@
 #include "../src/assets/TransformText.hpp"
 #include "../src/components/CameraComponent.hpp"
 #include "../src/components/LightComponent.hpp"
-#include "../src/core/Actor.hpp"
-#include "../src/core/ComponentFields.hpp"
-#include "../src/core/ComponentRegistry.hpp"
-#include "../src/core/UnknownComponent.hpp"
+#include "../src/scene/Actor.hpp"
+#include "../src/scene/ComponentFields.hpp"
+#include "../src/scene/ComponentRegistry.hpp"
+#include "../src/scene/UnknownComponent.hpp"
 
 #include <cmath>
 #include <cstdio>

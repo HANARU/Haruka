@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/IGameModule.hpp"
+#include "../runtime/IGameModule.hpp"
 
 class DefaultGameModule : public IGameModule {
 public:

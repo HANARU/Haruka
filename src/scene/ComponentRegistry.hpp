@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "Actor.hpp"
-#include "HLog.hpp"
+#include "../core/HLog.hpp"
 #include "SceneLog.hpp"
 
 class ComponentRegistry {

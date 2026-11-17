@@ -1,6 +1,6 @@
 #include "Renderer.hpp"
 #include "../ui/slate/HSlateRenderer.hpp"
-#include "../core/World.hpp"
+#include "../scene/World.hpp"
 #include "../components/StaticMeshComponent.hpp"
 #include "../components/SkinnedMeshComponent.hpp"
 #include "../assets/MeshSource.hpp"

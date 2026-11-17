@@ -2,9 +2,9 @@
 #include "LightChannels.hpp"
 #include "../renderer/MeshHandle.hpp"
 #include "../assets/AssetManager.hpp"
-#include "../core/Actor.hpp"
-#include "../core/ComponentFields.hpp"
-#include "../core/SceneLog.hpp"
+#include "../scene/Actor.hpp"
+#include "../scene/ComponentFields.hpp"
+#include "../scene/SceneLog.hpp"
 #include "../renderer/ScreenSize.hpp"
 #include <algorithm>
 #include <exception>

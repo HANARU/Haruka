@@ -106,22 +106,22 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-04** | `vkCmdPipelineBarrier2` (Synch2) 무조건 호출 | **해결됨 · 2026-10-31** (원래 HIGH, 배리어는 `RenderContext` 래퍼와 `hsync::record` 로만: sync2 가 있으면 KHR 함수, 없으면 1.0 으로 변환. 끝 "패키징 2단계 결과" 절) | `src/renderer/RenderContext.cpp`, `src/renderer/BarrierCompat.hpp`, `src/renderer/Renderer_render.cpp` | `pipelineBarrier` · `memoryBarrier` · `transitionImage` |
 | **DEF-05** | 스왑체인 리사이즈 시 GPU In-Flight 자원 파괴 | **해결됨** | `src/renderer/Renderer_swap.cpp` | L59~60 |
 | **DEF-06** | MSAA `LAZILY_ALLOCATED` 메모리 속성 누락 | **해결됨 · 2026-10-31** (원래 HIGH, MSAA 컬러만 지연 할당 타입에 핵심 힙 밖으로. 깊이는 SAMPLED · STORE 라 제외) | `src/renderer/passes/GeometryPass.cpp`, `src/memory/HarukaAllocator.cpp` | `acquireSizeDependent`, `allocLazyImage` |
-| **DEF-07** | `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터 | **해결됨 · 2026-08-26** (원래 MEDIUM, A-1: EditorApp 구독 + 컴포넌트 `notifyDestroy`) | `src/core/World.hpp`, `src/core/World.cpp` | L27, L27 |
-| **DEF-08** | 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성) | **HIGH · 빌드는 해결(2026-10-31)**, 헤드셋 실행 확인 남음. 창 팩토리 · 표면 없는 AndroidWindow · `android_main` · OpenXR 로더 · APK(Gradle 없이) | `src/core/Engine.cpp`, `src/platform/android/AndroidMain.cpp`, `cmake/HarukaAndroid.cmake` | `Engine::Engine`, `android_main` |
+| **DEF-07** | `onActorDestroyed` 구독자 부재로 인한 댕글링 포인터 | **해결됨 · 2026-08-26** (원래 MEDIUM, A-1: EditorApp 구독 + 컴포넌트 `notifyDestroy`) | `src/scene/World.hpp`, `src/scene/World.cpp` | L27, L27 |
+| **DEF-08** | 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성) | **HIGH · 빌드는 해결(2026-10-31)**, 헤드셋 실행 확인 남음. 창 팩토리 · 표면 없는 AndroidWindow · `android_main` · OpenXR 로더 · APK(Gradle 없이) | `src/runtime/Engine.cpp`, `src/platform/android/AndroidMain.cpp`, `cmake/HarukaAndroid.cmake` | `Engine::Engine`, `android_main` |
 | **DEF-09** | 멀티뷰 절반 구현 (피처만 켜지고 경로 없음) | **해결됨 · 2026-10-04** (원래 HIGH, 첫 단계는 눈마다 두 번 그리기. 셰이더 · UBO 는 두 눈 기준이라 멀티뷰는 Quest 이식 때 뷰 번호만 바꿔 켬). **둘째 단계 멀티뷰 2026-11-18**(끝의 "멀티뷰" 절) | `src/renderer/Renderer_render.cpp`, `src/renderer/passes/GeometryPass.cpp`, `shaders/include/haruka_shared.h` | `drawFrame` 의 눈 루프 |
-| **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **해결됨 · 2026-10-14** (원래 MEDIUM, `Config/engine.ini` 의 render.maxDrawRows · render.maxLights · physics.maxBodies) | `src/core/EngineSettings.hpp`, `src/core/Engine.cpp` | `loadEngineLimits` |
+| **DEF-10** | `kMaxDraws` / `kMaxBodies` 이중 상한 | **해결됨 · 2026-10-14** (원래 MEDIUM, `Config/engine.ini` 의 render.maxDrawRows · render.maxLights · physics.maxBodies) | `src/core/EngineSettings.hpp`, `src/runtime/Engine.cpp` | `loadEngineLimits` |
 | **DEF-11** | 셰이더 빌드 파이프라인 결함 (DEPENDS 누락·하드코딩·고아·죽은 파일) | **해결됨 · 2026-10-04** (원래 MEDIUM) | `CMakeLists.txt`, `shaders/include/` | L94~108 |
-| **DEF-12** | `World::tick`이 에디터 Play 상태에서만 실행 | **해결됨 · 2026-10-19** (원래 MEDIUM, 엔진 앞단 인터페이스 + 게임 실행 파일 `HarukaGame`. 끝 "패키징 1단계 결과" 절) | `src/core/Engine.cpp`, `src/core/IEngineFrontend.hpp` | `Engine::run` |
+| **DEF-12** | `World::tick`이 에디터 Play 상태에서만 실행 | **해결됨 · 2026-10-19** (원래 MEDIUM, 엔진 앞단 인터페이스 + 게임 실행 파일 `HarukaGame`. 끝 "패키징 1단계 결과" 절) | `src/runtime/Engine.cpp`, `src/runtime/IEngineFrontend.hpp` | `Engine::run` |
 | **DEF-13** | `FrameUBO`에 `invViewProj` 부재 | **보류 · 2026-10-14** (LOW, 첫 사용처가 생길 때. 렌더 확장이 CPU 행렬을 받음) | `shaders/include/haruka_shared.h` | `FrameUBO` |
 | **DEF-14** | `GpuTransform` 셰이더 4곳 중복 선언, 공유 include 부재 | **해결됨 · 2026-10-04** (원래 LOW, `haruka_shared.h`) | `shaders/pbr.vert`, `depth.vert`, `shadow.vert`, `triangle.vert` | L25, L18, L18, L19 |
 | **DEF-15** | `prevViewProj` 선언만 존재, TAA 입력 미비 | **해결됨 · 2026-10-04** (원래 LOW, 가짜 TAA 잔재와 함께 제거) | `shaders/post.frag` 외 4개 셰이더 | L48~51 |
 | **DEF-16** | 인스턴싱 `instanceCount = 1` 하드코딩 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 자동 인스턴싱. 명시적 인스턴싱 컴포넌트는 파편장 때) | `src/renderer/DrawBatching.hpp`, `src/renderer/passes/GeometryPass.cpp` | `hbatch::build`, 끝 "DEF-16 자동 인스턴싱 수정 결과" 절 |
 | **DEF-17** | 패스 레지스트리 부재 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 고정 지점 넷의 렌더 확장) | `src/renderer/RenderExtension.hpp`, `src/renderer/RenderExtensionRegistry.hpp` | `IRenderExtension`, `RenderExtensionRegistry`, 끝 "DEF-17 · 18 패스 확장 지점 수정 결과" 절 |
-| **DEF-18** | `EngineContext`에 렌더러 참조 없음 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 등록 · 해제만 여는 `IRenderExtensionHost`) | `src/core/IGameModule.hpp` | `EngineContext::render` |
+| **DEF-18** | `EngineContext`에 렌더러 참조 없음 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 등록 · 해제만 여는 `IRenderExtensionHost`) | `src/runtime/IGameModule.hpp` | `EngineContext::render` |
 | **DEF-19** | 물리 힘·임펄스·속도·레이캐스트 API 부재 | **해결됨 · 2026-10-04** (원래 HIGH · 경계, UE 식 규칙) | `src/physics/PhysicsSystem.cpp`, `src/components/RigidBodyComponent.cpp` | 끝 "3단계 VR 첫걸음 수정 결과" 절 |
 | **DEF-20** | 디지털 전용 입력 (아날로그 축·VR 포즈 부재) | **해결됨 · 2026-10-04** (원래 HIGH · 경계, XR 입력은 창이 아니라 `XrSystem`) | `src/xr/XrSystem.cpp`, `src/input/HInputSystem.cpp` | 끝 "3단계 VR 첫걸음 수정 결과" 절 |
 | **DEF-21** | 오일러각 카메라 (6DOF 자세 불가) | **해결됨 · 2026-10-04** (원래 HIGH · 경계, 쿼터니언 자세 · 눈별 투영) | `src/components/CameraComponent.cpp` | `projFromFov`, XR 원점 |
-| **DEF-22** | `SceneSerializer` 컴포넌트 하드코딩 | **해결됨 · 2026-10-14** (원래 HIGH · 경계, 타입 등록 · 씬 v4 · 프리팹 v2) | `src/core/ComponentRegistry.hpp`, `src/assets/ComponentSerializer.cpp` | 끝 "DEF-22 직렬화 타입 등록 수정 결과" 절 |
+| **DEF-22** | `SceneSerializer` 컴포넌트 하드코딩 | **해결됨 · 2026-10-14** (원래 HIGH · 경계, 타입 등록 · 씬 v4 · 프리팹 v2) | `src/scene/ComponentRegistry.hpp`, `src/assets/ComponentSerializer.cpp` | 끝 "DEF-22 직렬화 타입 등록 수정 결과" 절 |
 | **DEF-23** | 스피어 인덱스 도메인 불일치 (DEF-01의 직계 형제) | **해결됨** (2026-08-25, 원래 CRITICAL) | `shaders/cull.comp`, `src/renderer/passes/CullPass.cpp`, `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L54·L57 |
 | **DEF-24** | 라이트 개수 이중 계산 | **해결됨 · 2026-08-25** (원래 HIGH) | `src/renderer/Renderer_render.cpp`, `src/renderer/Renderer.hpp`, `src/renderer/RenderTypes.hpp`, `shaders/pbr.frag` | 8-2절 |
 | **DEF-33** | 라이트 선택 정책 부재 (생성 순서로 절단) | **해결됨 · 2026-10-14** (원래 MEDIUM, 화면 밖 거르기 + 상한 초과 시 방향광 우선 · 가까운 순) | `src/renderer/LightSelection.hpp`, `Renderer::updateLightSSBO` | 8-2-a절 |
@@ -145,7 +145,7 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-43** | 세터 안의 `resetIfLive`로 인한 매 프레임 바디 재생성 | **해결됨 · 2026-10-02** (원래 LOW, 재생성을 편집 확정 훅으로 옮김) | `src/components/RigidBodyComponent.cpp` | `resetIfLive` |
 | **DEF-44** | `RIGID:`의 enum 서수 직렬화 | **해결됨 · 2026-10-02** (원래 LOW, 이름으로 기록하고 옛 순번도 읽음) | `src/assets/SceneSerializer.cpp` | `RIGID:` 기록 경로 |
 | **DEF-45** | `uploadMesh`의 핸들 누수 | **해결됨 · 2026-08-25** (원래 LOW) | `src/renderer/GpuScene.cpp` | `uploadMesh`, 11-10절 |
-| **DEF-46** | 에디터 float 스텝 0.01 고정으로 1cm 미만 편집 불가 | **해결됨 · 2026-10-04** (원래 MEDIUM, 단위 종류 · UE 식 수정 키) | `src/core/Reflect.hpp` | `PropDesc::step` |
+| **DEF-46** | 에디터 float 스텝 0.01 고정으로 1cm 미만 편집 불가 | **해결됨 · 2026-10-04** (원래 MEDIUM, 단위 종류 · UE 식 수정 키) | `src/scene/Reflect.hpp` | `PropDesc::step` |
 | **DEF-47** | glTF 스칼라 팩터를 한 번도 읽지 않음 (텍스처 없는 머티리얼이 전부 순백) | **해결됨 · 2026-08-25** (원래 HIGH) | `src/assets/GltfLoader.cpp` | 머티리얼 추출 경로, 11-12절 |
 | **DEF-48** | sRGB 이중 디코드 (SRGB 포맷인데 셰이더가 `pow(2.2)`를 한 번 더 적용) | **해결됨 · 2026-08-25** (원래 MEDIUM) | `shaders/pbr.frag` | albedo 및 emissive 샘플링, 11-13절 |
 
@@ -179,7 +179,7 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 3. 투명 머티리얼 역참조 루프(L313-L326)도 같은 구조의 세 번째 카운터를 사용하며, opaque 쪽이 카운터를 공유한다는 사실을 반영하지 않습니다.
 4. **영향**: 세 경로의 증가 조건이 일치하지 않으므로 인덱스가 어긋납니다. `firstInstance`가 가리키는 SSBO 행과 실제 트랜스폼 데이터가 어긋나 오브젝트 위치가 뒤섞이고, 어긋난 폭이 커지면 SSBO 범위를 넘어서는 인덱싱이 발생합니다.
 
-**[정정 · 2026-08-25]** 이전 판의 2번 항목은 "**머티리얼이 없거나 LOD가 없는 메시에 대해서도** 카운터를 증가시킨다"를 세 번째 근거로 들었습니다. **이 근거는 사실이 아니므로 삭제했습니다.** [`World.cpp:L72`](file:///e:/Haruka/src/core/World.cpp#L72)의 `World::getVisibleMeshes()`가 `m->visible && m->mesh && m->material`을 이미 걸러내므로, 머티리얼이 없는 메시는 애초에 순회 목록에 들어오지 않습니다. LOD 실패 경로도 같은 이유로 도달하지 않습니다. 실제로 성립하던 불일치 근거는 프러스텀 컬링 유무와 opaque·transparent 카운터 공유 두 가지뿐입니다. 이 오류는 `getVisibleMeshes()`의 필터 조건을 코드로 확인하지 않고 호출부의 루프 형태만 보고 추정하여 쓴 데서 비롯되었습니다. 이에 따라 1-3절의 "머티리얼이나 LOD가 없는 메시를 어떻게 처리할지 먼저 결정하라"는 지시도 전제가 사라졌으므로 함께 정리했습니다.
+**[정정 · 2026-08-25]** 이전 판의 2번 항목은 "**머티리얼이 없거나 LOD가 없는 메시에 대해서도** 카운터를 증가시킨다"를 세 번째 근거로 들었습니다. **이 근거는 사실이 아니므로 삭제했습니다.** [`World.cpp:L72`](file:///e:/Haruka/src/scene/World.cpp#L72)의 `World::getVisibleMeshes()`가 `m->visible && m->mesh && m->material`을 이미 걸러내므로, 머티리얼이 없는 메시는 애초에 순회 목록에 들어오지 않습니다. LOD 실패 경로도 같은 이유로 도달하지 않습니다. 실제로 성립하던 불일치 근거는 프러스텀 컬링 유무와 opaque·transparent 카운터 공유 두 가지뿐입니다. 이 오류는 `getVisibleMeshes()`의 필터 조건을 코드로 확인하지 않고 호출부의 루프 형태만 보고 추정하여 쓴 데서 비롯되었습니다. 이에 따라 1-3절의 "머티리얼이나 LOD가 없는 메시를 어떻게 처리할지 먼저 결정하라"는 지시도 전제가 사라졌으므로 함께 정리했습니다.
 
 ### 1-3. 적용된 수정 내용 (2026-08-25)
 
@@ -318,7 +318,7 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 > 등재 당시의 분석입니다. 재진입 파괴와 주소 재사용(ABA) 한계는 `World::destroyImmediate` 주석에 남아 있습니다.
 
 ### 7-1. 대상 파일 및 위치
-* **파일**: [`src/core/World.hpp`](file:///e:/Haruka/src/core/World.hpp) ([L27](file:///e:/Haruka/src/core/World.hpp#L27) 선언), [`src/core/World.cpp`](file:///e:/Haruka/src/core/World.cpp) ([L27](file:///e:/Haruka/src/core/World.cpp#L27) 브로드캐스트)
+* **파일**: [`src/scene/World.hpp`](file:///e:/Haruka/src/scene/World.hpp) ([L27](file:///e:/Haruka/src/scene/World.hpp#L27) 선언), [`src/scene/World.cpp`](file:///e:/Haruka/src/scene/World.cpp) ([L27](file:///e:/Haruka/src/scene/World.cpp#L27) 브로드캐스트)
 
 ### 7-2. 결함 메커니즘 (Root Cause)
 
@@ -529,7 +529,7 @@ Release/Debug 빌드 통과, 신규 경고 0, 실행 정상, 검증 레이어 �
 #### 결함 메커니즘 (Root Cause)
 * 두 지점의 `if (item.material)` 가드가 **푸시 디스크립터 바인딩만 건너뛰고** `vkCmdDrawIndexed`는 그대로 실행합니다.
 * 직전 항목의 set 3이 남아 있으면 엉뚱한 텍스처로 그려지고, 해당 항목이 첫 항목이면 미바인딩 상태에서 드로우가 발행됩니다.
-* **현재 도달 가능성**: `World::getVisibleMeshes()`가 [`World.cpp:L72`](file:///e:/Haruka/src/core/World.cpp#L72)에서 머티리얼 없는 메시를 걸러내므로 **현재는 도달 불가입니다.** 그러나 `DrawItem`의 계약이 `material == nullptr`을 허용하는 형태로 열려 있으므로, 다른 경로로 항목을 만들면 즉시 발현합니다.
+* **현재 도달 가능성**: `World::getVisibleMeshes()`가 [`World.cpp:L72`](file:///e:/Haruka/src/scene/World.cpp#L72)에서 머티리얼 없는 메시를 걸러내므로 **현재는 도달 불가입니다.** 그러나 `DrawItem`의 계약이 `material == nullptr`을 허용하는 형태로 열려 있으므로, 다른 경로로 항목을 만들면 즉시 발현합니다.
 
 #### 수정 가이드라인 (담당 에이전트 지시사항)
 * 두 지점 모두 `if (!item.material) continue;`로 바꾸십시오. 한 줄이면 끝나고 위험도가 없습니다.
@@ -981,7 +981,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 ### 11-11. [DEF-46] [해결됨 · 2026-10-04, 원래 MEDIUM] 에디터 float 스텝이 0.01로 고정되어 1cm 미만을 편집할 수 없음
 
 #### 대상 파일 및 위치
-* **파일**: [`src/core/Reflect.hpp`](file:///e:/Haruka/src/core/Reflect.hpp)
+* **파일**: [`src/scene/Reflect.hpp`](file:///e:/Haruka/src/scene/Reflect.hpp)
 * **위치**: `PropDesc` 의 필드 `float step {0.01f};`, 그리고 `XPROP_Float`, `XPROP_FloatMin`, `XPROP_FloatClamp` 매크로
 
 #### ★ 배경: 이 항목이 단위 변경 논의를 촉발한 실제 원인입니다
@@ -1626,7 +1626,7 @@ DEF-101. 에디터 실행은 사용자 지시로 미뤄 화면 확인은 아래 
 
 | 항목 | 다른 엔진의 방법 | 수정 | 확인 |
 |---|---|---|---|
-| 타입 등록 | Bevy 는 `register_type` 으로 등록한 타입만 씬에 저장 · 읽기 하고 없으면 오류(`SceneSpawnError::UnregisteredComponent`). Godot 은 `ClassDB::register_class` 로 등록한 클래스만 씬을 읽을 때 만듭니다. UE 는 클래스가 정적으로 자동 등록됩니다 | `ComponentRegistry`(`src/core/ComponentRegistry.hpp`): 타입 이름 → 생성 · 찾기 함수, 옛 이름(별칭), 에디터 버튼 라벨. 엔진이 시작할 때 기본 5종을 등록하고(`registerCoreComponents`), Layer 2 는 `EngineContext::components` 로 등록합니다. 전역 객체로 스스로 등록하는 방식은 정적 라이브러리에서 링커가 버릴 수 있어 쓰지 않았습니다 | `scene_components` 신설 |
+| 타입 등록 | Bevy 는 `register_type` 으로 등록한 타입만 씬에 저장 · 읽기 하고 없으면 오류(`SceneSpawnError::UnregisteredComponent`). Godot 은 `ClassDB::register_class` 로 등록한 클래스만 씬을 읽을 때 만듭니다. UE 는 클래스가 정적으로 자동 등록됩니다 | `ComponentRegistry`(`src/scene/ComponentRegistry.hpp`): 타입 이름 → 생성 · 찾기 함수, 옛 이름(별칭), 에디터 버튼 라벨. 엔진이 시작할 때 기본 5종을 등록하고(`registerCoreComponents`), Layer 2 는 `EngineContext::components` 로 등록합니다. 전역 객체로 스스로 등록하는 방식은 정적 라이브러리에서 링커가 버릴 수 있어 쓰지 않았습니다 | `scene_components` 신설 |
 | 값 기록 | UE 는 값마다 이름 · 형을 붙여 쓰고(tagged property), Godot `.tscn` · Unity YAML 도 `이름 = 값` 입니다. Unity 는 이름을 바꾸면 `FormerlySerializedAs` 로 옛 이름도 받습니다. UE · Godot 은 기본값과 다른 값만 쓰고(기본값을 바꾸면 저장한 값이 "변경 없음"이 되는 문제가 UE-88414 로 보고됨), Unity 는 모두 씁니다 | `Component::writeFields` · `readField` · `onFieldsLoaded`. 씬 v4 · 프리팹 v2 의 액터 블록 안에 컴포넌트마다 `COMPONENT:타입` · `enabled=` · `이름=값` 줄 · `END_COMPONENT` 를 씁니다(`ComponentSerializer`). 순서와 상관없고, 모르는 이름은 경고하고 건너뛰며, 없는 이름은 기본값, 깨진 값은 기본값을 두고 오류를 남깁니다. 기본값도 모두 씁니다. 종류 · 셰이프 · 모션은 이름으로 쓰고 옛 숫자도 받습니다. `LIGHT:` 줄의 위치 기반 확장(예약 슬롯 포함) 문제가 사라졌습니다 | 같은 테스트, `physics_lifecycle` · `audio_system` 에 강체 · 오디오 왕복 추가 |
 | 모르는 타입 | Unity 는 스크립트를 못 찾으면 Missing Script 로 데이터를 보존하고, Bevy 는 오류를 냅니다 | 경고하고 `UnknownComponent` 에 원래 이름과 값을 담아, 다시 저장할 때 글자 그대로 씁니다. Layer 2 모듈 없이 씬을 열었다 저장해도 데이터가 사라지지 않습니다 | 같은 테스트 |
 | 옛 형식 | | v3 이하의 `LIGHT:` · `CAMERA:` · `AUDIO*:` · `RIGID*:` · `PRIM*:` · `MODEL:` 줄은 예전 경로로 계속 읽고, 쓰기는 v4 만 합니다. 저장소의 `LightingProbe.hscene` · `AudioProbe.hprefab` 은 v3 · v1 그대로 두었습니다(일괄 점검 때 에디터로 저장해 바꿈) | 빌드(예전 경로 그대로) |
@@ -1943,7 +1943,7 @@ DEF-08 은 빌드까지 해결했습니다(창 팩토리, `android_main`, OpenXR
 
 | ID | 심각도 | 내용 | 고친 것 |
 |---|---|---|---|
-| DEF-149 | MEDIUM | 묶음(`game.hpak`)과 실행 파일이 같은 빌드인지 확인하는 곳이 없었습니다. Android 빌드는 묶음을 만들지 않아 데스크톱 트리의 묶음을 따로 올렸고(셰이더를 바꾼 뒤 데스크톱을 다시 빌드하지 않으면 새 .so 가 옛 SPIR-V 를 받음), `adb install -r` 뒤에도 외부 파일 폴더에 남는 옛 묶음이 OBB 폴더의 새 묶음을 아무 표시 없이 가렸습니다. 엔진은 SPIR-V 를 리플렉션 없이 읽고 기기에는 검증 레이어가 없어 결과가 정의되지 않습니다. 마운트 로그에는 파일 이름만 있어 어느 폴더의 묶음인지도 알 수 없었습니다 | 빌드가 컴파일한 셰이더의 경로 · 내용 해시(XXH3-64, 목차와 같은 값)를 `HarukaPak shader-manifest` 가 목록 파일에 적어 엔진에 넣고(`src/core/ShaderManifest.cpp`), 게임 실행 파일은 마운트 뒤 실제로 읽힐 셰이더와 비교해 다르면 셰이더 이름을 적은 FATAL 로 멈춤(`--loose` 면 경고, 에디터는 핫 리로드 때문에 확인하지 않음). Android 구성도 데스크톱의 HarukaPak 으로 자기 셰이더에서 묶음을 만들고(`build/android/pack/game.hpak`, HarukaGame 이 GamePack 에 기댐), 쓰이지 않던 셰이더 · 에셋 복사는 뺌. 마운트 이름은 전체 경로, 뒤 폴더에도 묶음이 있으면 경고. 묶음 형식(v1)은 그대로 |
+| DEF-149 | MEDIUM | 묶음(`game.hpak`)과 실행 파일이 같은 빌드인지 확인하는 곳이 없었습니다. Android 빌드는 묶음을 만들지 않아 데스크톱 트리의 묶음을 따로 올렸고(셰이더를 바꾼 뒤 데스크톱을 다시 빌드하지 않으면 새 .so 가 옛 SPIR-V 를 받음), `adb install -r` 뒤에도 외부 파일 폴더에 남는 옛 묶음이 OBB 폴더의 새 묶음을 아무 표시 없이 가렸습니다. 엔진은 SPIR-V 를 리플렉션 없이 읽고 기기에는 검증 레이어가 없어 결과가 정의되지 않습니다. 마운트 로그에는 파일 이름만 있어 어느 폴더의 묶음인지도 알 수 없었습니다 | 빌드가 컴파일한 셰이더의 경로 · 내용 해시(XXH3-64, 목차와 같은 값)를 `HarukaPak shader-manifest` 가 목록 파일에 적어 엔진에 넣고(`src/runtime/ShaderManifest.cpp`), 게임 실행 파일은 마운트 뒤 실제로 읽힐 셰이더와 비교해 다르면 셰이더 이름을 적은 FATAL 로 멈춤(`--loose` 면 경고, 에디터는 핫 리로드 때문에 확인하지 않음). Android 구성도 데스크톱의 HarukaPak 으로 자기 셰이더에서 묶음을 만들고(`build/android/pack/game.hpak`, HarukaGame 이 GamePack 에 기댐), 쓰이지 않던 셰이더 · 에셋 복사는 뺌. 마운트 이름은 전체 경로, 뒤 폴더에도 묶음이 있으면 경고. 묶음 형식(v1)은 그대로 |
 | DEF-150 | LOW | 매니페스트의 `configChanges` 에 언어 · 글꼴 크기와 굵기 · 색 모드 · SIM 국가 등이 없어, 그런 설정이 바뀌면 시스템이 액티비티를 다시 만들고 `android_main` 의 `_exit` 때문에 게임이 그냥 꺼졌습니다 | API 34 가 정의하는 18개 항목 전부(`0x5000ffff`). 검출 결과가 제안한 `fontWeightAdjust` 는 이름이 틀려 aapt2 가 거부했고, 실제 이름은 `fontWeightAdjustment` 입니다 |
 | DEF-151 | LOW | APK 에 서드파티 고지 파일이 없었고, Android 에서만 들어가는 jnipp(MIT, OpenXR 로더 안)와 android_native_app_glue(Apache-2.0, 엔진 .so 안)가 고지 목록에 없었습니다 | 둘을 고지에 더함(glue 는 NDK 의 NOTICE 와 Apache-2.0 원문). `package_apk.py` 가 `assets/THIRD_PARTY_NOTICES.txt` 로 넣고, 파일이 없으면 멈춤 |
 | DEF-152 | LOW | `Config/args.txt` · `Config/log_levels.txt` 를 인코딩 처리 없이 읽어, Windows PowerShell 5.1 로 만든 파일(BOM 이 있는 UTF-16LE, `-Encoding utf8` 의 BOM)에서는 옵션이 사라졌습니다. 경고에는 멀쩡한 옵션이 거부된 것으로 보여 원인을 찾기 어려웠습니다 | `hfile::readConfigText`: UTF-8 BOM 을 지우고, BOM 이 있는 UTF-16 은 UTF-8 로 바꾸며, BOM 없이 NUL 이 있으면 이유와 함께 거부. Android 옵션 파일과 두 플랫폼의 로그 수준 파일에 적용 |

@@ -1,9 +1,9 @@
 #include "ReverbZoneComponent.hpp"
 #include "../core/DebugDraw.hpp"
 #include <glm/gtc/matrix_transform.hpp>
-#include "../core/Actor.hpp"
-#include "../core/ComponentFields.hpp"
-#include "../core/Reflect.hpp"
+#include "../scene/Actor.hpp"
+#include "../scene/ComponentFields.hpp"
+#include "../scene/Reflect.hpp"
 
 #include <algorithm>
 #include <cmath>

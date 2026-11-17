@@ -5,7 +5,7 @@
 // 실행: build/Release/HarukaActorUndoTest.exe
 
 #include "../src/editor/EditorCommands.hpp"
-#include "../src/core/World.hpp"
+#include "../src/scene/World.hpp"
 
 #include <cstdio>
 #include <sstream>

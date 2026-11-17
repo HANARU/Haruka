@@ -1,6 +1,6 @@
 #include "HeightFogComponent.hpp"
-#include "../core/ComponentFields.hpp"
-#include "../core/Reflect.hpp"
+#include "../scene/ComponentFields.hpp"
+#include "../scene/Reflect.hpp"
 
 #include <algorithm>
 #include <cmath>

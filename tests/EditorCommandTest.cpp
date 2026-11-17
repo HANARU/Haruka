@@ -8,8 +8,8 @@
 #include "../src/editor/EditorCommands.hpp"
 #include "../src/editor/EditTools.hpp"
 #include "../src/assets/PrefabRules.hpp"
-#include "../src/core/World.hpp"
-#include "../src/core/ComponentRegistry.hpp"
+#include "../src/scene/World.hpp"
+#include "../src/scene/ComponentRegistry.hpp"
 
 #include <cmath>
 #include <cstdio>

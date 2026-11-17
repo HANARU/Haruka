@@ -12,7 +12,7 @@
 #include "dock/DockTree.hpp"
 #include "dock/SDockOverlay.hpp"
 #include "../core/HDelegate.hpp"
-#include "../core/IEngineFrontend.hpp"
+#include "../runtime/IEngineFrontend.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <algorithm>

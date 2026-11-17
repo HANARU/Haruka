@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <typeindex>
 #include <unordered_map>
-#include "Transform.hpp"
+#include "../core/Transform.hpp"
 #include "Component.hpp"
 
 // 구조 버전(2026-11-18, 성능 안정화 1-5). 액터 생성 · 삭제 · ID 재배치와 컴포넌트 추가 · 제거 · 순서 변경 때 오릅니다.

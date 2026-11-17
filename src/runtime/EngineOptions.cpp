@@ -1,5 +1,5 @@
 #include "EngineOptions.hpp"
-#include "ProjectSettings.hpp"
+#include "../core/ProjectSettings.hpp"
 
 #include <cctype>
 #include <charconv>

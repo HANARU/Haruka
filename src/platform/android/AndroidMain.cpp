@@ -29,11 +29,11 @@
 #include <vector>
 
 #include "../../core/AppPaths.hpp"
-#include "../../core/Engine.hpp"
-#include "../../core/EngineOptions.hpp"
+#include "../../runtime/Engine.hpp"
+#include "../../runtime/EngineOptions.hpp"
 #include "../../core/FileUtil.hpp"
 #include "../../core/HLog.hpp"
-#include "../../core/IEngineFrontend.hpp"
+#include "../../runtime/IEngineFrontend.hpp"
 
 namespace {
 

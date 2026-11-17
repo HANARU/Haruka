@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/Component.hpp"
+#include "../scene/Component.hpp"
 #include "../xr/HandSkeleton.hpp"
 #include "../xr/GraspSolver.hpp"
 

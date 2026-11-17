@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/Component.hpp"
+#include "../scene/Component.hpp"
 #include "../ui/slate/HSlateContext.hpp"
 
 #define GLM_FORCE_RADIANS

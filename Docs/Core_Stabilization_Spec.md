@@ -123,7 +123,7 @@ graph TD
 3. 투명 머티리얼 역참조 루프(L313-L326)도 같은 구조의 세 번째 카운터를 사용하며, opaque 쪽이 카운터를 공유한다는 사실을 반영하지 않습니다.
 4. **영향**: 세 경로의 증가 조건이 일치하지 않으므로 인덱스가 어긋납니다. `firstInstance`가 가리키는 SSBO 행과 실제 트랜스폼 데이터가 어긋나 오브젝트 위치가 뒤섞이고, 어긋난 폭이 커지면 SSBO 범위를 넘어서는 인덱싱이 발생합니다.
 
-**[정정 · 2026-08-25]** 이전 판의 2번 항목은 "**머티리얼이 없거나 LOD가 없는 메시에 대해서도** 카운터를 증가시킨다"를 세 번째 근거로 들었습니다. **이 근거는 사실이 아니므로 삭제했습니다.** [`World.cpp:L72`](file:///e:/Haruka/src/core/World.cpp#L72)의 `World::getVisibleMeshes()`가 `m->visible && m->mesh && m->material`을 이미 걸러내므로, 머티리얼이 없는 메시는 애초에 순회 목록에 들어오지 않습니다. LOD 실패 경로도 같은 이유로 도달하지 않습니다. 실제로 존재하던 불일치 근거는 프러스텀 컬링 유무와 opaque·transparent 카운터 공유 두 가지뿐입니다. 이 오류는 `getVisibleMeshes()`의 필터 조건을 코드로 확인하지 않고 호출부의 루프 형태만 보고 추정하여 쓴 데서 비롯되었습니다.
+**[정정 · 2026-08-25]** 이전 판의 2번 항목은 "**머티리얼이 없거나 LOD가 없는 메시에 대해서도** 카운터를 증가시킨다"를 세 번째 근거로 들었습니다. **이 근거는 사실이 아니므로 삭제했습니다.** [`World.cpp:L72`](file:///e:/Haruka/src/scene/World.cpp#L72)의 `World::getVisibleMeshes()`가 `m->visible && m->mesh && m->material`을 이미 걸러내므로, 머티리얼이 없는 메시는 애초에 순회 목록에 들어오지 않습니다. LOD 실패 경로도 같은 이유로 도달하지 않습니다. 실제로 존재하던 불일치 근거는 프러스텀 컬링 유무와 opaque·transparent 카운터 공유 두 가지뿐입니다. 이 오류는 `getVisibleMeshes()`의 필터 조건을 코드로 확인하지 않고 호출부의 루프 형태만 보고 추정하여 쓴 데서 비롯되었습니다.
 
 #### 2) 적용된 해결 내용 (2026-08-25)
 
@@ -271,7 +271,7 @@ graph TD
 
 #### 1) 현상 및 발생 메커니즘
 
-* **위치**: [`World.hpp:L27`](file:///e:/Haruka/src/core/World.hpp#L27) (이벤트 선언), [`World.cpp:L27`](file:///e:/Haruka/src/core/World.cpp#L27) (브로드캐스트)
+* **위치**: [`World.hpp:L27`](file:///e:/Haruka/src/scene/World.hpp#L27) (이벤트 선언), [`World.cpp:L27`](file:///e:/Haruka/src/scene/World.cpp#L27) (브로드캐스트)
 
 **[정정]** 이전 판은 이 결함을 통지 구조 자체가 없는 문제로 서술하고 곧바로 `uint64_t` 핸들 전면 전환을 해결책으로 제시했으나, 인프라는 이미 절반이 지어져 있습니다. 빠진 것은 구조가 아니라 연결입니다.
 
@@ -293,7 +293,7 @@ graph TD
 
 ### ⚠️ [DEF-08] [HIGH] 안드로이드 빌드 불가 (`GlfwWindow` 무조건 생성)
 
-* **위치**: [`Engine.cpp`](file:///e:/Haruka/src/core/Engine.cpp)의 `Engine::Engine`, [`CMakeLists.txt`](file:///e:/Haruka/CMakeLists.txt)의 `if(ANDROID)` 분기 (2026-10-14 갱신: 부팅 코드가 예전 `main.cpp:38` 에서 `Engine` 클래스로 옮겨졌습니다)
+* **위치**: [`Engine.cpp`](file:///e:/Haruka/src/runtime/Engine.cpp)의 `Engine::Engine`, [`CMakeLists.txt`](file:///e:/Haruka/CMakeLists.txt)의 `if(ANDROID)` 분기 (2026-10-14 갱신: 부팅 코드가 예전 `main.cpp:38` 에서 `Engine` 클래스로 옮겨졌습니다)
 * **문제점**: `Engine::Engine` 이 `GlfwWindow`를 조건 없이 생성합니다. 헤더 포함만 `#ifndef ANDROID` 로 막혀 있어 안드로이드에서는 컴파일되지 않습니다. `AndroidWindow`는 CMake 의 `if(ANDROID)` 분기에 들어 있지만 어디서도 인스턴스화되지 않고, `IWindow` 의 순수 가상 클립보드 함수 두 개를 구현하지 않아 추상 클래스이기도 합니다(DEF-103). 즉 Quest 런타임 진입점이 존재하지 않습니다.
 * **해결 사양**: `IWindow` 생성을 플랫폼 팩토리 뒤로 옮기고, 안드로이드용 별도 진입점을 두십시오. 이것은 [Layer_Architecture.md](Layer_Architecture.md) 6절 1단계의 첫 항목입니다.
 * **[정정 · 2026-10-19]** Quest 에는 화면 표면이 필요 없습니다. Khronos hello_xr · Meta OpenXR SDK 예제는 Android 에서 VkSurfaceKHR ·
@@ -342,12 +342,12 @@ graph TD
 
 ### ✅ [DEF-12] [해결됨 · 2026-10-19, 원래 MEDIUM] `World::tick`이 에디터 Play 상태에서만 실행
 
-* **[해결 · 2026-10-19 · 패키징 1단계]** 엔진(`Engine`)이 에디터를 직접 부르지 않고 앞단 인터페이스(`core/IEngineFrontend.hpp`)로만 부릅니다.
+* **[해결 · 2026-10-19 · 패키징 1단계]** 엔진(`Engine`)이 에디터를 직접 부르지 않고 앞단 인터페이스(`runtime/IEngineFrontend.hpp`)로만 부릅니다.
   에디터를 뺀 엔진은 `HarukaRuntime` 라이브러리이고, 에디터 실행 파일(`EditorApp`)과 게임 실행 파일(`HarukaGame`, `game/GameFrontend.cpp`:
   시작 씬을 열고 처음부터 Play)이 각각 링크합니다. 상세는 [Packaging_Design.md](Packaging_Design.md) 4-1절과
   [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 "패키징 1단계 결과" 절.
 
-* **위치**: [`Engine.cpp`](file:///e:/Haruka/src/core/Engine.cpp)의 `Engine::run` Tick 블록 (2026-10-14 갱신: 예전 `main.cpp:115-119` 에서 옮겨졌습니다)
+* **위치**: [`Engine.cpp`](file:///e:/Haruka/src/runtime/Engine.cpp)의 `Engine::run` Tick 블록 (2026-10-14 갱신: 예전 `main.cpp:115-119` 에서 옮겨졌습니다)
 * **문제점**: `World::tick`과 `ModuleManager::tickAll`이 에디터가 Play 상태일 때만 돕니다. 따라서 에디터를 걷어낸 런타임 빌드에는 게임 루프가 없습니다.
 * **해결 사양**: 틱 구동 책임을 에디터 상태에서 분리하여 런타임 진입점(DEF-08)이 자체적으로 틱을 돌릴 수 있게 하십시오.
 
@@ -415,7 +415,7 @@ graph TD
 * **[해결 · 2026-10-14]** `EngineContext::render` 로 렌더러 전체가 아니라 등록 · 해제만 여는 좁은 인터페이스
   `IRenderExtensionHost` 를 넘깁니다(사용자 결정). 렌더러가 이 인터페이스를 구현합니다.
 
-* **위치**: [`IGameModule.hpp:L9-L14`](file:///e:/Haruka/src/core/IGameModule.hpp#L9-L14)
+* **위치**: [`IGameModule.hpp:L9-L14`](file:///e:/Haruka/src/runtime/IGameModule.hpp#L9-L14)
 * **문제점**: `EngineContext`에 렌더러 참조가 없어 게임 모듈이 렌더러에 닿을 수 없습니다. DEF-17을 고쳐 패스를 등록할 수 있게 만들어도, 게임 모듈에서 등록할 통로가 없습니다.
 * **해결 사양**: DEF-17과 **같은 작업 단위로 묶어서** 처리하십시오. 한쪽만 고치면 어느 쪽도 쓸 수 없습니다.
 
@@ -1028,7 +1028,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 ### ✅ [DEF-46] [해결됨 · 2026-10-04, 원래 MEDIUM] 에디터 float 스텝이 0.01로 고정되어 1cm 미만을 편집할 수 없음
 
-* **위치**: [`src/core/Reflect.hpp`](file:///e:/Haruka/src/core/Reflect.hpp)의 `PropDesc`, 필드 `float step {0.01f};`
+* **위치**: [`src/scene/Reflect.hpp`](file:///e:/Haruka/src/scene/Reflect.hpp)의 `PropDesc`, 필드 `float step {0.01f};`
 
 #### 1) 배경: 이 항목이 단위 변경 논의를 촉발한 실제 원인입니다
 

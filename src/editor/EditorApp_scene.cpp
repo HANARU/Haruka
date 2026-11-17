@@ -6,8 +6,8 @@
 // 파일 고르기와 이름 입력은 에디터 안의 대화상자로 합니다(OS 대화상자는 플랫폼마다 다르고 assets 밖의
 // 경로를 고를 수 있어 논리 경로 규칙을 지키기 어렵습니다).
 #include "EditorApp.hpp"
-#include "../core/World.hpp"
-#include "../core/Actor.hpp"
+#include "../scene/World.hpp"
+#include "../scene/Actor.hpp"
 #include "../core/FileUtil.hpp"
 #include "../core/AppPaths.hpp"
 #include "../core/ProjectPaths.hpp"

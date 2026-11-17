@@ -1,5 +1,5 @@
 #include "UIPanelPointer.hpp"
-#include "../core/Actor.hpp"
+#include "../scene/Actor.hpp"
 #include "../math/Geometry.hpp"
 
 #include <algorithm>

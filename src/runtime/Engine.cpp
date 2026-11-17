@@ -8,14 +8,14 @@
 #include "../input/HInputSystem.hpp"
 #include "../platform/IWindow.hpp"
 #include "../xr/XrSystem.hpp"
-#include "HLog.hpp"
+#include "../core/HLog.hpp"
 #include "IGameModule.hpp"
-#include "ComponentRegistry.hpp"
-#include "EngineSettings.hpp"
-#include "ProjectPaths.hpp"
-#include "FileUtil.hpp"
-#include "AppPaths.hpp"
-#include "DebugDraw.hpp"
+#include "../scene/ComponentRegistry.hpp"
+#include "../core/EngineSettings.hpp"
+#include "../core/ProjectPaths.hpp"
+#include "../core/FileUtil.hpp"
+#include "../core/AppPaths.hpp"
+#include "../core/DebugDraw.hpp"
 #include "../assets/GassetCache.hpp"
 #include "../vfs/Vfs.hpp"
 #include <filesystem>
@@ -28,7 +28,7 @@
 #include "../xr/SyntheticEyes.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "ShaderManifest.hpp"
-#include "FrameTimings.hpp"
+#include "../core/FrameTimings.hpp"
 #include "stb_image_write.h"   // 구현은 GltfLoader.cpp(STB_IMAGE_WRITE_IMPLEMENTATION)
 
 #ifdef ANDROID

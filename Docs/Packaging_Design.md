@@ -71,7 +71,7 @@
   `src/editor/*` + `editor/EditorFrontend.cpp`, `HarukaGame.exe` 는 `game/GameFrontend.cpp` 를 더해 링크합니다. `HARUKA_EDITOR` 와
   소스 트리 경로 `HARUKA_PROJECT_DIR` 은 에디터 실행 파일에만 정의합니다. 게임 실행 파일에는 에디터 문자열이 들어가지 않는 것을
   실행 파일 검사로 확인했습니다.
-- `core/IEngineFrontend.hpp`: 엔진이 에디터 대신 부르는 인터페이스입니다(부팅 · 첫 씬 · Play 상태 · 창 닫기 · tick · 입력 ·
+- `runtime/IEngineFrontend.hpp`: 엔진이 에디터 대신 부르는 인터페이스입니다(부팅 · 첫 씬 · Play 상태 · 창 닫기 · tick · 입력 ·
   창 제목 · 헤드셋 소리). 실행 파일마다 링크한 `createEngineFrontend()` 가 앞단을 고르므로 엔진 코드에 `#ifdef` 가 없습니다.
   실행 형태마다 다른 규칙은 `Policy`(프로젝트 폴더 · VR 시작 · 초점 일시정지 · EXITING 종료 · 재연결 · 쓰기 루트)로 넘깁니다.
 - `EditorApp` 이 이 인터페이스를 구현합니다(동작은 그대로). 앞단 멤버는 예전 에디터 자리에 두어 파괴 순서도 같습니다.

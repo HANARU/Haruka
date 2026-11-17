@@ -1,5 +1,5 @@
-#include "core/Engine.hpp"
-#include "core/EngineOptions.hpp"
+#include "runtime/Engine.hpp"
+#include "runtime/EngineOptions.hpp"
 #include "core/HLog.hpp"
 #include "core/AppPaths.hpp"
 

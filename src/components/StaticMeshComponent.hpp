@@ -1,5 +1,5 @@
 #pragma once
-#include "../core/Component.hpp"
+#include "../scene/Component.hpp"
 #include "../geometry/PrimitiveDesc.hpp"
 #include <memory>
 #include <optional>

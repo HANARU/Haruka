@@ -9,9 +9,9 @@
 #include "../physics/PhysicsSystem.hpp"
 #include "../components/AudioComponent.hpp"
 #include "../components/ReverbZoneComponent.hpp"
-#include "../core/World.hpp"
+#include "../scene/World.hpp"
 #include "../vfs/Vfs.hpp"
-#include "../core/Actor.hpp"
+#include "../scene/Actor.hpp"
 #include "../components/CameraComponent.hpp"
 
 #define GLM_FORCE_RADIANS

@@ -1,12 +1,12 @@
 #pragma once
 #include "HCommandStack.hpp"
 #include "ActorSnapshot.hpp"
-#include "../core/Actor.hpp"
-#include "../core/World.hpp"
-#include "../core/Component.hpp"
-#include "../core/ComponentFields.hpp"
-#include "../core/ComponentRegistry.hpp"
-#include "../core/Reflect.hpp"
+#include "../scene/Actor.hpp"
+#include "../scene/World.hpp"
+#include "../scene/Component.hpp"
+#include "../scene/ComponentFields.hpp"
+#include "../scene/ComponentRegistry.hpp"
+#include "../scene/Reflect.hpp"
 
 #include <functional>
 #include <memory>

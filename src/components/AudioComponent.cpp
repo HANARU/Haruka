@@ -1,8 +1,8 @@
 #include "AudioComponent.hpp"
 #include "../core/DebugDraw.hpp"
-#include "../core/Actor.hpp"
+#include "../scene/Actor.hpp"
 #include "../audio/AudioSystem.hpp"
-#include "../core/ComponentFields.hpp"
+#include "../scene/ComponentFields.hpp"
 #include <algorithm>
 #include <filesystem>
 

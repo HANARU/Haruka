@@ -93,7 +93,7 @@ set(WARNINGS_AS_ERRORS   OFF CACHE BOOL "" FORCE)
 # Jolt 은 기본값(꺼짐)이면 MSVC 에서 _HAS_EXCEPTIONS=0 을 PUBLIC 정의로 걸어, Jolt 를 링크하는 엔진 전체가 "예외 없는 STL" 로
 # 컴파일되었습니다(2026-11-01, DEF-157). 그 모드의 std::exception 은 메시지를 복사하지 않고 포인터만 쥐므로, std::string 으로 만든
 # 예외(핵심 힙 실패 · GPU 를 고르지 못한 이유 · 셰이더 열기 실패 등)의 FATAL 문구가 Windows 에서 해제된 메모리를 읽었습니다.
-# 엔진은 예외를 쓰므로 켭니다(Jolt 자신은 예외를 던지지 않음). src/core/Engine.cpp 가 다시 새어 들어오면 컴파일을 멈춥니다.
+# 엔진은 예외를 쓰므로 켭니다(Jolt 자신은 예외를 던지지 않음). src/runtime/Engine.cpp 가 다시 새어 들어오면 컴파일을 멈춥니다.
 set(CPP_EXCEPTIONS_ENABLED ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(JoltPhysics)
 
@@ -189,7 +189,7 @@ endforeach()
 
 # ── 묶음 도구와 셰이더 목록 (2026-11-01, DEF-149) ───────────────────────────────
 # 묶음(game.hpak)의 셰이더가 실행 파일과 같은 빌드의 것인지 엔진이 확인하도록, 컴파일한 SPIR-V 의 논리 경로와 내용 해시를
-# HarukaPak 이 목록 파일(generated/haruka_shader_manifest.inc)로 적고 엔진(src/core/ShaderManifest.cpp)에 넣습니다. 해시는 묶음
+# HarukaPak 이 목록 파일(generated/haruka_shader_manifest.inc)로 적고 엔진(src/runtime/ShaderManifest.cpp)에 넣습니다. 해시는 묶음
 # 목차와 같은 XXH3-64 라 호스트 도구가 필요합니다. Android 구성은 HarukaPak 을 만들지 않으므로(기기용 실행 파일만 만듦) 데스크톱
 # 빌드의 HarukaPak 을 씁니다. 다른 위치의 도구는 -DHARUKA_HOST_PAK=<경로> 로 줍니다.
 set(HARUKA_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
@@ -265,12 +265,12 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio)
 # 에디터 · 게임을 부르고, 어느 앞단인지는 실행 파일마다 링크한 createEngineFrontend 가 정합니다.
 set(RUNTIME_SOURCES
     src/core/AppPaths.cpp
-    src/core/Engine.cpp
-    src/core/EngineOptions.cpp
-    src/core/ShaderManifest.cpp
-    src/core/World.cpp
-    src/core/Actor.cpp
-    src/core/Component.cpp
+    src/runtime/Engine.cpp
+    src/runtime/EngineOptions.cpp
+    src/runtime/ShaderManifest.cpp
+    src/scene/World.cpp
+    src/scene/Actor.cpp
+    src/scene/Component.cpp
     src/core/HLog.cpp
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp
@@ -686,8 +686,8 @@ if(NOT ANDROID)
     # 계층 전파와 onEnable/onDisable 엣지는 화면이 아니라 검산으로 잡습니다.
     add_executable(HarukaActorTest
         tests/ActorLifecycleTest.cpp
-        src/core/Actor.cpp
-        src/core/Component.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
         src/core/HLog.cpp
         src/components/LightComponent.cpp
         src/components/CameraComponent.cpp
@@ -704,8 +704,8 @@ if(NOT ANDROID)
     add_executable(HarukaStereoTest
         tests/StereoViewTest.cpp
         src/components/CameraComponent.cpp
-        src/core/Actor.cpp
-        src/core/Component.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
         src/core/HLog.cpp
     )
     target_link_libraries(HarukaStereoTest PRIVATE glm::glm)
@@ -740,8 +740,8 @@ if(NOT ANDROID)
     add_executable(HarukaSceneTest
         tests/SceneComponentTest.cpp
         src/assets/ComponentSerializer.cpp
-        src/core/Actor.cpp
-        src/core/Component.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
         src/core/HLog.cpp
         src/components/LightComponent.cpp
         src/components/CameraComponent.cpp
@@ -827,7 +827,7 @@ if(NOT ANDROID)
     add_executable(HarukaHeadlessTest
         tests/HeadlessRenderTest.cpp
         src/platform/android/AndroidWindow.cpp
-        src/core/EngineOptions.cpp
+        src/runtime/EngineOptions.cpp
         src/core/HLog.cpp
     )
     target_link_libraries(HarukaHeadlessTest PRIVATE glm::glm HarukaVfs)   # 파이프라인 캐시 파일의 해시(DEF-153)
@@ -888,9 +888,9 @@ if(NOT ANDROID)
     add_executable(HarukaEditCmdTest
         tests/EditorCommandTest.cpp
         src/editor/ActorSnapshot.cpp
-        src/core/World.cpp
-        src/core/Actor.cpp
-        src/core/Component.cpp
+        src/scene/World.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
         src/core/HLog.cpp
     )
     target_link_libraries(HarukaEditCmdTest PRIVATE glm::glm)
@@ -906,9 +906,9 @@ if(NOT ANDROID)
     add_executable(HarukaActorUndoTest
         tests/ActorUndoTest.cpp
         src/editor/ActorSnapshot.cpp
-        src/core/World.cpp
-        src/core/Actor.cpp
-        src/core/Component.cpp
+        src/scene/World.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
         src/core/HLog.cpp
     )
     target_link_libraries(HarukaActorUndoTest PRIVATE glm::glm)
@@ -944,9 +944,9 @@ if(NOT ANDROID)
         src/components/ReverbZoneComponent.cpp
         src/components/RigidBodyComponent.cpp
         src/physics/PhysicsSystem.cpp
-        src/core/World.cpp
-        src/core/Actor.cpp
-        src/core/Component.cpp
+        src/scene/World.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
         src/core/HLog.cpp
     )
     target_link_libraries(HarukaAudioTest PRIVATE glm::glm HarukaVfs Jolt)
@@ -975,8 +975,8 @@ if(NOT ANDROID)
         # 3D UI 패널 P1b: 컴포넌트(텍스처 크기 · 직렬화 · 내용). 깨진 값 알림이 액터 이름을 씀
         src/components/UIPanelComponent.cpp
         src/components/UIPanelPointer.cpp
-        src/core/Component.cpp
-        src/core/Actor.cpp
+        src/scene/Component.cpp
+        src/scene/Actor.cpp
     )
     # 셰이더 · 글꼴을 가상 파일 시스템으로 읽습니다(2026-10-24).
     target_link_libraries(HarukaSlateTest PRIVATE Vulkan::Vulkan glm::glm HarukaVfs)
@@ -1001,9 +1001,9 @@ if(NOT ANDROID)
         src/assets/Skin.cpp
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
-        src/core/World.cpp
-        src/core/Actor.cpp
-        src/core/Component.cpp
+        src/scene/World.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
         src/core/HLog.cpp
     )
     target_link_libraries(HarukaPhysicsTest PRIVATE glm::glm Jolt)
@@ -1057,9 +1057,9 @@ if(NOT ANDROID)
         src/physics/PhysicsSystem.cpp
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
-        src/core/World.cpp
-        src/core/Actor.cpp
-        src/core/Component.cpp
+        src/scene/World.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
         src/core/HLog.cpp
     )
     # 자동 맞춤 쥐기(손 쥐기 D)는 잡기(XrComponents) · Jolt 바디 판정을 함께 시험합니다.

@@ -1,7 +1,7 @@
 #include "ActorSnapshot.hpp"
-#include "../core/Actor.hpp"
+#include "../scene/Actor.hpp"
 #include "../core/HLog.hpp"
-#include "../core/World.hpp"
+#include "../scene/World.hpp"
 
 #include <unordered_map>
 

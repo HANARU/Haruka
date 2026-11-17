@@ -3,8 +3,8 @@
 // 모든 편집은 Undo 커맨드로 쌓습니다(EditorCommands.hpp, 액터를 ID 로 기억).
 #include "EditorApp.hpp"
 #include "EditorCommands.hpp"
-#include "../core/World.hpp"
-#include "../core/Actor.hpp"
+#include "../scene/World.hpp"
+#include "../scene/Actor.hpp"
 #include "../components/CameraComponent.hpp"
 #include "../assets/SceneSerializer.hpp"
 #include "../platform/IWindow.hpp"

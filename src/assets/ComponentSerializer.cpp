@@ -1,9 +1,9 @@
 #include "ComponentSerializer.hpp"
 
-#include "../core/Actor.hpp"
-#include "../core/ComponentRegistry.hpp"
-#include "../core/SceneLog.hpp"
-#include "../core/UnknownComponent.hpp"
+#include "../scene/Actor.hpp"
+#include "../scene/ComponentRegistry.hpp"
+#include "../scene/SceneLog.hpp"
+#include "../scene/UnknownComponent.hpp"
 
 #include <set>
 

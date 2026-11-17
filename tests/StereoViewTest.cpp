@@ -10,7 +10,7 @@
 #include "../src/xr/SyntheticEyes.hpp"
 #include "../src/renderer/ScreenSize.hpp"
 #include "../src/components/HeightFogComponent.hpp"
-#include "../src/core/ComponentFields.hpp"
+#include "../src/scene/ComponentFields.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cmath>

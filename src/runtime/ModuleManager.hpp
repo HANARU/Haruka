@@ -1,5 +1,5 @@
 #pragma once
-#include "IEngineModule.hpp"
+#include "../core/IEngineModule.hpp"
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
