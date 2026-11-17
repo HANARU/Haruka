@@ -142,6 +142,7 @@ set(GLSL_SHADERS
     post.frag
     ui.vert     ui.frag
     line.vert   line.frag
+    ui_panel.vert ui_panel.frag
 )
 
 file(GLOB SHADER_FILES_ON_DISK RELATIVE ${SHADER_SRC_DIR}
@@ -280,6 +281,8 @@ set(RUNTIME_SOURCES
     src/components/CoreComponents.cpp
     src/components/XrComponents.cpp
     src/components/SkinnedMeshComponent.cpp
+    src/components/UIPanelComponent.cpp
+    src/components/UIPanelPointer.cpp
     src/components/HandPoseComponent.cpp
     src/renderer/Renderer.cpp
     src/renderer/Renderer_swap.cpp
@@ -294,6 +297,7 @@ set(RUNTIME_SOURCES
     src/renderer/passes/ShadowPass.cpp
     src/renderer/passes/PostPass.cpp
     src/renderer/passes/GeometryPass.cpp
+    src/renderer/passes/UIPanelPass.cpp
     src/geometry/PrimitiveDesc.cpp
     src/geometry/PrimitiveBuilder.cpp
     src/assets/GltfLoader.cpp
@@ -954,6 +958,11 @@ if(NOT ANDROID)
         src/ui/slate/HFontAtlas.cpp
         src/ui/slate/HPaintContext.cpp
         src/core/HLog.cpp
+        # 3D UI 패널 P1b: 컴포넌트(텍스처 크기 · 직렬화 · 내용). 깨진 값 알림이 액터 이름을 씀
+        src/components/UIPanelComponent.cpp
+        src/components/UIPanelPointer.cpp
+        src/core/Component.cpp
+        src/core/Actor.cpp
     )
     # 셰이더 · 글꼴을 가상 파일 시스템으로 읽습니다(2026-10-24).
     target_link_libraries(HarukaSlateTest PRIVATE Vulkan::Vulkan glm::glm HarukaVfs)

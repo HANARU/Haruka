@@ -27,6 +27,7 @@
 #include "passes/ShadowPass.hpp"
 #include "passes/PostPass.hpp"
 #include "passes/GeometryPass.hpp"
+#include "passes/UIPanelPass.hpp"
 #include "../platform/IWindow.hpp"
 #include "../memory/HarukaAllocator.hpp"
 #include "VulkanDeviceHooks.hpp"
@@ -156,6 +157,14 @@ public:
 
     void setUIRenderer(HSlateRenderer* r);
 
+    // ── 월드 UI 패널 출력 (3D UI P1a, UIPanelPass.hpp) ─────────────────────────
+    // 월드의 UIPanelComponent 는 렌더러가 프레임마다 모아 텍스처를 맞추고 그립니다(gatherUIPanels). 아래는 그 밖의
+    // 용도(시험 · 진단)입니다. 패널 UI 는 에디터가 있으면 에디터의 HSlateRenderer 를 같이 쓰고(글꼴 아틀라스 · 정점 버퍼
+    // 공유), 없으면(게임 실행 파일) 처음 쓸 때 하나 만듭니다.
+    uint32_t    createUIPanelTarget(uint32_t width, uint32_t height);   // 실패 · 패널 UI 없음이면 0
+    void        destroyUIPanelTarget(uint32_t handle);
+    const UIPanelPass& uiPanels() const { return panels_; }
+
     // 씬을 그릴 3D 뷰포트 rect(프레임버퍼 픽셀)를 지정합니다. 에디터가 매 프레임 호출하며,
     // 값이 바뀔 때만 renderExtent 타깃을 재생성합니다(Viewport_Render_Design.md). 지정하지
     // 않으면 창 전체로 렌더합니다(게임 빌드). drawFrame 이전(에디터 tick)에서 호출해야 합니다.
@@ -170,6 +179,9 @@ public:
 
     void setEditorLines(std::vector<LineVertex> lines) { geometry_.setLines(std::move(lines)); }
     void setGizmoTris  (std::vector<LineVertex> tris)  { geometry_.setGizmoTris(std::move(tris)); }
+    // 월드 UI 포인터의 레이저 · 커서(3D UI 구간 6). 엔진이 프레임마다 넣고, 없으면 빈 목록을 넣습니다.
+    void setPointerLines(std::vector<LineVertex> lines) { geometry_.setPointerLines(std::move(lines)); }
+
 
     VkCommandBuffer beginOneTimeCmd()                { return rc_.beginOneTimeCmd(); }
     void            endOneTimeCmd(VkCommandBuffer c) { rc_.endOneTimeCmd(c); }
@@ -316,6 +328,7 @@ private:
     // ── Shared samplers ───────────────────────────────────────────────────────
     VkSampler textureSampler = VK_NULL_HANDLE;  // anisotropic, repeat
     VkSampler clampSampler_  = VK_NULL_HANDLE;  // linear, clamp to edge
+    VkSampler panelSampler_  = VK_NULL_HANDLE;  // UI 패널: clamp, 밉 선형, 이방성(3D UI P1b)
 
     // ── Frame counters ────────────────────────────────────────────────────────
     VkCommandPool cmdPool   = VK_NULL_HANDLE;
@@ -336,6 +349,13 @@ private:
 
     // ── UI overlay ────────────────────────────────────────────────────────────
     HSlateRenderer* uiRenderer_ = nullptr;
+
+    // ── 월드 UI 패널 (3D UI P1a) ──────────────────────────────────────────────
+    UIPanelPass     panels_;
+    HSlateRenderer* panelUi_      = nullptr;   // 패널을 그리는 UI(처음 정한 뒤 바꾸지 않음)
+    HSlateRenderer* ownedPanelUi_ = nullptr;   // 에디터가 없을 때 렌더러가 만든 것(cleanup 에서 지움)
+    bool            panelUiFailed_ = false;    // 만들기 실패(글꼴 없음 등). 한 번만 알리고 패널을 끔
+    HSlateRenderer* panelUi();
 
     // ── Init helpers ──────────────────────────────────────────────────────────
     IVulkanDeviceHooks* deviceHooks_ = nullptr;   // init 중에만 씁니다
@@ -384,7 +404,10 @@ private:
         // 행은 모두 같은 머티리얼이라 첫 행(firstInstance)의 머티리얼이 묶음의 머티리얼이다.
         std::vector<const MaterialHandle*>  materialRows;
         std::array<AOPass::CameraParams, kMaxViews> aoCam;   // 눈별(투영이 눈마다 다름)
+        std::vector<GeometryPass::PanelDraw> panels;         // 월드 UI 패널(3D UI P1b)
     };
+    // 월드의 UI 패널을 모아 텍스처를 맞추고(만들기 · 크기 변경 · 사라진 패널 정리) 더러운 패널을 다시 그리게 올립니다.
+    void gatherUIPanels(World& world, std::vector<GeometryPass::PanelDraw>& out);
     RenderView extractRenderView(World& world, const XrFrameTarget* xr);
 
     // Per-frame logic (extractRenderView 내부에서만 호출)

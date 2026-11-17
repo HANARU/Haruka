@@ -262,6 +262,7 @@
 | `--synthetic-eyes[=WxH]` | 헤드셋 없이 XR 프레임 경로로 두 눈을 그림(기본 512x512) |
 | `--frames=N` · `--timeout=S` | N 프레임을 그리면 끝냄. 시간 안에 못 그리면 종료 코드 2(frames 만 주면 60초) |
 | `--capture=path` | 끝낼 때 합성 눈 왼쪽 층을 PNG 로 남김 |
+| `--scene=assets/scenes/X.hscene` | 프로젝트 시작 씬 대신 이 씬으로 시작(시험 장면 캡처, 2026-11-16). 씬 논리 경로 규칙을 어기면 무시하고 경고 |
 | `--vk-no-sync2` | sync2 가 있어도 1.0 배리어로 기록 |
 | `--vk-dedicated-msaa` | MSAA 컬러를 핵심 힙 밖 별도 할당으로(지연 할당 경로를 PC 에서 시험) |
 | `--ssao` · `--no-ssao` | 화면 공간 AO 를 켜거나 끔(AO 를 뺀 비교 · 끔 경로 시험). 프로젝트 설정 `render.ao` 를 덮어씀 |

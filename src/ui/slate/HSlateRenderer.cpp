@@ -49,7 +49,8 @@ void HSlateRenderer::init(VkDevice device, VkPhysicalDevice physDevice,
     colorFmt_          = swapFormat;
     pushDescriptorFn_  = pushDescriptor;
 
-    createUIRenderPass();
+    if (colorFmt_ != VK_FORMAT_UNDEFINED) createUIRenderPass();
+    createPanelRenderPass();
     createPipeline();
     createWhiteTexture(beginCmd, endCmd);
     createBuffers(beginCmd, endCmd);
@@ -99,6 +100,52 @@ void HSlateRenderer::createUIRenderPass() {
         throw std::runtime_error("[HSlateRenderer] Failed to create UI render pass!");
 }
 
+// ── createPanelRenderPass (3D UI P1a) ──────────────────────────────────────────
+void HSlateRenderer::createPanelRenderPass() {
+    VkAttachmentDescription att{};
+    att.format         = kPanelFormat;
+    att.samples        = VK_SAMPLE_COUNT_1_BIT;
+    att.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;     // 다시 그릴 때마다 처음부터(리테인드라 바뀐 프레임에만)
+    att.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+    att.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    att.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;       // 이전 내용은 버립니다
+    att.finalLayout    = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;   // 렌더러가 이어서 밉을 블릿합니다
+
+    VkAttachmentReference colorRef{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments    = &colorRef;
+
+    // 들어올 때: 앞 프레임이 이 텍스처를 조각 셰이더로 읽고(월드 패널) 블릿으로 밉을 쓴 것이 끝난 뒤 지웁니다.
+    // 나갈 때: 렌더러의 밉 블릿(전송)이나 셰이더 읽기가 이 패스의 쓰기를 봅니다.
+    VkSubpassDependency deps[2]{};
+    deps[0].srcSubpass    = VK_SUBPASS_EXTERNAL;
+    deps[0].dstSubpass    = 0;
+    deps[0].srcStageMask  = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+    deps[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    deps[0].dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].srcSubpass    = 0;
+    deps[1].dstSubpass    = VK_SUBPASS_EXTERNAL;
+    deps[1].srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].dstStageMask  = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+    VkRenderPassCreateInfo ci{};
+    ci.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    ci.attachmentCount = 1;
+    ci.pAttachments    = &att;
+    ci.subpassCount    = 1;
+    ci.pSubpasses      = &subpass;
+    ci.dependencyCount = 2;
+    ci.pDependencies   = deps;
+    if (vkCreateRenderPass(device_, &ci, nullptr, &panelRenderPass_) != VK_SUCCESS)
+        throw std::runtime_error("[HSlateRenderer] Failed to create panel render pass!");
+}
+
 // ── rebuildFramebuffers ────────────────────────────────────────────────────────
 void HSlateRenderer::destroyFramebuffers() {
     for (auto fb : framebuffers_)
@@ -109,6 +156,7 @@ void HSlateRenderer::destroyFramebuffers() {
 void HSlateRenderer::rebuildFramebuffers(VkExtent2D extent,
                                           const std::vector<VkImageView>& imageViews) {
     destroyFramebuffers();
+    if (uiRenderPass_ == VK_NULL_HANDLE) return;   // 패널 전용(스왑체인 출력 없음)
     framebuffers_.resize(imageViews.size(), VK_NULL_HANDLE);
     for (size_t i = 0; i < imageViews.size(); i++) {
         VkFramebufferCreateInfo ci{};
@@ -128,6 +176,10 @@ void HSlateRenderer::rebuildFramebuffers(VkExtent2D extent,
 void HSlateRenderer::cleanup() {
     fonts_.cleanup();
     destroyFramebuffers();
+    vkDestroyPipeline(device_, panelPipeline_, nullptr);
+    panelPipeline_ = VK_NULL_HANDLE;
+    vkDestroyRenderPass(device_, panelRenderPass_, nullptr);
+    panelRenderPass_ = VK_NULL_HANDLE;
     if (uiRenderPass_) { vkDestroyRenderPass(device_, uiRenderPass_, nullptr); uiRenderPass_ = VK_NULL_HANDLE; }
 
     vkDestroyPipeline           (device_, pipeline_,       nullptr);
@@ -141,7 +193,7 @@ void HSlateRenderer::cleanup() {
 
     // vertexMem_ is persistently mapped — unmap before free
     for (uint32_t i = 0; i < kFramesInFlight; ++i) {
-        vkUnmapMemory  (device_, vertexMem_[i]);
+        if (vertexMem_[i]) vkUnmapMemory(device_, vertexMem_[i]);   // init 이 중간에 실패했으면 없음
         vkDestroyBuffer(device_, vertexBuf_[i], nullptr);
         vkFreeMemory   (device_, vertexMem_[i], nullptr);
     }
@@ -179,6 +231,13 @@ void HSlateRenderer::createPipeline() {
     plci.pPushConstantRanges    = &pc;
     vkCreatePipelineLayout(device_, &plci, nullptr, &pipelineLayout_);
 
+    if (uiRenderPass_) pipeline_ = buildPipeline(uiRenderPass_, false);
+    panelPipeline_ = buildPipeline(panelRenderPass_, true);
+}
+
+// 에디터 오버레이(premultipliedTarget = false)와 패널(true)은 색 블렌딩이 같고 알파만 다릅니다. 에디터는 예전 그대로
+// 마지막에 그린 알파를 남기고, 패널은 알파를 "over" 로 덧쌓아(투명으로 지운 대상 위) 색이 알파를 곱한 값이 됩니다.
+VkPipeline HSlateRenderer::buildPipeline(VkRenderPass renderPass, bool premultipliedTarget) {
     // Shaders
     VkShaderModule vertMod = loadSpv("shaders/ui.vert.spv");
     VkShaderModule fragMod = loadSpv("shaders/ui.frag.spv");
@@ -241,7 +300,8 @@ void HSlateRenderer::createPipeline() {
     blendAtt.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     blendAtt.colorBlendOp        = VK_BLEND_OP_ADD;
     blendAtt.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    blendAtt.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    blendAtt.dstAlphaBlendFactor = premultipliedTarget ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+                                                       : VK_BLEND_FACTOR_ZERO;
     blendAtt.alphaBlendOp        = VK_BLEND_OP_ADD;
     blendAtt.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                    VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -259,7 +319,7 @@ void HSlateRenderer::createPipeline() {
 
     VkGraphicsPipelineCreateInfo gpci{};
     gpci.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gpci.renderPass          = uiRenderPass_;
+    gpci.renderPass          = renderPass;
     gpci.subpass             = 0;
     gpci.stageCount          = 2;
     gpci.pStages             = stages;
@@ -273,9 +333,11 @@ void HSlateRenderer::createPipeline() {
     gpci.pDynamicState       = &dsci;
     gpci.layout              = pipelineLayout_;
 
-    vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &gpci, nullptr, &pipeline_);
+    VkPipeline pipe = VK_NULL_HANDLE;
+    vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &gpci, nullptr, &pipe);
     vkDestroyShaderModule(device_, vertMod, nullptr);
     vkDestroyShaderModule(device_, fragMod, nullptr);
+    return pipe;
 }
 
 // ── createWhiteTexture ─────────────────────────────────────────────────────────
@@ -428,10 +490,9 @@ void HSlateRenderer::createBuffers(CmdBeginFn /*beginCmd*/, CmdEndFn /*endCmd*/)
 // ── record ─────────────────────────────────────────────────────────────────────
 bool HSlateRenderer::record(VkCommandBuffer cmd, uint32_t imgIdx,
                              VkExtent2D extent, uint32_t frameIdx) {
-    // P0 에서는 출력이 에디터 하나뿐이고 record 가 프레임마다 한 번 불리므로 여기서 슬롯을
-    // 초기화합니다. P1 에서 패널 출력이 생기면 이 호출을 렌더러의 프레임 시작으로 옮깁니다.
-    beginFrame(frameIdx % kFramesInFlight);
-
+    // 슬롯 정점 오프셋은 렌더러가 프레임 시작에서 beginFrame 으로 돌려 둡니다. 같은 프레임의 패널이 먼저
+    // 그 슬롯에 썼다면 그 뒤에 이어 씁니다(3D UI P1a).
+    if (uiRenderPass_ == VK_NULL_HANDLE) return false;
     if (imgIdx >= framebuffers_.size() || framebuffers_[imgIdx] == VK_NULL_HANDLE) return false;
 
     const glm::vec2 size{ (float)extent.width, (float)extent.height };
@@ -566,7 +627,41 @@ bool HSlateContext::buildDrawList(glm::vec2 size, HFontAtlas& fonts,
 bool HSlateRenderer::recordDrawList(VkCommandBuffer cmd, VkRenderPass renderPass,
                                     VkFramebuffer framebuffer, VkExtent2D extent,
                                     const HSlateDrawList& drawList, uint32_t frameIdx) {
+    return recordPass(cmd, renderPass, pipeline_, framebuffer, extent, false, drawList,
+                      frameIdx % kFramesInFlight);
+}
+
+bool HSlateRenderer::buildPanel(HSlateContext& ctx, VkExtent2D extent, HSlateDrawList& out) {
+    const glm::vec2 size{ (float)extent.width, (float)extent.height };
+    const bool drew = ctx.buildDrawList(size, fonts_, whiteView_, kMaxVerts, out);
+    if (fonts_.isDirty()) fonts_.upload();   // 글리프 확장 뒤(record 와 같은 이유)
+    if (!drew) out = HSlateDrawList{};
+    return drew;
+}
+
+bool HSlateRenderer::recordPanel(VkCommandBuffer cmd, const HSlateDrawList& list, VkFramebuffer framebuffer,
+                                 VkExtent2D extent, uint32_t frameIdx) {
     const uint32_t slot = frameIdx % kFramesInFlight;
+    bool drew = !list.batches.empty();
+    if (drew && slotVertOffset_[slot] + (uint32_t)list.vertices.size() > kMaxVerts) {
+        static bool panelBudgetWarned = false;
+        if (!panelBudgetWarned) {
+            panelBudgetWarned = true;
+            HLOG(LogUI, Warning) << "UI slot vertex budget exceeded by a world panel (" << slotVertOffset_[slot]
+                                 << " + " << list.vertices.size() << " > " << kMaxVerts
+                                 << ") - panel cleared this frame";
+        }
+        // 비운 목록으로 패스만 열어 투명하게 지웁니다. false 를 돌려 다음 프레임에 다시 그리게 합니다.
+        recordPass(cmd, panelRenderPass_, panelPipeline_, framebuffer, extent, true, HSlateDrawList{}, slot);
+        return false;
+    }
+    recordPass(cmd, panelRenderPass_, panelPipeline_, framebuffer, extent, true, list, slot);
+    return true;
+}
+
+bool HSlateRenderer::recordPass(VkCommandBuffer cmd, VkRenderPass renderPass, VkPipeline pipeline,
+                                VkFramebuffer framebuffer, VkExtent2D extent, bool clear,
+                                const HSlateDrawList& drawList, uint32_t slot) {
     const uint32_t count = static_cast<uint32_t>(drawList.vertices.size());
     if (slotVertOffset_[slot] + count > kMaxVerts) {
         static bool budgetWarned = false;
@@ -590,10 +685,17 @@ bool HSlateRenderer::recordDrawList(VkCommandBuffer cmd, VkRenderPass renderPass
     rpbi.renderPass        = renderPass;
     rpbi.framebuffer       = framebuffer;
     rpbi.renderArea.extent = extent;
-    // No clear values — LOAD_OP_LOAD preserves the 3D scene
+    // 에디터 오버레이는 지우기 값이 없습니다(LOAD_OP_LOAD 로 3D 장면을 보존). 패널은 투명으로 지웁니다.
+    VkClearValue transparent{};
+    transparent.color = {{ 0.f, 0.f, 0.f, 0.f }};
+    if (clear) { rpbi.clearValueCount = 1; rpbi.pClearValues = &transparent; }
     vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+    if (drawList.batches.empty()) {   // 지우기만(패널이 비었거나 예산 초과)
+        vkCmdEndRenderPass(cmd);
+        return true;
+    }
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
     VkViewport vp{ 0.f, 0.f, (float)extent.width, (float)extent.height, 0.f, 1.f };
     VkRect2D   sc{ {0, 0}, extent };

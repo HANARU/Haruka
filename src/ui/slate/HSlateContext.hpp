@@ -19,6 +19,29 @@ struct HSlateDrawList {
     bool               overflowed = false;
 };
 
+// 그리기 목록의 64비트 해시(정점 바이트 · 배치의 텍스처 · 범위). 월드 패널은 프레임마다 목록을 만들어 이 값이 직전과
+// 다를 때만 GPU 로 다시 그립니다(3D UI 구간 2). 8바이트씩 섞어 정점 수천 개도 수 µs 입니다. 같은 실행 안에서만 비교합니다
+// (텍스처는 핸들 값을 그대로 섞음).
+inline uint64_t drawListHash(const HSlateDrawList& dl) {
+    uint64_t h = 0x9E3779B97F4A7C15ull ^ (uint64_t)dl.vertices.size();
+    auto mix = [&h](uint64_t v) {
+        h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+        h *= 0xFF51AFD7ED558CCDull;
+        h ^= h >> 33;
+    };
+    static_assert(sizeof(UIVertex) % 8 == 0, "UIVertex is hashed as 64-bit words");
+    const auto* w = reinterpret_cast<const uint64_t*>(dl.vertices.data());
+    const size_t n = dl.vertices.size() * (sizeof(UIVertex) / 8);
+    for (size_t i = 0; i < n; ++i) mix(w[i]);
+    mix(dl.batches.size());
+    for (const auto& b : dl.batches) {
+        mix((uint64_t)(uintptr_t)b.texture);
+        mix(((uint64_t)b.firstQuad << 32) | b.quadCount);
+    }
+    mix(dl.overflowed ? 1u : 0u);
+    return h;
+}
+
 // ── HSlateContext ─────────────────────────────────────────────────────────────
 // CPU 전용 UI 문맥: 루트 위젯 · 배치 · 포인터 캡처 · 그리기 목록 생성을 담당하며
 // Vulkan 함수를 호출하지 않습니다. 구현은 HSlateRenderer.cpp 에 있습니다.

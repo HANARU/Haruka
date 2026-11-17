@@ -57,6 +57,8 @@ public:
     bool isDirty() const { return dirty_; }
     void upload(); // 더티 패치를 GPU에 업로드
     void clearDirty() { dirty_ = false; }
+    // 아틀라스가 가득 차 그리지 못한 글자(글자 · 크기 조합) 수. 오류 로그는 처음 하나만 남깁니다.
+    uint32_t droppedGlyphs() const { return droppedGlyphs_; }
 
 private:
     static constexpr int kAtlasW = 2048;
@@ -85,6 +87,7 @@ private:
     // 글자 폭 캐시. 레이아웃이 프레임마다 여러 번 재므로 stb 조회를 반복하지 않습니다.
     mutable std::unordered_map<uint64_t, float> advanceCache_;
     bool dirty_       = false;
+    uint32_t droppedGlyphs_ = 0;
     bool firstUpload_ = true;  // UNDEFINED→TRANSFER_DST vs SHADER_READ_ONLY→TRANSFER_DST
 
     // stb_truetype 데이터

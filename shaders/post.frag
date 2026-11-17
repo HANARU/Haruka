@@ -38,7 +38,8 @@ vec3 ACESFilm(vec3 x) {
 
 void main() {
     vec2 uv  = inUV * uvScale + uvOffset;
-    vec3 hdr = texture(hdrImage, uv).rgb * exposure;
+    vec4 src = texture(hdrImage, uv);
+    vec3 hdr = src.rgb * exposure;
 
     // SSAO — multiplicative on whole output (approximation for forward rendering)
     if (aoEnabled > 0.5) {
@@ -55,6 +56,12 @@ void main() {
     // ACES tone mapping. 결과는 선형값입니다. sRGB 스왑체인은 GPU 가 저장할 때 sRGB 로 바꾸므로
     // 여기서 또 바꾸면 두 번 들어가 화면이 밝고 흐려집니다(DEF-96, 예전에는 늘 pow(1/2.2) 를 적용).
     vec3 ldr = ACESFilm(hdr);
+
+    // 3D UI 패널(D1-나, 2026-11-16): HDR 알파는 후처리 가중치입니다. 장면은 1(지우기 값, 장면 파이프라인은 알파를 쓰지
+    // 않음)이고 패널 화소는 0 이라, 패널 색을 노출 · AO · 블룸 · 톤매핑 없이 에디터 UI 와 같은 색으로 냅니다. MSAA 로 섞인
+    // 가장자리는 두 결과를 가중치로 섞습니다. 1 이면 예전과 같은 경로라 패널이 없는 화면은 바이트 단위로 같습니다.
+    if (src.a < 1.0) ldr = mix(clamp(src.rgb, 0.0, 1.0), ldr, clamp(src.a, 0.0, 1.0));
+
     if (encodeSrgb > 0.5) ldr = linearToSrgb(ldr);
     outColor = vec4(ldr, 1.0);
 }

@@ -10,6 +10,7 @@
 #include "../core/ProjectSettings.hpp"
 #include "../vfs/Vfs.hpp"
 #include "../components/CameraComponent.hpp"
+#include "../components/UIPanelPointer.hpp"
 #include "../assets/SceneSerializer.hpp"
 #include "../input/HInputSystem.hpp"
 #include "../platform/IWindow.hpp"
@@ -74,6 +75,17 @@ public:
 
     void handleInput(float, float, bool, bool, float, float, float) override {}
     bool inViewport(float, float, float, float) const override { return true; }   // 창 전체가 게임 화면
+    // 창 전체가 게임 화면이라, 마우스 비율로 활성 카메라의 광선을 만듭니다(3D UI 구간 5).
+    bool pointerRay(float mx, float my, float winW, float winH, glm::vec3& origin, glm::vec3& dir) const override {
+        CameraComponent* cam = world_ ? world_->getActiveCamera() : nullptr;
+        if (!cam || !cam->owner || winW <= 0.f || winH <= 0.f) return false;
+        UIPanelPointer::Ray r;
+        if (!UIPanelPointer::rayFromScreen(cam->projMatrix(winW / winH) * cam->viewMatrix(), { mx / winW, my / winH }, r))
+            return false;
+        origin = r.origin;
+        dir    = r.dir;
+        return true;
+    }
     bool isTextInputActive() const override { return false; }
     std::string windowTitle() const override { return "Haruka  |  " + sceneName_; }
     bool headsetAudioInVr() const override { return true; }   // 장치 설정 화면은 나중(2026-10-19 결정)

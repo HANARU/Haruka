@@ -37,10 +37,21 @@ public:
         uint32_t instanceCount = 1;         // 같은 지오메트리 · 머티리얼 묶음의 크기(DEF-16)
     };
 
+    // 월드 UI 패널 하나(3D UI P1b). model 은 액터 월드 행렬에 패널 크기(m)를 곱한 것이고, 패널은 로컬 XY 평면의
+    // 1×1 사각형(가운데 원점, 앞면 +Z)입니다. view 는 알파를 곱한 sRGB 텍스처(UIPanelPass)입니다.
+    struct PanelDraw {
+        glm::mat4   model;
+        VkImageView view     = VK_NULL_HANDLE;
+        bool        twoSided = false;   // 거짓이면 뒷면을 그리지 않음(UE Widget Component 의 기본과 같음)
+        float       brightness = 1.f;   // 색에 곱함(알파는 그대로)
+    };
+
     struct Inputs {
         VkDescriptorSet frameSet, sceneSet, transformSet;
         VkBuffer        vertexBuffer, indexBuffer;
         VkSampler       textureSampler, clampSampler;
+        VkSampler       panelSampler = VK_NULL_HANDLE;   // 패널: 가장자리 고정 · 밉 선형 · 이방성
+        const std::vector<PanelDraw>* panels = nullptr;  // 반투명 뒤에 그림
         // CPU 드로우 (subpass 0/1 은 opaqueItems, subpass 2 는 transparentItems)
         const std::vector<DrawItem>* opaqueItems      = nullptr;
         const std::vector<DrawItem>* transparentItems = nullptr;
@@ -58,6 +69,8 @@ public:
 
     // 에디터 라인 오버레이 (다음 record에서 그려짐)
     void setLines(std::vector<LineVertex> lines) { pendingLines_ = std::move(lines); }
+    // 월드 UI 포인터(레이저 · 커서, 3D UI 구간 6). 에디터 선 뒤에 이어 그립니다. 엔진이 프레임마다 넣습니다(게임 실행 파일 포함).
+    void setPointerLines(std::vector<LineVertex> lines) { pendingPointerLines_ = std::move(lines); }
 
     // 기즈모 삼각형 오버레이 (색을 입힌 솔리드 핸들, 다음 record에서 그려짐).
     // 라인과 같은 정점 형식·셰이더를 쓰되 토폴로지만 삼각형입니다. 깊이 테스트가
@@ -114,6 +127,7 @@ private:
     VkDeviceMemory   lineVertMem_[MAX_FRAMES] = {};
     void*            lineVertPtr_[MAX_FRAMES] = {};
     std::vector<LineVertex> pendingLines_;
+    std::vector<LineVertex> pendingPointerLines_;   // 월드 UI 포인터(에디터 선 뒤에 이어 올림)
 
     // 기즈모 삼각형 오버레이 (linePipelineLayout_ 을 공유, 토폴로지만 삼각형). 버퍼는 라인과
     // 같은 이유로 프레임 슬롯마다 둡니다.
@@ -123,6 +137,11 @@ private:
     VkDeviceMemory   triVertMem_[MAX_FRAMES] = {};
     void*            triVertPtr_[MAX_FRAMES] = {};
     std::vector<LineVertex> pendingTris_;
+
+    // 월드 UI 패널(3D UI P1b, subpass 2). 정점 버퍼 없이 정점 번호로 사각형을 만들고, 텍스처는 set 1 푸시 디스크립터입니다.
+    VkPipeline            panelPipeline_  = VK_NULL_HANDLE;
+    VkPipelineLayout      panelLayout_    = VK_NULL_HANDLE;
+    VkDescriptorSetLayout panelSetLayout_ = VK_NULL_HANDLE;
 
     // 호스트에서 쓰는 정점 버퍼 하나를 만들고 매핑합니다(라인·삼각형 공용).
     void createHostVertexBuffer(VkDeviceSize size, const char* what,

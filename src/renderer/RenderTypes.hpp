@@ -54,6 +54,13 @@ static_assert(sizeof(GpuLight)     == 64,                "GpuLight must be four 
 struct GpuViewPush { int32_t viewIndex; };
 static_assert(sizeof(GpuViewPush) == 4, "GpuViewPush must match HarukaViewPush");
 
+// 월드 UI 패널 푸시 상수(3D UI P1b). shaders/ui_panel.vert · .frag 의 PanelPush 와 같은 배치입니다.
+// flags 비트 0 = 양면(뒷면도 그림). brightness 는 패널 색에 곱하는 선형 밝기(3D UI 구간 4), pad 는 16바이트 정렬용.
+struct GpuPanelPush { glm::mat4 model; int32_t viewIndex; int32_t flags; float brightness; float pad; };
+static_assert(sizeof(GpuPanelPush) == 80, "GpuPanelPush must match PanelPush in ui_panel shaders");
+static_assert(offsetof(GpuPanelPush, brightness) == 72, "GpuPanelPush.brightness offset");
+static_assert(offsetof(GpuPanelPush, viewIndex) == 64, "GpuPanelPush.viewIndex offset");
+
 // 그릴 뷰(눈) 하나. view 는 월드 → 눈, proj 는 눈 → 클립(Vulkan: 깊이 [0,1], Y 아래).
 // 단안은 카메라 하나, 스테레오는 눈 둘입니다(DEF-09).
 struct EyeView {

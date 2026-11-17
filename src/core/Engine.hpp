@@ -17,6 +17,7 @@ class IGameModule;
 class XrSystem;
 class PhysicsSystem;
 class AudioSystem;
+class UIPanelPointer;
 struct EngineContext;
 
 // 실행 옵션(EngineOptions)은 EngineOptions.hpp 에 있습니다(2026-10-31, 명령줄 해석을 창 없이 시험하려고 옮김).
@@ -59,6 +60,18 @@ private:
     // OpenXR 인스턴스를 잃었습니다(런타임 재시작 · 갱신 등, 2026-11-01 DEF-155). 이번 실행에서는 다시 열 수 없으므로 XR 을 끄고,
     // XR 이 필수인 플랫폼(Quest, 데스크톱 화면이 없음)은 앱을 끝냅니다.
     void onXrInstanceLost();
+    // 월드 UI 패널을 마우스 · XR 두 손으로 가리키고 누릅니다(3D UI 구간 5 · 6). 꺼진 쪽은 붙잡은 패널을 놓습니다. 앞단에
+    // "마우스가 패널 위" 를 알려 같은 클릭으로 액터를 고르지 않게 하고, XR 손의 레이저 · 커서를 렌더러에 넣습니다.
+    struct WorldUiPointerInput {
+        bool  mouseActive = false, xrActive = false;
+        float mx = 0.f, my = 0.f;
+        bool  lmb = false;
+        int   winW = 0, winH = 0;
+        float dt = 0.f;
+    };
+    void updateWorldUiPointers(IEngineFrontend& front, const WorldUiPointerInput& in);
+    // 머리를 따라오는 패널(placement = FollowHead)을 옮깁니다(3D UI 구간 7). Play 중 월드 틱 뒤에 부릅니다.
+    void updateFollowPanels(float dt);
 
     // 프로젝트 설정(assets/project.ini, 2026-10-15). 에셋 루트를 정한 뒤 한 번 읽습니다.
     ProjectSettings                project_;
@@ -98,6 +111,12 @@ private:
     // 리그가 없는 씬의 보이지 않는 리그(2026-10-16): 바닥을 찾은 카메라 액터(0 = 아직)와 카메라에서 바닥까지의 거리.
     uint64_t                       implicitRigCam_  = 0;
     float                          implicitRigDrop_ = 0.f;
+    // 마우스 월드 UI 포인터(3D UI 구간 5). 패널 주소를 붙잡지만 매 프레임 목록으로 확인하므로 패널보다 오래 살아도 됩니다.
+    std::unique_ptr<UIPanelPointer> mouseUiPointer_;
+    bool                            mouseUiPointerLive_ = false;
+    std::unique_ptr<UIPanelPointer> xrUiPointers_[2];             // 0 = 왼손, 1 = 오른손
+    bool                            xrUiPointerLive_[2] = { false, false };
+    bool                            pointerLinesShown_ = false;   // 지난 프레임에 레이저를 넣었음(지울 때 빈 목록 한 번)
     // 머리 추적 카메라의 부모를 원점으로 쓴다고 알린 카메라 액터(0 = 아직, DEF-144). 같은 카메라는 한 번만 알립니다.
     uint64_t                       trackedOriginCam_ = 0;
     std::unique_ptr<Renderer>      renderer_;
@@ -106,7 +125,7 @@ private:
 
     // ── 동적 모듈 레지스트리 (Physics, Audio, …) ────────────────────────────────
     ModuleManager                  modules_;
-    PhysicsSystem*                 physics_ = nullptr;   // modules_ 소유. XR 주사율에 스텝을 맞출 때 씁니다
+    PhysicsSystem*                 physics_ = nullptr;   // modules_ 소유. XR 주사율에 스텝을 맞출 때 · 패널 가림 판정에 씁니다
     AudioSystem*                   audio_   = nullptr;   // modules_ 소유. XR 중 청취자를 머리 자세에 둘 때 씁니다
 
     // ── 앞단 (에디터 또는 게임, 2026-10-19) ─────────────────────────────────────

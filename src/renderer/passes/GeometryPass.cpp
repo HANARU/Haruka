@@ -76,9 +76,10 @@ static VkPipeline buildPBRPipeline(VkDevice device, VkPipelineCache cache,
     ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     ms.rasterizationSamples = msaa;
 
+    // HDR 알파는 후처리 가중치입니다(3D UI P1b, D1-나): 장면은 지우기 값 1 을 그대로 두고, UI 패널만 줄입니다.
+    // 그래서 장면 파이프라인은 알파를 쓰지 않습니다(post.frag · bloom_threshold.frag 가 읽음).
     VkPipelineColorBlendAttachmentState cba{};
-    cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
     if (transparent) {
         cba.blendEnable = VK_TRUE;
         cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -441,9 +442,9 @@ void GeometryPass::createPipelines() {
         ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
         ms.rasterizationSamples = rc_->msaaSamples;
 
+        // 알파(후처리 가중치)는 쓰지 않습니다. 기즈모 · 라인은 장면과 같이 톤매핑됩니다(buildPBRPipeline 참고).
         VkPipelineColorBlendAttachmentState cba{};
-        cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
         cba.blendEnable = VK_TRUE;
         cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         cba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -493,6 +494,86 @@ void GeometryPass::createPipelines() {
         vkDestroyShaderModule(rc_->device, vert, nullptr);
         vkDestroyShaderModule(rc_->device, frag, nullptr);
     }
+
+    // 월드 UI 패널 (subpass 2, 3D UI P1b)
+    {
+        if (!panelLayout_) {
+            VkDescriptorSetLayoutBinding b{};
+            b.binding         = 0;
+            b.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            b.descriptorCount = 1;
+            b.stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+            VkDescriptorSetLayoutCreateInfo dl{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+            dl.flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+            dl.bindingCount = 1;
+            dl.pBindings    = &b;
+            if (vkCreateDescriptorSetLayout(rc_->device, &dl, nullptr, &panelSetLayout_) != VK_SUCCESS)
+                throw std::runtime_error("Failed to create UI panel set layout!");
+
+            const VkDescriptorSetLayout sets[2] = { frameSetLayout_, panelSetLayout_ };
+            VkPushConstantRange range{ VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(GpuPanelPush) };
+            VkPipelineLayoutCreateInfo pli{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+            pli.setLayoutCount = 2; pli.pSetLayouts = sets;
+            pli.pushConstantRangeCount = 1; pli.pPushConstantRanges = &range;
+            if (vkCreatePipelineLayout(rc_->device, &pli, nullptr, &panelLayout_) != VK_SUCCESS)
+                throw std::runtime_error("Failed to create UI panel pipeline layout!");
+        }
+
+        auto vert = rc_->createShaderModule(readFile("shaders/ui_panel.vert.spv"));
+        auto frag = rc_->createShaderModule(readFile("shaders/ui_panel.frag.spv"));
+        VkPipelineShaderStageCreateInfo stages[2] = {};
+        stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT; stages[0].module = vert; stages[0].pName = "main";
+        stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module = frag; stages[1].pName = "main";
+
+        VkPipelineVertexInputStateCreateInfo vi{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+        VkPipelineInputAssemblyStateCreateInfo ia{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+        ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        VkPipelineViewportStateCreateInfo vs{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+        vs.viewportCount = 1; vs.scissorCount = 1;
+        VkDynamicState dynStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        VkPipelineDynamicStateCreateInfo dyn{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+        dyn.dynamicStateCount = 2; dyn.pDynamicStates = dynStates;
+        // 앞 · 뒷면은 조각 셰이더가 gl_FrontFacing 으로 가립니다(양면 여부는 패널마다 다름).
+        VkPipelineRasterizationStateCreateInfo rs{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+        rs.polygonMode = VK_POLYGON_MODE_FILL; rs.lineWidth = 1.f;
+        rs.cullMode = VK_CULL_MODE_NONE; rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        VkPipelineMultisampleStateCreateInfo ms{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+        ms.rasterizationSamples = rc_->msaaSamples;
+
+        // 색: 알파를 곱한 텍스처라 ONE · ONE_MINUS_SRC_ALPHA. 알파(후처리 가중치): 바닥 값에 (1 - 패널 알파)를 곱해
+        // 불투명한 패널 화소는 0 이 되고, post.frag 가 그 화소를 톤매핑 · AO · 블룸 없이 냅니다(D1-나).
+        VkPipelineColorBlendAttachmentState cba{};
+        cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        cba.blendEnable         = VK_TRUE;
+        cba.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        cba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        cba.colorBlendOp        = VK_BLEND_OP_ADD;
+        cba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        cba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        cba.alphaBlendOp        = VK_BLEND_OP_ADD;
+        VkPipelineColorBlendStateCreateInfo cb{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+        cb.attachmentCount = 1; cb.pAttachments = &cba;
+
+        // 장면 깊이로 가려지되 깊이는 쓰지 않습니다(이 서브패스의 깊이는 읽기 전용).
+        VkPipelineDepthStencilStateCreateInfo ds{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+        ds.depthTestEnable = VK_TRUE; ds.depthWriteEnable = VK_FALSE;
+        ds.depthCompareOp  = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+        VkGraphicsPipelineCreateInfo ci{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+        ci.stageCount = 2; ci.pStages = stages;
+        ci.pVertexInputState = &vi; ci.pInputAssemblyState = &ia;
+        ci.pViewportState = &vs; ci.pRasterizationState = &rs;
+        ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
+        ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
+        ci.layout = panelLayout_; ci.renderPass = pass_; ci.subpass = 2;
+        const VkResult r = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &panelPipeline_);
+        vkDestroyShaderModule(rc_->device, vert, nullptr);
+        vkDestroyShaderModule(rc_->device, frag, nullptr);
+        if (r != VK_SUCCESS) throw std::runtime_error("Failed to create UI panel pipeline!");
+    }
 }
 
 void GeometryPass::destroyPipelines() {
@@ -503,13 +584,14 @@ void GeometryPass::destroyPipelines() {
     if (transparentFrontPipeline_) { vkDestroyPipeline(rc_->device, transparentFrontPipeline_, nullptr); transparentFrontPipeline_ = VK_NULL_HANDLE; }
     if (linePipeline_)        { vkDestroyPipeline(rc_->device, linePipeline_, nullptr);        linePipeline_        = VK_NULL_HANDLE; }
     if (triPipeline_)         { vkDestroyPipeline(rc_->device, triPipeline_, nullptr);         triPipeline_         = VK_NULL_HANDLE; }
+    if (panelPipeline_)       { vkDestroyPipeline(rc_->device, panelPipeline_, nullptr);       panelPipeline_       = VK_NULL_HANDLE; }
 }
 
 void GeometryPass::rebuildPipelines() {
     // 새 파이프라인을 다 만든 뒤에만 옛 것을 지웁니다. 하나라도 실패하면 새로 만든 것만 지우고
     // 옛 것을 되돌려, 핫 리로드가 실패해도 이전 파이프라인으로 계속 그립니다.
     VkPipeline* slots[] = { &depthPipeline_, &opaquePipeline_, &transparentBackPipeline_,
-                            &transparentFrontPipeline_, &linePipeline_, &triPipeline_ };
+                            &transparentFrontPipeline_, &linePipeline_, &triPipeline_, &panelPipeline_ };
     VkPipeline old[std::size(slots)];
     for (size_t i = 0; i < std::size(slots); ++i) { old[i] = *slots[i]; *slots[i] = VK_NULL_HANDLE; }
     try { createPipelines(); }
@@ -527,6 +609,8 @@ void GeometryPass::destroy() {
     releaseSizeDependent();
     destroyPipelines();
     if (linePipelineLayout_) { vkDestroyPipelineLayout(rc_->device, linePipelineLayout_, nullptr); linePipelineLayout_ = VK_NULL_HANDLE; }
+    if (panelLayout_)    { vkDestroyPipelineLayout(rc_->device, panelLayout_, nullptr);         panelLayout_    = VK_NULL_HANDLE; }
+    if (panelSetLayout_) { vkDestroyDescriptorSetLayout(rc_->device, panelSetLayout_, nullptr); panelSetLayout_ = VK_NULL_HANDLE; }
     for (int i = 0; i < MAX_FRAMES; ++i) {
         if (lineVertPtr_[i]) { vkUnmapMemory(rc_->device, lineVertMem_[i]); lineVertPtr_[i] = nullptr; }
         if (lineVertBuf_[i]) { vkDestroyBuffer(rc_->device, lineVertBuf_[i], nullptr); lineVertBuf_[i] = VK_NULL_HANDLE; }
@@ -660,6 +744,29 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
         drawAll();   // 앞면
     }
 
+    // 월드 UI 패널(3D UI P1b). 반투명 물체 뒤에 그려 패널 뒤의 유리가 비쳐 보이게 합니다(패널 앞의 반투명은 순서가
+    // 어긋나지만 드뭅니다). 두 눈이 같은 텍스처를 읽습니다. 아직 한 번도 그리지 않은 패널(view 없음)은 건너뜁니다.
+    if (in.panels && !in.panels->empty() && panelPipeline_ && in.panelSampler) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, panelPipeline_);
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+        vkCmdSetScissor (cmd, 0, 1, &sc);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, panelLayout_, 0, 1, &in.frameSet, 0, nullptr);
+        for (const PanelDraw& p : *in.panels) {
+            if (!p.view) continue;
+            VkDescriptorImageInfo img{ in.panelSampler, p.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+            VkWriteDescriptorSet w{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            w.dstBinding      = 0;
+            w.descriptorCount = 1;
+            w.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            w.pImageInfo      = &img;
+            rc_->vk.push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, panelLayout_, 1, 1, &w);
+            const GpuPanelPush push{ p.model, (int32_t)viewIndex, p.twoSided ? 1 : 0, p.brightness, 0.f };
+            vkCmdPushConstants(cmd, panelLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(push), &push);
+            vkCmdDraw(cmd, 6, 1, 0, 0);
+        }
+    }
+
     // 렌더 확장: 반투명 끝(DEF-17). 아래 기즈모 · 라인은 파이프라인 · 뷰포트 · 디스크립터 · 정점 버퍼를
     // 모두 다시 설정하므로 되돌릴 것이 없습니다.
     if (in.subpassHook && *in.subpassHook) {
@@ -687,10 +794,16 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
     }
 
     // Line overlay (in subpass 2)
-    if (lineVertPtr_[frameIdx] && !pendingLines_.empty()) {
-        uint32_t count = std::min((uint32_t)pendingLines_.size(), kMaxLineVerts);
-        if (viewIndex == 0)
-            memcpy(lineVertPtr_[frameIdx], pendingLines_.data(), count * sizeof(LineVertex));
+    // 에디터 선 다음에 월드 UI 포인터 선(3D UI 구간 6)을 이어 올립니다. 정점 수는 선분 단위(짝수)로 자릅니다.
+    if (lineVertPtr_[frameIdx] && (!pendingLines_.empty() || !pendingPointerLines_.empty())) {
+        const uint32_t editorCount  = std::min((uint32_t)pendingLines_.size(), kMaxLineVerts);
+        const uint32_t pointerCount = std::min((uint32_t)pendingPointerLines_.size(), (kMaxLineVerts - editorCount) & ~1u);
+        const uint32_t count        = editorCount + pointerCount;
+        if (viewIndex == 0) {
+            auto* dst = static_cast<LineVertex*>(lineVertPtr_[frameIdx]);
+            if (editorCount)  memcpy(dst, pendingLines_.data(), editorCount * sizeof(LineVertex));
+            if (pointerCount) memcpy(dst + editorCount, pendingPointerLines_.data(), pointerCount * sizeof(LineVertex));
+        }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, linePipeline_);
         vkCmdSetViewport(cmd, 0, 1, &vp); vkCmdSetScissor(cmd, 0, 1, &sc);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,

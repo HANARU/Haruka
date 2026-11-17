@@ -1,4 +1,5 @@
 #include "EngineOptions.hpp"
+#include "ProjectSettings.hpp"
 
 #include <cctype>
 #include <charconv>
@@ -79,6 +80,10 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         }
         else if (valueOf(a, "--capture", v)) {
             if (!v.empty()) o.capturePath = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--scene", v)) {
+            if (project_settings::isSceneLogicalPath(v)) o.scenePath = v;
             else unknown.push_back(a);
         }
         else unknown.push_back(a);

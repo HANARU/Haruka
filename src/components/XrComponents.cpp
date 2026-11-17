@@ -58,7 +58,7 @@ bool hxr::floorBelow(const World& world, const glm::vec3& from, const Actor* ski
         bool has = false;
         for (const auto& c : a->getComponents()) {
             glm::vec3 cmin, cmax;
-            if (c->isEnabled() && c->localBounds(cmin, cmax)) {
+            if (c->isEnabled() && c->blocksFloor() && c->localBounds(cmin, cmax)) {
                 lo  = has ? glm::min(lo, cmin) : cmin;
                 hi  = has ? glm::max(hi, cmax) : cmax;
                 has = true;

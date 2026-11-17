@@ -25,6 +25,9 @@ struct EngineOptions {
     uint32_t    frames        = 0;       // --frames=N : 그린 프레임이 N 이 되면 끝냄(0 = 끝없이)
     float       timeoutSec    = 0.f;     // --timeout=S : S 초가 지나면 실패로 끝냄(0 이면 frames 가 있을 때 60초)
     std::string capturePath;             // --capture=path : 끝낼 때 합성 눈 왼쪽 층을 PNG 로 저장
+    // --scene=assets/scenes/X.hscene : 프로젝트 시작 씬 대신 이 씬으로 시작(시험 장면 캡처용, 2026-11-16). 에디터는 지금처럼
+    // 마지막으로 연 씬이 먼저입니다. 형식이 틀리면(assets/ 아래 .hscene 이 아님) 모르는 인자로 보고 무시합니다.
+    std::string scenePath;
     bool        vkNoSync2     = false;   // --vk-no-sync2 : synchronization2 가 있어도 1.0 배리어로 기록(DEF-04 대체 경로 시험)
     bool        vkDedicatedMsaa = false; // --vk-dedicated-msaa : MSAA 컬러를 핵심 힙 밖 별도 할당으로(DEF-06 경로 시험)
     // --ssao · --no-ssao : 화면 공간 AO 를 켜거나 끔(AO 를 뺀 비교 실측 · 끔 경로 시험). 없으면 프로젝트 설정

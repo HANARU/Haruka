@@ -51,7 +51,10 @@ struct HRenderDeviceInfo {
     VkRenderPass          mainPass = VK_NULL_HANDLE;         // OpaqueEnd · TransparentEnd 가 열려 있는 렌더 패스
     uint32_t              opaqueSubpass      = 1;
     uint32_t              transparentSubpass = 2;
-    VkFormat              hdrFormat = VK_FORMAT_UNDEFINED;   // 메인 패스 색 · AfterScene 의 HDR 이미지 포맷
+    // 메인 패스 색 · AfterScene 의 HDR 이미지 포맷. HDR 의 알파 채널은 후처리 가중치입니다(3D UI 패널, 2026-11-16):
+    // 1 = 노출 · AO · 블룸 · 톤매핑을 받음(장면), 0 = 받지 않음(UI 패널). 장면을 그리는 확장은 colorWriteMask 에서
+    // 알파를 빼거나 알파 블렌드를 (ZERO, ONE) 으로 두어 값을 그대로 두십시오.
+    VkFormat              hdrFormat = VK_FORMAT_UNDEFINED;
 };
 
 // record 때 받는 것.

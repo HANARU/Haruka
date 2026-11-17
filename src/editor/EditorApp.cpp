@@ -3809,7 +3809,8 @@ void EditorApp::handleInput(float mouseX, float mouseY,
             outlinerPressHeld_ = true;
         e.button = 0; e.down = true;
         HReply r = slateRenderer_.handlePointerEvent(e);
-        if (!r.handled && inViewport(mouseX, mouseY, winW, winH)) {
+        // Play 중 월드 UI 패널을 누른 클릭은 패널이 받으므로 액터를 고르지 않습니다(3D UI 구간 5).
+        if (!r.handled && inViewport(mouseX, mouseY, winW, winH) && !pointerOverWorldUi_) {
             pickActor(mouseX, mouseY, winW, winH);
             lmbOrbit_ = true;
         }
@@ -3932,6 +3933,15 @@ WorldViewport EditorApp::worldVP(float mx, float my, float winW, float winH) con
     // rect = 뷰포트 fb 서브렉트(오프셋 포함). WorldViewport::project/ray 가 rect.left/top 을
     // 오프셋으로 쓰므로, 씬이 스왑체인의 그 오프셋에 합성되는 것과 좌표가 정확히 일치합니다.
     return { viewportFbRect(), mouseToFb(mx, my, winW, winH) };
+}
+
+bool EditorApp::pointerRay(float mx, float my, float winW, float winH, glm::vec3& origin, glm::vec3& dir) const {
+    if (!ctx_.world || !inViewport(mx, my, winW, winH)) return false;
+    CameraComponent* cam = ctx_.world->getActiveCamera();
+    if (!cam || !cam->owner || cam == editorCam_) return false;   // 에디터 카메라로 보는 중이면 게임 화면이 아님
+    const WorldViewport wvp = worldVP(mx, my, winW, winH);
+    if (wvp.fbRect.width <= 0.f || wvp.fbRect.height <= 0.f) return false;
+    return wvp.ray(cam->projMatrix(wvp.aspect()) * cam->viewMatrix(), origin, dir);
 }
 
 bool EditorApp::inViewport(float mx, float my, float winW, float winH) const {

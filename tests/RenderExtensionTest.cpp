@@ -8,6 +8,7 @@
 
 #include "../src/renderer/RenderExtensionRegistry.hpp"
 #include "../src/renderer/MipChain.hpp"
+#include "../src/renderer/RetireQueue.hpp"
 
 #include <cstdio>
 #include <string>
@@ -161,6 +162,25 @@ int main() {
         check(!hmip::canBlitMips(all & ~VK_FORMAT_FEATURE_BLIT_DST_BIT), "블릿 대상이 없으면 1단계");
         check(!hmip::canBlitMips(all & ~VK_FORMAT_FEATURE_BLIT_SRC_BIT), "블릿 원본이 없으면 1단계");
         check(!hmip::canBlitMips(all & ~VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT), "선형 필터가 없으면 1단계");
+    }
+
+    // 3D UI 구간 1: 지연 삭제 대기열. 제출 번호 n 까지 쓴 자원은 같은 슬롯을 다시 쓰는 n + 2(MAX_FRAMES) 의 펜스 대기 뒤에 지웁니다.
+    std::printf("\n== 7. 지연 삭제 대기열(UIPanelPass) ==\n");
+    {
+        RetireQueue<int> q(2);
+        std::vector<int> gone;
+        auto kill = [&](int& v) { gone.push_back(v); };
+        q.retire(10, 5);                 // 프레임 5 까지 씀
+        q.retire(11, 5);
+        q.retire(20, 6);
+        check(q.collect(5, kill) == 0 && q.collect(6, kill) == 0, "같은 프레임 · 다음 프레임에는 지우지 않음(아직 GPU 가 읽을 수 있음)");
+        check(q.collect(7, kill) == 2 && gone == std::vector<int>({ 10, 11 }), "n + 2 에서 그 프레임 것만, 넣은 순서대로 지움");
+        check(q.size() == 1, "늦게 넣은 것은 남음");
+        q.retire(30, 7);
+        check(q.collect(8, kill) == 1 && gone.back() == 20 && q.size() == 1, "섞여 있어도 끝난 것만 지우고 나머지 순서를 지킴");
+        q.drain(kill);
+        check(q.empty() && gone.back() == 30 && gone.size() == 4, "drain 은 남은 것을 모두 지움(종료 때)");
+        check(q.collect(1000, kill) == 0, "빈 대기열은 아무것도 하지 않음");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

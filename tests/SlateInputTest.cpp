@@ -16,6 +16,12 @@
 // 실행: build/Release/HarukaSlateTest.exe
 
 #include "../src/ui/slate/HSlate.hpp"
+#include "../src/components/UIPanelComponent.hpp"
+#include "../src/components/UIPanelPointer.hpp"
+#include "../src/core/Actor.hpp"
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include "../src/core/ComponentFields.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -753,6 +759,22 @@ void testTextMeasure() {
         scoped.loadFont();
     }
     check(HFontAtlas::metrics() == nullptr, "폰트를 읽은 아틀라스가 사라지면 등록도 풀림 (낡은 주소가 남지 않음)");
+
+    // 3D UI 구간 1: 아틀라스가 가득 차면 오류는 한 번, 넘친 글자는 수만 셈
+    {
+        HFontAtlas full;
+        if (full.initCpuOnly()) {
+            for (int c = 33; c < 127; ++c) full.getGlyph((char)c, 400.f);   // 400 px 글자는 2048 x 512 에 한 줄(약 20자)만 들어감
+            const uint32_t dropped = full.droppedGlyphs();
+            check(dropped > 0, "큰 글자를 많이 올리면 아틀라스가 넘침 (전제)");
+            const HGlyphInfo g = full.getGlyph('~', 400.f);
+            check(g.uvMin == g.uvMax && g.advance > 0.f, "넘친 글자는 그리지 않지만 자리(advance)는 차지함");
+            check(full.droppedGlyphs() == dropped, "넘친 글자를 다시 찾으면 캐시에서 나옴 (수가 늘지 않음)");
+            full.initCpuOnly();
+            check(full.droppedGlyphs() == 0, "다시 초기화하면 넘친 수도 0");
+            full.unloadFont();
+        }
+    }
 }
 
 // ── P0: 그리기 목록 고정 (4-1절) ──────────────────────────────────────────────
@@ -974,6 +996,505 @@ void testLayerSortStability() {
     check(ordered, "동일 층 40개 요소의 그리기 순서가 stable_sort 로 보존됨");
 }
 
+// ── 3D UI 패널 P1b: UIPanelComponent(텍스처 크기 · 직렬화 · 확정 시점 · 내용) ─────────────────────
+void testUIPanelComponent() {
+    std::printf("\n-- P1b: UIPanelComponent --\n");
+    using P = UIPanelComponent;
+
+    // (a) 텍스처 크기: 1,250 px/m 기본, 한 변 4096 상한, 크기 · 해상도는 범위로 자름
+    check(P::computeTextureSize(0.8f, 0.5f, 1250.f) == glm::uvec2(1000, 625), "0.8 x 0.5 m @ 1250 -> 1000 x 625");
+    check(P::computeTextureSize(10.f, 1.f, 1250.f) == glm::uvec2(4096, 1250), "긴 변은 4096 으로 자름");
+    check(P::computeTextureSize(0.001f, 0.001f, 1250.f) == glm::uvec2(13, 13), "최소 크기 0.01 m -> 13 px");
+    check(P::computeTextureSize(1.f, 1.f, 50.f) == glm::uvec2(100, 100), "해상도 하한 100 px/m");
+
+    // (b) 직렬화 왕복과 깨진 값
+    {
+        P a;
+        a.width = 1.2f; a.height = 0.3f; a.pixelsPerMeter = 2000.f; a.twoSided = true; a.content = "Demo";
+        ComponentFieldWriter w;
+        a.writeFields(w);
+        P b;
+        bool allKnown = true;
+        for (const auto& f : w.fields()) allKnown = b.readField(f.first, f.second) && allKnown;
+        check(allKnown && w.fields().size() == 9 && b.width == 1.2f && b.height == 0.3f &&
+              b.pixelsPerMeter == 2000.f && b.twoSided && b.content == "Demo" && b.brightness == 1.f,
+              "값 아홉 개(밝기 · 배치 포함)가 왕복함");
+
+        P c;
+        const bool handled = c.readField("width", "-1") && c.readField("pixelsPerMeter", "99999");
+        check(handled && c.width == 0.8f && c.pixelsPerMeter == P::kDefaultPixelsPerMeter, "범위 밖 값은 기본값 유지");
+        check(!c.readField("direction", "0 0 1"), "모르는 이름은 false(직렬화기가 경고)");
+    }
+
+    // (c) 텍스처 크기는 확정할 때만 바뀜(끄는 동안 GPU 를 기다리지 않음)
+    {
+        P p;
+        p.onAttach();
+        const glm::uvec2 before = p.textureSize();
+        p.width = 1.6f;
+        const bool unchanged = p.textureSize() == before;
+        p.onPropsCommitted();
+        check(unchanged && p.textureSize() == glm::uvec2(2000, 625), "편집 중에는 그대로, 확정하면 2000 x 625");
+    }
+
+    // (d) 선택 판정 상자: 얇은 판(두께 1 cm), 액터 원점 가운데
+    {
+        P p;
+        glm::vec3 mn, mx;
+        const bool ok = p.localBounds(mn, mx);
+        check(ok && mn == glm::vec3(-0.4f, -0.25f, -0.005f) && mx == glm::vec3(0.4f, 0.25f, 0.005f),
+              "localBounds = (+-0.4, +-0.25, +-0.005)");
+    }
+
+    // (e) 내용: Demo 는 그릴 것이 있고, 처음 만들 때 더러움 표시. 모르는 이름은 안내 화면으로 바뀜
+    {
+        P p;
+        const VkImageView kWhite = reinterpret_cast<VkImageView>(uintptr_t(0x1111));
+        HSlateRenderer ui;
+        const bool hasFont = ui.fontAtlas().initCpuOnly();
+        HSlateContext& ctx = p.slate();
+        const auto demoRoot = ctx.rootWidget();
+        check(demoRoot != nullptr && p.takeDirty() && !p.takeDirty(), "Demo 트리를 만들고 한 번만 더러움");
+        if (hasFont) {
+            HSlateDrawList dl;
+            const bool ok = ctx.buildDrawList({ 1000.f, 625.f }, ui.fontAtlas(), kWhite, HSlateRenderer::maxVerts(), dl);
+            check(ok && !dl.overflowed && dl.vertices.size() > 40, "Demo 그리기 목록에 배경 · 글자가 있음");
+        }
+        p.content = "NoSuchPanel";
+        p.slate();
+        check(ctx.rootWidget() != demoRoot && p.takeDirty(), "모르는 내용 -> 안내 화면으로 다시 만들고 더러움");
+        const auto names = P::contentNames();
+        check(std::find(names.begin(), names.end(), "Demo") != names.end(), "등록된 내용에 Demo 가 있음");
+    }
+
+    // (f) 3D UI 구간 3: 해상도와 배치 분리. 배치는 1,250 px/m 기준 픽셀 × 배율이라 해상도를 바꿔도 미터 기준으로 같음
+    {
+        check(P::computeLayoutScale(0.8f, 0.5f, 1250.f) == 1.f, "1250 px/m -> 배율 1");
+        check(P::computeLayoutScale(0.8f, 0.5f, 2500.f) == 2.f, "2500 px/m -> 배율 2");
+        check(P::computeLayoutScale(0.81f, 0.5f, 1250.f) == 1.f, "반올림(1012.5 -> 1013 px)이 있어도 배율은 정확히 1");
+        check(std::fabs(P::computeLayoutScale(10.f, 1.f, 1250.f) - 4096.f / 12500.f) < 1e-6f,
+              "긴 변이 4096 에 잘리면 그 변에 맞게 줄임 (0.328)");
+
+        // 등록소는 전역이라 팩토리가 지역 변수를 붙잡지 않게 static 에 기록합니다.
+        static P*    seen      = nullptr;
+        static float seenScale = 0.f;
+        P::registerContent("ScaleProbe", [](P& panel, float s) {
+            seen = &panel;
+            seenScale = s;
+            return std::shared_ptr<HWidget>(HNew(SBox)->widthOverride(100.f * s)->heightOverride(50.f * s));
+        });
+        P p;
+        p.content = "ScaleProbe";
+        p.pixelsPerMeter = 2500.f;
+        p.onPropsCommitted();
+        const auto r1 = p.slate().rootWidget();
+        check(seen == &p && seenScale == 2.f, "팩토리가 패널 자신과 배율 2 를 받음");
+        check(r1 && r1->computeDesiredSize() == glm::vec2(200.f, 100.f), "배율을 곱한 크기로 트리를 만듦");
+        p.takeDirty();
+        p.onPropsCommitted();   // 같은 값으로 다시 확정
+        check(p.slate().rootWidget() == r1, "배율이 같으면 트리를 다시 만들지 않음");
+        p.pixelsPerMeter = 1250.f;
+        p.slate();
+        check(p.slate().rootWidget() == r1, "편집 중(확정 전)에는 트리 그대로");
+        p.onPropsCommitted();
+        const auto r2 = p.slate().rootWidget();
+        check(r2 != r1 && seenScale == 1.f && p.takeDirty(), "확정하면 새 배율로 다시 만들고 더러움");
+        check(p.readOnlyInfo() == "Texture 1000 x 625 px, layout scale 1.00", "디테일 정보에 배율 표시");
+
+        // Demo 는 해상도를 두 배로 하면 텍스처 픽셀 기준 크기도 두 배(화면에서는 같은 크기)
+        HSlateRenderer ui;
+        ui.fontAtlas().initCpuOnly();
+        P d1, d2;
+        d2.pixelsPerMeter = 2500.f;
+        d1.onPropsCommitted();
+        d2.onPropsCommitted();
+        const glm::vec2 s1 = d1.slate().rootWidget()->computeDesiredSize();
+        const glm::vec2 s2 = d2.slate().rootWidget()->computeDesiredSize();
+        check(s1.x > 0.f && std::fabs(s2.x / s1.x - 2.f) < 0.02f && std::fabs(s2.y / s1.y - 2.f) < 0.02f,
+              "Demo 원하는 크기가 배율에 비례 (2500 / 1250 = 2)");
+    }
+
+    // (g) 3D UI 구간 4: 게임 API(패널별 값 · 동작)와 밝기
+    {
+        P p;
+        check(p.setParam("title", "Hello") && p.param("title") == "Hello", "값 넣고 읽기");
+        check(!p.setParam("bad name", "x") && !p.setParam("", "x") && !p.setParam("a=b", "x"), "공백 · 빈 이름 · '=' 이름은 거부");
+        p.setParam("multi", "line1\nline2");
+        check(p.param("multi") == "line1 line2", "값의 줄바꿈은 공백(씬 파일 한 줄)");
+        check(p.param("none", "fb") == "fb", "없는 값은 대체값");
+        p.setParam("score", "12.5");
+        check(p.paramFloat("score", 0.f) == 12.5f && p.paramFloat("title", -1.f) == -1.f && p.paramFloat("none", 3.f) == 3.f,
+              "숫자로 읽기, 숫자가 아니거나 없으면 대체값");
+
+        auto attr = p.paramAttr("title", "untitled");
+        p.setParam("title", "Changed");
+        check(attr.get() == "Changed", "paramAttr 는 그릴 때마다 지금 값을 읽음");
+        p.clearParam("title");
+        check(attr.get() == "untitled", "값을 지우면 대체값");
+
+        // 직렬화: param.이름 줄로 저장, 이름 순, 깨진 이름은 읽을 때 건너뜀
+        p.setParam("title", "Hi");
+        p.brightness = 0.5f;
+        ComponentFieldWriter w;
+        p.writeFields(w);
+        std::vector<std::string> keys;
+        for (const auto& f : w.fields()) keys.push_back(f.first);
+        check(keys.size() == 12 && keys[9] == "param.multi" && keys[10] == "param.score" && keys[11] == "param.title",
+              "param.이름 줄이 이름 순으로 저장됨");
+        P q;
+        for (const auto& f : w.fields()) q.readField(f.first, f.second);
+        check(q.params() == p.params() && q.brightness == 0.5f, "값 · 밝기가 왕복함");
+        P r;
+        const bool handled = r.readField("param.bad name", "x") && r.readField("brightness", "3");
+        check(handled && r.params().empty() && r.brightness == 1.f, "깨진 이름 · 범위 밖 밝기는 무시(경고)");
+        check(p.readOnlyInfo().find(", 3 param(s)") != std::string::npos, "디테일 정보에 값 개수");
+
+        // 동작: 팩토리가 버튼에 actionCallback 을 연결, 게임 코드는 setActionHandler 로 받음
+        P::registerContent("ActionProbe", [](P& panel, float) {
+            return std::shared_ptr<HWidget>(HNew(SButton)->onClick(panel.actionCallback("go")));
+        });
+        P a;
+        a.content = "ActionProbe";
+        std::string got;
+        P* from = nullptr;
+        a.setActionHandler([&](P& panel, const std::string& act) { from = &panel; got = act; });
+        HSlateContext& ctx = a.slate();
+        ctx.arrange({ 400.f, 200.f });
+        HPointerEvent e;
+        e.position = { 200.f, 100.f };
+        e.button   = 0;
+        e.down     = true;
+        ctx.handlePointerEvent(e);
+        e.down = false;
+        ctx.handlePointerEvent(e);
+        check(got == "go" && from == &a, "버튼을 누르고 떼면 처리기가 동작 이름과 패널을 받음");
+        a.setActionHandler(nullptr);
+        a.fireAction("go");   // 처리기가 없으면 아무 일도 없음(죽지 않음)
+        check(true, "처리기 없이 동작을 내도 안전");
+    }
+}
+
+// ── 3D UI 구간 2: 자동 다시 그리기(그리기 목록 해시) ──────────────────────────────
+// 렌더러는 프레임마다 패널의 그리기 목록을 만들어 drawListHash 가 직전과 다를 때만 GPU 로 다시 그립니다.
+void testPanelAutoRedraw() {
+    std::printf("\n-- 3D UI 구간 2: 그리기 목록 해시 --\n");
+    const VkImageView kWhite = reinterpret_cast<VkImageView>(uintptr_t(0x1111));
+    HSlateRenderer ui;
+    const bool hasFont = ui.fontAtlas().initCpuOnly();
+
+    std::string label = "Score 1";
+    glm::vec4   ink{ 1.f, 1.f, 1.f, 1.f };
+    bool        badge = true;
+    auto badgeBox = HNew(SBorder)->background({ 0.9f, 0.1f, 0.1f, 1.f })->padding(HPadding(8.f));
+    badgeBox->visibility.bind([&] { return badge ? EVisibility::Visible : EVisibility::Collapsed; });
+    auto text = HNew(STextBlock)->text(Attr<std::string>(std::function<std::string()>([&] { return label; })))
+                                ->color(Attr<glm::vec4>(std::function<glm::vec4()>([&] { return ink; })))
+                                ->fontSize(30.f);
+    auto column = std::make_shared<SVerticalBox>();
+    column->addSlot(text, SVerticalBox::ESizeRule::Auto)->addSlot(badgeBox, SVerticalBox::ESizeRule::Auto);
+    auto root = HNew(SBorder)->background({ 0.1f, 0.2f, 0.3f, 1.f })->content(column);
+    HSlateContext ctx;
+    ctx.setRootWidget(root);
+    auto hashNow = [&] {
+        HSlateDrawList dl;
+        ctx.buildDrawList({ 400.f, 200.f }, ui.fontAtlas(), kWhite, HSlateRenderer::maxVerts(), dl);
+        return drawListHash(dl);
+    };
+    const uint64_t h1 = hashNow();
+    check(hashNow() == h1, "아무것도 바뀌지 않으면 해시가 같음 -> GPU 로 다시 그리지 않음");
+    badge = false;
+    check(hashNow() != h1, "보이기 Attr 이 바뀌면 해시가 바뀜 (markDirty 없이)");
+    badge = true;
+    check(hashNow() == h1, "되돌리면 처음 해시와 같음");
+    if (hasFont) {
+        label = "Score 2";
+        check(hashNow() != h1, "글자 Attr 이 바뀌면 해시가 바뀜");
+        label = "Score 1";
+        ink   = { 1.f, 0.8f, 0.2f, 1.f };
+        check(hashNow() != h1, "글자 색 Attr 이 바뀌면 해시가 바뀜");
+        ink   = { 1.f, 1.f, 1.f, 1.f };
+        check(hashNow() == h1, "같은 글자 · 색으로 돌아오면 같은 해시");
+    }
+    HSlateDrawList a, b;
+    check(drawListHash(a) == drawListHash(b), "빈 목록끼리는 같은 해시");
+    a.batches.push_back({ kWhite, 0, 1 });
+    check(drawListHash(a) != drawListHash(b), "배치만 달라도 해시가 다름");
+}
+
+// ── 3D UI 구간 5: 월드 패널 포인터(광선 → UV → HPointerEvent) ─────────────────────
+void testPanelPointer() {
+    std::printf("\n-- 3D UI 구간 5: 패널 포인터 --\n");
+    using P   = UIPanelComponent;
+    using Ptr = UIPanelPointer;
+    static int taps = 0;
+    P::registerContent("PointerProbe", [](P& panel, float) {
+        return std::shared_ptr<HWidget>(HNew(SButton)->onClick(panel.actionCallback("tap"))
+                                            ->normalColor({ 0.2f, 0.2f, 0.2f, 1.f })
+                                            ->hoveredColor({ 0.5f, 0.5f, 0.5f, 1.f }));
+    });
+
+    // (a) 판정: 0.8 x 0.5 m 패널, 원점, 앞면 +Z
+    Actor a;
+    P* p = a.addComponent<P>();
+    p->content = "PointerProbe";
+    Ptr::Hit h;
+    check(Ptr::intersect(*p, { 0.f, 0.f, 2.f }, { 0.f, 0.f, -1.f }, h) && h.uv == glm::vec2(0.5f) &&
+          std::fabs(h.distance - 2.f) < 1e-5f && h.pixel == glm::vec2(500.f, 312.5f) && h.front,
+          "정면 가운데 -> uv (0.5, 0.5), 거리 2, 픽셀 (500, 312.5)");
+    check(Ptr::intersect(*p, { 0.2f, 0.125f, 2.f }, { 0.f, 0.f, -1.f }, h) &&
+          glm::length(h.uv - glm::vec2(0.75f, 0.25f)) < 1e-5f, "오른쪽 위 -> uv (0.75, 0.25)(v 는 아래로)");
+    check(!Ptr::intersect(*p, { 0.f, 0.f, 2.f }, { 0.f, 0.f, 1.f }, h), "패널 반대쪽을 보면 맞지 않음");
+    check(!Ptr::intersect(*p, { 0.5f, 0.f, 2.f }, { 0.f, 0.f, -1.f }, h), "사각형 밖은 맞지 않음");
+    check(Ptr::intersect(*p, { 0.5f, 0.f, 2.f }, { 0.f, 0.f, -1.f }, h, false) && h.uv.x > 1.f,
+          "캡처용(bounded=false)은 밖이어도 평면 좌표");
+    check(!Ptr::intersect(*p, { 0.2f, 0.f, -2.f }, { 0.f, 0.f, 1.f }, h), "한 면 패널은 뒤에서 맞지 않음");
+    p->twoSided = true;
+    check(Ptr::intersect(*p, { 0.2f, 0.f, -2.f }, { 0.f, 0.f, 1.f }, h) && !h.front &&
+          std::fabs(h.uv.x - 0.25f) < 1e-5f, "양면 패널을 뒤에서 맞으면 u 를 뒤집음(글자가 바로 읽히는 쪽)");
+    p->twoSided = false;
+    {
+        Actor b;
+        b.setLocalPosition({ 1.f, 0.f, 0.f });
+        b.setLocalRotation(glm::angleAxis(glm::radians(90.f), glm::vec3(0.f, 1.f, 0.f)));   // 앞면이 +X
+        b.setLocalScale({ 2.f, 2.f, 2.f });
+        P* q = b.addComponent<P>();
+        check(Ptr::intersect(*q, { 3.f, 0.25f, -0.4f }, { -1.f, 0.f, 0.f }, h) && std::fabs(h.distance - 2.f) < 1e-4f &&
+              glm::length(h.uv - glm::vec2(0.75f, 0.25f)) < 1e-4f, "돌리고 키운 액터도 로컬 평면으로 판정(크기 2배면 1.6 x 1 m)");
+    }
+
+    // (b) 광선 만들기: 화면 가운데는 카메라 앞쪽
+    {
+        const glm::mat4 vp = glm::perspective(glm::radians(60.f), 1.5f, 0.1f, 100.f) *
+                             glm::lookAt(glm::vec3(0.f, 1.f, 3.f), glm::vec3(0.f, 1.f, 0.f), glm::vec3(0.f, 1.f, 0.f));
+        Ptr::Ray r;
+        check(Ptr::rayFromScreen(vp, { 0.5f, 0.5f }, r) && glm::length(r.dir - glm::vec3(0.f, 0.f, -1.f)) < 1e-4f,
+              "화면 가운데 광선 = 카메라 앞쪽");
+        check(!Ptr::rayFromScreen(vp, { 1.2f, 0.5f }, r) && !r.valid, "화면 밖이면 광선 없음");
+    }
+
+    // (c) 호버 · 클릭: 누르고 떼면 동작, 호버가 그리기 목록을 바꿈
+    HSlateRenderer ui;
+    const VkImageView kWhite = reinterpret_cast<VkImageView>(uintptr_t(0x1111));
+    auto listHash = [&](P& panel) {
+        HSlateDrawList dl;
+        panel.slate().buildDrawList(glm::vec2(panel.textureSize()), ui.fontAtlas(), kWhite, HSlateRenderer::maxVerts(), dl);
+        return drawListHash(dl);
+    };
+    p->setActionHandler([](P&, const std::string& act) { if (act == "tap") ++taps; });
+    const uint64_t idle = listHash(*p);
+    std::vector<P*> panels{ p };
+    Ptr ptr;
+    Ptr::Ray on;  on.origin  = { 0.f, 0.f, 2.f };  on.dir  = { 0.f, 0.f, -1.f }; on.valid = true;
+    Ptr::Ray off; off.origin = { 3.f, 0.f, 2.f };  off.dir = { 0.f, 0.f, -1.f }; off.valid = true;
+    ptr.update(panels, on, {});
+    check(ptr.overPanel() && ptr.hit().panel == p && listHash(*p) != idle, "패널을 가리키면 호버(그리기 목록이 바뀜)");
+    ptr.update(panels, on, { true, 0.f });
+    check(ptr.capturing() && taps == 0, "누르면 캡처, 아직 동작 없음");
+    ptr.update(panels, on, { false, 0.f });
+    check(taps == 1 && !ptr.capturing(), "떼면 동작 한 번");
+    ptr.update(panels, off, {});
+    check(!ptr.overPanel() && listHash(*p) == idle, "벗어나면 바깥 이동으로 호버가 풀림");
+
+    // (d) 캡처: 패널에서 눌러 밖에서 떼면 뗌은 그 패널이 받고, 클릭은 아님(버튼 규칙)
+    ptr.update(panels, on, { true, 0.f });
+    ptr.update(panels, off, { true, 0.f });
+    check(ptr.capturing() && ptr.hit().panel == p && ptr.hit().uv.x > 1.f, "누르는 동안 밖으로 나가도 누른 패널의 평면 좌표");
+    ptr.update(panels, off, { false, 0.f });
+    check(taps == 1 && !ptr.capturing(), "밖에서 떼면 클릭이 아님");
+    ptr.update(panels, off, {});
+    check(!ptr.overPanel(), "뗀 뒤에는 밖이므로 가리키지 않음");
+    // 패널 밖에서 누르고 들어오면 누름이 아님
+    ptr.update(panels, off, { true, 0.f });
+    ptr.update(panels, on, { true, 0.f });
+    ptr.update(panels, on, { false, 0.f });
+    check(taps == 1, "밖에서 누르고 들어와 떼도 클릭이 아님");
+
+    // (e) 가림 · 가장 가까운 패널 · 거리
+    {
+        Actor wall;
+        Ptr::Occluder blocked = [&](const glm::vec3&, const glm::vec3&, float, float& d, Actor*& who) {
+            d = 1.f; who = &wall; return true;
+        };
+        Ptr::Occluder self = [&](const glm::vec3&, const glm::vec3&, float, float& d, Actor*& who) {
+            d = 1.99f; who = &a; return true;   // 패널 자신의 충돌체
+        };
+        Ptr q;
+        q.update(panels, on, {}, blocked);
+        check(!q.overPanel(), "패널보다 앞에 물체가 있으면 가리키지 않음");
+        q.update(panels, on, {}, self);
+        check(q.overPanel(), "패널 액터 자신의 충돌체는 가리지 않음");
+
+        Actor nearA;
+        nearA.setLocalPosition({ 0.f, 0.f, 1.f });
+        P* nearP = nearA.addComponent<P>();
+        nearP->content = "PointerProbe";
+        std::vector<P*> two{ p, nearP };
+        q.update(two, on, {});
+        check(q.hit().panel == nearP && std::fabs(q.hit().distance - 1.f) < 1e-5f, "겹치면 가까운 패널");
+        q.maxDistance = 0.5f;
+        q.update(two, on, {});
+        check(!q.overPanel(), "maxDistance 보다 멀면 가리키지 않음");
+        q.maxDistance = 20.f;
+
+        // (f) 목록에서 빠진 패널(지워짐 · 꺼짐)은 붙잡지 않음
+        q.update(two, on, { true, 0.f });
+        check(q.capturing() && q.hit().panel == nearP, "가까운 패널을 누름");
+        std::vector<P*> onlyFar{ p };
+        q.update(onlyFar, on, { true, 0.f });
+        check(!q.capturing() || q.hit().panel != nearP, "누른 패널이 목록에서 빠지면 캡처를 버림");
+        q.update(onlyFar, on, { false, 0.f });
+        q.reset();
+        check(!q.overPanel() && !q.capturing(), "reset 은 상태를 비움");
+        Ptr::Ray none;
+        q.update(onlyFar, none, {});
+        check(!q.overPanel(), "광선이 없으면(추적 잃음) 가리키지 않음");
+    }
+}
+
+// ── 3D UI 구간 6: XR 컨트롤러(조준 광선 · 트리거 · 스틱 휠 · 레이저) ──────────────────
+struct WheelProbe : HWidget {
+    float total = 0.f;
+    glm::vec2 computeDesiredSize() override { return { 10.f, 10.f }; }
+    void paint(HPaintContext&, const HGeometry&) override {}
+    HReply onScroll(const HPointerEvent& e) override { total += e.wheelDelta; return HReply::Handled(); }
+};
+
+void testPanelPointerXr() {
+    std::printf("\n-- 3D UI 구간 6: XR 컨트롤러 포인터 --\n");
+    using P   = UIPanelComponent;
+    using Ptr = UIPanelPointer;
+
+    // (a) 조준 자세 -> 월드 광선: XR 원점(위치 + 요)을 곱하고, 조준 방향은 -Z
+    {
+        const glm::mat4 origin = glm::translate(glm::mat4(1.f), glm::vec3(10.f, 0.f, 0.f)) *
+                                 glm::mat4_cast(glm::angleAxis(glm::radians(90.f), glm::vec3(0.f, 1.f, 0.f)));
+        const Ptr::Ray r = Ptr::rayFromAim(origin, { 0.f, 1.5f, 0.f }, glm::quat(1.f, 0.f, 0.f, 0.f));
+        check(r.valid && glm::length(r.origin - glm::vec3(10.f, 1.5f, 0.f)) < 1e-5f &&
+              glm::length(r.dir - glm::vec3(-1.f, 0.f, 0.f)) < 1e-5f, "원점 요 90도면 조준 -Z 가 월드 -X");
+        const Ptr::Ray down = Ptr::rayFromAim(glm::mat4(1.f), {}, glm::angleAxis(glm::radians(-90.f), glm::vec3(1.f, 0.f, 0.f)));
+        check(glm::length(down.dir - glm::vec3(0.f, -1.f, 0.f)) < 1e-5f, "손목을 아래로 꺾으면 아래를 가리킴");
+    }
+
+    // (b) 트리거: 0.55 넘으면 누름, 0.35 아래로 가야 뗌
+    {
+        Ptr::TriggerLatch t;
+        const bool a = t.update(0.5f), b = t.update(0.6f), c = t.update(0.4f), d = t.update(0.3f);
+        check(!a && b && c && !d, "트리거 히스테리시스(0.5 안 누름, 0.6 누름, 0.4 유지, 0.3 뗌)");
+    }
+
+    // (c) 스틱 휠: 가운데 0.25 무시, 끝까지 밀면 초당 8 칸, 아래로 밀면 음수
+    check(Ptr::stickWheel(0.2f, 0.1f) == 0.f, "스틱 0.2 는 무시");
+    check(std::fabs(Ptr::stickWheel(1.f, 0.5f) - 4.f) < 1e-5f, "끝까지 0.5 초 -> 4 칸");
+    check(Ptr::stickWheel(-1.f, 0.1f) < 0.f && std::fabs(Ptr::stickWheel(-0.625f, 1.f) + 4.f) < 1e-4f,
+          "아래로 밀면 음수, 0.625 는 절반 속도");
+
+    // (d) 휠은 가리키는 패널의 위젯이 받음
+    static WheelProbe* probe = nullptr;
+    P::registerContent("WheelProbe", [](P&, float) {
+        auto w = std::make_shared<WheelProbe>();
+        probe = w.get();
+        return std::shared_ptr<HWidget>(w);
+    });
+    Actor a;
+    P* p = a.addComponent<P>();
+    p->content = "WheelProbe";
+    p->slate();
+    std::vector<P*> panels{ p };
+    Ptr::Ray on;  on.origin = { 0.f, 0.f, 2.f }; on.dir = { 0.f, 0.f, -1.f }; on.valid = true;
+    Ptr::Ray off = on; off.origin.x = 5.f;
+    Ptr ptr;
+    ptr.update(panels, on, { false, 1.5f });
+    check(probe && std::fabs(probe->total - 1.5f) < 1e-6f, "가리키는 패널의 위젯이 휠을 받음");
+    ptr.update(panels, off, { false, 2.f });
+    check(std::fabs(probe->total - 1.5f) < 1e-6f, "패널을 가리키지 않으면 휠을 보내지 않음");
+
+    // (e) 레이저 · 커서: 가리킬 때만, 누르는 중이면 흰색
+    std::vector<Ptr::Segment> segs;
+    ptr.appendLaser(off.origin, segs);
+    check(segs.empty(), "아무것도 가리키지 않으면 레이저 없음");
+    ptr.update(panels, on, {});
+    ptr.appendLaser(on.origin, segs);
+    check(segs.size() == 3 && glm::length(segs[0].b - glm::vec3(0.f)) < 1e-5f && segs[0].color.r < 1.f,
+          "가리키면 시작점 -> 맞은 점 레이저 + 커서 십자 둘(파란색)");
+    check(std::fabs(glm::length(segs[1].b - segs[1].a) - 0.015f) < 1e-5f && segs[1].a.z > 0.f,
+          "커서 십자 한 변 1.5 cm, 패널 앞쪽으로 띄움");
+    segs.clear();
+    ptr.update(panels, on, { true, 0.f });
+    ptr.appendLaser(on.origin, segs);
+    check(segs.size() == 3 && segs[0].color == glm::vec4(1.f), "누르는 중이면 흰색");
+    ptr.reset();
+    check(!ptr.trigger.down && !ptr.capturing(), "reset 은 트리거 래치도 풂");
+}
+
+// ── 3D UI 구간 7: 머리를 따라오는 패널 ───────────────────────────────────────────
+void testPanelFollow() {
+    std::printf("\n-- 3D UI 구간 7: 따라오는 패널 --\n");
+    using P = UIPanelComponent;
+    const glm::vec3 head{ 0.f, 1.6f, 0.f };
+    const glm::vec3 up{ 0.f, 1.f, 0.f };
+    auto facing = [](const glm::quat& q) { return q * glm::vec3(0.f, 0.f, 1.f); };   // 패널 앞면 방향
+
+    // (a) 목표: 머리 앞 수평 거리, 눈높이 + 높이, 앞면이 머리를 향함(요만)
+    {
+        const P::Pose t = P::followTarget(head, glm::quat(1.f, 0.f, 0.f, 0.f), 1.f, -0.15f, {});
+        check(glm::length(t.position - glm::vec3(0.f, 1.45f, -1.f)) < 1e-5f && glm::length(facing(t.rotation) - glm::vec3(0.f, 0.f, 1.f)) < 1e-5f,
+              "정면: (0, 1.45, -1), 앞면 +Z(머리 쪽)");
+        const P::Pose r = P::followTarget(head, glm::angleAxis(glm::radians(90.f), up), 1.f, 0.f, {});
+        check(glm::length(r.position - glm::vec3(-1.f, 1.6f, 0.f)) < 1e-5f && glm::length(facing(r.rotation) - glm::vec3(1.f, 0.f, 0.f)) < 1e-5f,
+              "왼쪽(요 90도)을 보면 -X 쪽, 앞면이 +X(머리 쪽)");
+        const glm::quat down60 = glm::angleAxis(glm::radians(-60.f), glm::vec3(1.f, 0.f, 0.f));
+        const P::Pose d = P::followTarget(head, down60, 1.f, 0.f, {});
+        check(glm::length(d.position - glm::vec3(0.f, 1.6f, -1.f)) < 1e-4f, "고개를 숙여도 수평 거리 · 높이는 그대로(기울이지 않음)");
+        const glm::quat down90 = glm::angleAxis(glm::radians(-90.f), glm::vec3(1.f, 0.f, 0.f));
+        const P::Pose f = P::followTarget(head, down90, 1.f, 0.f, { 1.f, 0.f, 0.f });
+        check(glm::length(f.position - glm::vec3(1.f, 1.6f, 0.f)) < 1e-4f, "바로 아래를 보면 대체 방향(지금 패널 쪽)을 앞으로");
+    }
+
+    // (b) 천천히 따라오기: 처음엔 바로, 조금 돌면 그대로, 크게 돌면 움직여 닿으면 멈춤
+    {
+        Actor a;
+        P* p = a.addComponent<P>();
+        p->placement = P::Placement::FollowHead;
+        p->stepFollow(head, glm::quat(1.f, 0.f, 0.f, 0.f), 1.f / 60.f);
+        check(glm::length(a.worldPosition() - glm::vec3(0.f, 1.45f, -1.f)) < 1e-5f && !p->followMoving(), "처음 부르면 목표로 바로");
+        const glm::vec3 before = a.worldPosition();
+        p->stepFollow(head, glm::angleAxis(glm::radians(20.f), up), 1.f / 60.f);
+        check(a.worldPosition() == before && !p->followMoving(), "20도 돌면 그대로(30도 안)");
+        const glm::quat turned = glm::angleAxis(glm::radians(60.f), up);
+        const bool moving = p->stepFollow(head, turned, 1.f / 60.f);
+        const glm::vec3 step1 = a.worldPosition();
+        check(moving && step1 != before && glm::length(step1 - before) < 0.2f, "60도 돌면 움직이기 시작(한 번에 뛰지 않음)");
+        int frames = 1;
+        while (p->stepFollow(head, turned, 1.f / 60.f) && frames < 600) ++frames;
+        const P::Pose target = P::followTarget(head, turned, 1.f, -0.15f, {});
+        check(!p->followMoving() && glm::length(a.worldPosition() - target.position) < 0.011f && frames > 30 && frames < 120,
+              "목표 1 cm 안에 닿으면 멈춤(약 1 초, 실제 " + std::to_string(frames) + " 프레임)");
+        check(glm::length(facing(a.worldRotation()) - facing(target.rotation)) < 0.02f, "움직이며 머리 쪽으로 돌아섬");
+        const glm::vec3 rest = a.worldPosition();
+        p->stepFollow(head + glm::vec3(0.f, 0.f, 0.2f), turned, 1.f / 60.f);
+        check(a.worldPosition() == rest, "20 cm 물러서는 정도는 그대로(35 cm 안)");
+        p->stepFollow(head + glm::vec3(0.f, 0.f, 0.f) - (turned * glm::vec3(0.f, 0.f, -1.f)) * 0.6f, turned, 1.f / 60.f);
+        check(p->followMoving(), "60 cm 물러서면 따라오기 시작");
+    }
+
+    // (c) 직렬화 · 범위
+    {
+        P a;
+        a.placement = P::Placement::FollowHead;
+        a.followDistance = 1.5f;
+        a.followHeight = 0.2f;
+        ComponentFieldWriter w;
+        a.writeFields(w);
+        P b;
+        for (const auto& f : w.fields()) b.readField(f.first, f.second);
+        check(b.placement == P::Placement::FollowHead && b.followDistance == 1.5f && b.followHeight == 0.2f, "배치 · 거리 · 높이가 왕복함");
+        P c;
+        const bool handled = c.readField("placement", "sideways") && c.readField("followDistance", "9") && c.readField("followHeight", "-3");
+        check(handled && c.placement == P::Placement::World && c.followDistance == 1.f && c.followHeight == -0.15f,
+              "모르는 배치 · 범위 밖 값은 기본값 유지");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1004,6 +1525,11 @@ int main() {
     testMultiContextCapture();
     testSlotVertexOffset();
     testLayerSortStability();
+    testUIPanelComponent();
+    testPanelAutoRedraw();
+    testPanelPointer();
+    testPanelPointerXr();
+    testPanelFollow();
 
     if (g_failed) {
         std::printf("\n%d check(s) FAILED\n", g_failed);

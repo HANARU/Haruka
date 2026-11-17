@@ -1,6 +1,8 @@
 #pragma once
 #include <memory>
 #include <string>
+#define GLM_FORCE_RADIANS
+#include <glm/glm.hpp>
 
 class Renderer;
 class World;
@@ -61,6 +63,15 @@ public:
     virtual std::string windowTitle() const = 0;   // 창 제목 앞부분(엔진이 FPS 를 덧붙임)
     // XR 세션 동안 소리를 헤드셋 장치로 바꿀지(2026-10-16).
     virtual bool headsetAudioInVr() const = 0;
+
+    // ── 월드 UI 패널 포인터 (3D UI 구간 5) ─────────────────────────────────────
+    // Play 중 마우스 (mx, my) 를 지나는 게임 화면의 월드 광선. 마우스가 게임 화면 밖이거나 게임 카메라가 보이지 않으면
+    // false 입니다(에디터 카메라로 보는 중 등). 엔진이 이 광선으로 월드 패널을 가리키고 누릅니다.
+    virtual bool pointerRay(float /*mx*/, float /*my*/, float /*winW*/, float /*winH*/,
+                            glm::vec3& /*origin*/, glm::vec3& /*dir*/) const { return false; }
+    // 마우스가 월드 패널을 가리키거나 누르는 중인지 엔진이 프레임마다 알립니다. 참이면 앞단은 같은 클릭으로 액터를
+    // 고르지 않습니다(에디터 Play 중 패널 버튼을 누르면 선택이 바뀌던 것).
+    virtual void setPointerOverWorldUi(bool /*over*/) {}
 };
 
 // 실행 파일마다 하나씩 정의합니다(에디터: editor/EditorFrontend.cpp, 게임: game/GameFrontend.cpp).

@@ -67,6 +67,7 @@ bool HFontAtlas::initCpuOnly(const std::string& fontPath) {
     cursorY_ = 0;
     rowH_    = 0;
     dirty_   = false;
+    droppedGlyphs_ = 0;
     // CPU 아틀라스 버퍼 초기화 (RGBA, 불투명 흰색 × 투명)
     cpuAtlas_.assign(kAtlasW * kAtlasH * 4, 0);
     return true;
@@ -152,7 +153,11 @@ void HFontAtlas::rasterizeGlyph(char c, float size, HGlyphInfo& out) {
         rowH_     = 0;
     }
     if (cursorY_ + gh + 1 > kAtlasH) {
-        HLOG(LogUI, Error) << "Font atlas full";
+        // 넘친 글자도 캐시에 남지만 글자 · 크기 조합마다 새로 넘치므로, 오류는 처음 한 번만 남기고 수는 셉니다
+        // (3D UI 패널처럼 큰 글자 · 여러 크기를 쓰면 같은 오류가 수백 줄 찍혔음).
+        if (droppedGlyphs_++ == 0)
+            HLOG(LogUI, Error) << "Font atlas full (" << kAtlasW << "x" << kAtlasH << "): glyph '" << c << "' at "
+                               << size << " px and any later new glyphs are not drawn";
         out = {};
         out.advance = glyphAdvance(c, size);   // 그리지 못해도 자리는 측정과 같게 차지합니다
         return;

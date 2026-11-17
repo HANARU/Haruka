@@ -61,6 +61,13 @@ public:
     }
 };
 
+// 바운드는 있지만 밟는 면이 아니라고 알리는 컴포넌트입니다(3D UI 패널과 같은 경우).
+class NotFloor : public BoundsOnly {
+public:
+    const char* typeName() const override { return "NotFloor"; }
+    bool blocksFloor() const override { return false; }
+};
+
 // 위치 · 크기를 주면 단위 상자 바운드를 가진 액터를 만듭니다.
 Actor* boundsBox(World& w, const char* name, const glm::vec3& pos, const glm::vec3& scale) {
     Actor* a = w.spawnActor(name);
@@ -819,6 +826,15 @@ int main() {
         Actor* body = boundsBox(w, "CamBody", { 0.f, -0.5f, 0.f }, { 0.3f, 0.3f, 0.3f });
         body->attachTo(cam);
         check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y) < 1e-5f, "카메라의 자식은 바닥이 아님");
+        // 밟는 면이 아니라고 알린 바운드(눕힌 3D UI 패널)는 보지 않음, 같은 액터의 다른 바운드는 봄
+        Actor* panel = w.spawnActor("LyingPanel");
+        panel->setLocalPosition({ 0.f, 1.0f, 2.5f });
+        panel->setLocalScale({ 1.f, 0.02f, 1.f });
+        panel->addComponent<NotFloor>();
+        check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y) < 1e-5f, "blocksFloor=false 바운드(눕힌 패널)는 바닥이 아님");
+        panel->addComponent<BoundsOnly>();
+        check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y - 1.01f) < 1e-4f, "같은 액터의 메시 바운드는 바닥 후보");
+        panel->setActive(false);   // 아래 시험에 끼지 않게
         // 아래에 아무것도 없음(바닥 밖 · 바닥보다 아래)
         check(!hxr::floorBelow(w, { 50.f, 1.f, 0.f }, nullptr, y), "바닥 밖이면 찾지 못함");
         check(!hxr::floorBelow(w, { 0.f, -5.f, 0.f }, nullptr, y), "바닥보다 아래면 찾지 못함");

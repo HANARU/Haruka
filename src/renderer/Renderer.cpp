@@ -112,6 +112,7 @@ void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
     rc_.viewportOffset = { 0, 0 };
     rc_.viewportExtent = rc_.extent;
     rc_.renderExtent   = desiredRenderExtent();
+    panels_.init(&rc_);
 
     // 기본 패스의 수명주기 목록(DEF-17). 프레임 순서대로이고, 확장은 등록할 때 뒤에 붙습니다.
     passRegistry_.setBuiltins({ &shadow_, &geometry_, &ao_, &bloom_, &post_ });
@@ -181,6 +182,14 @@ void Renderer::cleanup() {
     for (auto& ext : passRegistry_.takeExtensionsReversed()) ext->destroy();
     passRegistry_.forEachReverse([](HPass& p) { p.destroy(); });
 
+    // 월드 UI 패널 텍스처와, 에디터가 없을 때 만든 패널 UI(3D UI P1a)
+    if (const auto& ps = panels_.stats(); ps.redrawn + ps.skipped > 0)
+        HLOG(LogRenderer, Log) << "World UI panels: " << ps.redrawn << " GPU redraw(s), " << ps.skipped
+                               << " frame(s) skipped as unchanged";
+    panels_.destroy();
+    if (ownedPanelUi_) { ownedPanelUi_->cleanup(); delete ownedPanelUi_; ownedPanelUi_ = nullptr; }
+    panelUi_ = nullptr;
+
     // Error material + mega buffers
     if (errorMaterial_) { scene_.freeMaterial(errorMaterial_); errorMaterial_ = nullptr; }
     scene_.destroy();
@@ -189,6 +198,7 @@ void Renderer::cleanup() {
     swapchain_.reset();    // explicitly destroy before vkDestroyDevice
     if (textureSampler) { vkDestroySampler(device, textureSampler, nullptr); }
     if (clampSampler_)  { vkDestroySampler(device, clampSampler_,  nullptr); }
+    if (panelSampler_)  { vkDestroySampler(device, panelSampler_,  nullptr); panelSampler_ = VK_NULL_HANDLE; }
 
     frames_.destroy();
 
@@ -911,8 +921,43 @@ void Renderer::createTimestampPool() {
 // ── UI renderer hook ──────────────────────────────────────────────────────────
 
 void Renderer::setUIRenderer(HSlateRenderer* r) {
+    // 패널이 에디터 UI 로 그리고 있었는데 그 UI 가 떨어지면 패널 UI 를 다시 고릅니다. 이미 만든 패널 프레임버퍼는
+    // 형식이 같은 패널 렌더 패스와 호환이라 그대로 씁니다.
+    if (!r && panelUi_ == uiRenderer_) panelUi_ = nullptr;
     uiRenderer_ = r;
     if (r) r->rebuildFramebuffers(swapchain_->extent(), swapchain_->imageViews());
+}
+
+// ── 월드 UI 패널 (3D UI P1a) ──────────────────────────────────────────────────
+HSlateRenderer* Renderer::panelUi() {
+    if (panelUi_) return panelUi_;
+    if (uiRenderer_) return panelUi_ = uiRenderer_;
+    if (ownedPanelUi_) return panelUi_ = ownedPanelUi_;
+    if (panelUiFailed_) return nullptr;
+    auto* ui = new HSlateRenderer();
+    try {
+        ui->init(device, physDevice, VK_FORMAT_UNDEFINED, rc_.vk.push,
+                 [this]() { return rc_.beginOneTimeCmd(); },
+                 [this](VkCommandBuffer c) { rc_.endOneTimeCmd(c); });
+    } catch (const std::exception& ex) {
+        HLOG(LogRenderer, Error) << "World UI panels disabled: " << ex.what();
+        ui->cleanup();
+        delete ui;
+        panelUiFailed_ = true;
+        return nullptr;
+    }
+    HLOG(LogRenderer, Log) << "World UI panels: created a panel-only UI renderer (no editor UI)";
+    ownedPanelUi_ = ui;
+    return panelUi_ = ui;
+}
+
+uint32_t Renderer::createUIPanelTarget(uint32_t width, uint32_t height) {
+    HSlateRenderer* ui = panelUi();
+    return ui ? panels_.create(*ui, width, height) : 0u;
+}
+
+void Renderer::destroyUIPanelTarget(uint32_t handle) {
+    panels_.release(handle);
 }
 
 // ── Hot reload ────────────────────────────────────────────────────────────────

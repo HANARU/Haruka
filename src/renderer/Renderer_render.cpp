@@ -6,6 +6,7 @@
 #include "../assets/MeshSource.hpp"
 #include "../components/CameraComponent.hpp"
 #include "../components/LightComponent.hpp"
+#include "../components/UIPanelComponent.hpp"
 #include "../core/FrameTimings.hpp"
 #include "RendererLog.hpp"
 #include "DrawBatching.hpp"
@@ -66,6 +67,10 @@ void Renderer::createSamplers() {
          devicePlan_.samplerAnisotropy, VK_BORDER_COLOR_INT_OPAQUE_BLACK, 16.f);
     make(clampSampler_,  VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
          false, VK_BORDER_COLOR_INT_OPAQUE_BLACK,    16.f);
+    // 월드 UI 패널(3D UI P1b): 가장자리를 고정해 반대쪽 테두리가 번지지 않게 하고, 비스듬히 볼 때 글자가 흐려지지 않게
+    // 이방성을 켭니다(Research_3D_UI_Panel: UE Widget Component 의 흐림 · 반짝임을 밉 + 이방성으로 피함).
+    make(panelSampler_,  VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+         devicePlan_.samplerAnisotropy, VK_BORDER_COLOR_INT_OPAQUE_BLACK, 16.f);
     // (shadow sampler는 ShadowPass가 소유)
     make(iblSampler_,    VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
          false, VK_BORDER_COLOR_INT_OPAQUE_BLACK,    16.f);
@@ -471,6 +476,50 @@ void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
     }
 }
 
+// ── gatherUIPanels (3D UI P1b) ─────────────────────────────────────────────────
+// 패널마다 텍스처 핸들을 컴포넌트에 둡니다(렌더러는 컴포넌트 포인터를 들고 있지 않음). 이번 프레임에 쓰지 않은 텍스처는
+// 사라진 패널(액터 삭제 · 비활성 · 월드 교체)의 것이라 지웁니다. 지우기는 GPU 를 기다리지만 드문 일입니다.
+void Renderer::gatherUIPanels(World& world, std::vector<GeometryPass::PanelDraw>& out) {
+    out.clear();
+    std::vector<uint32_t> used;
+    for (const auto& up : world.getActors()) {
+        Actor* a = up.get();
+        if (!a->activeInHierarchy()) continue;
+        auto* pc = a->getComponent<UIPanelComponent>();
+        if (!pc || !pc->isEnabled()) continue;
+
+        // 같은 핸들을 쥔 패널이 이미 있으면(컴포넌트를 값으로 복사한 경우) 이 패널은 새로 만듭니다.
+        if (pc->gpuTarget && std::find(used.begin(), used.end(), pc->gpuTarget) != used.end())
+            pc->gpuTarget = 0;
+        const glm::uvec2 want = pc->textureSize();
+        if (pc->gpuTarget && (!panels_.valid(pc->gpuTarget) || pc->gpuSize != want)) {
+            panels_.release(pc->gpuTarget);   // 무효 핸들이면 아무것도 하지 않음
+            pc->gpuTarget = 0;
+        }
+        if (!pc->gpuTarget) {
+            pc->gpuTarget = createUIPanelTarget(want.x, want.y);
+            if (!pc->gpuTarget) continue;
+            pc->gpuSize = want;
+            pc->markDirty();
+        }
+        used.push_back(pc->gpuTarget);
+
+        // 그리기 목록은 여기(월드를 읽는 추출 단계)에서 만들고, 바뀐 패널만 drawFrame 이 GPU 로 그립니다(3D UI 구간 2).
+        HSlateContext& ctx = pc->slate();   // 처음이면 트리를 만들고 더럽게 표시
+        if (pc->takeDirty()) panels_.requestRedraw(pc->gpuTarget);
+        if (HSlateRenderer* ui = panelUi()) panels_.update(pc->gpuTarget, *ui, ctx);
+
+        GeometryPass::PanelDraw d;
+        d.model    = a->worldMatrix() * glm::scale(glm::mat4(1.f), glm::vec3(pc->width, pc->height, 1.f));
+        d.view     = panels_.view(pc->gpuTarget);
+        d.twoSided = pc->twoSided;
+        d.brightness = std::clamp(pc->brightness, UIPanelComponent::kMinBrightness, 1.f);
+        if (d.view) out.push_back(d);
+    }
+    for (uint32_t h : panels_.liveHandles())
+        if (std::find(used.begin(), used.end(), h) == used.end()) panels_.release(h);
+}
+
 // ── extractRenderView ──────────────────────────────────────────────────────────
 // World를 읽는 유일한 지점 (docs/RendererRefactor.md §4). 이후 패스 기록에서는
 // World/Actor/Component 참조 금지 — 시뮬레이션/렌더 스레드 분리의 경계가 된다.
@@ -493,6 +542,7 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
     updateUBO(world, lightCount);
     buildDrawCommands(world, v.opaqueDraws, v.transpDraws, v.materialRows, v.shadowDraws);
     frameStats_.drawCalls = (uint32_t)v.opaqueDraws.size();
+    gatherUIPanels(world, v.panels);
 
     if (hasCamera_) {
         for (uint32_t i = 0; i < viewCount_; ++i) {
@@ -559,6 +609,8 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
         ScopedCpuTimer t(ft.fenceWait);
         vkWaitForFences(device, 1, &frameFence, VK_TRUE, UINT64_MAX);
     }
+    // 이 슬롯을 마지막으로 쓴 제출(frameNum_ - MAX_FRAMES)이 끝났으니, 그 프레임까지만 쓰던 패널 텍스처를 지웁니다.
+    panels_.beginFrame(frameNum_);
 
     // Read previous frame's timestamps — skip until each slot has been written at least once
     if (timestampPool_ && frameNum_ >= MAX_FRAMES) {
@@ -657,6 +709,14 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     rc_.memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, kTargetWrites,
                            VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, kTargetReads);
 
+    // ── 월드 UI 패널 (3D UI P1a) ──────────────────────────────────────────────
+    // UI 정점 버퍼의 이 슬롯을 비웁니다. 패널과 에디터 오버레이가 한 프레임에 같은 슬롯 버퍼에 이어 쓰므로 UI 를
+    // 기록하기 전에 한 번입니다. 다시 그릴 패널은 메인 패스(두 눈이 함께 읽음)보다 먼저 그리고 밉을 만듭니다.
+    if (uiRenderer_)                                   uiRenderer_->beginFrame(fi);
+    if (ownedPanelUi_ && ownedPanelUi_ != uiRenderer_) ownedPanelUi_->beginFrame(fi);
+    if (panels_.hasQueued())
+        if (HSlateRenderer* ui = panelUi()) panels_.record(cmd, *ui, fi);
+
     // ── Shadow pass ───────────────────────────────────────────────────────────
     // view.shadowDraws 는 buildDrawCommands 가 **라이트 프러스텀**으로 걸러 만든 캐스터
     // 목록이다(DEF-27). 불투명·투명을 모두 담고(투명은 알파 무시·실루엣 근사), firstInstance
@@ -689,6 +749,8 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     gin.clampSampler     = clampSampler_;
     gin.opaqueItems      = &view.opaqueItems;
     gin.transparentItems = &view.transparentItems;
+    gin.panelSampler     = panelSampler_;
+    gin.panels           = &view.panels;
 
     // 단안은 뷰포트 전체, 스테레오 흉내는 뷰포트의 왼쪽 · 오른쪽 절반, XR 은 스왑체인의 그 눈 층에
     // 합성합니다.

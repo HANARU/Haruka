@@ -134,6 +134,14 @@ int main() {
         check(o.capturePath == "a.png" && u.empty(), "--capture=a.png");
         o = parse({ "--capture=" }, u);
         check(o.capturePath.empty() && u.size() == 1, "--capture= → 거부");
+        // --scene(2026-11-16, 시험 장면 캡처): 씬 논리 경로 규칙(assets/ 아래 .hscene, .. · 역슬래시 없음)을 따름
+        o = parse({ "--scene=assets/scenes/UIPanelProbe.hscene" }, u);
+        check(o.scenePath == "assets/scenes/UIPanelProbe.hscene" && u.empty(), "--scene=assets/scenes/X.hscene");
+        for (const char* bad : { "--scene=", "--scene=scenes/X.hscene", "--scene=assets/scenes/X.txt",
+                                 "--scene=assets/../X.hscene", "--scene=assets\\scenes\\X.hscene" }) {
+            o = parse({ bad }, u);
+            check(o.scenePath.empty() && u.size() == 1, std::string(bad) + " → 거부");
+        }
 
         o = parse({ "--xr", "--emulate-stereo", "--loose" }, u);
         check(o.xr == true && o.emulateStereo && o.loose && u.empty(), "기존 --xr · --emulate-stereo · --loose 는 그대로");

@@ -24,6 +24,7 @@
 #include "../components/CoreComponents.hpp"
 #include "../components/XrComponents.hpp"
 #include "../components/CameraComponent.hpp"
+#include "../components/UIPanelPointer.hpp"
 #include "../xr/SyntheticEyes.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "ShaderManifest.hpp"
@@ -326,12 +327,122 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
     // 처음 열 씬은 앞단이 정합니다. 에디터는 마지막으로 연 씬(없으면 프로젝트 시작 씬), 게임 실행 파일은 프로젝트 시작
     // 씬입니다. 예전에는 게임 모듈이 코드에 박힌 시작 씬을 읽어, 에디터가 지금 열린 파일을 몰랐습니다.
-    frontend_->openInitialScene(project_.startScene);
+    // --scene 이 있으면 그 씬이 시작 씬입니다(시험 장면 캡처, 2026-11-16).
+    frontend_->openInitialScene(options_.scenePath.empty() ? project_.startScene : options_.scenePath);
 }
 
 // ── Teardown (부팅의 역순) ─────────────────────────────────────────────────────
 // 완전히 구성된 Engine 만 여기 도달합니다. 부팅 중 예외로 미완성이면 이미 생성된
 // 멤버의 소멸자만 돌아가며, 그때의 안전성은 예전 main() 의 스택 파괴와 동일합니다.
+// ── 머리를 따라오는 월드 UI 패널 (3D UI 구간 7) ─────────────────────────────────────
+void Engine::updateFollowPanels(float dt) {
+    CameraComponent* cam = world_.getActiveCamera();
+    if (!cam || !cam->owner) return;
+    // 머리 자세: XR 세션이 입력을 받는 동안은 헤드셋(XR 원점 × 머리), 아니면 카메라 액터. 청취자와 같은 기준입니다.
+    glm::vec3 headPos = cam->owner->worldPosition();
+    glm::quat headRot = cam->owner->worldRotation();
+    const HXrInputState& xr = HInputSystem::get().xr();
+    if (xr_ && xr_->hasSession() && xr.focused && xr.head.valid) {
+        const glm::mat4 m = cam->xrOrigin() * glm::translate(glm::mat4(1.f), xr.head.position) * glm::mat4_cast(xr.head.orientation);
+        headPos = glm::vec3(m[3]);
+        headRot = glm::quat_cast(glm::mat3(glm::normalize(glm::vec3(m[0])), glm::normalize(glm::vec3(m[1])),
+                                           glm::normalize(glm::vec3(m[2]))));
+    }
+    for (const auto& ap : world_.getActors()) {
+        if (!ap->activeInHierarchy()) continue;
+        auto* pc = ap->getComponent<UIPanelComponent>();
+        if (pc && pc->isEnabled() && pc->placement == UIPanelComponent::Placement::FollowHead)
+            pc->stepFollow(headPos, headRot, dt);
+    }
+}
+
+// ── 월드 UI 패널 포인터: 마우스 · XR 두 손 (3D UI 구간 5 · 6) ───────────────────────────
+void Engine::updateWorldUiPointers(IEngineFrontend& front, const WorldUiPointerInput& in) {
+    auto stop = [](std::unique_ptr<UIPanelPointer>& p, bool& live) {
+        if (live && p) p->reset();
+        live = false;
+    };
+    if (!in.mouseActive) stop(mouseUiPointer_, mouseUiPointerLive_);
+    if (!in.xrActive)
+        for (int h = 0; h < 2; ++h) stop(xrUiPointers_[h], xrUiPointerLive_[h]);
+    if (!in.mouseActive && !in.xrActive) {
+        front.setPointerOverWorldUi(false);
+        if (pointerLinesShown_) { renderer_->setPointerLines({}); pointerLinesShown_ = false; }
+        return;
+    }
+
+    // 보이는 패널(렌더러가 그리는 것과 같은 조건: 켜진 액터의 켜진 첫 패널)
+    std::vector<UIPanelComponent*> panels;
+    for (const auto& ap : world_.getActors()) {
+        if (!ap->activeInHierarchy()) continue;
+        if (auto* pc = ap->getComponent<UIPanelComponent>(); pc && pc->isEnabled()) panels.push_back(pc);
+    }
+
+    // 가림은 물리 레이캐스트로 봅니다. 플레이어(활성 카메라의 맨 위 조상) 아래의 액터는 모두 뺍니다. 광선이 몸 · 리그 · 손의
+    // 충돌체 안에서 출발하면 거리 0 으로 맞기 때문입니다(Jolt 기본 동작).
+    CameraComponent*    cam = world_.getActiveCamera();
+    std::vector<Actor*> ignore;
+    if (cam && cam->owner) {
+        const Actor* root = cam->owner;
+        while (root->getParent()) root = root->getParent();
+        for (const auto& ap : world_.getActors()) {
+            const Actor* top = ap.get();
+            while (top->getParent()) top = top->getParent();
+            if (top == root) ignore.push_back(ap.get());
+        }
+    }
+    UIPanelPointer::Occluder occluder;
+    if (physics_)
+        occluder = [this, &ignore](const glm::vec3& o, const glm::vec3& d, float maxD, float& outD, Actor*& outA) {
+            PhysicsSystem::RaycastHit h;
+            if (!physics_->raycast(o, d, maxD, h, ignore)) return false;
+            outD = h.distance;
+            outA = h.actor;
+            return true;
+        };
+
+    // ── 마우스 ──
+    bool mouseOver = false;
+    if (in.mouseActive) {
+        if (!mouseUiPointer_) mouseUiPointer_ = std::make_unique<UIPanelPointer>();
+        UIPanelPointer::Ray ray;
+        ray.valid = !panels.empty() && front.pointerRay(in.mx, in.my, (float)in.winW, (float)in.winH, ray.origin, ray.dir);
+        mouseUiPointer_->update(panels, ray, { in.lmb, 0.f }, occluder);
+        mouseUiPointerLive_ = true;
+        mouseOver = mouseUiPointer_->overPanel() || mouseUiPointer_->capturing();
+    }
+    front.setPointerOverWorldUi(mouseOver);
+
+    // ── XR 두 손: 조준 자세 광선, 트리거 = 클릭, 스틱 위아래 = 휠, 레이저 · 커서 ──
+    std::vector<UIPanelPointer::Segment> segs;
+    if (in.xrActive) {
+        const HXrInputState& xr = HInputSystem::get().xr();
+        const glm::mat4 origin = cam ? cam->xrOrigin() : glm::mat4(1.f);
+        for (int h = 0; h < 2; ++h) {
+            if (!xrUiPointers_[h]) xrUiPointers_[h] = std::make_unique<UIPanelPointer>();
+            const HHandInput& hand = xr.hands[h];
+            UIPanelPointer::Ray ray;
+            if (xr.focused && hand.active && hand.aim.valid && cam && !panels.empty())
+                ray = UIPanelPointer::rayFromAim(origin, hand.aim.position, hand.aim.orientation);
+            const bool wasPressed = xrUiPointers_[h]->capturing();
+            const UIPanelPointer::Buttons b{ xrUiPointers_[h]->trigger.update(xr.focused && hand.active ? hand.trigger : 0.f),
+                                             UIPanelPointer::stickWheel(hand.thumbstick.y, in.dt) };
+            xrUiPointers_[h]->update(panels, ray, b, occluder);
+            xrUiPointerLive_[h] = true;
+            // 패널을 누른 순간 짧게 진동합니다(누른 것을 손으로 느끼게).
+            if (!wasPressed && xrUiPointers_[h]->capturing()) HInputSystem::get().haptic(h, 0.35f, 0.02f);
+            if (ray.valid) xrUiPointers_[h]->appendLaser(ray.origin, segs);
+        }
+    }
+    if (!segs.empty() || pointerLinesShown_) {
+        std::vector<LineVertex> lines;
+        lines.reserve(segs.size() * 2);
+        for (const auto& sg : segs) { lines.push_back({ sg.a, sg.color }); lines.push_back({ sg.b, sg.color }); }
+        pointerLinesShown_ = !lines.empty();
+        renderer_->setPointerLines(std::move(lines));
+    }
+}
+
 Engine::~Engine() {
     if (game_)     game_->onShutdown();
     modules_.shutdownAll();
@@ -696,6 +807,19 @@ int Engine::run() {
                 world.tick(dt);
                 gameModule.onTick(dt, ctx);
                 modules.tickAll(dt);
+            }
+            // 머리를 따라오는 패널(3D UI 구간 7)을 먼저 옮기고, 그 자세로 포인터가 가리킵니다.
+            if (playing) updateFollowPanels(dt);
+            // 월드 UI 패널(3D UI 구간 5 · 6): 틱이 옮긴 뒤의 자세로 가리키고, 앞단의 클릭 처리(handleInput)보다 먼저 알립니다.
+            // 마우스는 XR 세션이 없을 때만, 창 없는 실행(--headless)에는 실제 마우스가 없어 끕니다(좌표 0,0 의 호버가
+            // 캡처를 바꾸지 않게). XR 은 세션이 입력을 받는 동안 두 손 컨트롤러로 가리킵니다.
+            {
+                const bool xrLiveNow = xr_ && xr_->hasSession();
+                WorldUiPointerInput pin;
+                pin.mouseActive = playing && !minimized && !headless_ && !xrLiveNow;
+                pin.xrActive    = playing && xrLiveNow;
+                pin.mx = mx; pin.my = my; pin.lmb = lmb; pin.winW = winW; pin.winH = winH; pin.dt = dt;
+                updateWorldUiPointers(front, pin);
             }
             // 마우스 시선은 이번 프레임 것만 씁니다(에디터가 다음 tick 에 다시 넣음).
             HInputSystem::get().setLookDelta(0.f, 0.f);

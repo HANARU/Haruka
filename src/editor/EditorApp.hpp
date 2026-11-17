@@ -86,7 +86,12 @@ public:
     // XR Play 동안 소리를 헤드셋 장치로 바꿀지(기본 켜짐). 엔진이 세션을 열고 닫을 때 묻습니다.
     bool headsetAudioInVr() const override { return headsetAudioInVr_; }
 
+    // 월드 UI 패널 포인터(3D UI 구간 5): Play 중 뷰포트가 게임 카메라를 보일 때만 광선을 줍니다.
+    bool pointerRay(float mx, float my, float winW, float winH, glm::vec3& origin, glm::vec3& dir) const override;
+    void setPointerOverWorldUi(bool over) override { pointerOverWorldUi_ = over; }
+
 private:
+    bool pointerOverWorldUi_ = false;   // 엔진이 알림: 마우스가 월드 패널 위(같은 클릭으로 액터를 고르지 않음)
     // UI scale factor: 1.0 at 1080p, proportional to framebuffer height
     float uiScale_ = 1.f;
     float s(float x) const { return x * uiScale_; }

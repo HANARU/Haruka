@@ -18,6 +18,9 @@ public:
     // 솔리드 몸체가 없는 것은 false 를 두고 아이콘으로 잡힙니다(editorIcon).
     // 반환하는 바운드는 액터 로컬 공간입니다. 픽은 여기에 worldMatrix 를 곱해 OBB 로 씁니다.
     virtual bool localBounds(glm::vec3& /*outMin*/, glm::vec3& /*outMax*/) const { return false; }
+    // localBounds 를 밟을 수 있는 면으로 볼지입니다(hxr::floorBelow 의 바닥 후보). 메시는 true, 3D UI 패널처럼
+    // 바운드가 있어도 서 있을 곳이 아닌 것은 false 를 돌려줍니다.
+    virtual bool blocksFloor() const { return true; }
 
     // 솔리드 바운드가 없는 엔티티(라이트·카메라·오디오)를 뷰포트에서 보이고 잡히게
     // 하는 에디터 아이콘입니다. true 면 outColor 로 아이콘을 그리고 화면 원판 판정으로
