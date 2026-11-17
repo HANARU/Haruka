@@ -1,6 +1,7 @@
 #pragma once
 #include <chrono>
 #include <cstdint>
+#include <initializer_list>
 
 // ── CPU 프레임 계측 (진단용) ──────────────────────────────────────────────────
 //
@@ -22,9 +23,12 @@
 
 struct FrameTimings {
     // 지수 이동 평균입니다. 한 프레임짜리 튀는 값에 눈이 따라가지 않게 합니다.
+    // last 는 이번 프레임의 값입니다(루프 시작에 resetLast 가 0 으로). 예산을 넘은 프레임이 어느 구간 때문인지
+    // 알리는 데 씁니다(2026-11-18, 성능 안정화 1-1).
     struct Avg {
-        float v = 0.f;
-        void  add(float ms) { v = v * 0.9f + ms * 0.1f; }
+        float v    = 0.f;
+        float last = 0.f;
+        void  add(float ms) { v = v * 0.9f + ms * 0.1f; last += ms; }
     };
 
     // ── Renderer::drawFrame 내부 구간 ────────────────────────────────────────
@@ -41,9 +45,19 @@ struct FrameTimings {
 
     // ── 메인 루프의 drawFrame 바깥 구간 ──────────────────────────────────────
     Avg pollEvents;
+    Avg xrWait;       // xrWaitFrame + xrBeginFrame(헤드셋이 루프 속도를 정하는 대기)
     Avg tick;         // editor.tick + world.tick + 모듈
+    Avg worldTick;    // 그중 world.tick + 게임 모듈
+    Avg modules;      // 그중 모듈(물리 · 소리)
+    Avg physics;      // 그중 물리
     Avg handleInput;
     Avg loopTotal;    // 루프 1 회 전체. 이것이 곧 실제 프레임 간격입니다
+
+    void resetLast() {
+        for (Avg* a : { &fenceWait, &reflCapture, &acquire, &imgFence, &extract, &record, &uiRecord, &submit, &present,
+                        &drawFrame, &pollEvents, &xrWait, &tick, &worldTick, &modules, &physics, &handleInput, &loopTotal })
+            a->last = 0.f;
+    }
 
     // ── 카운터 ───────────────────────────────────────────────────────────────
     // 스왑체인 또는 씬 렌더 타깃(뷰포트 크기 변경)의 재생성 횟수입니다. 이 값이 초당

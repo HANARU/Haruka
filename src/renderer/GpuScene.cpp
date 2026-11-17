@@ -47,6 +47,10 @@ void GpuScene::create(RenderContext& rc) {
 
 void GpuScene::destroy() {
     if (!rc_) return;
+    if (fallbackReady_) {
+        for (TexSlot& t : fallback_) { t.shared = false; freeTexSlot(t); t = {}; }
+        fallbackReady_ = false;
+    }
     if (megaVertBuf_) { vkDestroyBuffer(rc_->device, megaVertBuf_, nullptr); rc_->allocator->freeB(megaVertAlloc_); megaVertBuf_ = VK_NULL_HANDLE; }
     if (megaIdxBuf_)  { vkDestroyBuffer(rc_->device, megaIdxBuf_,  nullptr); rc_->allocator->freeB(megaIdxAlloc_);  megaIdxBuf_  = VK_NULL_HANDLE; }
 }
@@ -186,6 +190,24 @@ void GpuScene::freeMesh(MeshHandle* h) {
 // ── Texture slot upload ───────────────────────────────────────────────────────
 
 TexSlot GpuScene::uploadTexture(const uint8_t* pixels, int w, int h, VkFormat fmt) {
+    std::vector<Staging> staging;
+    auto cmd = rc_->beginOneTimeCmd();
+    TexSlot slot = recordTextureUpload(cmd, pixels, w, h, fmt, staging);
+    rc_->endOneTimeCmd(cmd);
+    freeStaging(staging);
+    return slot;
+}
+
+void GpuScene::freeStaging(std::vector<Staging>& staging) {
+    for (Staging& s : staging) {
+        vkDestroyBuffer(rc_->device, s.buf, nullptr);
+        rc_->allocator->freeB(s.alloc);
+    }
+    staging.clear();
+}
+
+TexSlot GpuScene::recordTextureUpload(VkCommandBuffer cmd, const uint8_t* pixels, int w, int h, VkFormat fmt,
+                                      std::vector<Staging>& staging) {
     TexSlot slot;
     VkDeviceSize imageSize = (VkDeviceSize)w * h * 4;
 
@@ -202,6 +224,7 @@ TexSlot GpuScene::uploadTexture(const uint8_t* pixels, int w, int h, VkFormat fm
     if (!stagingAlloc.isValid()) throw std::runtime_error("Zone B: staging alloc failed!");
     rc_->allocator->bind(stagingBuf, stagingAlloc);
     memcpy(stagingAlloc.mappedPtr, pixels, imageSize);
+    staging.push_back({ stagingBuf, stagingAlloc });
 
     // 밉 사슬(DEF-165, MipChain.hpp). 0단계는 스테이징에서 복사하고, 나머지는 바로 위 단계에서 선형 블릿으로 줄입니다.
     const uint32_t mips = (w > 1 || h > 1) && canBlitMips(fmt) ? hmip::levelCount((uint32_t)w, (uint32_t)h) : 1u;
@@ -229,7 +252,6 @@ TexSlot GpuScene::uploadTexture(const uint8_t* pixels, int w, int h, VkFormat fm
         rc_->pipelineBarrier(c, di);
     };
 
-    auto cmd = rc_->beginOneTimeCmd();
     rc_->transitionImage(cmd, slot.image,
         VK_IMAGE_LAYOUT_UNDEFINED,                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_PIPELINE_STAGE_2_NONE,                 VK_ACCESS_2_NONE,
@@ -267,10 +289,6 @@ TexSlot GpuScene::uploadTexture(const uint8_t* pixels, int w, int h, VkFormat fm
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_PIPELINE_STAGE_2_COPY_BIT | VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
-    rc_->endOneTimeCmd(cmd);
-
-    vkDestroyBuffer(rc_->device, stagingBuf, nullptr);
-    rc_->allocator->freeB(stagingAlloc);
 
     slot.imageView = rc_->createImageView(slot.image, fmt, VK_IMAGE_ASPECT_COLOR_BIT, mips, 1);
     return slot;
@@ -291,6 +309,7 @@ bool GpuScene::canBlitMips(VkFormat fmt) {
 }
 
 void GpuScene::freeTexSlot(TexSlot slot) {
+    if (slot.shared) return;   // 기본값 1x1(fallback_)은 destroy 가 지움
     if (slot.imageView) { vkDestroyImageView(rc_->device, slot.imageView, nullptr); slot.imageView = VK_NULL_HANDLE; }
     if (slot.image)     { vkDestroyImage(rc_->device, slot.image, nullptr);         slot.image     = VK_NULL_HANDLE; }
     if (slot.alloc.isValid()) { rc_->allocator->freeB(slot.alloc); slot.alloc = {}; }
@@ -310,18 +329,32 @@ MaterialHandle* GpuScene::uploadMaterial(
 {
     auto* mat = new MaterialHandle();
 
-    auto upload = [&](const TexSourceData& tex, const uint8_t* fallback,
-                      VkFormat fmt) -> TexSlot {
+    // 텍스처를 모두 한 명령 버퍼에 기록하고 한 번 제출합니다(2026-11-18, 성능 안정화 1-6). 기본값 1x1 은 처음 한 번만 만들고
+    // 모든 머티리얼이 함께 씁니다(fallback_, 내용 · 형식은 예전 머티리얼마다 올리던 것과 같음).
+    std::vector<Staging> staging;
+    auto cmd = rc_->beginOneTimeCmd();
+    if (!fallbackReady_) {
+        fallback_[kFbAlbedo]     = recordTextureUpload(cmd, kWhite,    1, 1, VK_FORMAT_R8G8B8A8_SRGB,  staging);
+        fallback_[kFbNormal]     = recordTextureUpload(cmd, kFlatNorm, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, staging);
+        fallback_[kFbMetalRough] = recordTextureUpload(cmd, kMR,       1, 1, VK_FORMAT_R8G8B8A8_UNORM, staging);
+        fallback_[kFbAo]         = recordTextureUpload(cmd, kWhite,    1, 1, VK_FORMAT_R8G8B8A8_UNORM, staging);
+        fallback_[kFbEmissive]   = recordTextureUpload(cmd, kBlack,    1, 1, VK_FORMAT_R8G8B8A8_SRGB,  staging);
+        for (TexSlot& t : fallback_) t.shared = true;
+        fallbackReady_ = true;
+    }
+    auto upload = [&](const TexSourceData& tex, FallbackTex fb, VkFormat fmt) -> TexSlot {
         if (tex.hasData)
-            return uploadTexture(tex.data.data(), tex.w, tex.h, fmt);
-        return uploadTexture(fallback, 1, 1, fmt);
+            return recordTextureUpload(cmd, tex.data.data(), tex.w, tex.h, fmt, staging);
+        return fallback_[fb];
     };
 
-    mat->albedo    = upload(albedo,    kWhite,    VK_FORMAT_R8G8B8A8_SRGB);
-    mat->normalMap = upload(normalMap, kFlatNorm, VK_FORMAT_R8G8B8A8_UNORM);
-    mat->metalRough= upload(metalRough,kMR,       VK_FORMAT_R8G8B8A8_UNORM);
-    mat->ao        = upload(ao,        kWhite,    VK_FORMAT_R8G8B8A8_UNORM);
-    mat->emissive  = upload(emissive,  kBlack,    VK_FORMAT_R8G8B8A8_SRGB);
+    mat->albedo    = upload(albedo,     kFbAlbedo,     VK_FORMAT_R8G8B8A8_SRGB);
+    mat->normalMap = upload(normalMap,  kFbNormal,     VK_FORMAT_R8G8B8A8_UNORM);
+    mat->metalRough= upload(metalRough, kFbMetalRough, VK_FORMAT_R8G8B8A8_UNORM);
+    mat->ao        = upload(ao,         kFbAo,         VK_FORMAT_R8G8B8A8_UNORM);
+    mat->emissive  = upload(emissive,   kFbEmissive,   VK_FORMAT_R8G8B8A8_SRGB);
+    rc_->endOneTimeCmd(cmd);
+    freeStaging(staging);
 
     return mat;
 }

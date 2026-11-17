@@ -182,6 +182,41 @@ int main() {
         msg.clear();
         ProjectSettings pb = project_settings::parse("render.ao = off\n", msg);
         check(pb.renderAo && pb.renderBloom && msg.size() == 1, "render.ao 의 true · false 밖 값은 경고하고 켬");
+
+        // 품질 단계 · 플랫폼 접미사(2026-11-18, 성능 안정화 2-1 · 2-2)
+        check(d.renderCsmCascades == 2 && d.renderShadowDistance == 20.f && d.renderContactShadows && d.renderHeightFog &&
+              d.renderReflectionCapture && d.renderLightLimit == 0, "품질 기본값 = PC 화면(2 단 · 20 m · 모두 켬 · 상한 없음)");
+        const std::string q =
+            "render.ao.android = false\n"          // 기본 줄보다 앞에 있어도 기본 줄 뒤에 덮음
+            "render.ao = true\n"
+            "render.csmCascades = 2\n"
+            "render.csmCascades.android = 1\n"
+            "render.shadowDistance.android = 12\n"
+            "render.lightLimit.android = 32\n"
+            "render.contactShadows.windows = false\n"
+            "render.heightFog = false\n"
+            "render.reflectionCapture = false\n";
+        msg.clear();
+        ProjectSettings qa = project_settings::parse(q, msg, settings_platform::kAndroid);
+        check(!qa.renderAo && qa.renderCsmCascades == 1 && qa.renderShadowDistance == 12.f && qa.renderLightLimit == 32 &&
+              qa.renderContactShadows && msg.empty(), "android: .android 줄이 덮고(줄 순서와 무관) .windows 줄은 건너뜀");
+        check(!qa.renderHeightFog && !qa.renderReflectionCapture, "접미사 없는 줄은 모든 플랫폼에 적용");
+        msg.clear();
+        ProjectSettings qw = project_settings::parse(q, msg, settings_platform::kWindows);
+        check(qw.renderAo && qw.renderCsmCascades == 2 && qw.renderShadowDistance == 20.f && qw.renderLightLimit == 0 &&
+              !qw.renderContactShadows && msg.empty(), "windows: .android 줄은 건너뛰고 .windows 줄만 덮음");
+        msg.clear();
+        ProjectSettings qn = project_settings::parse(q, msg);
+        check(qn.renderAo && qn.renderCsmCascades == 2 && qn.renderContactShadows && msg.empty(), "플랫폼을 주지 않으면 접미사 줄은 모두 건너뜀");
+        msg.clear();
+        ProjectSettings qb = project_settings::parse("render.csmCascades = 3\nrender.shadowDistance = 5\nrender.lightLimit = 2.5\n"
+                                                     "input.action.Jump.android = key:Space\n", msg);
+        check(qb.renderCsmCascades == 2 && qb.renderShadowDistance == 20.f && msg.size() == 4 && qb.input.empty(),
+              "범위 밖 단 수 · 거리, 정수가 아닌 상한, 접미사 붙은 입력 바인딩 → 경고(4)");
+        std::string base;
+        check(settings_platform::split("render.ao.android", base) == "android" && base == "render.ao", "접미사 떼기");
+        check(settings_platform::split("render.ao", base).empty() && base == "render.ao", "접미사가 없으면 그대로");
+        check(settings_platform::split(".android", base).empty(), "이름 없이 접미사만 있으면 접미사로 보지 않음");
     }
 
     std::printf("\n== 4. 원자적 저장 ==\n");

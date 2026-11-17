@@ -1,4 +1,5 @@
 #include "PhysicsSystem.hpp"
+#include "../core/FrameTimings.hpp"
 #include "../core/World.hpp"
 #include "../core/Actor.hpp"
 #include "../components/RigidBodyComponent.hpp"
@@ -510,6 +511,7 @@ void PhysicsSystem::teleport(uint32_t id, const Actor& a) {
 
 void PhysicsSystem::tick(float dt) {
     if (!impl_ || !world_) return;
+    ScopedCpuTimer timer(gFrameTimings().physics);
 
     auto& bi = impl_->physics->GetBodyInterface();
 

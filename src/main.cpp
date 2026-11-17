@@ -73,6 +73,8 @@ static bool redirectStdioIfHeadless() {
 //   --vk-no-sync2          synchronization2 가 있어도 Vulkan 1.0 배리어로 기록합니다(Quest 의 대체 경로 시험, DEF-04).
 //   --vk-dedicated-msaa    MSAA 컬러를 핵심 힙 밖 별도 할당으로 둡니다(Quest 의 지연 할당 경로를 PC 에서 시험, DEF-06).
 //   --no-multiview         두 눈의 메인 패스를 멀티뷰로 한 번에 그리지 않고 눈마다 그립니다(비교 · 진단).
+//   --gpu=N                Vulkan 이 나열한 N 번째 GPU 를 씁니다(0 부터, GPU 가 여럿일 때 비어 있는 GPU 로 측정).
+//   --settings-platform=P  project.ini 의 플랫폼 접미사 줄을 P(android · windows) 것으로 읽습니다(PC 에서 Quest 품질 단계 시험).
 //   --ssao · --no-ssao     화면 공간 AO 를 켜거나 끕니다(AO 를 뺀 비교 · 끔 경로 시험). 프로젝트 설정 render.ao 를
 //                          덮어씁니다. 머티리얼 occlusion 텍스처는 그대로입니다.
 

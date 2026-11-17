@@ -88,6 +88,8 @@ public:
     void setForceNoSync2(bool on) { forceNoSync2_ = on; }
     // --vk-dedicated-msaa: MSAA 컬러를 핵심 힙 밖 별도 할당으로(지연 할당 타입이 없는 데스크톱에서 DEF-06 경로 시험).
     void setForceDedicatedMsaa(bool on) { forceDedicatedMsaa_ = on; }
+    // --gpu=N: vkEnumeratePhysicalDevices 순서의 N 번째 GPU 를 씁니다(-1 = 처음 쓸 수 있는 것). init 전에 부릅니다.
+    void setPreferredGpu(int index) { preferredGpu_ = index; }
     // --no-multiview: 두 눈의 메인 패스를 멀티뷰로 한 번에 그리지 않고 눈마다 그립니다(진단 · 비교용, 2026-11-18).
     // 장치의 멀티뷰 기능은 그래도 켭니다(셰이더가 gl_ViewIndex 를 씀). 언제든 부를 수 있고 다음 프레임부터 반영됩니다.
     void setMultiview(bool on) { multiview_ = on; }
@@ -238,6 +240,7 @@ private:
     bool               headless_ = false;   // 창이 표면을 주지 않음
     bool               forceNoSync2_ = false;   // --vk-no-sync2
     bool               forceDedicatedMsaa_ = false;   // --vk-dedicated-msaa
+    int                preferredGpu_ = -1;            // --gpu=N
     bool               multiview_ = true;             // --no-multiview 면 거짓(setMultiview)
     int                stereoMainPassMode_ = -1;      // 직전 두 눈 프레임의 메인 패스(1 멀티뷰 · 0 눈마다, 로그용)
     Quality            quality_;                      // 품질 단계(setQuality)

@@ -133,6 +133,7 @@ static void checkShadersMatchBuild(bool loose, bool anyPack, bool packFailed) {
 // 코어 서비스는 초기화 순서가 고정입니다: 창 → 렌더러(창 필요) → 에셋(렌더러 필요).
 // 그다음 동적 모듈을 등록하고, 마지막에 에디터·게임을 올립니다.
 Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> frontend) {
+    bootStart_ = std::chrono::steady_clock::now();
     if (!frontend) throw std::runtime_error("Engine needs a frontend (editor or game)");
     frontend_ = std::move(frontend);
     policy_   = frontend_->policy();
@@ -212,8 +213,14 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         std::string text;
         if (hvfs::readText(ProjectSettings::kPath, text)) {
             std::vector<std::string> messages;
-            project_ = project_settings::parse(text, messages);
+            // 플랫폼 접미사 줄(이름.android 등, 2026-11-18)은 이 빌드의 플랫폼 것을 씁니다. --settings-platform 으로 바꿔 시험합니다.
+            const std::string platform = options.settingsPlatform.empty() ? std::string(settings_platform::native())
+                                                                          : options.settingsPlatform;
+            project_ = project_settings::parse(text, messages, platform);
             for (const auto& m : messages) HLOG(LogEngine, Warning) << ProjectSettings::kPath << ": " << m;
+            if (!options.settingsPlatform.empty()) {
+                HLOG(LogEngine, Log) << "Project settings read for platform '" << platform << "' (--settings-platform)";
+            }
         } else {
             HLOG(LogEngine, Warning) << ProjectSettings::kPath << " not found; using defaults (start scene "
                                      << project_.startScene << ")";
@@ -257,7 +264,28 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     renderer_->setLimits(limits.maxDrawRows, limits.maxLights);
     renderer_->setForceNoSync2(options.vkNoSync2);
     renderer_->setForceDedicatedMsaa(options.vkDedicatedMsaa);
+    renderer_->setPreferredGpu(options.gpuIndex);
     renderer_->setMultiview(options.multiview);
+    // 품질 단계(2026-11-18, 성능 안정화 2-2). project.ini 의 render.* 품질 키(플랫폼 접미사 줄 포함).
+    {
+        Renderer::Quality q;
+        q.csmCascades       = project_.renderCsmCascades;
+        q.shadowDistance    = project_.renderShadowDistance;
+        q.contactShadows    = project_.renderContactShadows;
+        q.heightFog         = project_.renderHeightFog;
+        q.reflectionCapture = project_.renderReflectionCapture;
+        q.lightLimit        = project_.renderLightLimit;
+        renderer_->setQuality(q);
+        const Renderer::Quality d;
+        if (q.csmCascades != d.csmCascades || q.shadowDistance != d.shadowDistance || q.contactShadows != d.contactShadows ||
+            q.heightFog != d.heightFog || q.reflectionCapture != d.reflectionCapture || q.lightLimit != d.lightLimit) {
+            HLOG(LogEngine, Log) << "Quality: shadow cascades " << q.csmCascades << ", shadow distance " << q.shadowDistance
+                                 << " m, contact shadows " << (q.contactShadows ? "on" : "off") << ", height fog "
+                                 << (q.heightFog ? "on" : "off") << ", reflection capture " << (q.reflectionCapture ? "on" : "off")
+                                 << ", light limit " << (q.lightLimit ? std::to_string(q.lightLimit) : std::string("engine.ini"))
+                                 << " (" << ProjectSettings::kPath << ")";
+        }
+    }
     // 후처리 패스 켬/끔(프로젝트 설정 render.ao · render.bloom). --ssao · --no-ssao 가 AO 를 덮어씁니다.
     renderer_->setPostFeatures(project_.renderAo, project_.renderBloom);
     if (options.ssao.has_value()) renderer_->setAoEnabled(*options.ssao);
@@ -330,6 +358,26 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // 씬입니다. 예전에는 게임 모듈이 코드에 박힌 시작 씬을 읽어, 에디터가 지금 열린 파일을 몰랐습니다.
     // --scene 이 있으면 그 씬이 시작 씬입니다(시험 장면 캡처, 2026-11-16).
     frontend_->openInitialScene(options_.scenePath.empty() ? project_.startScene : options_.scenePath);
+    HLOG(LogEngine, Log) << "Startup: engine ready in "
+                         << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bootStart_).count()
+                         << " ms (window, renderer, IBL, modules, first scene)";
+}
+
+void Engine::logFramePacing(const char* when) {
+    if (cpuFrames_.total() == 0) return;
+    const hperf::Distribution c = cpuFrames_.summary();
+    const hperf::Distribution g = gpuFrames_.summary();
+    const float budget = budgetMs_ > 0.f ? budgetMs_ : hperf::frameBudgetMs(0.f);
+    char buf[320];
+    std::snprintf(buf, sizeof(buf),
+                  "Frame pacing (%s): %u frames, CPU frame median %.2f, p99 %.2f, max %.2f ms; GPU median %.2f, p99 %.2f, "
+                  "max %.2f ms; over budget %u (budget %.1f ms)",
+                  when, c.count, c.median, c.p99, c.max, g.median, g.p99, g.max, overBudget_, budget);
+    HLOG(LogEngine, Log) << buf;
+    cpuFrames_.clear();
+    gpuFrames_.clear();
+    overBudget_    = 0;
+    hitchesLogged_ = 0;
 }
 
 // ── Teardown (부팅의 역순) ─────────────────────────────────────────────────────
@@ -491,6 +539,7 @@ void Engine::endXr(const char* reason) {
     xr_->destroySession();
     HInputSystem::get().setXrInput({});
     if (physics_) physics_->setStepRate(60.f);
+    logFramePacing("XR session");
     if (audio_ && !audio_->outputOverride().empty()) audio_->setOutputOverride("");   // 고른 출력 장치로 돌아감
     if (audio_) audio_->setXrActive(false);
     implicitRigCam_   = 0;   // 다음 Play 에서 바닥을 다시 찾습니다
@@ -571,6 +620,7 @@ int Engine::run() {
             win.setShouldClose(false);
         }
         const auto loopT0 = Clock::now();
+        gFrameTimings().resetLast();
         {
             ScopedCpuTimer t(gFrameTimings().pollEvents);
             win.pollEvents();
@@ -673,7 +723,10 @@ int Engine::run() {
                     endXr("ended by the runtime; Play continues on the desktop");
                 }
             } else if (xr_->sessionRunning()) {
-                xrBegun = xr_->beginFrame(xrFrame);
+                {
+                    ScopedCpuTimer tw(gFrameTimings().xrWait);
+                    xrBegun = xr_->beginFrame(xrFrame);
+                }
                 if (xrBegun) xr_->syncInput(xrFrame.displayTime, xin);
                 if (xrBegun && xrRecovering_) {
                     // 다시 연 세션이 5초 동안 이어서 돌면 복구가 끝난 것으로 봅니다(DEF-155). 그 전에 또 잃으면 처음 마감 시각을 씁니다.
@@ -803,8 +856,12 @@ int Engine::run() {
             hdebug::lines().clear();
             HInputSystem::get().update(dt, win, front.isTextInputActive());
             if (playing) {
-                world.tick(dt);
-                gameModule.onTick(dt, ctx);
+                {
+                    ScopedCpuTimer tw(gFrameTimings().worldTick);
+                    world.tick(dt);
+                    gameModule.onTick(dt, ctx);
+                }
+                ScopedCpuTimer tm(gFrameTimings().modules);
                 modules.tickAll(dt);
             }
             // 머리를 따라오는 패널(3D UI 구간 7)을 먼저 옮기고, 그 자세로 포인터가 가리킵니다.
@@ -897,8 +954,42 @@ int Engine::run() {
 
         // 루프 1 회 전체입니다. 이것이 실제 프레임 간격이며, 위 구간들의 합과
         // 크게 벌어지면 그 차이가 곧 "어느 계측기에도 잡히지 않는 시간"입니다.
-        gFrameTimings().loopTotal.add(std::chrono::duration<float, std::milli>(
-                                          Clock::now() - loopT0).count());
+        const float loopMs = std::chrono::duration<float, std::milli>(Clock::now() - loopT0).count();
+        gFrameTimings().loopTotal.add(loopMs);
+
+        // 프레임 시간 분포와 끊김 로그(2026-11-18, 성능 안정화 1-1). XR 세션 · 합성 눈 프레임만 셉니다.
+        if (xrBegun || drewSynthetic) {
+            budgetMs_ = hperf::frameBudgetMs(xrBegun ? xr_->displayRefreshRate() : 0.f);
+            if (!firstFrameLogged_) {
+                firstFrameLogged_ = true;
+                HLOG(LogEngine, Log) << "Startup: first frame drawn "
+                                     << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bootStart_).count()
+                                     << " ms after the engine started (that frame " << loopMs << " ms)";
+            } else {
+                cpuFrames_.add(loopMs);
+                gpuFrames_.add(renderer.getTimings().totalMs);
+                if (hperf::overBudget(loopMs, budgetMs_, xrBegun)) {
+                    ++overBudget_;
+                    if (hitchesLogged_ < kMaxHitchLogs) {
+                        ++hitchesLogged_;
+                        const FrameTimings& f = gFrameTimings();
+                        char buf[400];
+                        std::snprintf(buf, sizeof(buf),
+                            "Hitch: frame %u took %.2f ms (budget %.1f): poll %.2f, xr wait %.2f, tick %.2f (world %.2f, modules %.2f, "
+                            "physics %.2f), input %.2f, draw %.2f (fence %.2f, capture %.2f, extract %.2f, record %.2f, submit %.2f, "
+                            "present %.2f), GPU %.2f",
+                            drawnFrames_, loopMs, budgetMs_, f.pollEvents.last, f.xrWait.last, f.tick.last, f.worldTick.last,
+                            f.modules.last, f.physics.last, f.handleInput.last, f.drawFrame.last, f.fenceWait.last,
+                            f.reflCapture.last, f.extract.last, f.record.last, f.submit.last, f.present.last,
+                            renderer.getTimings().totalMs);
+                        HLOG(LogEngine, Log) << buf;
+                        if (hitchesLogged_ == kMaxHitchLogs) {
+                            HLOG(LogEngine, Log) << "Hitch: " << kMaxHitchLogs << " logged; later ones are only counted";
+                        }
+                    }
+                }
+            }
+        }
 
         // 최소화 중에는 그리지 않아 루프가 코어 하나를 다 쓰므로 쉬어 갑니다(약 60Hz, dt 는 실제 시간이라
         // 시뮬레이션 속도는 그대로). 헤드셋이 돌면 xrWaitFrame 이 속도를 정하므로 쉬지 않습니다. 합성 눈을 그린 프레임도
@@ -944,6 +1035,7 @@ int Engine::finishRun() {
             if (!ok) blank = true;
         }
     }
+    logFramePacing("run");
     // GPU 구간 시간(타임스탬프, 지수 이동 평균). 요약 줄의 형식은 그대로 두고 따로 남깁니다(패스 비용 비교용).
     {
         const Renderer::GpuTimings t = renderer_->getTimings();

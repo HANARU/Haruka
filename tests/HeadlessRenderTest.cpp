@@ -7,12 +7,14 @@
 // 실행: build/Release/HarukaHeadlessTest.exe
 
 #include "../src/core/EngineOptions.hpp"
+#include "../src/core/FramePacing.hpp"
 #include "../src/platform/android/AndroidWindow.hpp"
 #include "../src/platform/headless/HeadlessWindow.hpp"
 #include "../src/renderer/FrameResources.hpp"
 #include "../src/renderer/ISwapchain.hpp"
 #include "../src/renderer/PipelineCacheFile.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -157,6 +159,18 @@ int main() {
         check(o.vkNoSync2 && u.empty(), "--vk-no-sync2(1.0 배리어 경로)");
         o = parse({}, u);
         check(!o.vkNoSync2 && !o.vkDedicatedMsaa, "기본은 sync2 를 쓰고 MSAA 컬러는 보통 경로");
+        o = parse({}, u);
+        check(o.gpuIndex == -1, "--gpu 가 없으면 처음 쓸 수 있는 GPU");
+        o = parse({ "--gpu=1" }, u);
+        check(o.gpuIndex == 1 && u.empty(), "--gpu=1");
+        o = parse({ "--settings-platform=android" }, u);
+        check(o.settingsPlatform == "android" && u.empty(), "--settings-platform=android");
+        o = parse({ "--settings-platform=quest" }, u);
+        check(o.settingsPlatform.empty() && u.size() == 1, "--settings-platform=quest → 거부(android · windows 만)");
+        for (const char* bad : { "--gpu=", "--gpu=-1", "--gpu=x", "--gpu=64" }) {
+            o = parse({ bad }, u);
+            check(o.gpuIndex == -1 && u.size() == 1, std::string(bad) + " → 거부");
+        }
         o = parse({ "--vk-dedicated-msaa" }, u);
         check(o.vkDedicatedMsaa && u.empty(), "--vk-dedicated-msaa(별도 할당 경로)");
         o = parse({}, u);
@@ -249,6 +263,34 @@ int main() {
         const uint32_t two = 2;
         std::memcpy(badVer.data() + 4, &two, 4);
         check(rejected(hpcache::wrap(badVer.data(), badVer.size()), props), "Vulkan 캐시 머리 버전이 1 이 아님 → 버림");
+    }
+
+    // ── 프레임 시간 분포와 예산 (2026-11-18, 성능 안정화 1-1) ──────────────────────────────────
+    {
+        std::printf("\n[프레임 시간 분포 · 예산 (FramePacing.hpp)]\n");
+        using namespace hperf;
+        check(std::fabs(frameBudgetMs(90.f) - 11.111f) < 1e-3f, "90 Hz 예산 11.11 ms");
+        check(std::fabs(frameBudgetMs(72.f) - 13.889f) < 1e-3f, "72 Hz 예산 13.89 ms");
+        check(std::fabs(frameBudgetMs(0.f) - 11.111f) < 1e-3f, "주사율을 모르면 90 Hz");
+        check(!overBudget(12.f, 11.111f, true) && overBudget(17.f, 11.111f, true), "헤드셋 대기를 포함하면 1.5 배를 넘어야 넘음");
+        check(overBudget(12.f, 11.111f, false) && !overBudget(11.f, 11.111f, false), "대기가 없으면 예산을 넘는 순간 넘음");
+
+        check(summarize({}).count == 0 && summarize({}).max == 0.f, "빈 표본 → 0");
+        std::vector<float> v;
+        for (int i = 1; i <= 100; ++i) v.push_back((float)i);
+        const Distribution d = summarize(v);
+        check(d.count == 100 && d.median == 50.f && d.p99 == 99.f && d.max == 100.f, "1 ~ 100: 중앙값 50, 99 분위 99, 최악 100");
+        const Distribution one = summarize({ 7.f });
+        check(one.median == 7.f && one.p99 == 7.f && one.max == 7.f, "표본 하나 → 모두 그 값");
+
+        FrameHistory h(4);
+        for (float x : { 1.f, 2.f, 30.f, 4.f, 5.f, 6.f, 7.f }) h.add(x);
+        const Distribution hd = h.summary();
+        check(hd.count == 7, "고리 버퍼: 센 프레임 수는 덮어쓴 것까지");
+        check(hd.max == 30.f, "고리 버퍼: 덮어쓴 최악값(30)도 기억");
+        check(hd.median == 5.f, "고리 버퍼: 분포는 최근 4 개(4 · 5 · 6 · 7)의 중앙값 5");
+        h.clear();
+        check(h.total() == 0 && h.summary().max == 0.f, "비우면 0");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

@@ -34,6 +34,12 @@ struct EngineOptions {
     // --no-multiview : 두 눈의 메인 패스를 멀티뷰(viewMask 0b11)로 한 번에 그리지 않고 눈마다 그림(Quest 에서 이득 비교 ·
     // 멀티뷰 탓인지 가르는 진단, 2026-11-18). 장치의 멀티뷰 기능은 그래도 켭니다.
     bool        multiview     = true;
+    // --gpu=N : vkEnumeratePhysicalDevices 순서의 N 번째 GPU 를 씀(GPU 가 여럿인 기계에서 비어 있는 GPU 로 측정 · 시험,
+    // 2026-11-18). 없으면(-1) 처음 쓸 수 있는 GPU. XR 은 런타임이 고른 GPU 가 먼저입니다.
+    int         gpuIndex      = -1;
+    // --settings-platform=android|windows : project.ini 의 플랫폼 접미사 줄(이름.android 등)을 이 플랫폼 것으로 읽음(PC 에서 Quest
+    // 품질 단계를 시험, 2026-11-18). 없으면 이 빌드의 플랫폼.
+    std::string settingsPlatform;
     // --ssao · --no-ssao : 화면 공간 AO 를 켜거나 끔(AO 를 뺀 비교 실측 · 끔 경로 시험). 없으면 프로젝트 설정
     // render.ao. 진단용이라 프로젝트 설정을 덮어씁니다.
     std::optional<bool> ssao;

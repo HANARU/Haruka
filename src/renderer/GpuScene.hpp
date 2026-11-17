@@ -69,6 +69,20 @@ private:
 
     // 형식마다 밉 블릿 가능 여부를 한 번만 묻습니다(DEF-165). 텍스처는 SRGB · UNORM 두 형식뿐입니다.
     bool canBlitMips(VkFormat fmt);
+
+    // 텍스처 하나를 올리는 명령을 cmd 에 기록합니다. 스테이징 버퍼는 staging 에 담아, 제출이 끝난 뒤 부르는 쪽이 놓습니다
+    // (2026-11-18, 성능 안정화 1-6). 머티리얼의 텍스처 여러 장을 한 번에 제출하려고 uploadTexture 에서 나눴습니다.
+    struct Staging { VkBuffer buf = VK_NULL_HANDLE; HarukaAllocation alloc; };
+    TexSlot recordTextureUpload(VkCommandBuffer cmd, const uint8_t* pixels, int w, int h, VkFormat fmt,
+                                std::vector<Staging>& staging);
+    void    freeStaging(std::vector<Staging>& staging);
+
+    // 머티리얼에 텍스처가 없을 때 쓰는 1x1 기본값(albedo 흰색 · 평평한 법선 · metalRough 기본 · AO 흰색 · 이미시브 검정).
+    // 예전에는 머티리얼마다 다섯 장을 따로 올려(장마다 제출 · 대기), 색만 다른 도형 2,000 개를 여는 데 4 초 넘게 걸렸습니다.
+    // 처음 머티리얼을 올릴 때 한 번 만들고 destroy 에서 지웁니다.
+    enum FallbackTex { kFbAlbedo, kFbNormal, kFbMetalRough, kFbAo, kFbEmissive, kFbCount };
+    TexSlot fallback_[kFbCount];
+    bool    fallbackReady_ = false;
     struct BlitSupport { VkFormat fmt; bool ok; };
     std::vector<BlitSupport> blitSupport_;
 

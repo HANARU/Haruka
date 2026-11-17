@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <atomic>
+#include <thread>
 
 #ifndef ANDROID
 #include "../platform/glfw/GlfwWindow.hpp"
@@ -388,12 +389,15 @@ void Renderer::generateIBLCubemaps() {
         prefBytes += sz * sz * 6 * 8;
     }
     std::vector<uint8_t> prefData(prefBytes);
-    VkDeviceSize prefOff = 0;
     // pbr.frag 는 textureQueryLevels 로 mip 수를 읽으므로 kPrefMips 만 바꾸면 됩니다.
-    for (uint32_t mip = 0; mip < kPrefMips; mip++) {
-        float roughness = (float)mip / (kPrefMips - 1);
-        uint32_t sz = kPrefSize >> mip;
-        for (int face = 0; face < 6; face++) {
+    // 면 하나를 스레드 하나가 맡습니다(2026-11-18, 성능 안정화 1-3). 면마다 쓰는 자리가 겹치지 않고 계산이 결정적이라 결과는
+    // 한 스레드와 비트까지 같습니다. 데이터 배치는 밉 우선 · 면 다음(아래 올리기 영역과 같은 순서)입니다.
+    auto prefilterFace = [&](int face) {
+        VkDeviceSize mipBase = 0;
+        for (uint32_t mip = 0; mip < kPrefMips; mip++) {
+            const float    roughness = (float)mip / (kPrefMips - 1);
+            const uint32_t sz        = kPrefSize >> mip;
+            VkDeviceSize   prefOff   = mipBase + (VkDeviceSize)face * sz * sz * 8;
             for (uint32_t iy = 0; iy < sz; iy++) {
                 for (uint32_t ix = 0; ix < sz; ix++) {
                     float u = (ix + 0.5f) / sz * 2.f - 1.f;
@@ -414,7 +418,15 @@ void Renderer::generateIBLCubemaps() {
                     prefOff += 8;
                 }
             }
+            mipBase += (VkDeviceSize)sz * sz * 6 * 8;
         }
+    };
+    {
+        std::vector<std::thread> workers;
+        workers.reserve(5);
+        for (int face = 1; face < 6; ++face) workers.emplace_back(prefilterFace, face);
+        prefilterFace(0);
+        for (auto& t : workers) t.join();
     }
     {
         using ms = std::chrono::duration<double, std::milli>;
@@ -648,6 +660,17 @@ void Renderer::pickPhysicalDevice() {
         std::vector<VkPhysicalDevice> devs(cnt);
         vkEnumeratePhysicalDevices(instance, &cnt, devs.data());
         std::string reasons;
+        if (preferredGpu_ >= 0) {
+            // --gpu=N: 그 GPU 만 봅니다. 못 쓰면 다른 GPU 로 넘어가지 않고 멈춥니다(측정 조건이 몰래 바뀌지 않게).
+            if ((uint32_t)preferredGpu_ >= cnt)
+                throw std::runtime_error("--gpu=" + std::to_string(preferredGpu_) + ": only " + std::to_string(cnt) +
+                                         " Vulkan GPU(s) found");
+            VkPhysicalDevice d = devs[(size_t)preferredGpu_];
+            if (!isDeviceSuitable(d, false, plan, why))
+                throw std::runtime_error("--gpu=" + std::to_string(preferredGpu_) + " cannot be used (" + why + ")");
+            physDevice = d;
+            devs.clear();
+        }
         for (auto& d : devs) {
             if (isDeviceSuitable(d, false, plan, why)) { physDevice = d; break; }
             VkPhysicalDeviceProperties dp;

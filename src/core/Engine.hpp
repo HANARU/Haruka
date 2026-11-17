@@ -4,6 +4,7 @@
 #include "ProjectSettings.hpp"
 #include "IEngineFrontend.hpp"
 #include "EngineOptions.hpp"
+#include "FramePacing.hpp"
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -100,6 +101,20 @@ private:
     uint32_t      syntheticImage_ = 0;         // 다음에 그릴 합성 눈 이미지
     uint32_t      lastSynthetic_  = UINT32_MAX;   // 마지막으로 그린 합성 눈 이미지(캡처용)
     bool          timedOut_       = false;
+
+    // ── 프레임 시간 분포와 끊김 로그 (2026-11-18, 성능 안정화 1-1) ─────────────────────────────────
+    // XR 세션 · 합성 눈 프레임만 모읍니다(데스크톱 창은 모니터 대기가 섞여 VR 예산과 비교할 수 없음). 첫 프레임은 시작
+    // 비용(파이프라인 · 캡처 등)이라 분포에서 빼고 "Startup" 줄에 따로 남깁니다.
+    hperf::FrameHistory                   cpuFrames_;            // 루프 1 회(ms)
+    hperf::FrameHistory                   gpuFrames_;            // GPU 합계(ms, 타임스탬프라 MAX_FRAMES 앞 프레임 것)
+    uint32_t                              overBudget_    = 0;    // 예산을 넘은 프레임 수
+    uint32_t                              hitchesLogged_ = 0;    // 자세히 남긴 끊김 수(상한 kMaxHitchLogs)
+    float                                 budgetMs_      = 0.f;  // 마지막으로 모은 프레임의 예산(세션을 지운 뒤에도 씀)
+    std::chrono::steady_clock::time_point bootStart_{};          // 엔진 생성 시작
+    bool                                  firstFrameLogged_ = false;
+    static constexpr uint32_t             kMaxHitchLogs = 20;
+    // 모은 분포를 한 줄로 남기고 비웁니다(XR 세션 끝 · 자동 실행 끝).
+    void logFramePacing(const char* when);
 
     // ── 코어 서비스 (초기화 순서대로 선언 = 역순으로 파괴) ──────────────────────
     std::unique_ptr<IWindow>       window_;

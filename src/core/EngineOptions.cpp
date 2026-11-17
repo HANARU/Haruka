@@ -87,6 +87,15 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (v == "left" || v == "right") o.captureEye = (v == "right") ? 1u : 0u;
             else unknown.push_back(a);
         }
+        else if (valueOf(a, "--settings-platform", v)) {
+            if (v == settings_platform::kAndroid || v == settings_platform::kWindows) o.settingsPlatform = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--gpu", v)) {
+            uint32_t n = 0;
+            if (parseUint(v, n) && n < 64) o.gpuIndex = (int)n;
+            else unknown.push_back(a);
+        }
         else if (valueOf(a, "--scene", v)) {
             if (project_settings::isSceneLogicalPath(v)) o.scenePath = v;
             else unknown.push_back(a);
