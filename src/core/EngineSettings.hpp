@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "ComponentFields.hpp"
+#include "FieldParse.hpp"
 
 struct EngineLimits {
     // 프레임당 transform 행(= 한 프레임에 그릴 수 있는 메시 수, DEF-16). 행 64B, 프레임 슬롯 2개, Zone C(64MB).

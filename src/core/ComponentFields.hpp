@@ -11,13 +11,13 @@
 // 이름은 멤버 이름을 따릅니다. 한 번 저장한 이름은 바꾸지 마십시오. 바꿔야 하면 readField 에서 옛 이름도
 // 받으십시오(Unity 의 FormerlySerializedAs 와 같은 역할).
 
-#include <cstdlib>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <glm/glm.hpp>
 
+#include "FieldParse.hpp"
 #include "TextFloat.hpp"
 
 class AssetManager;
@@ -47,52 +47,4 @@ struct ComponentLoadContext {
     AssetManager* assets = nullptr;
 };
 
-// 값 해석. 문자열 전체가 그 형이어야 성공입니다(앞뒤 공백은 허용). 실패하면 out 을 건드리지 않습니다.
-namespace fieldparse {
-
-inline bool onlySpaceFrom(const char* p) {
-    while (*p == ' ' || *p == '\t') ++p;
-    return *p == '\0';
-}
-
-inline bool toFloat(const std::string& s, float& out) {
-    const char* b = s.c_str();
-    char* e = nullptr;
-    const float v = std::strtof(b, &e);
-    if (e == b || !onlySpaceFrom(e)) return false;
-    out = v;
-    return true;
-}
-
-inline bool toInt(const std::string& s, int& out) {
-    const char* b = s.c_str();
-    char* e = nullptr;
-    const long v = std::strtol(b, &e, 10);
-    if (e == b || !onlySpaceFrom(e)) return false;
-    out = (int)v;
-    return true;
-}
-
-inline bool toBool(const std::string& s, bool& out) {
-    int v = 0;
-    if (toInt(s, v) && (v == 0 || v == 1)) { out = (v == 1); return true; }
-    if (s == "true")  { out = true;  return true; }
-    if (s == "false") { out = false; return true; }
-    return false;
-}
-
-inline bool toVec3(const std::string& s, glm::vec3& out) {
-    const char* p = s.c_str();
-    glm::vec3 v{};
-    for (int k = 0; k < 3; ++k) {
-        char* e = nullptr;
-        v[k] = std::strtof(p, &e);
-        if (e == p) return false;
-        p = e;
-    }
-    if (!onlySpaceFrom(p)) return false;
-    out = v;
-    return true;
-}
-
-} // namespace fieldparse
+// 값 해석(fieldparse::toFloat · toInt · toBool · toVec3)은 FieldParse.hpp 에 있습니다.
