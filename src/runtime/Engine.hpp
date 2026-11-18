@@ -4,7 +4,8 @@
 #include "../core/ProjectSettings.hpp"
 #include "IEngineFrontend.hpp"
 #include "EngineOptions.hpp"
-#include "../core/FramePacing.hpp"
+#include "FrameStats.hpp"
+#include "WorldUiDriver.hpp"
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -18,7 +19,8 @@ class IGameModule;
 class XrSystem;
 class PhysicsSystem;
 class AudioSystem;
-class UIPanelPointer;
+class XrSessionController;
+class XrViewOrigin;
 struct EngineContext;
 
 // 실행 옵션(EngineOptions)은 EngineOptions.hpp 에 있습니다(2026-10-31, 명령줄 해석을 창 없이 시험하려고 옮김).
@@ -50,29 +52,30 @@ private:
     // 창 없는 자동 실행(--frames · --timeout · --capture)을 마무리합니다: 캡처를 저장하고 요약을 남긴 뒤 종료 코드를 정합니다.
     int finishRun();
     void setupInputBindings();   // 프로젝트 설정 레이어(키 바인딩). 게임 코드와 분리.
-    // VR 세션을 Play 에 맞춥니다(2026-10-15 사용자 결정). Play 에 들어가면 세션을 만들고, Stop 하면 런타임에
-    // 정상 종료를 요청합니다. UE VR Preview · Unity 처럼 편집 중에는 헤드셋에 그리지 않습니다. 프레임을
-    // 시작하기 전에 불러, 진행 중인 XR 프레임이 있을 때 세션을 지우는 일이 없게 합니다.
-    void syncXrWithPlay(bool inGame);
-    bool startXrSession();   // 세션 + 스왑체인을 렌더러에 연결. 실패하면 이번 Play 는 데스크톱만
-    // XR 세션을 끝냅니다(렌더러에서 스왑체인을 떼고 세션을 지움). OpenXR 인스턴스는 그것으로 만든 Vulkan
-    // 장치가 살아 있는 동안 남겨 두고 엔진이 끝날 때 지웁니다. 물리 스텝을 60Hz 로 되돌립니다.
-    void endXr(const char* reason);
-    // OpenXR 인스턴스를 잃었습니다(런타임 재시작 · 갱신 등, 2026-11-01 DEF-155). 이번 실행에서는 다시 열 수 없으므로 XR 을 끄고,
-    // XR 이 필수인 플랫폼(Quest, 데스크톱 화면이 없음)은 앱을 끝냅니다.
-    void onXrInstanceLost();
-    // 월드 UI 패널을 마우스 · XR 두 손으로 가리키고 누릅니다(3D UI 구간 5 · 6). 꺼진 쪽은 붙잡은 패널을 놓습니다. 앞단에
-    // "마우스가 패널 위" 를 알려 같은 클릭으로 액터를 고르지 않게 하고, XR 손의 레이저 · 커서를 렌더러에 넣습니다.
-    struct WorldUiPointerInput {
-        bool  mouseActive = false, xrActive = false;
-        float mx = 0.f, my = 0.f;
-        bool  lmb = false;
-        int   winW = 0, winH = 0;
-        float dt = 0.f;
-    };
-    void updateWorldUiPointers(IEngineFrontend& front, const WorldUiPointerInput& in);
-    // 머리를 따라오는 패널(placement = FollowHead)을 옮깁니다(3D UI 구간 7). Play 중 월드 틱 뒤에 부릅니다.
-    void updateFollowPanels(float dt);
+
+    // ── 메인 루프의 프레임 단계 (2026-11-18, 엔진 구조 안정화 S2) ──────────────────────────────────────
+    // run() 은 아래 단계를 이 순서로 부르기만 합니다. 순서가 규칙입니다(Unity PlayerLoop · UE TickGroup 처럼 단계 목록으로 둠).
+    //   1 beginLoop        창 닫기 요청(앞단에 물음) · 창 이벤트 · 최소화 판정
+    //   2 beginXrFrame     Play 에 세션 맞춤 · 세션 없을 때 이벤트 · 다시 열기 · 화면 카메라와 리그 공간 · XR 프레임 시작(입력)
+    //   3 applyViewPose    화면 카메라의 XR 원점 · 소리 청취자 자세
+    //   4 readDesktopInput 프레임 시간 · 창 크기 · 마우스 · 오른쪽 버튼 카메라 모드
+    //   5 updatePlayState  헤드셋 초점 일시정지 · Play 시작 · 끝 · 일시정지 알림
+    //   6 tickFrame        앞단 tick · 디버그 선 비우기 · 입력 갱신 · 월드 · 게임 · 모듈 · 따라오는 패널 · 월드 UI 포인터
+    //   7 frontendInput    앞단 입력(에디터 클릭 처리)
+    //   8 renderFrame      XR · 합성 눈 · 데스크톱 중 하나
+    //   9 endLoop          자동 실행 끝내기 · FPS 제목 · 프레임 통계 · 최소화 중 쉼
+    // FrameState 는 루프 1 회의 값, LoopState 는 루프 사이에 이어지는 값입니다(Engine.cpp).
+    struct FrameState;
+    struct LoopState;
+    bool beginLoop(FrameState& f);   // 거짓이면 루프를 끝냄
+    void beginXrFrame(FrameState& f);
+    void applyViewPose(FrameState& f);
+    void readDesktopInput(FrameState& f, LoopState& loop);
+    void updatePlayState(FrameState& f, LoopState& loop);
+    void tickFrame(FrameState& f);
+    void frontendInput(FrameState& f);
+    void renderFrame(FrameState& f);
+    void endLoop(FrameState& f, LoopState& loop);
 
     // 프로젝트 설정(assets/project.ini, 2026-10-15). 에셋 루트를 정한 뒤 한 번 읽습니다.
     ProjectSettings                project_;
@@ -81,17 +84,6 @@ private:
     IEngineFrontend::Policy          policy_;   // 부팅할 때 앞단에서 한 번 받음(에셋 루트 · VR 시작 · XR 처리 규칙)
     bool                             xrWanted_       = false;   // 이번 실행에서 VR 을 원함(명령줄 또는 정책)
     bool                             xrFocusPaused_  = false;   // 헤드셋 초점을 잃어 게임을 멈춘 중(policy_.pauseOnXrFocusLoss)
-    // 헤드셋 연결이 끊긴 뒤 다시 열기를 기다리는 중(policy_.retryXrSession). 정해진 간격으로 조용히 확인합니다.
-    bool                                  xrRetryPending_ = false;
-    std::chrono::steady_clock::time_point xrRetryAt_{};
-    // 처음 잃은 때부터 다시 연 세션이 5초 동안 이어서 돌 때까지 복구 중입니다(DEF-155). 다시 연 세션이 시작하지 못하거나 곧 다시
-    // 잃어도 마감 시각은 처음 것을 유지하고, 다시 열기 간격은 2초에서 30초까지 두 배씩 늘립니다. 첫 프레임 하나로 복구를 판정하면
-    // 곧 잃을 세션(성공 코드 XR_SESSION_LOSS_PENDING)에서 마감 시각이 다시 잡혔습니다(2026-11-01 재검토).
-    bool                                  xrRecovering_   = false;
-    std::chrono::seconds                  xrRetryDelay_{ 2 };
-    std::chrono::steady_clock::time_point xrRecoveredRunSince_{};   // 다시 연 세션이 처음 프레임을 시작한 때(비면 아직)
-    // XR 이 필수인 플랫폼(options_.xrRequired)은 이때까지 돌아오지 않으면 끝냅니다(DEF-155). 데스크톱으로 계속할 수 없습니다.
-    std::chrono::steady_clock::time_point xrRetryGiveUpAt_{};
 
     // ── 창 없는 실행 · 합성 눈 · 자동 확인 (2026-10-31, 패키징 2단계) ─────────────────────────
     EngineOptions options_;                    // 부팅할 때 받은 옵션(프레임 수 · 시간 제한 · 캡처 경로)
@@ -102,38 +94,17 @@ private:
     uint32_t      lastSynthetic_  = UINT32_MAX;   // 마지막으로 그린 합성 눈 이미지(캡처용)
     bool          timedOut_       = false;
 
-    // ── 프레임 시간 분포와 끊김 로그 (2026-11-18, 성능 안정화 1-1) ─────────────────────────────────
-    // XR 세션 · 합성 눈 프레임만 모읍니다(데스크톱 창은 모니터 대기가 섞여 VR 예산과 비교할 수 없음). 첫 프레임은 시작
-    // 비용(파이프라인 · 캡처 등)이라 분포에서 빼고 "Startup" 줄에 따로 남깁니다.
-    hperf::FrameHistory                   cpuFrames_;            // 루프 1 회(ms)
-    hperf::FrameHistory                   gpuFrames_;            // GPU 합계(ms, 타임스탬프라 MAX_FRAMES 앞 프레임 것)
-    uint32_t                              overBudget_    = 0;    // 예산을 넘은 프레임 수
-    uint32_t                              hitchesLogged_ = 0;    // 자세히 남긴 끊김 수(상한 kMaxHitchLogs)
-    float                                 budgetMs_      = 0.f;  // 마지막으로 모은 프레임의 예산(세션을 지운 뒤에도 씀)
-    std::chrono::steady_clock::time_point bootStart_{};          // 엔진 생성 시작
-    bool                                  firstFrameLogged_ = false;
-    static constexpr uint32_t             kMaxHitchLogs = 20;
-    // 모은 분포를 한 줄로 남기고 비웁니다(XR 세션 끝 · 자동 실행 끝).
-    void logFramePacing(const char* when);
+    // ── 프레임 단계가 쓰는 객체 (2026-11-18 S2, 예전 Engine 멤버 · 메인 루프 구간을 옮김) ─────────────────
+    FrameStats                           stats_;       // FPS 제목 · 프레임 시간 분포 · 끊김 로그 · 시작 시간
+    std::unique_ptr<XrSessionController> xrSession_;   // Play 에 맞춘 세션 · 손실 처리 · 다시 열기(DEF-155)
+    std::unique_ptr<XrViewOrigin>        viewOrigin_;  // 화면 카메라의 XR 원점(씬 리그 · 추적 부모 · 보이지 않는 리그)
+    WorldUiDriver                        worldUi_;     // 따라오는 패널 · 마우스 · XR 손 포인터
 
     // ── 코어 서비스 (초기화 순서대로 선언 = 역순으로 파괴) ──────────────────────
     std::unique_ptr<IWindow>       window_;
     // XR(--xr). 렌더러보다 먼저 만듭니다(OpenXR 이 Vulkan 장치를 고름). 세션은 렌더러보다 먼저
     // 지워야 하므로 소멸자가 순서를 직접 정합니다. 런타임 · 헤드셋이 없으면 null(데스크톱).
     std::unique_ptr<XrSystem>      xr_;
-    bool                           xrUsable_     = false;   // 렌더러가 OpenXR 이 고른 장치로 만들어져 세션을 열 수 있음
-    bool                           xrPlayWanted_ = false;   // Play(일시정지 포함) 중이라 세션이 있어야 함
-    // 리그가 없는 씬의 보이지 않는 리그(2026-10-16): 바닥을 찾은 카메라 액터(0 = 아직)와 카메라에서 바닥까지의 거리.
-    uint64_t                       implicitRigCam_  = 0;
-    float                          implicitRigDrop_ = 0.f;
-    // 마우스 월드 UI 포인터(3D UI 구간 5). 패널 주소를 붙잡지만 매 프레임 목록으로 확인하므로 패널보다 오래 살아도 됩니다.
-    std::unique_ptr<UIPanelPointer> mouseUiPointer_;
-    bool                            mouseUiPointerLive_ = false;
-    std::unique_ptr<UIPanelPointer> xrUiPointers_[2];             // 0 = 왼손, 1 = 오른손
-    bool                            xrUiPointerLive_[2] = { false, false };
-    bool                            pointerLinesShown_ = false;   // 지난 프레임에 레이저를 넣었음(지울 때 빈 목록 한 번)
-    // 머리 추적 카메라의 부모를 원점으로 쓴다고 알린 카메라 액터(0 = 아직, DEF-144). 같은 카메라는 한 번만 알립니다.
-    uint64_t                       trackedOriginCam_ = 0;
     std::unique_ptr<Renderer>      renderer_;
     World                          world_;
     std::unique_ptr<AssetManager>  assets_;

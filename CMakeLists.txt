@@ -266,6 +266,10 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio)
 set(RUNTIME_SOURCES
     src/core/AppPaths.cpp
     src/runtime/Engine.cpp
+    src/runtime/FrameStats.cpp
+    src/runtime/WorldUiDriver.cpp
+    src/runtime/XrSessionController.cpp
+    src/runtime/XrViewOrigin.cpp
     src/runtime/EngineOptions.cpp
     src/runtime/ShaderManifest.cpp
     src/scene/World.cpp

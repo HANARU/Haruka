@@ -24,10 +24,11 @@
 #include "../components/CoreComponents.hpp"
 #include "../components/XrComponents.hpp"
 #include "../components/CameraComponent.hpp"
-#include "../components/UIPanelPointer.hpp"
 #include "../xr/SyntheticEyes.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "ShaderManifest.hpp"
+#include "XrSessionController.hpp"
+#include "XrViewOrigin.hpp"
 #include "../core/FrameTimings.hpp"
 #include "stb_image_write.h"   // 구현은 GltfLoader.cpp(STB_IMAGE_WRITE_IMPLEMENTATION)
 
@@ -133,7 +134,9 @@ static void checkShadersMatchBuild(bool loose, bool anyPack, bool packFailed) {
 // 코어 서비스는 초기화 순서가 고정입니다: 창 → 렌더러(창 필요) → 에셋(렌더러 필요).
 // 그다음 동적 모듈을 등록하고, 마지막에 에디터·게임을 올립니다.
 Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> frontend) {
-    bootStart_ = std::chrono::steady_clock::now();
+    stats_.markBoot();
+    xrSession_  = std::make_unique<XrSessionController>();
+    viewOrigin_ = std::make_unique<XrViewOrigin>();
     if (!frontend) throw std::runtime_error("Engine needs a frontend (editor or game)");
     frontend_ = std::move(frontend);
     policy_   = frontend_->policy();
@@ -299,15 +302,15 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     if (xr_) {
         // 세션은 Play 때 만듭니다(syncXrWithPlay). 인스턴스는 쓸 수 없어도 남겨 둡니다. 렌더러의 Vulkan
         // 인스턴스 · 장치를 그것으로 만들었을 수 있어서, 엔진이 끝날 때 렌더러 다음에 지웁니다.
-        xrUsable_ = renderer_->xrCompatible();
-        if (xrUsable_) HLOG(LogEngine, Log) << "XR ready; the headset session starts with Play";
+        xrSession_->setUsable(renderer_->xrCompatible());
+        if (xrSession_->usable()) HLOG(LogEngine, Log) << "XR ready; the headset session starts with Play";
         else           HLOG(LogEngine, Warning) << "XR is disabled for this run; continuing in desktop mode";
     }
-    if (options.xrRequired && !xrUsable_)
+    if (options.xrRequired && !xrSession_->usable())
         throw std::runtime_error("XR is required on this platform, but the renderer could not use the OpenXR runtime's "
                                  "Vulkan device (see the Renderer and XR log lines above)");
     if (options.emulateStereo) {
-        if (xrUsable_) {
+        if (xrSession_->usable()) {
             HLOG(LogEngine, Warning) << "--emulate-stereo is ignored while XR is enabled";
         } else if (headless_) {
             HLOG(LogEngine, Warning) << "--emulate-stereo needs a window; ignored (use --synthetic-eyes)";
@@ -318,13 +321,13 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // 합성 눈: 헤드셋 없이 XR 프레임 경로로 두 눈을 그립니다(2026-10-31). XR 세션과 같은 자리를 쓰므로 XR 을 쓸 수 있으면
     // 붙이지 않습니다.
     if (options.syntheticEyes) {
-        if (xrUsable_) {
+        if (xrSession_->usable()) {
             HLOG(LogEngine, Warning) << "--synthetic-eyes is ignored while XR is enabled";
         } else {
             synthetic_ = renderer_->attachSyntheticEyes({ options.syntheticEyeW, options.syntheticEyeH });
         }
     }
-    if (headless_ && !xrUsable_ && !synthetic_) {
+    if (headless_ && !xrSession_->usable() && !synthetic_) {
         HLOG(LogEngine, Warning) << "No window, no XR and no synthetic eyes: nothing will be drawn";
     }
 
@@ -348,6 +351,15 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
     setupInputBindings();
 
+    // XR 세션 제어(2026-11-18 S2). 세션이 끝나면 프레임 시간 분포를 남기고, 다음 Play 에서 바닥 · 원점 안내를 다시 합니다.
+    {
+        XrSessionController::Deps d;
+        d.xr = xr_.get(); d.renderer = renderer_.get(); d.physics = physics_; d.audio = audio_;
+        d.frontend = frontend_.get(); d.window = window_.get(); d.policy = &policy_; d.xrRequired = options_.xrRequired;
+        d.onSessionEnded = [this] { stats_.logPacing("XR session"); viewOrigin_->reset(); };
+        xrSession_->bind(d);
+    }
+
     // 게임 모듈(씬 콘텐츠) + 프레임 컨텍스트.
     ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_, *renderer_,
                                   ComponentRegistry::get() });
@@ -358,135 +370,8 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // 씬입니다. 예전에는 게임 모듈이 코드에 박힌 시작 씬을 읽어, 에디터가 지금 열린 파일을 몰랐습니다.
     // --scene 이 있으면 그 씬이 시작 씬입니다(시험 장면 캡처, 2026-11-16).
     frontend_->openInitialScene(options_.scenePath.empty() ? project_.startScene : options_.scenePath);
-    HLOG(LogEngine, Log) << "Startup: engine ready in "
-                         << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bootStart_).count()
+    HLOG(LogEngine, Log) << "Startup: engine ready in " << stats_.msSinceBoot()
                          << " ms (window, renderer, IBL, modules, first scene)";
-}
-
-void Engine::logFramePacing(const char* when) {
-    if (cpuFrames_.total() == 0) return;
-    const hperf::Distribution c = cpuFrames_.summary();
-    const hperf::Distribution g = gpuFrames_.summary();
-    const float budget = budgetMs_ > 0.f ? budgetMs_ : hperf::frameBudgetMs(0.f);
-    char buf[320];
-    std::snprintf(buf, sizeof(buf),
-                  "Frame pacing (%s): %u frames, CPU frame median %.2f, p99 %.2f, max %.2f ms; GPU median %.2f, p99 %.2f, "
-                  "max %.2f ms; over budget %u (budget %.1f ms)",
-                  when, c.count, c.median, c.p99, c.max, g.median, g.p99, g.max, overBudget_, budget);
-    HLOG(LogEngine, Log) << buf;
-    cpuFrames_.clear();
-    gpuFrames_.clear();
-    overBudget_    = 0;
-    hitchesLogged_ = 0;
-}
-
-// ── Teardown (부팅의 역순) ─────────────────────────────────────────────────────
-// 완전히 구성된 Engine 만 여기 도달합니다. 부팅 중 예외로 미완성이면 이미 생성된
-// 멤버의 소멸자만 돌아가며, 그때의 안전성은 예전 main() 의 스택 파괴와 동일합니다.
-// ── 머리를 따라오는 월드 UI 패널 (3D UI 구간 7) ─────────────────────────────────────
-void Engine::updateFollowPanels(float dt) {
-    CameraComponent* cam = world_.getActiveCamera();
-    if (!cam || !cam->owner) return;
-    // 머리 자세: XR 세션이 입력을 받는 동안은 헤드셋(XR 원점 × 머리), 아니면 카메라 액터. 청취자와 같은 기준입니다.
-    glm::vec3 headPos = cam->owner->worldPosition();
-    glm::quat headRot = cam->owner->worldRotation();
-    const HXrInputState& xr = HInputSystem::get().xr();
-    if (xr_ && xr_->hasSession() && xr.focused && xr.head.valid) {
-        const glm::mat4 m = cam->xrOrigin() * glm::translate(glm::mat4(1.f), xr.head.position) * glm::mat4_cast(xr.head.orientation);
-        headPos = glm::vec3(m[3]);
-        headRot = glm::quat_cast(glm::mat3(glm::normalize(glm::vec3(m[0])), glm::normalize(glm::vec3(m[1])),
-                                           glm::normalize(glm::vec3(m[2]))));
-    }
-    for (UIPanelComponent* pc : world_.componentsOf<UIPanelComponent>()) {
-        if (!pc->owner->activeInHierarchy()) continue;
-        if (pc->isEnabled() && pc->placement == UIPanelComponent::Placement::FollowHead)
-            pc->stepFollow(headPos, headRot, dt);
-    }
-}
-
-// ── 월드 UI 패널 포인터: 마우스 · XR 두 손 (3D UI 구간 5 · 6) ───────────────────────────
-void Engine::updateWorldUiPointers(IEngineFrontend& front, const WorldUiPointerInput& in) {
-    auto stop = [](std::unique_ptr<UIPanelPointer>& p, bool& live) {
-        if (live && p) p->reset();
-        live = false;
-    };
-    if (!in.mouseActive) stop(mouseUiPointer_, mouseUiPointerLive_);
-    if (!in.xrActive)
-        for (int h = 0; h < 2; ++h) stop(xrUiPointers_[h], xrUiPointerLive_[h]);
-    if (!in.mouseActive && !in.xrActive) {
-        front.setPointerOverWorldUi(false);
-        if (pointerLinesShown_) { renderer_->setPointerLines({}); pointerLinesShown_ = false; }
-        return;
-    }
-
-    // 보이는 패널(렌더러가 그리는 것과 같은 조건: 켜진 액터의 켜진 첫 패널)
-    std::vector<UIPanelComponent*> panels;
-    for (UIPanelComponent* pc : world_.componentsOf<UIPanelComponent>())
-        if (pc->owner->activeInHierarchy() && pc->isEnabled()) panels.push_back(pc);
-
-    // 가림은 물리 레이캐스트로 봅니다. 플레이어(활성 카메라의 맨 위 조상) 아래의 액터는 모두 뺍니다. 광선이 몸 · 리그 · 손의
-    // 충돌체 안에서 출발하면 거리 0 으로 맞기 때문입니다(Jolt 기본 동작).
-    CameraComponent*    cam = world_.getActiveCamera();
-    std::vector<Actor*> ignore;
-    if (cam && cam->owner) {
-        const Actor* root = cam->owner;
-        while (root->getParent()) root = root->getParent();
-        for (const auto& ap : world_.getActors()) {
-            const Actor* top = ap.get();
-            while (top->getParent()) top = top->getParent();
-            if (top == root) ignore.push_back(ap.get());
-        }
-    }
-    UIPanelPointer::Occluder occluder;
-    if (physics_)
-        occluder = [this, &ignore](const glm::vec3& o, const glm::vec3& d, float maxD, float& outD, Actor*& outA) {
-            PhysicsSystem::RaycastHit h;
-            if (!physics_->raycast(o, d, maxD, h, ignore)) return false;
-            outD = h.distance;
-            outA = h.actor;
-            return true;
-        };
-
-    // ── 마우스 ──
-    bool mouseOver = false;
-    if (in.mouseActive) {
-        if (!mouseUiPointer_) mouseUiPointer_ = std::make_unique<UIPanelPointer>();
-        UIPanelPointer::Ray ray;
-        ray.valid = !panels.empty() && front.pointerRay(in.mx, in.my, (float)in.winW, (float)in.winH, ray.origin, ray.dir);
-        mouseUiPointer_->update(panels, ray, { in.lmb, 0.f }, occluder);
-        mouseUiPointerLive_ = true;
-        mouseOver = mouseUiPointer_->overPanel() || mouseUiPointer_->capturing();
-    }
-    front.setPointerOverWorldUi(mouseOver);
-
-    // ── XR 두 손: 조준 자세 광선, 트리거 = 클릭, 스틱 위아래 = 휠, 레이저 · 커서 ──
-    std::vector<UIPanelPointer::Segment> segs;
-    if (in.xrActive) {
-        const HXrInputState& xr = HInputSystem::get().xr();
-        const glm::mat4 origin = cam ? cam->xrOrigin() : glm::mat4(1.f);
-        for (int h = 0; h < 2; ++h) {
-            if (!xrUiPointers_[h]) xrUiPointers_[h] = std::make_unique<UIPanelPointer>();
-            const HHandInput& hand = xr.hands[h];
-            UIPanelPointer::Ray ray;
-            if (xr.focused && hand.active && hand.aim.valid && cam && !panels.empty())
-                ray = UIPanelPointer::rayFromAim(origin, hand.aim.position, hand.aim.orientation);
-            const bool wasPressed = xrUiPointers_[h]->capturing();
-            const UIPanelPointer::Buttons b{ xrUiPointers_[h]->trigger.update(xr.focused && hand.active ? hand.trigger : 0.f),
-                                             UIPanelPointer::stickWheel(hand.thumbstick.y, in.dt) };
-            xrUiPointers_[h]->update(panels, ray, b, occluder);
-            xrUiPointerLive_[h] = true;
-            // 패널을 누른 순간 짧게 진동합니다(누른 것을 손으로 느끼게).
-            if (!wasPressed && xrUiPointers_[h]->capturing()) HInputSystem::get().haptic(h, 0.35f, 0.02f);
-            if (ray.valid) xrUiPointers_[h]->appendLaser(ray.origin, segs);
-        }
-    }
-    if (!segs.empty() || pointerLinesShown_) {
-        std::vector<LineVertex> lines;
-        lines.reserve(segs.size() * 2);
-        for (const auto& sg : segs) { lines.push_back({ sg.a, sg.color }); lines.push_back({ sg.b, sg.color }); }
-        pointerLinesShown_ = !lines.empty();
-        renderer_->setPointerLines(std::move(lines));
-    }
 }
 
 Engine::~Engine() {
@@ -500,65 +385,6 @@ Engine::~Engine() {
     if (xr_)       xr_->destroySession();
     if (renderer_) renderer_->cleanup();
     if (xr_)       xr_->shutdown();
-}
-
-void Engine::syncXrWithPlay(bool inGame) {
-    if (!xrUsable_ || inGame == xrPlayWanted_) return;
-    xrPlayWanted_ = inGame;
-    if (inGame) {
-        // 앞 Play 의 세션이 아직 끝나는 중이면(Stop 직후 곧바로 Play) 다 끝난 뒤 루프가 다시 엽니다. XR 이 필수인 플랫폼
-        // (Quest)에서 첫 세션을 못 만들면 이유를 남기고 멈춥니다. 다시 시도해도 같은 이유로 실패하기 때문입니다(그래픽
-        // 연결 · 액션 바인딩). 연결이 잠시 끊겼다 돌아오는 경우는 아래의 다시 열기가 맡습니다.
-        if (!xr_->hasSession() && !startXrSession() && options_.xrRequired)
-            throw std::runtime_error("XR is required on this platform, but the XR session could not be created "
-                                     "(see the XR log lines above)");
-    } else if (xr_->hasSession() && !xr_->requestExit()) {
-        endXr("Play stopped");   // 돌고 있지 않으면(헤드셋을 벗음 등) 요청할 것이 없어 바로 지웁니다
-    }
-}
-
-bool Engine::startXrSession() {
-    if (!xr_->createSession(renderer_->getInstance(), renderer_->getPhysDevice(), renderer_->getDevice(),
-                            renderer_->graphicsQueueFamily(), renderer_->getSwapFormat())) {
-        xr_->destroySession();
-        HLOG(LogEngine, Warning) << "XR session could not be created; this Play runs on the desktop only";
-        return false;
-    }
-    renderer_->attachXrSwapchain(xr_->swapchainImages(), xr_->swapchainFormat(), xr_->eyeExtent());
-    HLOG(LogEngine, Log) << "XR session created for Play; drawing starts when the runtime reports READY";
-    // XR Play 동안 소리를 헤드셋 장치로(2026-10-16, 에디터 설정에서 끌 수 있음). 세션이 끝나면 고른 장치로 돌아갑니다.
-    if (audio_ && frontend_->headsetAudioInVr() && !xr_->headsetAudioOutputId().empty())
-        audio_->setOutputOverride(xr_->headsetAudioOutputId());
-    if (audio_) audio_->setXrActive(true);   // HRTF 모드 Auto 는 XR 세션 동안 켜짐(2026-11-06)
-    return true;
-}
-
-void Engine::endXr(const char* reason) {
-    if (!xr_ || !xr_->hasSession()) return;
-    renderer_->detachXrSwapchain();   // 장치가 쉬기를 기다린 뒤 이미지 뷰를 지움
-    xr_->destroySession();
-    HInputSystem::get().setXrInput({});
-    if (physics_) physics_->setStepRate(60.f);
-    logFramePacing("XR session");
-    if (audio_ && !audio_->outputOverride().empty()) audio_->setOutputOverride("");   // 고른 출력 장치로 돌아감
-    if (audio_) audio_->setXrActive(false);
-    implicitRigCam_   = 0;   // 다음 Play 에서 바닥을 다시 찾습니다
-    trackedOriginCam_ = 0;   // 다음 Play 에서 원점 안내를 다시 남깁니다
-    HLOG(LogEngine, Log) << "XR session ended (" << reason << ")";
-}
-
-void Engine::onXrInstanceLost() {
-    endXr("the OpenXR instance was lost");
-    xrUsable_       = false;   // 다음 Play 에서도 세션을 만들지 않습니다(잃은 인스턴스로는 만들 수 없음)
-    xrRetryPending_      = false;
-    xrRecovering_        = false;
-    xrRecoveredRunSince_ = {};
-    if (options_.xrRequired) {
-        HLOG(LogEngine, Error) << "XR: the OpenXR instance was lost and this platform has no desktop view; closing";
-        window_->setShouldClose(true);
-    } else {
-        HLOG(LogEngine, Warning) << "XR: the OpenXR instance was lost; VR is off for the rest of this run";
-    }
 }
 
 // ── 입력 바인딩 (프로젝트 설정 레이어, 게임 코드와 분리) ────────────────────────
@@ -581,423 +407,274 @@ void Engine::setupInputBindings() {
     });
 }
 
-// 화면 카메라의 XR 원점(hxr::chooseOrigin). 카메라가 플레이어 리그의 머리면(카메라 액터에 TrackedPose[Head], 부모에 XrRig)
-// 그 리그, 머리 추적은 있지만 부모가 리그가 아니면 그 부모(DEF-144), 아니면 카메라 기준입니다.
-static hxr::XrOriginChoice originOfCamera(const CameraComponent* cam) {
-    return hxr::chooseOrigin(cam ? cam->owner : nullptr);
-}
-
 // ── Main loop ─────────────────────────────────────────────────────────────────
-int Engine::run() {
-    // 루프 본문을 예전 main() 과 동일하게 유지하기 위해 로컬 참조로 바인딩합니다.
-    IWindow&         win        = *window_;
-    Renderer&        renderer   = *renderer_;
-    IEngineFrontend& front      = *frontend_;
-    IGameModule&     gameModule = *game_;
-    EngineContext& ctx        = *ctx_;
-    ModuleManager& modules    = modules_;
-    World&         world      = world_;
-
+// 루프 1 회의 값입니다. 단계가 차례로 채우고 뒤 단계가 읽습니다.
+struct Engine::FrameState {
     using Clock = std::chrono::high_resolution_clock;
-    auto prev       = Clock::now();
-    auto fpsTimer   = prev;
-    int  fpsFrames  = 0;
-    bool prevLDown  = false;
-    bool prevRDown  = false;
-    bool prevInGame = false;
-    bool prevPaused = false;
+    Clock::time_point   loopT0;
+    bool                minimized = false;      // 프레임버퍼 0x0(창 최소화 · 창 없는 실행)
+    XrSystem::FrameInfo xrFrame;
+    bool                xrBegun   = false;      // XR 프레임을 시작함(이번 프레임 안에 endFrame)
+    XrViewChoice        view;                   // 화면 카메라와 그 XR 원점(프레임을 시작하기 전에 정함)
+    float               dt        = 0.f;
+    int                 winW = 0, winH = 0;
+    float               mx = 0.f, my = 0.f;
+    bool                lmb = false, lmbJustUp = false;
+    bool                playing   = false;      // 월드 · 모듈이 도는 Play(일시정지 · 초점 잃음 제외)
+    bool                drewSynthetic = false;
+};
 
+// 루프 사이에 이어지는 값입니다.
+struct Engine::LoopState {
+    using Clock = std::chrono::high_resolution_clock;
+    Clock::time_point prev;
+    bool prevLDown = false, prevRDown = false, prevInGame = false, prevPaused = false;
     // 자동 실행(2026-10-31): --frames=N 이면 N 프레임을 그린 뒤 닫고, 시간 제한(--timeout, frames 만 있으면 60초)을 넘기면
     // 실패로 닫습니다. 둘 다 없으면 예전처럼 창이 닫힐 때까지 돕니다.
-    const auto  runStart     = Clock::now();
-    const float timeLimitSec = options_.timeoutSec > 0.f ? options_.timeoutSec : (options_.frames > 0 ? 60.f : 0.f);
-    bool        closeAsked   = false;
+    Clock::time_point runStart;
+    float             timeLimitSec = 0.f;
+    bool              closeAsked   = false;
+};
 
+int Engine::run() {
+    LoopState loop;
+    loop.prev         = LoopState::Clock::now();
+    loop.runStart     = loop.prev;
+    loop.timeLimitSec = options_.timeoutSec > 0.f ? options_.timeoutSec : (options_.frames > 0 ? 60.f : 0.f);
+    stats_.startLoop();
     while (true) {
-        // 창 닫기 요청은 앞단에 묻습니다. 에디터는 저장하지 않은 씬이 있으면 확인 창을 띄우고 닫기를 미루고, 게임은 바로 끝냅니다.
-        if (win.shouldClose()) {
-            if (front.requestClose()) break;
-            win.setShouldClose(false);
-        }
-        const auto loopT0 = Clock::now();
-        gFrameTimings().resetLast();
-        {
-            ScopedCpuTimer t(gFrameTimings().pollEvents);
-            win.pollEvents();
-        }
-        // 창이 최소화되면(프레임버퍼 0x0) 에디터 UI 는 쉬고 시뮬레이션 · 소리 · XR 은 계속 돕니다. 예전에는
-        // 스왑체인을 다시 만들며 복원될 때까지 루프 전체가 멈춰, 최소화한 채 창을 닫으면 엔진이 끝나지 않았습니다
-        // (DEF-106). 에디터의 배치 계산은 0 크기를 다루지 않으므로 부르지 않습니다.
-        int fbW = 0, fbH = 0;
-        win.getFramebufferSize(fbW, fbH);
-        const bool minimized = (fbW <= 0 || fbH <= 0);
-
-        // ── XR 프레임 시작 ─────────────────────────────────────────────────
-        // 세션이 돌면 xrWaitFrame 이 헤드셋 주사율에 맞춰 기다리므로 루프 속도를 헤드셋이 정합니다.
-        // 입력은 이 프레임이 보일 예상 시각의 자세로 읽어 틱에 넘깁니다.
-        // Play 상태는 앞 프레임의 에디터 입력이 바꿉니다. 여기서 세션을 맞추면 진행 중인 XR 프레임이 없습니다.
-        syncXrWithPlay(front.isPlaying() || front.isPaused());
-        // 세션이 없을 때도 XR 이벤트를 받습니다(DEF-155). 다시 열기를 기다리는 동안 인스턴스를 잃으면(런타임 재시작 등) 그것을
-        // 알아야 끝없이 다시 시도하지 않습니다. 예전에는 세션이 있을 때만 받아 인스턴스 손실을 영영 받지 못했습니다.
-        if (xr_ && xrUsable_ && !xr_->hasSession()) {
-            xr_->pollEvents();
-            if (xr_->lossReason() == XrSystem::LossReason::InstanceLost) onXrInstanceLost();
-        }
-        // 헤드셋 연결이 끊겼다가 돌아오면 세션을 다시 엽니다(게임 실행 파일, 2026-10-19). 정해진 간격(처음 2초)으로 조용히
-        // 확인합니다. XR 이 필수인 플랫폼은 데스크톱으로 계속할 수 없으므로, 처음 잃은 때부터 30초 안에 다시 돌지 않으면 끝냅니다
-        // (DEF-155). 마감 시각은 다시 연 세션이 시작하지 못하고 또 잃어도 처음 것을 씁니다.
-        if (xrRetryPending_ && xr_ && !xr_->hasSession() && xrPlayWanted_) {
-            const auto nowRetry = std::chrono::steady_clock::now();
-            if (options_.xrRequired && nowRetry >= xrRetryGiveUpAt_) {
-                xrRetryPending_      = false;
-                xrRecovering_        = false;
-                xrRecoveredRunSince_ = {};
-                HLOG(LogEngine, Error) << "XR: the session did not come back and this platform has no desktop view; closing";
-                win.setShouldClose(true);
-            } else if (nowRetry >= xrRetryAt_) {
-                xrRetryAt_ = nowRetry + xrRetryDelay_;
-                if (xr_->headsetAvailable() && startXrSession()) {
-                    xrRetryPending_ = false;
-                    HLOG(LogEngine, Log) << "XR: the headset is back; session reopened";
-                }
-            }
-        }
-        XrSystem::FrameInfo xrFrame;
-        bool xrBegun = false;
-        // XR 에는 언제나 리그가 있습니다(2026-10-15 플레이어 리그, 2026-10-16 보이지 않는 리그). 화면 카메라가 씬 리그의
-        // 머리면 그 리그의 높이 모드를, 아니면 프로젝트 설정의 값을 씁니다. 프레임을 시작하기 전에 정해 한 프레임 안에서는
-        // 바뀌지 않게 합니다.
-        CameraComponent* const    viewCam    = world_.getActiveCamera();
-        const hxr::XrOriginChoice viewOrigin = originOfCamera(viewCam);
-        const Actor* const        viewRig    = viewOrigin.kind == hxr::EXrOrigin::SceneRig ? viewOrigin.actor : nullptr;
-        if (xr_ && xr_->hasSession()) {
-            const auto* rc = viewRig ? viewRig->getComponent<XrRigComponent>() : nullptr;
-            xr_->setRigSpace(rc ? rc->trackedHeight : project_.xrTrackedHeight, rc ? rc->eyeHeight : project_.xrEyeHeight);
-        }
-        if (xr_ && xr_->hasSession()) {
-            xr_->pollEvents();
-            // 입력은 매 프레임 새로 넣습니다. 세션이 멈추면(헤드셋을 벗음 등) 빈 상태가 들어가, 마지막
-            // 버튼 · 스틱 값이 눌린 채 남지 않습니다.
-            HXrInputState xin;
-            if (xr_->sessionLost()) {
-                const bool                 requested = xr_->exitRequested();
-                const XrSystem::LossReason why       = xr_->lossReason();
-                if (why == XrSystem::LossReason::InstanceLost) {
-                    // 인스턴스를 잃으면 무엇을 요청했든 이번 실행에서는 다시 열 수 없습니다(DEF-155).
-                    onXrInstanceLost();
-                } else if (requested) {
-                    // Stop 으로 끝냈습니다. 끝내는 중에 다시 Play 를 눌렀으면 곧바로 엽니다.
-                    endXr("Play stopped");
-                    if (xrPlayWanted_) startXrSession();
-                } else if (why == XrSystem::LossReason::Exiting && policy_.quitOnXrExit) {
-                    // 게임 실행 파일: 대시보드에서 종료하는 등 런타임이 끝내라고 하면 앱도 끝냅니다(2026-10-19, OpenXR 권고).
-                    endXr("the runtime asked the app to exit");
-                    win.setShouldClose(true);
-                } else if (why == XrSystem::LossReason::Disconnected && policy_.retryXrSession) {
-                    // 게임 실행 파일: 헤드셋 연결이 끊겼습니다. 데스크톱으로 계속하면서 돌아오기를 기다립니다.
-                    // 복구 중에 또 잃었으면(다시 연 세션이 시작하지 못함) 마감 시각은 그대로 두고 간격을 늘립니다(DEF-155).
-                    // 예전에는 손실 때마다 마감 시각을 새로 잡아, 시작에 계속 실패하는 세션이 2초마다 다시 열리며 끝나지 않았습니다.
-                    endXr("the headset disconnected; continuing on the desktop until it is back");
-                    const auto nowLoss = std::chrono::steady_clock::now();
-                    xrRecoveredRunSince_ = {};
-                    if (!xrRecovering_) {
-                        xrRecovering_    = true;
-                        xrRetryDelay_    = std::chrono::seconds(2);
-                        xrRetryGiveUpAt_ = nowLoss + std::chrono::seconds(30);
-                    } else {
-                        xrRetryDelay_ = std::min(xrRetryDelay_ * 2, std::chrono::seconds(30));
-                        HLOG(LogEngine, Warning) << "XR: the reopened session was lost before it started; next try in "
-                                                 << xrRetryDelay_.count() << " s";
-                    }
-                    xrRetryPending_ = true;
-                    xrRetryAt_      = nowLoss + xrRetryDelay_;
-                } else if (options_.xrRequired) {
-                    // XR 이 필수인 플랫폼(Quest)은 데스크톱으로 계속할 수 없으므로 끝냅니다(DEF-155). 예전에는 아래 에디터
-                    // 갈래로 가서 세션 없이 빈 화면인 채 끝나지 않았습니다.
-                    endXr("ended by the runtime");
-                    HLOG(LogEngine, Error) << "XR: the session ended and this platform has no desktop view; closing";
-                    win.setShouldClose(true);
-                } else {
-                    // 에디터: 런타임이 Play 중에 끝냈으면(대시보드에서 종료 등) Play 는 데스크톱으로 계속하고, 다음
-                    // Play 에서 다시 엽니다.
-                    endXr("ended by the runtime; Play continues on the desktop");
-                }
-            } else if (xr_->sessionRunning()) {
-                {
-                    ScopedCpuTimer tw(gFrameTimings().xrWait);
-                    xrBegun = xr_->beginFrame(xrFrame);
-                }
-                if (xrBegun) xr_->syncInput(xrFrame.displayTime, xin);
-                if (xrBegun && xrRecovering_) {
-                    // 다시 연 세션이 5초 동안 이어서 돌면 복구가 끝난 것으로 봅니다(DEF-155). 그 전에 또 잃으면 처음 마감 시각을 씁니다.
-                    const auto nowRun = std::chrono::steady_clock::now();
-                    if (xrRecoveredRunSince_ == std::chrono::steady_clock::time_point{}) {
-                        xrRecoveredRunSince_ = nowRun;
-                    } else if (nowRun - xrRecoveredRunSince_ >= std::chrono::seconds(5)) {
-                        xrRecovering_        = false;
-                        xrRecoveredRunSince_ = {};
-                        HLOG(LogEngine, Log) << "XR: the reopened session is running";
-                    }
-                }
-                // 물리 스텝을 헤드셋 주사율에 맞춥니다(1/60 이면 72 · 90Hz 에서 물체가 떨려 보임).
-                const float hz = xr_->displayRefreshRate();
-                if (physics_ && hz > 1.f && std::abs(physics_->stepRate() - hz) > 0.5f) {
-                    physics_->setStepRate(hz);
-                    HLOG(LogEngine, Log) << "Physics step matched to the headset: " << hz << " Hz";
-                }
-            }
-            HInputSystem::get().setXrInput(xin);
-        }
-        if (viewCam) {
-            const bool xrLive = xr_ && xr_->hasSession();
-            if (xrLive && viewCam->owner && viewOrigin.kind == hxr::EXrOrigin::TrackedParent) {
-                // 머리 추적 카메라인데 부모가 리그가 아님: 그 부모(없으면 월드 원점)를 리그처럼 원점으로 씁니다. 예전에는 보이지
-                // 않는 리그를 카메라에 붙여, 머리 추적이 이미 옮긴 카메라 위치 · 요를 원점으로 다시 써서 두 번 적용됐습니다(DEF-144).
-                viewCam->setXrTrackedParent(viewOrigin.actor, xr_->rigLift());
-                implicitRigCam_ = 0;
-                if (trackedOriginCam_ != viewCam->owner->id) {
-                    trackedOriginCam_ = viewCam->owner->id;
-                    HLOG(LogEngine, Log) << "XR rig: camera '" << viewCam->owner->name << "' tracks the head without an XR Rig parent; "
-                                         << (viewOrigin.actor ? "its parent '" + viewOrigin.actor->name + "'" : std::string("the world origin"))
-                                         << " is the tracking origin";
-                }
-            } else if (viewRig || !xrLive || !viewCam->owner) {
-                // 씬 리그(원점 = 리그 액터), 또는 XR 이 아님(데스크톱 · 스테레오 흉내는 예전처럼 카메라 위치 + 요).
-                viewCam->setXrRig(viewRig, xrLive ? xr_->rigLift() : 0.f);
-                if (!xrLive) implicitRigCam_ = 0;
-            } else {
-                // 보이지 않는 리그: 이 카메라로 XR 을 처음 볼 때 카메라 아래 바닥을 한 번 찾고, 그 뒤에는 카메라를 따라 같은
-                // 거리 아래에 둡니다. 아래에 아무것도 없으면(우주 씬 등) 카메라 위치에 둡니다.
-                Actor* const camActor = viewCam->owner;
-                if (implicitRigCam_ != camActor->id) {
-                    const glm::vec3 cp = camActor->worldPosition();
-                    float floorY = 0.f;
-                    const bool found = hxr::floorBelow(world_, cp, camActor, floorY);
-                    implicitRigDrop_ = found ? cp.y - floorY : 0.f;
-                    implicitRigCam_  = camActor->id;
-                    if (found) HLOG(LogEngine, Log) << "XR rig: none in the scene; standing on the floor " << implicitRigDrop_ << " m below the camera";
-                    else       HLOG(LogEngine, Log) << "XR rig: none in the scene and nothing below the camera; rig placed at the camera";
-                }
-                viewCam->setXrImplicitRig(implicitRigDrop_, xr_->rigLift());
-            }
-        }
-        // 소리 청취자: XR 세션이 입력을 받는 동안에는 헤드셋 자세를 따릅니다. 카메라는 XR 원점(위치 + 요)일
-        // 뿐이라, 넘기지 않으면 고개를 돌려도 소리의 좌우가 바뀌지 않습니다. 손 자세와 같은 기준(원점 × 자세)입니다.
-        if (audio_) {
-            const HXrInputState& xr  = HInputSystem::get().xr();
-            CameraComponent*     cam = world_.getActiveCamera();
-            if (xr.focused && xr.head.valid && cam)
-                audio_->setListenerPose(cam->xrOrigin() * glm::translate(glm::mat4(1.f), xr.head.position)
-                                        * glm::mat4_cast(xr.head.orientation));
-            else
-                audio_->clearListenerPose();
-        }
-
-        auto  now = Clock::now();
-        float dt  = std::chrono::duration<float>(now - prev).count();
-        prev      = now;
-        dt        = std::min(dt, 0.05f);
-        renderer.advanceTime(dt);
-
-        int winW, winH;
-        win.getWindowSize(winW, winH);
-
-        float mx, my;
-        win.getMousePosition(mx, my);
-
-        auto inViewport = [&](float x, float y) {
-            return front.inViewport(x, y, (float)winW, (float)winH);
-        };
-
-        // LMB — viewport hit-test (pick / orbit gated to viewport)
-        bool lmb      = win.isMouseButtonDown(HInput::MOUSE_BUTTON_LEFT);
-        bool lmbJustUp= !lmb && prevLDown;
-        prevLDown     = lmb;
-
-        // RMB → camera mode
-        bool rmb = win.isMouseButtonDown(HInput::MOUSE_BUTTON_RIGHT);
-        if (rmb && !prevRDown && inViewport(mx, my)) win.activateCameraMode();
-        if (!rmb && prevRDown) win.deactivateCameraMode();
-        prevRDown = rmb;
-
-        // ── Play state transitions ─────────────────────────────────────────
-        // 게임 실행 파일은 헤드셋이 입력 초점을 잃으면(벗음 · 시스템 메뉴) 멈춥니다(2026-10-19, Meta VRC.Quest.Functional.2).
-        // 에디터의 Pause 와 같은 경로(월드 · 모듈 tick 정지, 소리 그룹 일시정지)이고, 초점이 돌아오면 이어서 갑니다.
-        const bool focusLost = policy_.pauseOnXrFocusLoss && xr_ && xr_->hasSession() && !HInputSystem::get().xr().focused;
-        if (focusLost != xrFocusPaused_) {
-            xrFocusPaused_ = focusLost;
-            HLOG(LogEngine, Log) << (focusLost ? "Paused: the headset does not have input focus (taken off or system menu)"
-                                               : "Resumed: the headset has input focus");
-        }
-        const bool inGame  = front.isPlaying() || front.isPaused();
-        const bool paused  = front.isPaused() || (front.isPlaying() && xrFocusPaused_);
-        const bool playing = front.isPlaying() && !xrFocusPaused_;
-        if (inGame && !prevInGame) {
-            gameModule.onBeginPlay(ctx);
-            modules.beginPlayAll();
-        }
-        if (!inGame && prevInGame) {
-            gameModule.onEndPlay();
-            modules.endPlayAll();
-        }
-        // 일시정지는 시작·끝 처리 뒤에 알립니다. Pause 상태에서 곧바로 Stop 하면 끝 처리가
-        // 먼저 사운드를 멈추므로, 뒤따르는 재개 통지가 남은 소리를 다시 들려주지 않습니다.
-        if (paused != prevPaused) modules.pauseChangedAll(paused);
-        prevInGame = inGame;
-        prevPaused = paused;
-
-        // ── Tick ──────────────────────────────────────────────────────────
-        {
-            ScopedCpuTimer t(gFrameTimings().tick);
-            if (!minimized) front.tick(dt);
-            // 디버그 선은 한 프레임용입니다. 에디터는 tick 에서 앞 프레임의 선을 가져가 그리므로, 그 뒤 · 월드 틱 전에
-            // 비웁니다. 예전에는 에디터만 비워, 에디터가 없거나(게임 실행 파일) 최소화로 에디터 tick 을 건너뛰면 선이
-            // 끝없이 쌓였습니다(2026-10-19).
-            hdebug::lines().clear();
-            HInputSystem::get().update(dt, win, front.isTextInputActive());
-            if (playing) {
-                {
-                    ScopedCpuTimer tw(gFrameTimings().worldTick);
-                    world.tick(dt);
-                    gameModule.onTick(dt, ctx);
-                }
-                ScopedCpuTimer tm(gFrameTimings().modules);
-                modules.tickAll(dt);
-            }
-            // 머리를 따라오는 패널(3D UI 구간 7)을 먼저 옮기고, 그 자세로 포인터가 가리킵니다.
-            if (playing) updateFollowPanels(dt);
-            // 월드 UI 패널(3D UI 구간 5 · 6): 틱이 옮긴 뒤의 자세로 가리키고, 앞단의 클릭 처리(handleInput)보다 먼저 알립니다.
-            // 마우스는 XR 세션이 없을 때만, 창 없는 실행(--headless)에는 실제 마우스가 없어 끕니다(좌표 0,0 의 호버가
-            // 캡처를 바꾸지 않게). XR 은 세션이 입력을 받는 동안 두 손 컨트롤러로 가리킵니다.
-            {
-                const bool xrLiveNow = xr_ && xr_->hasSession();
-                WorldUiPointerInput pin;
-                pin.mouseActive = playing && !minimized && !headless_ && !xrLiveNow;
-                pin.xrActive    = playing && xrLiveNow;
-                pin.mx = mx; pin.my = my; pin.lmb = lmb; pin.winW = winW; pin.winH = winH; pin.dt = dt;
-                updateWorldUiPointers(front, pin);
-            }
-            // 마우스 시선은 이번 프레임 것만 씁니다(에디터가 다음 tick 에 다시 넣음).
-            HInputSystem::get().setLookDelta(0.f, 0.f);
-        }
-
-        // ── Editor input (단축키는 EditorApp::tickShortcuts에서 처리) ──────
-        if (!minimized) {
-            ScopedCpuTimer t(gFrameTimings().handleInput);
-            front.handleInput(mx, my, lmb, lmbJustUp, 0.f,
-                              (float)winW, (float)winH);
-        }
-
-        // ── Render ─────────────────────────────────────────────────────────
-        // XR: 눈 자세를 이 프레임에 한 번 받아 컬링 · 렌더 · 제출에 함께 씁니다(DEF-32). 헤드셋이 화면을
-        // 보여 주지 않거나(벗음 등) 추적을 잃으면 그 프레임은 데스크톱만 그리고 빈 프레임을 제출합니다.
-        // 합성 눈(--synthetic-eyes)은 XR 세션 대신 렌더러가 만든 이미지에 같은 경로로 그립니다. 눈은 스테레오 흉내와 같은
-        // 두 평행한 눈이고, 원점은 XR 과 같습니다(씬 리그면 리그 액터 + 눈높이, 아니면 카메라 위치 + 요).
-        bool drewSynthetic = false;
-        if (xrBegun) {
-            XrFrameTarget target;
-            bool acquired = false;
-            if (xrFrame.shouldRender && xr_->locateViews(xrFrame.displayTime, target.eyes))
-                acquired = xr_->acquireImage(target.imageIndex);
-            const bool rendered = renderer.drawFrame(world, acquired ? &target : nullptr);
-            if (acquired) xr_->releaseImage();
-            xr_->endFrame(xrFrame.displayTime, acquired && rendered);
-            if (acquired && rendered) ++drawnFrames_;
-        } else if (synthetic_) {
-            static_assert(kMaxViews == 2, "synthetic eyes are a stereo pair");
-            const float tanUp  = std::tan(glm::radians(viewCam ? viewCam->fovY : 45.f) * 0.5f);
-            const float aspect = (float)options_.syntheticEyeW / (float)options_.syntheticEyeH;
-            const auto* rigC   = viewRig ? viewRig->getComponent<XrRigComponent>() : nullptr;
-            const std::array<XrEyePose, 2> eyes = hxr::syntheticEyes(hxr::kSyntheticIpd, tanUp, aspect,
-                                                                     rigC ? rigC->eyeHeight : 0.f);
-            XrFrameTarget target;
-            target.imageIndex = syntheticImage_;
-            target.eyes[0]    = eyes[0];
-            target.eyes[1]    = eyes[1];
-            drewSynthetic = renderer.drawFrame(world, &target);
-            if (drewSynthetic) {
-                lastSynthetic_  = syntheticImage_;
-                syntheticImage_ = (syntheticImage_ + 1) % renderer.syntheticImageCount();
-                ++drawnFrames_;
-            }
-        } else {
-            renderer.drawFrame(world);
-            if (renderer.lastFrameDesktop()) ++drawnFrames_;
-        }
-
-        if (!closeAsked && options_.frames > 0 && drawnFrames_ >= options_.frames) {
-            closeAsked = true;
-            win.setShouldClose(true);
-        }
-        if (!closeAsked && timeLimitSec > 0.f &&
-            std::chrono::duration<float>(Clock::now() - runStart).count() > timeLimitSec) {
-            closeAsked = true;
-            timedOut_  = true;
-            HLOG(LogEngine, Warning) << "Run time limit " << timeLimitSec << " s reached after drawing " << drawnFrames_
-                                     << " frames; closing";
-            win.setShouldClose(true);
-        }
-
-        // FPS title (every 0.5 s)
-        ++fpsFrames;
-        auto  fpsNow = Clock::now();
-        float fpsDt  = std::chrono::duration<float>(fpsNow - fpsTimer).count();
-        if (fpsDt >= 0.5f && !headless_) {
-            int fps = (int)(fpsFrames / fpsDt);
-            // VR 을 원했는데 쓸 수 없거나(런타임 · 헤드셋 없음) 연결이 끊겨 기다리는 중이면 제목에 알립니다(2026-10-19).
-            const char* vrNote = (xrWanted_ && !xrUsable_) ? "  |  VR unavailable"
-                               : xrRetryPending_          ? "  |  VR disconnected" : "";
-            win.setTitle(front.windowTitle() + vrNote + "  |  " + std::to_string(fps) + " FPS");
-            fpsTimer  = fpsNow;
-            fpsFrames = 0;
-        }
-
-        // 루프 1 회 전체입니다. 이것이 실제 프레임 간격이며, 위 구간들의 합과
-        // 크게 벌어지면 그 차이가 곧 "어느 계측기에도 잡히지 않는 시간"입니다.
-        const float loopMs = std::chrono::duration<float, std::milli>(Clock::now() - loopT0).count();
-        gFrameTimings().loopTotal.add(loopMs);
-
-        // 프레임 시간 분포와 끊김 로그(2026-11-18, 성능 안정화 1-1). XR 세션 · 합성 눈 프레임만 셉니다.
-        if (xrBegun || drewSynthetic) {
-            budgetMs_ = hperf::frameBudgetMs(xrBegun ? xr_->displayRefreshRate() : 0.f);
-            if (!firstFrameLogged_) {
-                firstFrameLogged_ = true;
-                HLOG(LogEngine, Log) << "Startup: first frame drawn "
-                                     << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bootStart_).count()
-                                     << " ms after the engine started (that frame " << loopMs << " ms)";
-            } else {
-                cpuFrames_.add(loopMs);
-                gpuFrames_.add(renderer.getTimings().totalMs);
-                if (hperf::overBudget(loopMs, budgetMs_, xrBegun)) {
-                    ++overBudget_;
-                    if (hitchesLogged_ < kMaxHitchLogs) {
-                        ++hitchesLogged_;
-                        const FrameTimings& f = gFrameTimings();
-                        char buf[400];
-                        std::snprintf(buf, sizeof(buf),
-                            "Hitch: frame %u took %.2f ms (budget %.1f): poll %.2f, xr wait %.2f, tick %.2f (world %.2f, modules %.2f, "
-                            "physics %.2f), input %.2f, draw %.2f (fence %.2f, capture %.2f, extract %.2f, record %.2f, submit %.2f, "
-                            "present %.2f), GPU %.2f",
-                            drawnFrames_, loopMs, budgetMs_, f.pollEvents.last, f.xrWait.last, f.tick.last, f.worldTick.last,
-                            f.modules.last, f.physics.last, f.handleInput.last, f.drawFrame.last, f.fenceWait.last,
-                            f.reflCapture.last, f.extract.last, f.record.last, f.submit.last, f.present.last,
-                            renderer.getTimings().totalMs);
-                        HLOG(LogEngine, Log) << buf;
-                        if (hitchesLogged_ == kMaxHitchLogs) {
-                            HLOG(LogEngine, Log) << "Hitch: " << kMaxHitchLogs << " logged; later ones are only counted";
-                        }
-                    }
-                }
-            }
-        }
-
-        // 최소화 중에는 그리지 않아 루프가 코어 하나를 다 쓰므로 쉬어 갑니다(약 60Hz, dt 는 실제 시간이라
-        // 시뮬레이션 속도는 그대로). 헤드셋이 돌면 xrWaitFrame 이 속도를 정하므로 쉬지 않습니다. 합성 눈을 그린 프레임도
-        // 쉬지 않습니다(창 없는 실행은 언제나 0x0 이라, 쉬면 자동 확인이 프레임마다 15ms 씩 느려짐).
-        if (minimized && !xrBegun && !drewSynthetic)
-            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        FrameState f;
+        if (!beginLoop(f)) break;
+        beginXrFrame(f);
+        applyViewPose(f);
+        readDesktopInput(f, loop);
+        updatePlayState(f, loop);
+        tickFrame(f);
+        frontendInput(f);
+        renderFrame(f);
+        endLoop(f, loop);
     }
     return finishRun();
+}
+
+// 1. 창 닫기 요청은 앞단에 묻습니다. 에디터는 저장하지 않은 씬이 있으면 확인 창을 띄우고 닫기를 미루고, 게임은 바로 끝냅니다.
+bool Engine::beginLoop(FrameState& f) {
+    IWindow& win = *window_;
+    if (win.shouldClose()) {
+        if (frontend_->requestClose()) return false;
+        win.setShouldClose(false);
+    }
+    f.loopT0 = FrameState::Clock::now();
+    gFrameTimings().resetLast();
+    {
+        ScopedCpuTimer t(gFrameTimings().pollEvents);
+        win.pollEvents();
+    }
+    // 창이 최소화되면(프레임버퍼 0x0) 에디터 UI 는 쉬고 시뮬레이션 · 소리 · XR 은 계속 돕니다. 예전에는
+    // 스왑체인을 다시 만들며 복원될 때까지 루프 전체가 멈춰, 최소화한 채 창을 닫으면 엔진이 끝나지 않았습니다
+    // (DEF-106). 에디터의 배치 계산은 0 크기를 다루지 않으므로 부르지 않습니다.
+    int fbW = 0, fbH = 0;
+    win.getFramebufferSize(fbW, fbH);
+    f.minimized = (fbW <= 0 || fbH <= 0);
+    return true;
+}
+
+// 2. XR 프레임 시작. 세션이 돌면 xrWaitFrame 이 헤드셋 주사율에 맞춰 기다리므로 루프 속도를 헤드셋이 정합니다. 입력은 이 프레임이
+// 보일 예상 시각의 자세로 읽어 틱에 넘깁니다. Play 상태는 앞 프레임의 에디터 입력이 바꾸므로, 여기서 세션을 맞추면 진행 중인
+// XR 프레임이 없습니다.
+void Engine::beginXrFrame(FrameState& f) {
+    xrSession_->syncWithPlay(frontend_->isPlaying() || frontend_->isPaused());
+    xrSession_->pollWithoutSession();
+    xrSession_->retryIfDue();
+    // 화면 카메라가 씬 리그의 머리면 그 리그의 높이 모드를, 아니면 프로젝트 설정의 값을 씁니다. 프레임을 시작하기 전에 정해
+    // 한 프레임 안에서는 바뀌지 않게 합니다.
+    f.view = viewOrigin_->choose(world_);
+    if (xr_) viewOrigin_->applyRigSpace(*xr_, f.view, project_);
+    f.xrBegun = xrSession_->beginFrame(f.xrFrame);
+}
+
+// 3. 화면 카메라의 XR 원점과 소리 청취자. 청취자는 XR 세션이 입력을 받는 동안 헤드셋 자세를 따릅니다. 카메라는 XR 원점(위치 + 요)일
+// 뿐이라, 넘기지 않으면 고개를 돌려도 소리의 좌우가 바뀌지 않습니다. 손 자세와 같은 기준(원점 × 자세)입니다.
+void Engine::applyViewPose(FrameState& f) {
+    viewOrigin_->applyToCamera(f.view, xr_.get(), world_);
+    if (audio_) {
+        const HXrInputState& xr  = HInputSystem::get().xr();
+        CameraComponent*     cam = world_.getActiveCamera();
+        if (xr.focused && xr.head.valid && cam)
+            audio_->setListenerPose(cam->xrOrigin() * glm::translate(glm::mat4(1.f), xr.head.position)
+                                    * glm::mat4_cast(xr.head.orientation));
+        else
+            audio_->clearListenerPose();
+    }
+}
+
+// 4. 프레임 시간 · 창 크기 · 마우스. 오른쪽 버튼을 뷰포트 안에서 누르면 카메라 모드(커서 잡기)입니다.
+void Engine::readDesktopInput(FrameState& f, LoopState& loop) {
+    IWindow& win = *window_;
+    const auto now = LoopState::Clock::now();
+    f.dt      = std::chrono::duration<float>(now - loop.prev).count();
+    loop.prev = now;
+    f.dt      = std::min(f.dt, 0.05f);
+    renderer_->advanceTime(f.dt);
+
+    win.getWindowSize(f.winW, f.winH);
+    win.getMousePosition(f.mx, f.my);
+
+    // LMB — viewport hit-test (pick / orbit gated to viewport)
+    f.lmb          = win.isMouseButtonDown(HInput::MOUSE_BUTTON_LEFT);
+    f.lmbJustUp    = !f.lmb && loop.prevLDown;
+    loop.prevLDown = f.lmb;
+
+    // RMB → camera mode
+    const bool rmb = win.isMouseButtonDown(HInput::MOUSE_BUTTON_RIGHT);
+    if (rmb && !loop.prevRDown && frontend_->inViewport(f.mx, f.my, (float)f.winW, (float)f.winH)) win.activateCameraMode();
+    if (!rmb && loop.prevRDown) win.deactivateCameraMode();
+    loop.prevRDown = rmb;
+}
+
+// 5. Play 상태 전이. 게임 실행 파일은 헤드셋이 입력 초점을 잃으면(벗음 · 시스템 메뉴) 멈춥니다(2026-10-19, Meta VRC.Quest.Functional.2).
+// 에디터의 Pause 와 같은 경로(월드 · 모듈 tick 정지, 소리 그룹 일시정지)이고, 초점이 돌아오면 이어서 갑니다.
+void Engine::updatePlayState(FrameState& f, LoopState& loop) {
+    IEngineFrontend& front = *frontend_;
+    const bool focusLost = policy_.pauseOnXrFocusLoss && xr_ && xr_->hasSession() && !HInputSystem::get().xr().focused;
+    if (focusLost != xrFocusPaused_) {
+        xrFocusPaused_ = focusLost;
+        HLOG(LogEngine, Log) << (focusLost ? "Paused: the headset does not have input focus (taken off or system menu)"
+                                           : "Resumed: the headset has input focus");
+    }
+    const bool inGame = front.isPlaying() || front.isPaused();
+    const bool paused = front.isPaused() || (front.isPlaying() && xrFocusPaused_);
+    f.playing         = front.isPlaying() && !xrFocusPaused_;
+    if (inGame && !loop.prevInGame) {
+        game_->onBeginPlay(*ctx_);
+        modules_.beginPlayAll();
+    }
+    if (!inGame && loop.prevInGame) {
+        game_->onEndPlay();
+        modules_.endPlayAll();
+    }
+    // 일시정지는 시작·끝 처리 뒤에 알립니다. Pause 상태에서 곧바로 Stop 하면 끝 처리가
+    // 먼저 사운드를 멈추므로, 뒤따르는 재개 통지가 남은 소리를 다시 들려주지 않습니다.
+    if (paused != loop.prevPaused) modules_.pauseChangedAll(paused);
+    loop.prevInGame = inGame;
+    loop.prevPaused = paused;
+}
+
+// 6. 틱. 앞단(에디터 UI) → 디버그 선 비우기 → 입력 → 월드 · 게임 · 모듈 → 따라오는 패널 → 월드 UI 포인터.
+void Engine::tickFrame(FrameState& f) {
+    ScopedCpuTimer t(gFrameTimings().tick);
+    if (!f.minimized) frontend_->tick(f.dt);
+    // 디버그 선은 한 프레임용입니다. 에디터는 tick 에서 앞 프레임의 선을 가져가 그리므로, 그 뒤 · 월드 틱 전에
+    // 비웁니다. 예전에는 에디터만 비워, 에디터가 없거나(게임 실행 파일) 최소화로 에디터 tick 을 건너뛰면 선이
+    // 끝없이 쌓였습니다(2026-10-19).
+    hdebug::lines().clear();
+    HInputSystem::get().update(f.dt, *window_, frontend_->isTextInputActive());
+    if (f.playing) {
+        {
+            ScopedCpuTimer tw(gFrameTimings().worldTick);
+            world_.tick(f.dt);
+            game_->onTick(f.dt, *ctx_);
+        }
+        ScopedCpuTimer tm(gFrameTimings().modules);
+        modules_.tickAll(f.dt);
+    }
+    // 머리를 따라오는 패널(3D UI 구간 7)을 먼저 옮기고, 그 자세로 포인터가 가리킵니다.
+    if (f.playing) worldUi_.updateFollowPanels(world_, xr_ && xr_->hasSession(), f.dt);
+    // 월드 UI 패널(3D UI 구간 5 · 6): 틱이 옮긴 뒤의 자세로 가리키고, 앞단의 클릭 처리(handleInput)보다 먼저 알립니다.
+    // 마우스는 XR 세션이 없을 때만, 창 없는 실행(--headless)에는 실제 마우스가 없어 끕니다(좌표 0,0 의 호버가
+    // 캡처를 바꾸지 않게). XR 은 세션이 입력을 받는 동안 두 손 컨트롤러로 가리킵니다.
+    {
+        const bool xrLiveNow = xr_ && xr_->hasSession();
+        WorldUiDriver::PointerInput pin;
+        pin.mouseActive = f.playing && !f.minimized && !headless_ && !xrLiveNow;
+        pin.xrActive    = f.playing && xrLiveNow;
+        pin.mx = f.mx; pin.my = f.my; pin.lmb = f.lmb; pin.winW = f.winW; pin.winH = f.winH; pin.dt = f.dt;
+        worldUi_.updatePointers(*frontend_, world_, physics_, *renderer_, pin);
+    }
+    // 마우스 시선은 이번 프레임 것만 씁니다(에디터가 다음 tick 에 다시 넣음).
+    HInputSystem::get().setLookDelta(0.f, 0.f);
+}
+
+// 7. 앞단 입력(단축키는 EditorApp::tickShortcuts 에서 처리).
+void Engine::frontendInput(FrameState& f) {
+    if (f.minimized) return;
+    ScopedCpuTimer t(gFrameTimings().handleInput);
+    frontend_->handleInput(f.mx, f.my, f.lmb, f.lmbJustUp, 0.f, (float)f.winW, (float)f.winH);
+}
+
+// 8. 렌더. XR: 눈 자세를 이 프레임에 한 번 받아 컬링 · 렌더 · 제출에 함께 씁니다(DEF-32). 헤드셋이 화면을
+// 보여 주지 않거나(벗음 등) 추적을 잃으면 그 프레임은 데스크톱만 그리고 빈 프레임을 제출합니다.
+// 합성 눈(--synthetic-eyes)은 XR 세션 대신 렌더러가 만든 이미지에 같은 경로로 그립니다. 눈은 스테레오 흉내와 같은
+// 두 평행한 눈이고, 원점은 XR 과 같습니다(씬 리그면 리그 액터 + 눈높이, 아니면 카메라 위치 + 요).
+void Engine::renderFrame(FrameState& f) {
+    Renderer& renderer = *renderer_;
+    if (f.xrBegun) {
+        XrFrameTarget target;
+        bool acquired = false;
+        if (f.xrFrame.shouldRender && xr_->locateViews(f.xrFrame.displayTime, target.eyes))
+            acquired = xr_->acquireImage(target.imageIndex);
+        const bool rendered = renderer.drawFrame(world_, acquired ? &target : nullptr);
+        if (acquired) xr_->releaseImage();
+        xr_->endFrame(f.xrFrame.displayTime, acquired && rendered);
+        if (acquired && rendered) ++drawnFrames_;
+    } else if (synthetic_) {
+        static_assert(kMaxViews == 2, "synthetic eyes are a stereo pair");
+        const float tanUp  = std::tan(glm::radians(f.view.cam ? f.view.cam->fovY : 45.f) * 0.5f);
+        const float aspect = (float)options_.syntheticEyeW / (float)options_.syntheticEyeH;
+        const auto* rigC   = f.view.rig ? f.view.rig->getComponent<XrRigComponent>() : nullptr;
+        const std::array<XrEyePose, 2> eyes = hxr::syntheticEyes(hxr::kSyntheticIpd, tanUp, aspect,
+                                                                 rigC ? rigC->eyeHeight : 0.f);
+        XrFrameTarget target;
+        target.imageIndex = syntheticImage_;
+        target.eyes[0]    = eyes[0];
+        target.eyes[1]    = eyes[1];
+        f.drewSynthetic = renderer.drawFrame(world_, &target);
+        if (f.drewSynthetic) {
+            lastSynthetic_  = syntheticImage_;
+            syntheticImage_ = (syntheticImage_ + 1) % renderer.syntheticImageCount();
+            ++drawnFrames_;
+        }
+    } else {
+        renderer.drawFrame(world_);
+        if (renderer.lastFrameDesktop()) ++drawnFrames_;
+    }
+}
+
+// 9. 루프 끝: 자동 실행 끝내기 · FPS 제목 · 프레임 통계 · 최소화 중 쉼.
+void Engine::endLoop(FrameState& f, LoopState& loop) {
+    IWindow& win = *window_;
+    if (!loop.closeAsked && options_.frames > 0 && drawnFrames_ >= options_.frames) {
+        loop.closeAsked = true;
+        win.setShouldClose(true);
+    }
+    if (!loop.closeAsked && loop.timeLimitSec > 0.f &&
+        std::chrono::duration<float>(LoopState::Clock::now() - loop.runStart).count() > loop.timeLimitSec) {
+        loop.closeAsked = true;
+        timedOut_       = true;
+        HLOG(LogEngine, Warning) << "Run time limit " << loop.timeLimitSec << " s reached after drawing " << drawnFrames_
+                                 << " frames; closing";
+        win.setShouldClose(true);
+    }
+
+    // FPS 제목(0.5 초마다). VR 을 원했는데 쓸 수 없거나(런타임 · 헤드셋 없음) 연결이 끊겨 기다리는 중이면 제목에 알립니다(2026-10-19).
+    const char* vrNote = (xrWanted_ && !xrSession_->usable()) ? "  |  VR unavailable"
+                       : xrSession_->retryPending()           ? "  |  VR disconnected" : "";
+    stats_.updateTitle(win, frontend_->windowTitle(), vrNote, headless_);
+
+    // 루프 1 회 전체입니다. 이것이 실제 프레임 간격이며, 위 구간들의 합과
+    // 크게 벌어지면 그 차이가 곧 "어느 계측기에도 잡히지 않는 시간"입니다.
+    const float loopMs = std::chrono::duration<float, std::milli>(FrameState::Clock::now() - f.loopT0).count();
+    gFrameTimings().loopTotal.add(loopMs);
+    // 프레임 시간 분포와 끊김 로그(2026-11-18, 성능 안정화 1-1). XR 세션 · 합성 눈 프레임만 셉니다.
+    if (f.xrBegun || f.drewSynthetic)
+        stats_.recordFrame(loopMs, f.xrBegun, f.drewSynthetic, f.xrBegun ? xr_->displayRefreshRate() : 0.f, drawnFrames_,
+                           renderer_->getTimings().totalMs);
+
+    // 최소화 중에는 그리지 않아 루프가 코어 하나를 다 쓰므로 쉬어 갑니다(약 60Hz, dt 는 실제 시간이라
+    // 시뮬레이션 속도는 그대로). 헤드셋이 돌면 xrWaitFrame 이 속도를 정하므로 쉬지 않습니다. 합성 눈을 그린 프레임도
+    // 쉬지 않습니다(창 없는 실행은 언제나 0x0 이라, 쉬면 자동 확인이 프레임마다 15ms 씩 느려짐).
+    if (f.minimized && !f.xrBegun && !f.drewSynthetic)
+        std::this_thread::sleep_for(std::chrono::milliseconds(15));
 }
 
 uint32_t Engine::validationErrorCount() { return Renderer::validationErrorCount(); }
@@ -1035,7 +712,7 @@ int Engine::finishRun() {
             if (!ok) blank = true;
         }
     }
-    logFramePacing("run");
+    stats_.logPacing("run");
     // GPU 구간 시간(타임스탬프, 지수 이동 평균). 요약 줄의 형식은 그대로 두고 따로 남깁니다(패스 비용 비교용).
     {
         const Renderer::GpuTimings t = renderer_->getTimings();

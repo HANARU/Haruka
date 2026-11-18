@@ -8,6 +8,7 @@
 
 #include "../src/runtime/EngineOptions.hpp"
 #include "../src/core/FramePacing.hpp"
+#include "../src/runtime/XrRecovery.hpp"
 #include "../src/platform/android/AndroidWindow.hpp"
 #include "../src/platform/headless/HeadlessWindow.hpp"
 #include "../src/renderer/FrameResources.hpp"
@@ -291,6 +292,42 @@ int main() {
         check(hd.median == 5.f, "고리 버퍼: 분포는 최근 4 개(4 · 5 · 6 · 7)의 중앙값 5");
         h.clear();
         check(h.total() == 0 && h.summary().max == 0.f, "비우면 0");
+    }
+
+    // ── XR 세션 다시 열기 시각 (DEF-155, 2026-11-18 Engine::run 에서 떼어 낸 순수 계산) ─────────────────────────
+    {
+        std::printf("\n[XR 세션 다시 열기 시각 (XrRecovery.hpp)]\n");
+        using hxr::XrRecovery;
+        using S = std::chrono::seconds;
+        const XrRecovery::TimePoint t0{ S(1000) };
+        XrRecovery r;
+        check(!r.pending && !r.recovering, "처음에는 기다리지 않음");
+        check(!r.onDisconnected(t0), "첫 손실은 '또 잃음' 이 아님");
+        check(r.pending && r.recovering && r.delay == S(2) && r.retryAt == t0 + S(2) && r.giveUpAt == t0 + S(30),
+              "첫 손실: 2 초 뒤 다시 열기, 마감 30 초 뒤");
+        check(!r.due(t0 + S(1)), "간격 전에는 다시 열지 않음");
+        check(r.due(t0 + S(2)) && r.retryAt == t0 + S(4), "간격이 되면 다시 열고, 실패할 때를 위해 다음 시도를 2 초 뒤로");
+        // 다시 연 세션이 프레임을 시작했다가 5 초 전에 또 잃음: 마감 그대로, 간격 두 배
+        r.pending = false;
+        check(!r.onFrameStarted(t0 + S(3)) && r.runSince == t0 + S(3), "다시 연 세션의 첫 프레임 시각을 기억");
+        check(!r.onFrameStarted(t0 + S(7)), "5 초가 안 되면 아직 복구 중");
+        check(r.onDisconnected(t0 + S(7)), "복구 중에 또 잃음");
+        check(r.delay == S(4) && r.giveUpAt == t0 + S(30) && r.runSince == XrRecovery::TimePoint{},
+              "또 잃으면 간격 4 초, 마감은 처음 것, 실행 시작 시각은 비움");
+        for (int i = 0; i < 5; ++i) r.onDisconnected(t0 + S(8 + i));
+        check(r.delay == S(30), "간격은 30 초에서 멈춤");
+        check(!r.expired(t0 + S(29), true) && r.expired(t0 + S(30), true), "필수 플랫폼은 처음 잃은 때부터 30 초에 마감");
+        check(!r.expired(t0 + S(100), false), "필수가 아니면 마감 없음");
+        // 복구 완료: 5 초 이어서 돌면 한 번만 참
+        XrRecovery q;
+        q.onDisconnected(t0);
+        q.pending = false;
+        q.onFrameStarted(t0 + S(3));
+        check(!q.onFrameStarted(t0 + S(7)) && q.onFrameStarted(t0 + S(8)) && !q.recovering, "5 초 이어서 돌면 복구 끝(그 순간만 참)");
+        check(!q.onFrameStarted(t0 + S(20)), "복구가 끝난 뒤에는 다시 알리지 않음");
+        check(!q.onDisconnected(t0 + S(21)) && q.delay == S(2) && q.giveUpAt == t0 + S(51), "복구 뒤 새 손실은 처음부터(2 초, 새 마감)");
+        q.cancel();
+        check(!q.pending && !q.recovering && q.runSince == XrRecovery::TimePoint{}, "그만두면 기다림 · 복구 상태를 모두 비움");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
