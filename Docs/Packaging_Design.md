@@ -309,7 +309,7 @@
 | XR | Android 는 언제나 XR, 못 쓰면 이유와 함께 멈춤(`xrRequired`) | Quest 에는 데스크톱으로 계속할 화면이 없음. 연결이 잠시 끊기는 것만 다시 엶 |
 
 **구현**:
-- `platform/android/AndroidMain.cpp` 가 `android_main` 입니다.
+- `src/AndroidMain.cpp` 가 `android_main` 입니다(2026-11-18 까지 `platform/android/`, 엔진 구조 안정화 S3 에서 main.cpp 옆으로).
   - 스레드를 JavaVM 에 붙이고, 폴더와 로그를 엽니다.
   - RESUME 과 창을 받을 때까지 이벤트를 처리합니다. UI 스레드가 기다리므로 ANR 을 막으려는 것입니다.
   - 그다음 Engine 을 실행하고, 끝나면 액티비티를 끝내 달라고 합니다. 시스템이 받았다는 첫 표시(PAUSE · STOP · DESTROY)까지만, 최대

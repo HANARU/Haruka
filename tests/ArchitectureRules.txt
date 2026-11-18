@@ -64,11 +64,6 @@ allow geometry/PrimitiveDesc.hpp -> components/RigidBodyComponent.hpp
 # physics -> components — 2단계 S7: RigidBodyComponent 를 physics 옆으로
 allow physics/PhysicsSystem.cpp -> components/RigidBodyComponent.hpp
 
-# platform -> runtime — 1단계: Android 진입점(AndroidMain.cpp)을 앱 쪽으로(main.cpp 와 같은 자리)
-allow platform/android/AndroidMain.cpp -> runtime/Engine.hpp
-allow platform/android/AndroidMain.cpp -> runtime/EngineOptions.hpp
-allow platform/android/AndroidMain.cpp -> runtime/IEngineFrontend.hpp
-
 # renderer -> assets — 2단계 S5: 렌더러가 glTF 로더 · 메시 데이터를 직접 씀(업로드 인터페이스로)
 allow renderer/GpuScene.cpp -> assets/GltfLoader.hpp
 allow renderer/GpuScene.cpp -> assets/MeshSource.hpp

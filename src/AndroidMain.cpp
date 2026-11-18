@@ -28,12 +28,12 @@
 #include <string>
 #include <vector>
 
-#include "../../core/AppPaths.hpp"
-#include "../../runtime/Engine.hpp"
-#include "../../runtime/EngineOptions.hpp"
-#include "../../core/FileUtil.hpp"
-#include "../../core/HLog.hpp"
-#include "../../runtime/IEngineFrontend.hpp"
+#include "core/AppPaths.hpp"
+#include "runtime/Engine.hpp"
+#include "runtime/EngineOptions.hpp"
+#include "core/FileUtil.hpp"
+#include "core/HLog.hpp"
+#include "runtime/IEngineFrontend.hpp"
 
 namespace {
 
