@@ -989,7 +989,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 > **미검증 항목입니다.** 설계 검토자가 제시했으나 코드로 확인하지 않았습니다. **먼저 실측하십시오.**
 
-* **위치(주장)**: [`src/components/RigidBodyComponent.cpp`](file:///e:/Haruka/src/components/RigidBodyComponent.cpp)의 `resetIfLive`
+* **위치(주장)**: [`src/physics/RigidBodyComponent.cpp`](file:///e:/Haruka/src/physics/RigidBodyComponent.cpp)의 `resetIfLive`
 * **주장 내용**: `resetIfLive` 가 세터 안에 있어서, 에디터에서 슬라이더를 드래그하는 동안 **매 프레임 Jolt 바디를 파괴하고 재생성한다**는 것입니다.
 * **착수 전 실측 항목**:
   * `resetIfLive` 가 실제로 세터에서 호출되는지, 값이 바뀌지 않아도 호출되는지 확인하십시오.

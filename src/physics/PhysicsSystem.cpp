@@ -2,7 +2,7 @@
 #include "../core/FrameTimings.hpp"
 #include "../scene/World.hpp"
 #include "../scene/Actor.hpp"
-#include "../components/RigidBodyComponent.hpp"
+#include "RigidBodyComponent.hpp"
 #include "../geometry/CollisionMesh.hpp"
 
 // Jolt headers

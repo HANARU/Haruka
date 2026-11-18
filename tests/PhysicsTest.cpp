@@ -14,7 +14,7 @@
 
 #include "../src/scene/World.hpp"
 #include "../src/scene/Actor.hpp"
-#include "../src/components/RigidBodyComponent.hpp"
+#include "../src/physics/RigidBodyComponent.hpp"
 #include "../src/physics/PhysicsSystem.hpp"
 #include "../src/geometry/CollisionMesh.hpp"
 #include "../src/scene/ComponentFields.hpp"

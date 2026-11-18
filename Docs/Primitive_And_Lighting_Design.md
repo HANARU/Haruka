@@ -1800,7 +1800,7 @@ DEF-26과 DEF-27을 수정합니다.
 | `src/scene/World.cpp` | `getVisibleMeshes`의 `mesh && material` 요구, `getLights` 순서 |
 | `src/components/LightComponent.hpp` | `LIGHT_PROPS` 목록, 기본값, `direction` 과 `lightType` 미노출 |
 | `src/components/CameraComponent.hpp` / `.cpp` | zNear 와 zFar, forward 식, `proj[1][1] *= -1` |
-| `src/components/RigidBodyComponent.hpp` / `.cpp` | `EPhysicsShape`, `HalfExt` 기본 0.5, `resetIfLive` 세터 캡처 |
+| `src/physics/RigidBodyComponent.hpp` / `.cpp` | `EPhysicsShape`, `HalfExt` 기본 0.5, `resetIfLive` 세터 캡처 |
 | `src/components/StaticMeshComponent.hpp` / `.cpp` | LOD 필드, `getMeshForDistanceSq`, `readOnlyInfo`의 `find_last_of` |
 | `src/physics/PhysicsSystem.cpp` | Jolt 셰이프 생성, `transform.scale` 미반영, Capsule 인자 순서 |
 | `src/assets/GltfLoader.cpp` | `generateTangents` handedness 식, `defaultCube` 정점 24개 전체와 체커 생성 |

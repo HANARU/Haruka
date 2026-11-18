@@ -1,6 +1,6 @@
 #pragma once
 #include "../scene/Component.hpp"
-#include "../audio/AudioReverb.hpp"
+#include "AudioReverb.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>

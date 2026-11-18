@@ -1,6 +1,6 @@
 #include "AudioComponent.hpp"
 #include "../scene/Actor.hpp"
-#include "../audio/AudioSystem.hpp"
+#include "AudioSystem.hpp"
 #include "../scene/ComponentFields.hpp"
 #include <algorithm>
 #include <filesystem>

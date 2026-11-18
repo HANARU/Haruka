@@ -8,8 +8,8 @@
 #include "../components/StaticMeshComponent.hpp"
 #include "../components/LightComponent.hpp"
 #include "../components/CameraComponent.hpp"
-#include "../components/AudioComponent.hpp"
-#include "../components/RigidBodyComponent.hpp"
+#include "../audio/AudioComponent.hpp"
+#include "../physics/RigidBodyComponent.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>

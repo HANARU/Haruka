@@ -27,7 +27,7 @@
 #include "../src/xr/HandSkeleton.hpp"
 #include "../src/xr/GraspSolver.hpp"
 #include "../src/components/XrComponents.hpp"
-#include "../src/components/RigidBodyComponent.hpp"
+#include "../src/physics/RigidBodyComponent.hpp"
 #include "../src/physics/PhysicsSystem.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>

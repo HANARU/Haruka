@@ -279,9 +279,9 @@ set(RUNTIME_SOURCES
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp
     src/components/StaticMeshComponent.cpp
-    src/components/AudioComponent.cpp
-    src/components/ReverbZoneComponent.cpp
-    src/components/RigidBodyComponent.cpp
+    src/audio/AudioComponent.cpp
+    src/audio/ReverbZoneComponent.cpp
+    src/physics/RigidBodyComponent.cpp
     src/components/CoreComponents.cpp
     src/components/XrComponents.cpp
     src/components/SkinnedMeshComponent.cpp
@@ -953,10 +953,10 @@ if(NOT ANDROID)
         src/audio/AudioAttenuation.cpp
         src/audio/MiniaudioImpl.cpp
         src/audio/SteamAudioHrtf.cpp
-        src/components/AudioComponent.cpp
+        src/audio/AudioComponent.cpp
         src/components/CameraComponent.cpp
-        src/components/ReverbZoneComponent.cpp
-        src/components/RigidBodyComponent.cpp
+        src/audio/ReverbZoneComponent.cpp
+        src/physics/RigidBodyComponent.cpp
         src/physics/PhysicsSystem.cpp
         src/scene/World.cpp
         src/scene/Actor.cpp
@@ -1007,7 +1007,7 @@ if(NOT ANDROID)
     add_executable(HarukaPhysicsTest
         tests/PhysicsTest.cpp
         src/physics/PhysicsSystem.cpp
-        src/components/RigidBodyComponent.cpp
+        src/physics/RigidBodyComponent.cpp
         src/components/XrComponents.cpp
         src/components/CameraComponent.cpp
         src/components/HandPoseComponent.cpp
@@ -1067,7 +1067,7 @@ if(NOT ANDROID)
         src/components/HandPoseComponent.cpp
         src/components/CameraComponent.cpp
         src/components/XrComponents.cpp
-        src/components/RigidBodyComponent.cpp
+        src/physics/RigidBodyComponent.cpp
         src/physics/PhysicsSystem.cpp
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp

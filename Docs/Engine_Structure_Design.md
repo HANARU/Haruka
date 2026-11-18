@@ -39,8 +39,8 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 기반 | `ui` | HSlate UI | core, math, vfs, input |
 | 장면 | `scene` | Actor · Component · World · 컴포넌트 필드 · 레지스트리 · Reflect | core, math |
 | 시스템 | `geometry` | 절차 도형 · 메시 처리 | core, math |
-| 시스템 | `physics` | Jolt 물리 | core, math, scene, geometry |
-| 시스템 | `audio` | miniaudio · 차폐 · 잔향 · HRTF | core, math, vfs, scene, physics |
+| 시스템 | `physics` | Jolt 물리, RigidBodyComponent(2026-11-18 S7 에 components 에서 옮김) | core, math, scene, geometry |
+| 시스템 | `audio` | miniaudio · 차폐 · 잔향 · HRTF, AudioComponent · ReverbZoneComponent(2026-11-18 S7 에 옮김) | core, math, vfs, scene, physics |
 | 시스템 | `renderer` | Vulkan 렌더러 · 패스 | core, math, vfs, memory, platform, ui, geometry |
 | 시스템 | `xr` | OpenXR · 손 쥐기 풀이 | core, math, input, platform, renderer |
 | 시스템 | `assets` | 에셋(메시 · 텍스처 · glTF · 캐시) 불러오기 | core, math, vfs, geometry, scene, renderer |
@@ -90,12 +90,11 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 - 변이 확인(2026-11-18): 기반 → 에디터 include 추가, 필요 없는 허용 항목, 표의 순환(math ↔ core), 규칙 없는 새 폴더, 필요한
   허용 항목 삭제 다섯 가지를 모두 잡았습니다.
 
-## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개, 모두 2단계 몫)
+## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개 → 컴포넌트 이동 뒤 19개, 모두 2단계 몫)
 
 | 방향 | 수 | 원인 | 없앨 단계 |
 |---|---|---|---|
-| audio → components | 3 | 소리 컴포넌트 · 청취자 카메라 | 2단계 S7 |
-| physics → components | 1 | RigidBodyComponent | 2단계 S7 |
+| audio → components | 1 | 청취자 카메라 | 2단계 S7 |
 | geometry → assets | 1 | 메시 데이터(MeshSource)의 자리 | 2단계 S5 |
 | renderer → assets · components · scene | 17 | 렌더 데이터 추출이 렌더러 안 | 2단계 S5 |
 
@@ -209,7 +208,7 @@ UE 의 UWorldSubsystem 과 같은 자리이며, 월드(scene)는 형을 모른 �
 | `buildProps` · `readOnlyInfo` · `onPropsCommitted` · `onTransformCommitted` | 그대로(Component) | 속성 리플렉션과 편집 확정 알림(다른 엔진도 객체 쪽) |
 | `writeFields` · `readField` · `onFieldsLoaded` | 그대로(Component) | 직렬화(DEF-22) |
 
-함께 옮긴 것: 충돌체 모양 열거형 `EPhysicsShape` · `EMotionType` · `HalfExt` 를 `components/RigidBodyComponent.hpp` 에서
+함께 옮긴 것: 충돌체 모양 열거형 `EPhysicsShape` · `EMotionType` · `HalfExt` 를 `components/RigidBodyComponent.hpp`(지금 `physics/`) 에서
 `geometry/CollisionShape.hpp` 로 옮겨, 절차 도형 설명(`geometry/PrimitiveDesc.hpp`)이 컴포넌트를 include 하지 않습니다(허용 목록
 geometry → components 1개, 29 → 28).
 

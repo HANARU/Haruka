@@ -3,13 +3,13 @@
 #include "ComponentVisualizers.hpp"
 #include "../core/DebugDraw.hpp"
 #include "../scene/Actor.hpp"
-#include "../components/AudioComponent.hpp"
+#include "../audio/AudioComponent.hpp"
 #include "../components/CameraComponent.hpp"
 #include "../components/HeightFogComponent.hpp"
 #include "../components/LightComponent.hpp"
 #include "../components/ReflectionCaptureComponent.hpp"
-#include "../components/ReverbZoneComponent.hpp"
-#include "../components/RigidBodyComponent.hpp"
+#include "../audio/ReverbZoneComponent.hpp"
+#include "../physics/RigidBodyComponent.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <algorithm>

@@ -118,7 +118,7 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-16** | 인스턴싱 `instanceCount = 1` 하드코딩 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 자동 인스턴싱. 명시적 인스턴싱 컴포넌트는 파편장 때) | `src/renderer/DrawBatching.hpp`, `src/renderer/passes/GeometryPass.cpp` | `hbatch::build`, 끝 "DEF-16 자동 인스턴싱 수정 결과" 절 |
 | **DEF-17** | 패스 레지스트리 부재 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 고정 지점 넷의 렌더 확장) | `src/renderer/RenderExtension.hpp`, `src/renderer/RenderExtensionRegistry.hpp` | `IRenderExtension`, `RenderExtensionRegistry`, 끝 "DEF-17 · 18 패스 확장 지점 수정 결과" 절 |
 | **DEF-18** | `EngineContext`에 렌더러 참조 없음 | **해결됨 · 2026-10-14** (원래 CRITICAL · 경계, 등록 · 해제만 여는 `IRenderExtensionHost`) | `src/runtime/IGameModule.hpp` | `EngineContext::render` |
-| **DEF-19** | 물리 힘·임펄스·속도·레이캐스트 API 부재 | **해결됨 · 2026-10-04** (원래 HIGH · 경계, UE 식 규칙) | `src/physics/PhysicsSystem.cpp`, `src/components/RigidBodyComponent.cpp` | 끝 "3단계 VR 첫걸음 수정 결과" 절 |
+| **DEF-19** | 물리 힘·임펄스·속도·레이캐스트 API 부재 | **해결됨 · 2026-10-04** (원래 HIGH · 경계, UE 식 규칙) | `src/physics/PhysicsSystem.cpp`, `src/physics/RigidBodyComponent.cpp` | 끝 "3단계 VR 첫걸음 수정 결과" 절 |
 | **DEF-20** | 디지털 전용 입력 (아날로그 축·VR 포즈 부재) | **해결됨 · 2026-10-04** (원래 HIGH · 경계, XR 입력은 창이 아니라 `XrSystem`) | `src/xr/XrSystem.cpp`, `src/input/HInputSystem.cpp` | 끝 "3단계 VR 첫걸음 수정 결과" 절 |
 | **DEF-21** | 오일러각 카메라 (6DOF 자세 불가) | **해결됨 · 2026-10-04** (원래 HIGH · 경계, 쿼터니언 자세 · 눈별 투영) | `src/components/CameraComponent.cpp` | `projFromFov`, XR 원점 |
 | **DEF-22** | `SceneSerializer` 컴포넌트 하드코딩 | **해결됨 · 2026-10-14** (원래 HIGH · 경계, 타입 등록 · 씬 v4 · 프리팹 v2) | `src/scene/ComponentRegistry.hpp`, `src/sceneio/ComponentSerializer.cpp` | 끝 "DEF-22 직렬화 타입 등록 수정 결과" 절 |
@@ -142,7 +142,7 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-40** | 라인 오버레이 정점 버퍼의 GPU 인플라이트 레이스 | **해결됨 · 2026-10-02** (원래 MEDIUM, 라인·기즈모 삼각형 버퍼를 프레임 슬롯별로 분리) | `src/renderer/passes/GeometryPass.*` | 라인 오버레이 정점 버퍼 |
 | **DEF-41** | 콜라이더가 `Transform.scale`을 반영하지 않음 | **해결됨 · 2026-08-25** (원래 MEDIUM · 절차 도형 선결 조건) | `src/physics/PhysicsSystem.cpp` | 바디 생성 지점, 11-6절 |
 | **DEF-42** | 힙이 1GB 미만일 때 Zone 오프셋이 실제 할당 범위를 넘음 | **해결됨 · 2026-10-31** (원래 MEDIUM, 1GB 를 한 번에 잡고 못 잡으면 이유를 적은 예외로 멈춤. 축소 경로 삭제) | `src/memory/HarukaAllocator.cpp`, `src/memory/MemoryTypeSelect.hpp` | `init`, `hmem::planCoreHeap` |
-| **DEF-43** | 세터 안의 `resetIfLive`로 인한 매 프레임 바디 재생성 | **해결됨 · 2026-10-02** (원래 LOW, 재생성을 편집 확정 훅으로 옮김) | `src/components/RigidBodyComponent.cpp` | `resetIfLive` |
+| **DEF-43** | 세터 안의 `resetIfLive`로 인한 매 프레임 바디 재생성 | **해결됨 · 2026-10-02** (원래 LOW, 재생성을 편집 확정 훅으로 옮김) | `src/physics/RigidBodyComponent.cpp` | `resetIfLive` |
 | **DEF-44** | `RIGID:`의 enum 서수 직렬화 | **해결됨 · 2026-10-02** (원래 LOW, 이름으로 기록하고 옛 순번도 읽음) | `src/sceneio/SceneSerializer.cpp` | `RIGID:` 기록 경로 |
 | **DEF-45** | `uploadMesh`의 핸들 누수 | **해결됨 · 2026-08-25** (원래 LOW) | `src/renderer/GpuScene.cpp` | `uploadMesh`, 11-10절 |
 | **DEF-46** | 에디터 float 스텝 0.01 고정으로 1cm 미만 편집 불가 | **해결됨 · 2026-10-04** (원래 MEDIUM, 단위 종류 · UE 식 수정 키) | `src/scene/Reflect.hpp` | `PropDesc::step` |
@@ -914,7 +914,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 > **미검증 항목입니다.** 설계 검토자가 제시했으나 코드로 확인하지 않았습니다. **아래 실측을 먼저 수행하십시오.**
 
 #### 대상 파일 및 위치 (주장)
-* [`src/components/RigidBodyComponent.cpp`](file:///e:/Haruka/src/components/RigidBodyComponent.cpp)의 `resetIfLive`
+* [`src/physics/RigidBodyComponent.cpp`](file:///e:/Haruka/src/physics/RigidBodyComponent.cpp)의 `resetIfLive`
 
 #### 주장 내용
 * `resetIfLive` 가 세터 안에 있어서, 에디터에서 슬라이더를 드래그하는 동안 **매 프레임 Jolt 바디를 파괴하고 재생성한다**는 것입니다.

@@ -1,7 +1,7 @@
 #pragma once
 #include "../scene/Component.hpp"
-#include "../audio/AudioAttenuation.hpp"
-#include "../audio/AudioPropagation.hpp"
+#include "AudioAttenuation.hpp"
+#include "AudioPropagation.hpp"
 #include <string>
 
 class AudioSystem;

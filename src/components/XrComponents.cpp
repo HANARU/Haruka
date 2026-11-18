@@ -1,5 +1,5 @@
 #include "XrComponents.hpp"
-#include "RigidBodyComponent.hpp"
+#include "../physics/RigidBodyComponent.hpp"
 #include "HandPoseComponent.hpp"
 #include "FloorSurface.hpp"
 #include "../physics/PhysicsSystem.hpp"

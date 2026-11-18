@@ -1,6 +1,6 @@
 #include "RigidBodyComponent.hpp"
 #include <glm/gtc/matrix_transform.hpp>
-#include "../physics/PhysicsSystem.hpp"
+#include "PhysicsSystem.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/Reflect.hpp"
 #include "../scene/ComponentFields.hpp"

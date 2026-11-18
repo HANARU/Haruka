@@ -43,16 +43,11 @@ module main:      core, math, vfs, memory, platform, input, ui, scene, geometry,
 
 # ── 허용 목록: 아직 고치지 않은 위반 ──
 
-# audio -> components — 2단계 S7: 소리 컴포넌트를 audio 옆으로, 청취자 카메라는 질의로
-allow audio/AudioSystem.cpp -> components/AudioComponent.hpp
-allow audio/AudioSystem.cpp -> components/ReverbZoneComponent.hpp
+# audio -> components — 2단계 S7: 청취자 카메라를 질의로(소리 컴포넌트는 audio 로 옮김)
 allow audio/AudioSystem.cpp -> components/CameraComponent.hpp
 
 # geometry -> assets — 2단계 S5: 메시 데이터(MeshSource)의 자리
 allow geometry/PrimitiveBuilder.hpp -> assets/MeshSource.hpp
-
-# physics -> components — 2단계 S7: RigidBodyComponent 를 physics 옆으로
-allow physics/PhysicsSystem.cpp -> components/RigidBodyComponent.hpp
 
 # renderer -> assets — 2단계 S5: 렌더러가 glTF 로더 · 메시 데이터를 직접 씀(업로드 인터페이스로)
 allow renderer/GpuScene.cpp -> assets/GltfLoader.hpp
