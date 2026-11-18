@@ -2,7 +2,10 @@
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <algorithm>
+#include <cstddef>
 #include <span>
+
+struct MeshHandle;
 
 // ── 화면 크기 · LOD 선택 · 작은 물체 컬링 (수학 보강 O6 · O7, 2026-11-17) ─────────────────────────────
 // glm 만 쓰는 헤더라 단위 시험(HarukaStereoTest)에서 장치 없이 검산합니다.
@@ -40,6 +43,26 @@ inline int selectLod(float size, std::span<const float> thresholds, int current,
 // 화면 높이 heightPx 화소에서 지름이 minPx 보다 작게 보이면 true.
 inline bool tooSmall(float size, float heightPx, float minPx = kMinScreenPixels) {
     return size * heightPx < minPx;
+}
+
+// LOD 고르기 순수 함수(S5c): autoLod 가 꺼져 있으면 단계 0 · 가장 고운 메시를 돌려주고,
+// 켜져 있으면 selectLod 로 새 단계를 고른 뒤 비어 있는 단계는 더 고운 쪽으로 물러납니다.
+struct LodPick {
+    int               level = 0;
+    const MeshHandle* mesh  = nullptr;
+};
+
+inline LodPick pickLodMesh(float screenSize,
+                           const MeshHandle* fineMesh,
+                           MeshHandle* const* lodMeshes, size_t lodMeshCount,
+                           const float* lodScreenSizes, size_t lodScreenSizeCount,
+                           int current, bool autoLod) {
+    if (!autoLod) return { 0, fineMesh };
+    const size_t n   = std::min(lodScreenSizeCount, lodMeshCount);
+    const int    lvl = selectLod(screenSize, std::span<const float>(lodScreenSizes, n), current);
+    for (int i = lvl; i > 0; --i)
+        if (lodMeshes[i - 1]) return { lvl, lodMeshes[i - 1] };
+    return { lvl, fineMesh };
 }
 
 } // namespace hscreen

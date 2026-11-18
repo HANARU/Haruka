@@ -1,8 +1,14 @@
 #pragma once
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
+
+struct MeshHandle;
+struct MaterialHandle;
+struct MeshSourceVertex;
+class  HSlateContext;
 
 // ── 렌더 입력 스냅샷 (엔진 구조 안정화 S5b, 2026-11-18) ────────────────────────────
 // 추출 단계(components/RenderExtract)가 장면(World · Actor · 컴포넌트)에서 값을 뽑아
@@ -43,8 +49,73 @@ struct RenderFog {                  // 켜져 있고 활성인 첫 HeightFogComp
     float     startDistance = 0.f;
 };
 
+struct RenderMesh {                        // StaticMeshComponent::visibleIn 순서 그대로
+    uint64_t              key               = 0;        // LOD 상태 표의 키(컴포넌트 주소)
+    uint64_t              actorId           = 0;        // 재질 없음 경고를 액터마다 한 번
+    const char*           debugName         = "?";      // 액터 이름(이 프레임 동안 유효)
+    const MeshHandle*     mesh              = nullptr;  // 가장 고운 메시
+    MeshHandle* const*    lodMeshes         = nullptr;  // 컴포넌트 벡터 포인터(이 프레임 동안 유효)
+    size_t                lodMeshCount      = 0;
+    const float*          lodScreenSizes    = nullptr;
+    size_t                lodScreenSizeCount = 0;
+    bool                  autoLod           = true;
+    const MaterialHandle* material          = nullptr;  // null 이면 렌더러가 오류 재질로
+    glm::mat4             model{ 1.f };                 // owner->worldMatrix()
+    bool                  transparent       = false;
+    uint8_t               lightChannels     = 1;
+};
+
+struct IRenderSkinSource {                // 스킨 메시가 구현. 렌더러는 이것만 앎
+    virtual bool skinInto(MeshSourceVertex* out, glm::vec3& bmin, glm::vec3& bmax) const = 0;
+protected:
+    ~IRenderSkinSource() = default;
+};
+
+struct RenderSkinnedMesh {                // componentsOf<SkinnedMeshComponent> 순서 그대로
+    const IRenderSkinSource* source        = nullptr;
+    const MeshHandle*        baseMesh      = nullptr;
+    uint32_t                 vertCount     = 0;
+    uint64_t                 actorId       = 0;
+    const char*              debugName     = "?";
+    const MaterialHandle*    material      = nullptr;
+    glm::mat4                model{ 1.f };
+    bool                     transparent   = false;
+    uint8_t                  lightChannels = 1;
+};
+
+struct RenderReflectionCapture {          // 켜진 첫 ReflectionCaptureComponent. 없으면 present = false
+    bool        present    = false;
+    uint64_t    actorId    = 0;
+    glm::vec3   pos{ 0.f };               // owner->worldPosition()
+    float       radius     = 0.f;
+    float       intensity  = 1.f;
+    uint32_t    version    = 0;
+    const void* worldToken = nullptr;     // &world (월드가 바뀌면 다시 찍기 위한 식별값)
+};
+
+struct IRenderPanelSource {               // UIPanelComponent 가 구현. 렌더러는 이것만 앎
+    virtual HSlateContext& slate()     = 0;
+    virtual bool           takeDirty() = 0;
+    virtual void           markDirty() = 0;
+protected:
+    ~IRenderPanelSource() = default;
+};
+
+struct RenderUIPanel {                    // componentsOf<UIPanelComponent> 순서 그대로
+    uint64_t            key         = 0;  // 패널 GPU 상태 표의 키(컴포넌트 주소)
+    IRenderPanelSource* source      = nullptr;
+    glm::mat4           model{ 1.f };     // owner->worldMatrix() * scale(width, height, 1)
+    glm::uvec2          textureSize{ 0, 0 };
+    bool                twoSided    = false;
+    float               brightness  = 1.f;
+};
+
 struct RenderSceneInput {
-    RenderCamera             camera;
-    std::vector<RenderLight> lights;
-    RenderFog                fog;
+    RenderCamera                   camera;
+    std::vector<RenderLight>       lights;
+    RenderFog                      fog;
+    std::vector<RenderMesh>        meshes;
+    std::vector<RenderSkinnedMesh> skinned;
+    RenderReflectionCapture        capture;
+    std::vector<RenderUIPanel>     panels;
 };

@@ -47,10 +47,6 @@ public:
     // AssetPair 의 메시 · 충돌 · LOD 를 한 경로로 채웁니다(StaticMeshComponent · SceneSerializer 공용).
     void assignMeshFromPair(const struct AssetPair& pair);
 
-    // 화면 크기로 LOD 를 고르고 지금 단계를 기억합니다(렌더러 전용, 이력 띠 때문에 상태가 있음).
-    MeshHandle* selectMeshForScreenSize(float screenSize);
-    int         currentLod() const { return lodCurrent_; }
-
     bool localBounds(glm::vec3& outMin, glm::vec3& outMax) const override;
     const CollisionMesh* collisionMesh() const override { return collision.get(); }
 
@@ -76,6 +72,5 @@ public:
 
 private:
     AssetManager* assets_ = nullptr;   // 머티리얼을 다시 받을 곳(불러올 때 정해짐)
-    int lodCurrent_ = 0;   // selectMeshForScreenSize 가 고른 단계
     bool transparentLoaded_ = false;   // 파일에 transparent 가 있었는지(없으면 에셋 값을 씀)
 };

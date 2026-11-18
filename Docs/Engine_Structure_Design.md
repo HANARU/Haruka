@@ -90,11 +90,9 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 - 변이 확인(2026-11-18): 기반 → 에디터 include 추가, 필요 없는 허용 항목, 표의 순환(math ↔ core), 규칙 없는 새 폴더, 필요한
   허용 항목 삭제 다섯 가지를 모두 잡았습니다.
 
-## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개 → 컴포넌트 이동 뒤 19개 → 청취자 선택 뒤 18개 → S5a 뒤 12개 → S5b 뒤 7개, 모두 2단계 S5 몫)
+## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개 → 컴포넌트 이동 뒤 19개 → 청취자 선택 뒤 18개 → S5a 뒤 12개 → S5b 뒤 7개 → S5c 뒤 5개 → **S5d 뒤 0개**)
 
-| 방향 | 수 | 원인 | 없앨 단계 |
-|---|---|---|---|
-| renderer → components · scene | 7 | 렌더 데이터 추출이 렌더러 안 | 2단계 S5 |
+남은 위반은 없습니다(2026-11-18 S5d). 허용 목록은 비어 있고, 새 위반은 아키텍처 시험이 바로 실패시킵니다.
 
 ## 6. 단계와 진행
 
@@ -107,14 +105,14 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 1 | S3 시스템 접근 통일(엔진 단위 · 월드 단위 서비스), 정적 포인터 · 흩어진 전역 정리, World 의 에디터 상태 | 끝남(2026-11-18, 8절) |
 | 2 | S4 Component 기반 정리(에디터 함수 → 등록식 visualizer, collisionMesh · blocksFloor → 질의) | 끝남(2026-11-18, 9절) |
 | 2 | S7 나머지: 컴포넌트를 소유 시스템 옆으로 | 끝남(2026-11-18, 10절) |
-| 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | 진행 중(S5a · S5b 끝남) |
+| 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | 끝남(2026-11-18, 12절). AssetManager 업로드 인터페이스(옛 S5e)는 하지 않기로 함(assets → renderer 는 규칙 안의 방향) |
 | 3 | S6 EditorApp 분해(아웃라이너 · 디테일 · 로그 · 도킹 · 메뉴와 툴바 · 뷰포트 컨트롤러) | |
 
 완료 기준:
 - 1단계: 1단계 몫의 허용 목록 항목 0(core · scene · runtime 순환 0), `Engine::run` 100줄 이하(단계 호출만), 정적 시스템 포인터 0. → **채움(2026-11-18, S3 뒤)**
 - 2단계: renderer 가 components 헤더를 include 하는 곳 0, Component 기반 클래스의 에디터 그리기 · 시스템별 질의 함수 0(S4 에서 채움.
   속성 목록 · 편집 확정 알림은 리플렉션으로 남김, 9절), 허용 목록의 컴포넌트 관련 항목 0.
-  매번 기준 PNG 전부(왼눈 · 오른눈 · Quest 값 · LightingProbe · UIPanelProbe) + 검증 레이어 0.
+  매번 기준 PNG 전부(왼눈 · 오른눈 · Quest 값 · LightingProbe · UIPanelProbe) + 검증 레이어 0. → **채움(2026-11-18, S5d 뒤, 허용 목록 0)**
 - 3단계: EditorApp.cpp 1,000줄 이하, 함수 150줄 이하, 창 에디터 확인 통과.
 
 ## 7. 프레임 단계 (S2, 2026-11-18)
@@ -248,7 +246,7 @@ miniaudio 기준값과 비교하는 검사가 잡음). 기준 PNG 전부 그대�
 | 모듈 배치 | Godot · Bevy: 기능 모듈이 자기 컴포넌트 소유 | 컴포넌트를 소유 시스템 옆으로(S7 나머지) |
 | 의존 시험 | ArchUnit(Java) · NetArchTest(.NET)의 계층 규칙 시험 | include 방향 시험 + 줄기만 하는 허용 목록(S1) |
 
-## 12. 렌더 경계 (S5, 2026-11-18 진행 중)
+## 12. 렌더 경계 (S5, 2026-11-18)
 
 방향(사용자 결정, 2026-11-18): 렌더러는 장면(World · Actor · 컴포넌트)을 모르게 합니다. Bevy 의 Extract 단계처럼 엔진이 매 프레임 한 번
 **추출 단계**를 돌려 컴포넌트 값을 렌더 전용 입력 형에 옮기고, 렌더러는 그 형만 읽습니다. 입력 형은 `renderer`(아래 층), 추출 코드는
@@ -258,8 +256,8 @@ miniaudio 기준값과 비교하는 검사가 잡음). 기준 PNG 전부 그대�
 |---|---|---|
 | S5a | CPU 메시 · 텍스처 데이터 형(`MeshSource.hpp`)을 assets → geometry. 렌더러에서 쓰지 않던 `GltfLoader.hpp` include 2줄 지움 | 18 → 12 |
 | S5b | 카메라 · 조명 · 안개를 입력 형으로: `renderer/RenderSceneInput.hpp`(`RenderCamera` · `RenderLight` · `RenderFog`), `components/RenderExtract`(`extractRenderScene`), `Engine::renderFrame` 첫머리에서 한 번 추출해 `drawFrame(world, scene, xr)` 로 넘김. 투영 행렬은 `math/Projection.hpp`(`hmath::perspectiveReverseZ` · `perspectiveFromFov`)로 옮겨 카메라 · 렌더러 · 반사 캡처가 함께 씀 | 12 → 7 |
-| S5c | 정적 · 스킨 메시를 입력 형으로, LOD 현재 단계 · 스킨 행렬을 렌더러 쪽 상태로 | (예정) |
-| S5d | UI 패널 GPU 핸들을 렌더러 표로, 반사 캡처 목록을 입력 형으로, `drawFrame` 의 World 인자 없앰 | (예정) → 0 |
+| S5c | 정적 · 스킨 메시를 입력 형으로: `RenderMesh`(메시 · LOD 핸들과 전환 크기는 컴포넌트 벡터를 가리키는 포인터 + 개수, 재질, 월드 행렬, 투명, 라이트 채널, Auto LOD, 상태 키), `RenderSkinnedMesh` + `IRenderSkinSource`(CPU 스키닝은 지금처럼 렌더러가 스킨 구간에 바로 씀, 복사 없음). LOD 현재 단계는 컴포넌트가 아니라 렌더러의 `lodStates_` 표(키 = 컴포넌트, 메시가 바뀌면 0, 이번 호출에 없던 키는 지움), 고르기는 순수 함수 `hscreen::pickLodMesh` | 7 → 5 |
+| S5d | 반사 캡처를 입력 형으로(`RenderReflectionCapture`: 액터 · 위치 · 반경 · 세기 · 버전 · 월드 식별값, 품질 설정은 렌더러). UI 패널은 `RenderUIPanel` + `IRenderPanelSource`(HSlate 트리 · 더러움 표시). 패널 GPU 핸들 · 크기는 컴포넌트에서 렌더러의 `panelStates_` 표로(키 = 컴포넌트, 이번 호출에 없던 키는 핸들 해제). 더러움 표시는 추출이 아니라 렌더러가 그리는 자리에서 소비(창 최소화로 drawFrame 이 일찍 끝나도 잃지 않음). `drawFrame(scene, xr)`: 렌더러 코드에 World · Actor · 컴포넌트 참조 0 | 5 → **0** |
 
 지킬 것:
 - 입력 형에는 렌더러가 컴포넌트에서 읽던 값을 **계산이 끝난 모양**으로 담습니다(예: 라이트 색 = `effectiveColor() × intensity`, 반경은 하한
@@ -270,3 +268,7 @@ miniaudio 기준값과 비교하는 검사가 잡음). 기준 PNG 전부 그대�
 확인(S5a · S5b): 시험 27 · 검사 1,956(추출 검사 +5, `HarukaLightTest` 8절), 경고 0(Release · Debug), 기준 PNG 7장 모두 그대로 · 검증 0,
 Android 빌드 통과. 기준 PNG 값은 2026-11-18 사용자가 PC 점검 중 저장한 `LightingProbe.hscene` 으로 다시 쟀습니다(기본 `ce6def24`, 오른눈
 `c283f276`, Quest Pro 형 `5d6e3e5f`, Quest 값 `9cf28353` · LightingProbe `201fad0e`. UIPanelProbe `7788eb5f` · `559660c0` 는 그대로).
+
+확인(S5c): 검사 1,972(LOD 고르기 순수 함수 +4, 메시 추출 +3), 경고 0, 기준 PNG 7장 그대로 · 검증 0, LodProbe(`--no-auto-lod` `54d2431a` · 켬 `e941bba3`, 고른 단계 1 · 1 · 2 · 3)도 그대로라 LOD 상태를 옮겨도 고르는 단계가 같습니다. CPU 프레임 중앙값(perf.sh, 다섯 장면) 차이 −0.05 ~ +0.01 ms, Android 빌드 통과.
+
+확인(S5d): 검사 1,975(반사 캡처 · UI 패널 추출 +3), 경고 0, 아키텍처 시험 허용 0, 기준 PNG 7장 · LodProbe 두 장 그대로 · 검증 0, 반사 캡처 로그 수 그대로(다시 찍기 늘지 않음), CPU 프레임 중앙값 차이 −0.04 ~ +0.03 ms, Android 빌드 통과. 이것으로 2단계 완료 기준을 채웠습니다.

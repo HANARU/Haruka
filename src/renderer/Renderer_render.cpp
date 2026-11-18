@@ -1,11 +1,7 @@
 #include "Renderer.hpp"
 #include "../ui/slate/HSlateRenderer.hpp"
-#include "../scene/World.hpp"
-#include "../components/StaticMeshComponent.hpp"
-#include "../components/SkinnedMeshComponent.hpp"
 #include "../geometry/MeshSource.hpp"
 #include "../math/Projection.hpp"
-#include "../components/UIPanelComponent.hpp"
 #include "../core/FrameTimings.hpp"
 #include "RendererLog.hpp"
 #include "DrawBatching.hpp"
@@ -249,7 +245,7 @@ void Renderer::updateUBO(const RenderFog& fog, uint32_t lightCount) {
 
 // ── buildDrawCommands ─────────────────────────────────────────────────────────
 
-void Renderer::buildDrawCommands(World& world,
+void Renderer::buildDrawCommands(const RenderSceneInput& scene,
                                   std::vector<GpuDrawCmd>& opaqueOut,
                                   std::vector<GpuDrawCmd>& transpOut,
                                   std::vector<const MaterialHandle*>& materialRowsOut,
@@ -281,8 +277,7 @@ void Renderer::buildDrawCommands(World& world,
 
     auto* tfData = static_cast<GpuTransform*>(frames_.transformPtr(frameIdx));
 
-    const auto& allMeshes   = StaticMeshComponent::visibleIn(world);
-    uint32_t totalCnt = (uint32_t)allMeshes.size();
+    uint32_t totalCnt = (uint32_t)scene.meshes.size();
 
     // LOD 와 투명 정렬의 기준점은 두 눈의 가운데입니다. 눈마다 다르게 고르면 두 눈이 다른 LOD 나
     // 다른 그리기 순서를 보게 됩니다. 단안이면 카메라 위치 그대로입니다.
@@ -314,19 +309,18 @@ void Renderer::buildDrawCommands(World& world,
     std::vector<hbatch::Candidate>     cands;
     std::vector<glm::mat4>             models;      // cands 와 같은 순서
     std::vector<const MaterialHandle*> materials;   // cands 와 같은 순서
-    cands.reserve(allMeshes.size());
-    models.reserve(allMeshes.size());
-    materials.reserve(allMeshes.size());
+    cands.reserve(scene.meshes.size());
+    models.reserve(scene.meshes.size());
+    materials.reserve(scene.meshes.size());
 
     // 머티리얼이 없는 메시는 오류 머티리얼(자홍색)로 그리고 액터마다 한 번 경고합니다(DEF-28).
     // 건너뛰지 않는 이유: 빠진 메시가 화면에서 보여야 알아챌 수 있습니다. 또 materialRowsOut
     // 에 nullptr 이 들어가지 않는다는 불변식을 이 대체가 지킵니다. null 이면(오류 머티리얼을 만들기 전, 초기화 중) 건너뜁니다.
-    auto resolveMaterial = [&](const MaterialHandle* material, const Actor* owner) -> const MaterialHandle* {
+    auto resolveMaterial = [&](const MaterialHandle* material, uint64_t actorId, const char* debugName) -> const MaterialHandle* {
         if (material) return material;
-        const uint64_t actorId = owner ? owner->id : 0;
         if (noMaterialWarned_.insert(actorId).second) {
             HLOG(LogRenderer, Warning) << "Mesh on actor '"
-                << (owner ? owner->name : std::string("?"))
+                << (debugName ? debugName : "?")
                 << "' has no material; drawing it with the magenta error material";
         }
         return errorMaterial_;
@@ -365,30 +359,42 @@ void Renderer::buildDrawCommands(World& world,
         materials.push_back(material);
     };
 
-    for (auto* mc : allMeshes) {
-        if (!mc->visible || !mc->mesh) continue;
-        const MaterialHandle* material = resolveMaterial(mc->material, mc->owner);
+    ++lodStamp_;
+    for (const RenderMesh& rm : scene.meshes) {
+        if (!rm.mesh) continue;
+        const MaterialHandle* material = resolveMaterial(rm.material, rm.actorId, rm.debugName);
         if (!material) continue;
 
-        glm::mat4 model = mc->owner ? mc->owner->worldMatrix() : glm::mat4(1.f);
-
-        // LOD: 가장 고운 메시(mc->mesh)의 바운딩 구가 화면에서 차지하는 크기로 고릅니다(O6). distSq 는 투명 정렬 키입니다.
-        const float distSq = glm::length2(camPos - glm::vec3(model[3]));
-        MeshHandle* mesh   = mc->mesh;
-        if (!mc->lodMeshes.empty()) {
-            const float ss = sphereScreenSize(glm::vec3(model * glm::vec4(mc->mesh->boundCenter, 1.f)),
-                                              mc->mesh->boundRadius * maxAxisScale(model));
-            mesh = mc->selectMeshForScreenSize(ss);
+        // LOD: 가장 고운 메시(rm.mesh)의 바운딩 구가 화면에서 차지하는 크기로 고릅니다(O6). distSq 는 투명 정렬 키입니다.
+        const float distSq = glm::length2(camPos - glm::vec3(rm.model[3]));
+        const MeshHandle* mesh = rm.mesh;
+        if (rm.lodMeshCount > 0) {
+            LodState& st = lodStates_[rm.key];
+            if (st.mesh != rm.mesh) {
+                st.mesh    = rm.mesh;
+                st.current = 0;
+            }
+            st.stamp = lodStamp_;
+            const float ss = sphereScreenSize(glm::vec3(rm.model * glm::vec4(rm.mesh->boundCenter, 1.f)),
+                                              rm.mesh->boundRadius * maxAxisScale(rm.model));
+            const hscreen::LodPick pick = hscreen::pickLodMesh(
+                ss, rm.mesh, rm.lodMeshes, rm.lodMeshCount,
+                rm.lodScreenSizes, rm.lodScreenSizeCount, st.current, rm.autoLod);
+            st.current = pick.level;
+            mesh       = pick.mesh;
             if (frameNum_ == 0 && mesh) {
-                HLOG(LogRenderer, Log) << "LOD pick: " << (mc->owner ? mc->owner->name : "?")
-                                       << " lod=" << mc->currentLod() << "/" << mc->lodMeshes.size()
+                HLOG(LogRenderer, Log) << "LOD pick: " << (rm.debugName ? rm.debugName : "?")
+                                       << " lod=" << st.current << "/" << rm.lodMeshCount
                                        << " screenSize=" << ss << " tris=" << (mesh->indexCount / 3);
             }
         }
         if (!mesh) continue;
 
-        pushCandidate(material, model, mesh->boundCenter, mesh->boundRadius, mesh->indexCount, mesh->firstIndex,
-                      (int32_t)mesh->firstVertex, distSq, mc->transparent, mesh->index16, mc->lightChannels);
+        pushCandidate(material, rm.model, mesh->boundCenter, mesh->boundRadius, mesh->indexCount, mesh->firstIndex,
+                      (int32_t)mesh->firstVertex, distSq, rm.transparent, mesh->index16, rm.lightChannels);
+    }
+    if (!lodStates_.empty()) {
+        std::erase_if(lodStates_, [&](const auto& kv) { return kv.second.stamp != lodStamp_; });
     }
 
     // 스킨 메시(2026-11-07, Hand_Grasp_Design 4-1): 이 프레임 슬롯의 스킨 구간에 지금 자세로 CPU 스키닝한 정점을 직접 쓰고,
@@ -398,34 +404,30 @@ void Renderer::buildDrawCommands(World& world,
         uint32_t      arenaFirst = 0, used = 0;
         PackedVertex* arena      = nullptr;
         bool     asked      = false;
-        for (const SkinnedMeshComponent* sk : world.componentsOf<SkinnedMeshComponent>()) {
-            const Actor* a = sk->owner;
-            if (!a->activeInHierarchy()) continue;
-            if (!sk->isEnabled() || !sk->visible || !sk->loaded()) continue;
+        for (const RenderSkinnedMesh& sk : scene.skinned) {
             if (!asked) { arena = scene_.skinArena(frameIdx, arenaFirst); asked = true; }
             if (!arena) break;
             ++totalCnt;
-            const uint32_t n = (uint32_t)sk->vertCount;
+            const uint32_t n = sk.vertCount;
             if (used + n > GpuScene::kSkinArenaVerts) {
                 if (!skinOverflowWarned_) {
                     skinOverflowWarned_ = true;
                     HLOG(LogRenderer, Warning) << "Skinned meshes need more than " << GpuScene::kSkinArenaVerts
-                        << " vertices this frame; '" << a->name << "' and later ones are not drawn (warned once)";
+                        << " vertices this frame; '" << (sk.debugName ? sk.debugName : "?") << "' and later ones are not drawn (warned once)";
                 }
                 continue;
             }
-            const MaterialHandle* material = resolveMaterial(sk->material, a);
+            const MaterialHandle* material = resolveMaterial(sk.material, sk.actorId, sk.debugName);
             if (!material) continue;
             glm::vec3 bmin, bmax;
             // CPU 스키닝은 Vertex(MeshSourceVertex)로 하고 GPU 형식으로 옮깁니다(QTangent, C2).
             skinScratch_.resize(n);
-            if (!sk->skinInto(reinterpret_cast<MeshSourceVertex*>(skinScratch_.data()), bmin, bmax)) continue;
+            if (!sk.source || !sk.source->skinInto(reinterpret_cast<MeshSourceVertex*>(skinScratch_.data()), bmin, bmax)) continue;
             hqtan::packRange(skinScratch_.data(), arena + used, n);
-            const glm::mat4 model = a->worldMatrix();
-            const float distSq = glm::length2(camPos - glm::vec3(model[3]));
-            pushCandidate(material, model, 0.5f * (bmin + bmax), 0.5f * glm::length(bmax - bmin),
-                          sk->baseMesh->indexCount, sk->baseMesh->firstIndex, (int32_t)(arenaFirst + used),
-                          distSq, sk->transparent, sk->baseMesh->index16, sk->lightChannels);
+            const float distSq = glm::length2(camPos - glm::vec3(sk.model[3]));
+            pushCandidate(material, sk.model, 0.5f * (bmin + bmax), 0.5f * glm::length(bmax - bmin),
+                          sk.baseMesh->indexCount, sk.baseMesh->firstIndex, (int32_t)(arenaFirst + used),
+                          distSq, sk.transparent, sk.baseMesh->index16, sk.lightChannels);
             used += n;
         }
     }
@@ -551,54 +553,57 @@ void Renderer::gatherViews(const RenderCamera& cam, const XrFrameTarget* xr) {
 }
 
 // ── gatherUIPanels (3D UI P1b) ─────────────────────────────────────────────────
-// 패널마다 텍스처 핸들을 컴포넌트에 둡니다(렌더러는 컴포넌트 포인터를 들고 있지 않음). 이번 프레임에 쓰지 않은 텍스처는
-// 사라진 패널(액터 삭제 · 비활성 · 월드 교체)의 것이라 지웁니다. 지우기는 GPU 를 기다리지만 드문 일입니다.
-void Renderer::gatherUIPanels(World& world, std::vector<GeometryPass::PanelDraw>& out) {
+// 패널마다 GPU 핸들과 크기를 렌더러 표(panelStates_)에 둡니다. 이번 프레임에 쓰지 않은 키는
+// 사라진 패널(액터 삭제 · 비활성 · 월드 교체)의 것이라 핸들을 해제하고 지웁니다.
+void Renderer::gatherUIPanels(const RenderSceneInput& scene, std::vector<GeometryPass::PanelDraw>& out) {
     out.clear();
-    std::vector<uint32_t> used;
-    for (UIPanelComponent* pc : world.componentsOf<UIPanelComponent>()) {
-        Actor* a = pc->owner;
-        if (!a->activeInHierarchy()) continue;
-        if (!pc->isEnabled()) continue;
-
-        // 같은 핸들을 쥔 패널이 이미 있으면(컴포넌트를 값으로 복사한 경우) 이 패널은 새로 만듭니다.
-        if (pc->gpuTarget && std::find(used.begin(), used.end(), pc->gpuTarget) != used.end())
-            pc->gpuTarget = 0;
-        const glm::uvec2 want = pc->textureSize();
-        if (pc->gpuTarget && (!panels_.valid(pc->gpuTarget) || pc->gpuSize != want)) {
-            panels_.release(pc->gpuTarget);   // 무효 핸들이면 아무것도 하지 않음
-            pc->gpuTarget = 0;
+    ++panelStamp_;
+    for (const RenderUIPanel& rp : scene.panels) {
+        if (!rp.source) continue;
+        // 키가 컴포넌트 주소로 고유하므로, 예전 값 복사 패널의 핸들 중복 검사는 불필요합니다.
+        PanelState& st = panelStates_[rp.key];
+        st.stamp = panelStamp_;
+        const glm::uvec2 want = rp.textureSize;
+        if (st.handle && (!panels_.valid(st.handle) || st.size != want)) {
+            panels_.release(st.handle);   // 무효 핸들이면 아무것도 하지 않음
+            st.handle = 0;
         }
-        if (!pc->gpuTarget) {
-            pc->gpuTarget = createUIPanelTarget(want.x, want.y);
-            if (!pc->gpuTarget) continue;
-            pc->gpuSize = want;
-            pc->markDirty();
+        if (!st.handle) {
+            st.handle = createUIPanelTarget(want.x, want.y);
+            if (!st.handle) continue;
+            st.size = want;
+            rp.source->markDirty();
         }
-        used.push_back(pc->gpuTarget);
 
-        // 그리기 목록은 여기(월드를 읽는 추출 단계)에서 만들고, 바뀐 패널만 drawFrame 이 GPU 로 그립니다(3D UI 구간 2).
-        HSlateContext& ctx = pc->slate();   // 처음이면 트리를 만들고 더럽게 표시
-        if (pc->takeDirty()) panels_.requestRedraw(pc->gpuTarget);
-        if (HSlateRenderer* ui = panelUi()) panels_.update(pc->gpuTarget, *ui, ctx);
+        // 더러움 표시는 추출 단계가 아니라 여기서(drawFrame 이 실제로 그려질 때) 소비합니다.
+        HSlateContext& ctx = rp.source->slate();   // 처음이면 트리를 만들고 더럽게 표시
+        if (rp.source->takeDirty()) panels_.requestRedraw(st.handle);
+        if (HSlateRenderer* ui = panelUi()) panels_.update(st.handle, *ui, ctx);
 
         GeometryPass::PanelDraw d;
-        d.model    = a->worldMatrix() * glm::scale(glm::mat4(1.f), glm::vec3(pc->width, pc->height, 1.f));
-        d.view     = panels_.view(pc->gpuTarget);
-        d.twoSided = pc->twoSided;
-        d.brightness = std::clamp(pc->brightness, UIPanelComponent::kMinBrightness, 1.f);
+        d.model      = rp.model;
+        d.view       = panels_.view(st.handle);
+        d.twoSided   = rp.twoSided;
+        d.brightness = rp.brightness;
         if (d.view) out.push_back(d);
     }
-    for (uint32_t h : panels_.liveHandles())
-        if (std::find(used.begin(), used.end(), h) == used.end()) panels_.release(h);
+    // panelStates_ 가 패널 핸들의 유일한 소유자이므로 표에 없는 키를 지우면서 핸들을 해제합니다.
+    for (auto it = panelStates_.begin(); it != panelStates_.end(); ) {
+        if (it->second.stamp != panelStamp_) {
+            if (it->second.handle) panels_.release(it->second.handle);
+            it = panelStates_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 // ── extractRenderView ──────────────────────────────────────────────────────────
-// 카메라 · 조명 · 안개는 RenderSceneInput 으로 받고(S5b), 메시 · 스킨 · UI 패널은 아직 World 에서 읽습니다
-// (S5c~d 에서 마저 옮김). 이후 패스 기록에서는 World/Actor/Component 참조 금지.
+// 렌더러는 RenderSceneInput 만 소비합니다(추출은 components/RenderExtract, S5b~d). 이후 패스 기록에서도
+// World/Actor/Component 를 참조하지 않습니다.
 // v1: 프레임별 mapped 버퍼(UBO/라이트/트랜스폼) 업로드를 추출 단계에서 수행.
 
-Renderer::RenderView Renderer::extractRenderView(World& world, const RenderSceneInput& scene, const XrFrameTarget* xr) {
+Renderer::RenderView Renderer::extractRenderView(const RenderSceneInput& scene, const XrFrameTarget* xr) {
     RenderView v;
 
     // 이번 프레임의 눈을 먼저 정합니다. 아래 UBO · 컬링 · AO 가 모두 이 한 벌을 씁니다.
@@ -613,9 +618,9 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const RenderScene
     // 순서 주의: 라이트 SSBO를 먼저 채워 실제 개수를 확정한 뒤 UBO에 싣는다.
     const uint32_t lightCount = updateLightSSBO(scene.lights);
     updateUBO(scene.fog, lightCount);
-    buildDrawCommands(world, v.opaqueDraws, v.transpDraws, v.materialRows, v.rowFlags, v.shadowDraws);
+    buildDrawCommands(scene, v.opaqueDraws, v.transpDraws, v.materialRows, v.rowFlags, v.shadowDraws);
     frameStats_.drawCalls = (uint32_t)v.opaqueDraws.size();
-    gatherUIPanels(world, v.panels);
+    gatherUIPanels(scene, v.panels);
 
     if (hasCamera_) {
         for (uint32_t i = 0; i < viewCount_; ++i) {
@@ -662,7 +667,7 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const RenderScene
 
 // ── drawFrame ─────────────────────────────────────────────────────────────────
 
-bool Renderer::drawFrame(World& world, const RenderSceneInput& scene, const XrFrameTarget* xr) {
+bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr) {
     const bool xrFrame = (xr != nullptr) && xrActive_;
     // 데스크톱 창이 최소화되면(표면 크기 0) 스왑체인 이미지를 받을 수 없습니다. 데스크톱 화면은 건너뛰고,
     // XR 프레임이면 두 눈만 그려 헤드셋은 계속 보이게 합니다(DEF-106). UE · Godot 도 최소화한 창은 그리지
@@ -693,7 +698,7 @@ bool Renderer::drawFrame(World& world, const RenderSceneInput& scene, const XrFr
     // 반사 캡처: 캡처 컴포넌트가 새로 생기거나 옮겨지면 이 자리에서 장치를 멈추고 6면을 찍습니다(드묾).
     {
         ScopedCpuTimer t(ft.reflCapture);
-        updateReflectionCapture(world, scene);
+        updateReflectionCapture(scene);
     }
 
     // Read previous frame's timestamps — skip until each slot has been written at least once
@@ -760,7 +765,7 @@ bool Renderer::drawFrame(World& world, const RenderSceneInput& scene, const XrFr
     RenderView view;
     {
         ScopedCpuTimer t(ft.extract);
-        view      = extractRenderView(world, scene, xrFrame ? xr : nullptr);
+        view      = extractRenderView(scene, xrFrame ? xr : nullptr);
         // A-4: GPU 컬 입력 업로드 제거. 깊이 프리패스가 CPU opaqueItems 를 직접 그립니다.
     }
 

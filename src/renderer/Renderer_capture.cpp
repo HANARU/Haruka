@@ -10,9 +10,6 @@
 #include "SkyIbl.hpp"
 #include "RendererLog.hpp"
 #include "../math/Projection.hpp"
-#include "../components/ReflectionCaptureComponent.hpp"
-#include "../scene/Actor.hpp"
-#include "../scene/World.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/packing.hpp>
@@ -46,30 +43,25 @@ inline float halfToFloat(uint16_t h) {
 }
 } // namespace
 
-void Renderer::updateReflectionCapture(World& world, const RenderSceneInput& scene) {
-    const ReflectionCaptureComponent* rc = nullptr;
-    if (quality_.reflectionCapture)   // 품질 단계에서 끄면 캡처 없음(하늘 IBL 만, 2026-11-18)
-    for (const ReflectionCaptureComponent* c : world.componentsOf<ReflectionCaptureComponent>()) {
-        if (!c->owner->activeInHierarchy()) continue;
-        if (c->isEnabled()) { rc = c; break; }
-    }
-    if (!rc || !rc->owner) {
+void Renderer::updateReflectionCapture(const RenderSceneInput& scene) {
+    if (!quality_.reflectionCapture || !scene.capture.present) {   // 품질 단계에서 끄면 캡처 없음(하늘 IBL 만, 2026-11-18)
         capturePos_ = glm::vec4(0.f);   // 반경 0 = 캡처 없음(셰이더가 하늘만)
         captureKey_ = {};
         return;
     }
-    CaptureKey key{ rc->owner->id, rc->owner->worldPosition(), rc->radius, rc->version(), &world, true };
-    captureIntensity_ = rc->intensity;
+    const RenderReflectionCapture& rc = scene.capture;
+    CaptureKey key{ rc.actorId, rc.pos, rc.radius, rc.version, rc.worldToken, true };
+    captureIntensity_ = rc.intensity;
     if (key == captureKey_) {
-        capturePos_ = glm::vec4(key.pos, rc->radius);
+        capturePos_ = glm::vec4(key.pos, rc.radius);
         return;
     }
-    performReflectionCapture(world, scene, key.pos);
+    performReflectionCapture(scene, key.pos);
     captureKey_ = key;
-    capturePos_ = glm::vec4(key.pos, rc->radius);
+    capturePos_ = glm::vec4(key.pos, rc.radius);
 }
 
-void Renderer::performReflectionCapture(World& world, const RenderSceneInput& scene, const glm::vec3& pos) {
+void Renderer::performReflectionCapture(const RenderSceneInput& scene, const glm::vec3& pos) {
     const auto t0 = std::chrono::steady_clock::now();
     vkDeviceWaitIdle(device);
     const uint32_t fi   = frameIdx;
@@ -121,7 +113,7 @@ void Renderer::performReflectionCapture(World& world, const RenderSceneInput& sc
         captureEye_.zNear = kCaptureNear;
         captureEye_.zFar  = kCaptureFar;
 
-        RenderView view = extractRenderView(world, scene, nullptr);
+        RenderView view = extractRenderView(scene, nullptr);
         VkCommandBuffer cmd = beginOneTimeCmd();
         rc_.memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
                                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,

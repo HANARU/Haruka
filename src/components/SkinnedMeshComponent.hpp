@@ -1,5 +1,6 @@
 #pragma once
 #include "../scene/Component.hpp"
+#include "../renderer/RenderSceneInput.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -20,7 +21,7 @@ struct SkinSourceData;
 //
 // 자세는 쉬는 자세(모델의 관절 로컬 TRS)에서 관절별 로컬 회전만 바꿉니다. 이동 · 배율은 쉬는 자세 그대로입니다. 손은
 // HandPoseComponent 가 이 컴포넌트의 관절 회전을 정합니다.
-class SkinnedMeshComponent : public Component {
+class SkinnedMeshComponent : public Component, public IRenderSkinSource {
 public:
     bool        visible     = true;
     bool        transparent = false;
@@ -51,7 +52,7 @@ public:
 
     // 렌더러가 부릅니다: 지금 자세로 스키닝한 정점 vertCount 개를 out 에 쓰고 모델 공간 AABB 를 돌려줍니다.
     // out 은 매핑된 정점 구간이라 읽지 않습니다. 불러오지 못했으면 false.
-    bool skinInto(MeshSourceVertex* out, glm::vec3& bmin, glm::vec3& bmax) const;
+    bool skinInto(MeshSourceVertex* out, glm::vec3& bmin, glm::vec3& bmax) const override;
 
     // 시험 · 도구용: 스킨 데이터를 직접 넣습니다(AssetManager 없이). baseMesh 가 null 이어도 skinInto 는 됩니다.
     void setSkinData(std::shared_ptr<const SkinSourceData> skin,

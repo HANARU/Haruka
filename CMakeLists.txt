@@ -790,13 +790,21 @@ if(NOT ANDROID)
         src/components/CameraComponent.cpp
         src/components/HeightFogComponent.cpp
         src/components/LightComponent.cpp
+        src/components/ReflectionCaptureComponent.cpp
+        src/components/SkinnedMeshComponent.cpp
+        src/components/StaticMeshComponent.cpp
+        src/components/UIPanelComponent.cpp
+        src/ui/slate/HPaintContext.cpp
+        src/ui/slate/HFontAtlas.cpp
+        src/assets/Skin.cpp
+        src/geometry/PrimitiveDesc.cpp
         src/scene/World.cpp
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaLightTest PRIVATE glm::glm)
-    target_include_directories(HarukaLightTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(HarukaLightTest PRIVATE glm::glm HarukaVfs Vulkan::Vulkan)
+    target_include_directories(HarukaLightTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR} ${Vulkan_INCLUDE_DIRS})
     if(MSVC)
         target_compile_options(HarukaLightTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaLightTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")

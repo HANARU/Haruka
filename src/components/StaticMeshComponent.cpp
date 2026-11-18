@@ -6,20 +6,9 @@
 #include "../scene/ComponentFields.hpp"
 #include "../scene/SceneLog.hpp"
 #include "../scene/World.hpp"
-#include "../renderer/ScreenSize.hpp"
 #include <algorithm>
 #include <exception>
 #include <cstdio>
-
-MeshHandle* StaticMeshComponent::selectMeshForScreenSize(float screenSize) {
-    if (!autoLod) { lodCurrent_ = 0; return mesh; }
-    const size_t n = std::min(lodScreenSizes.size(), lodMeshes.size());
-    lodCurrent_    = hscreen::selectLod(screenSize, std::span<const float>(lodScreenSizes.data(), n), lodCurrent_);
-    // 비어 있는 단계는 더 고운 쪽으로 물러납니다.
-    for (int i = lodCurrent_; i > 0; --i)
-        if (lodMeshes[i - 1]) return lodMeshes[i - 1];
-    return mesh;
-}
 
 void StaticMeshComponent::assignMeshFromPair(const AssetPair& pair) {
     mesh           = pair.mesh;
@@ -28,7 +17,6 @@ void StaticMeshComponent::assignMeshFromPair(const AssetPair& pair) {
     triCount       = pair.triCount;
     lodMeshes      = pair.lods;
     lodScreenSizes = pair.lodScreenSizes;
-    lodCurrent_    = 0;
 }
 
 std::vector<PropDesc> StaticMeshComponent::buildProps() {

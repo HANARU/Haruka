@@ -2,8 +2,13 @@
 #include "CameraComponent.hpp"
 #include "HeightFogComponent.hpp"
 #include "LightComponent.hpp"
+#include "ReflectionCaptureComponent.hpp"
+#include "SkinnedMeshComponent.hpp"
+#include "StaticMeshComponent.hpp"
+#include "UIPanelComponent.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/World.hpp"
+#include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 
 void extractRenderScene(const World& world, RenderSceneInput& out) {
@@ -52,5 +57,75 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         out.fog.height        = fog->owner->worldPosition().y;
         out.fog.startDistance = fog->startDistance;
         break;
+    }
+
+    out.meshes.clear();
+    const std::vector<StaticMeshComponent*> meshes = StaticMeshComponent::visibleIn(world);
+    out.meshes.reserve(meshes.size());
+    for (const StaticMeshComponent* mc : meshes) {
+        if (!mc->visible || !mc->mesh) continue;
+        RenderMesh rm;
+        rm.key                = reinterpret_cast<uint64_t>(mc);
+        rm.actorId            = mc->owner ? mc->owner->id : 0;
+        rm.debugName          = mc->owner ? mc->owner->name.c_str() : "?";
+        rm.mesh               = mc->mesh;
+        rm.lodMeshes          = mc->lodMeshes.empty() ? nullptr : mc->lodMeshes.data();
+        rm.lodMeshCount       = mc->lodMeshes.size();
+        rm.lodScreenSizes     = mc->lodScreenSizes.empty() ? nullptr : mc->lodScreenSizes.data();
+        rm.lodScreenSizeCount = mc->lodScreenSizes.size();
+        rm.autoLod            = mc->autoLod;
+        rm.material           = mc->material;
+        rm.model              = mc->owner ? mc->owner->worldMatrix() : glm::mat4(1.f);
+        rm.transparent        = mc->transparent;
+        rm.lightChannels      = mc->lightChannels;
+        out.meshes.push_back(rm);
+    }
+
+    out.skinned.clear();
+    for (const SkinnedMeshComponent* sk : world.componentsOf<SkinnedMeshComponent>()) {
+        const Actor* a = sk->owner;
+        if (!a->activeInHierarchy()) continue;
+        if (!sk->isEnabled() || !sk->visible || !sk->loaded()) continue;
+        RenderSkinnedMesh rs;
+        rs.source        = sk;
+        rs.baseMesh      = sk->baseMesh;
+        rs.vertCount     = (uint32_t)sk->vertCount;
+        rs.actorId       = a->id;
+        rs.debugName     = a->name.c_str();
+        rs.material      = sk->material;
+        rs.model         = a->worldMatrix();
+        rs.transparent   = sk->transparent;
+        rs.lightChannels = sk->lightChannels;
+        out.skinned.push_back(rs);
+    }
+
+    out.capture = RenderReflectionCapture{};
+    for (const ReflectionCaptureComponent* c : world.componentsOf<ReflectionCaptureComponent>()) {
+        if (!c->owner->activeInHierarchy()) continue;
+        if (c->isEnabled()) {
+            out.capture.present    = true;
+            out.capture.actorId    = c->owner->id;
+            out.capture.pos        = c->owner->worldPosition();
+            out.capture.radius     = c->radius;
+            out.capture.intensity  = c->intensity;
+            out.capture.version    = c->version();
+            out.capture.worldToken = &world;
+            break;
+        }
+    }
+
+    out.panels.clear();
+    for (UIPanelComponent* pc : world.componentsOf<UIPanelComponent>()) {
+        const Actor* a = pc->owner;
+        if (!a->activeInHierarchy()) continue;
+        if (!pc->isEnabled()) continue;
+        RenderUIPanel rp;
+        rp.key         = reinterpret_cast<uint64_t>(pc);
+        rp.source      = pc;
+        rp.model       = a->worldMatrix() * glm::scale(glm::mat4(1.f), glm::vec3(pc->width, pc->height, 1.f));
+        rp.textureSize = pc->textureSize();
+        rp.twoSided    = pc->twoSided;
+        rp.brightness  = std::clamp(pc->brightness, UIPanelComponent::kMinBrightness, 1.f);
+        out.panels.push_back(rp);
     }
 }

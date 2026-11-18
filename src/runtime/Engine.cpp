@@ -616,7 +616,7 @@ void Engine::renderFrame(FrameState& f) {
         bool acquired = false;
         if (f.xrFrame.shouldRender && xr_->locateViews(f.xrFrame.displayTime, target.eyes))
             acquired = xr_->acquireImage(target.imageIndex);
-        const bool rendered = renderer.drawFrame(world_, sceneInput_, acquired ? &target : nullptr);
+        const bool rendered = renderer.drawFrame(sceneInput_, acquired ? &target : nullptr);
         if (acquired) xr_->releaseImage();
         xr_->endFrame(f.xrFrame.displayTime, acquired && rendered);
         if (acquired && rendered) ++drawnFrames_;
@@ -631,14 +631,14 @@ void Engine::renderFrame(FrameState& f) {
         target.imageIndex = syntheticImage_;
         target.eyes[0]    = eyes[0];
         target.eyes[1]    = eyes[1];
-        f.drewSynthetic = renderer.drawFrame(world_, sceneInput_, &target);
+        f.drewSynthetic = renderer.drawFrame(sceneInput_, &target);
         if (f.drewSynthetic) {
             lastSynthetic_  = syntheticImage_;
             syntheticImage_ = (syntheticImage_ + 1) % renderer.syntheticImageCount();
             ++drawnFrames_;
         }
     } else {
-        renderer.drawFrame(world_, sceneInput_);
+        renderer.drawFrame(sceneInput_);
         if (renderer.lastFrameDesktop()) ++drawnFrames_;
     }
 }

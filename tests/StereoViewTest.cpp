@@ -235,6 +235,38 @@ int main() {
         check(back.readField("exposureEv", "20") && back.exposureEv == -1.5f, "범위 밖 노출 보정은 거부");
     }
 
+    // ── S5c: LOD 고르기 순수 함수(pickLodMesh) ──────────────────────────────────
+    {
+        std::printf("\n== S5c LOD 고르기 순수 함수 ==\n");
+        const auto* fine = reinterpret_cast<const MeshHandle*>(uintptr_t(0x100));
+        auto*       lod1 = reinterpret_cast<MeshHandle*>(uintptr_t(0x200));
+        auto*       lod2 = reinterpret_cast<MeshHandle*>(uintptr_t(0x300));
+        MeshHandle* lods[2] = { lod1, lod2 };
+        const float thr[2]  = { 0.5f, 0.2f };
+
+        // 이력 띠: 0.5*(1-0.1)=0.45 아래로 내려가야 1단계, 0.5*(1+0.1)=0.55 위로 올라가야 0단계
+        const auto pStay0 = hscreen::pickLodMesh(0.47f, fine, lods, 2, thr, 2, 0, true);
+        const auto pDrop1 = hscreen::pickLodMesh(0.44f, fine, lods, 2, thr, 2, 0, true);
+        const auto pStay1 = hscreen::pickLodMesh(0.52f, fine, lods, 2, thr, 2, pDrop1.level, true);
+        const auto pBack0 = hscreen::pickLodMesh(0.56f, fine, lods, 2, thr, 2, pStay1.level, true);
+        check(pStay0.level == 0 && pStay0.mesh == fine &&
+              pDrop1.level == 1 && pDrop1.mesh == lod1 &&
+              pStay1.level == 1 && pStay1.mesh == lod1 &&
+              pBack0.level == 0 && pBack0.mesh == fine,
+              "이력 띠: 0.47 유지 -> 0.44 단계1 -> 0.52 유지 -> 0.56 단계0");
+
+        const auto pOff = hscreen::pickLodMesh(0.05f, fine, lods, 2, thr, 2, 2, false);
+        check(pOff.level == 0 && pOff.mesh == fine, "autoLod 꺼짐: 늘 단계 0 · 가장 고운 메시");
+
+        MeshHandle* sparse[2] = { lod1, nullptr };
+        const auto pFallback = hscreen::pickLodMesh(0.05f, fine, sparse, 2, thr, 2, 2, true);
+        check(pFallback.level == 2 && pFallback.mesh == lod1, "빈 단계 물러남: lod2 비면 lod1 반환");
+
+        // 메시가 바뀌어 current 를 0 으로 되돌렸을 때 이력 띠 안(0.47)이면 0 유지
+        const auto pReset = hscreen::pickLodMesh(0.47f, fine, lods, 2, thr, 2, 0, true);
+        check(pReset.level == 0 && pReset.mesh == fine, "메시 교체 시 0 으로 되돌려 고운 메시 유지");
+    }
+
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
     return g_failed ? 1 : 0;
 }

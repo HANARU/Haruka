@@ -1,6 +1,7 @@
 #pragma once
 #include "../scene/Component.hpp"
 #include "FloorSurface.hpp"
+#include "../renderer/RenderSceneInput.hpp"
 #include "../ui/slate/HSlateContext.hpp"
 
 #define GLM_FORCE_RADIANS
@@ -23,7 +24,7 @@
 //  - 다시 그리기는 자동입니다: 렌더러가 보이는 패널마다 프레임마다 그리기 목록을 만들어 직전과 해시가 다를 때만 GPU 로
 //    다시 그리고 밉을 만듭니다(Attr 바인딩 글자 · 색도 따라감). markDirty 는 목록이 같아도 다시 그리게 하는 강제용입니다.
 // 눕힌 패널도 밟는 면이 아닙니다(XR 리그 바닥 찾기에서 뺌, INotFloorSurface).
-class UIPanelComponent : public Component, public INotFloorSurface {
+class UIPanelComponent : public Component, public INotFloorSurface, public IRenderPanelSource {
 public:
     float       width          = 0.8f;   // m(액터 크기를 곱하기 전)
     float       height         = 0.5f;
@@ -66,9 +67,9 @@ public:
     void applyTextureSize();
 
     // 위젯 트리 문맥. 처음 부를 때(또는 content 가 바뀐 뒤) content 로 트리를 만듭니다.
-    HSlateContext& slate();
-    void markDirty() { dirty_ = true; }
-    bool takeDirty() { const bool d = dirty_; dirty_ = false; return d; }   // 렌더러 전용
+    HSlateContext& slate() override;
+    void markDirty() override { dirty_ = true; }
+    bool takeDirty() override { const bool d = dirty_; dirty_ = false; return d; }   // 렌더러 전용
 
     // 배치 배율: 내용은 기준 해상도(kReferencePixelsPerMeter = 1,250 px/m)의 픽셀로 짜고, 팩토리가 크기 · 여백 · 글자에
     // 이 배율을 곱해 트리를 만듭니다(에디터 uiScale 과 같은 방식). 그래서 pixelsPerMeter 를 바꾸면 선명도만 바뀌고 배치는
@@ -125,10 +126,6 @@ public:
     bool                  readField(const std::string& key, const std::string& value) override;
     std::vector<PropDesc> buildProps() override;
     std::string           readOnlyInfo() const override;
-
-    // ── 렌더러 전용(직렬화하지 않음) ───────────────────────────────────────
-    uint32_t   gpuTarget = 0;      // UIPanelPass 핸들
-    glm::uvec2 gpuSize{ 0, 0 };    // 그 텍스처의 크기
 
 private:
     HSlateContext slate_;

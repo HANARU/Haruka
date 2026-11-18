@@ -17,7 +17,19 @@
 #include "../src/components/CameraComponent.hpp"
 #include "../src/components/HeightFogComponent.hpp"
 #include "../src/components/LightComponent.hpp"
+#include "../src/components/ReflectionCaptureComponent.hpp"
 #include "../src/components/RenderExtract.hpp"
+#include "../src/components/SkinnedMeshComponent.hpp"
+#include "../src/components/StaticMeshComponent.hpp"
+#include "../src/components/UIPanelComponent.hpp"
+#include "../src/assets/AssetManager.hpp"
+#include "../src/assets/Skin.hpp"
+#include "../src/geometry/MeshSource.hpp"
+
+// HarukaLightTest 는 Vulkan/Renderer 없이 RenderExtract 를 시험하므로 StaticMeshComponent 가 참조하는 AssetManager 메서드만 비워 둡니다.
+std::vector<AssetPair> AssetManager::loadAll(const std::string&) { return {}; }
+AssetPair AssetManager::acquirePrimitive(const PrimitiveDesc&) { return {}; }
+MaterialHandle* AssetManager::acquirePrimitiveMaterial(const PrimitiveMaterialDesc&) { return nullptr; }
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -413,6 +425,110 @@ int main() {
               in.fog.heightFalloff == 0.3f && in.fog.height == 3.5f &&
               in.fog.startDistance == 5.f,
               "안개 둘(첫째 꺼짐): 둘째 값 추출");
+
+        // S5c: 정적 · 스킨 메시 추출(순서, 꺼진 · 숨긴 메시 빠짐, model 행렬, 스킨 소스 포인터)
+        auto* dummyMeshA = reinterpret_cast<MeshHandle*>(uintptr_t(0x1000));
+        auto* dummyMeshB = reinterpret_cast<MeshHandle*>(uintptr_t(0x2000));
+        auto* dummySkinM = reinterpret_cast<MeshHandle*>(uintptr_t(0x3000));
+
+        Actor* ma1 = w.spawnActor("m1");
+        ma1->setLocalPosition({ 2.f, 0.f, -5.f });
+        auto* sm1 = ma1->addComponent<StaticMeshComponent>();
+        sm1->mesh = dummyMeshA;
+
+        Actor* maHidden = w.spawnActor("mHidden");
+        auto* smHidden = maHidden->addComponent<StaticMeshComponent>();
+        smHidden->mesh = dummyMeshA;
+        smHidden->visible = false;
+
+        Actor* maOff = w.spawnActor("mOff");
+        auto* smOff = maOff->addComponent<StaticMeshComponent>();
+        smOff->mesh = dummyMeshA;
+        smOff->setEnabled(false);
+
+        Actor* ma2 = w.spawnActor("m2");
+        ma2->setLocalPosition({ -3.f, 1.f, -8.f });
+        auto* sm2 = ma2->addComponent<StaticMeshComponent>();
+        sm2->mesh = dummyMeshB;
+        sm2->transparent = true;
+
+        auto skinData = std::make_shared<SkinSourceData>();
+        auto bindVerts = std::make_shared<std::vector<MeshSourceVertex>>(1);
+        Actor* skaOff = w.spawnActor("skOff");
+        auto* skOff = skaOff->addComponent<SkinnedMeshComponent>();
+        skOff->baseMesh = dummySkinM;
+        skOff->setSkinData(skinData, bindVerts);
+        skOff->visible = false;
+
+        Actor* ska = w.spawnActor("skOn");
+        ska->setLocalPosition({ 4.f, 5.f, 6.f });
+        auto* skOn = ska->addComponent<SkinnedMeshComponent>();
+        skOn->baseMesh = dummySkinM;
+        skOn->vertCount = 1;
+        skOn->setSkinData(skinData, bindVerts);
+
+        extractRenderScene(w, in);
+        check(in.meshes.size() == 2 &&
+              in.meshes[0].mesh == dummyMeshA && in.meshes[1].mesh == dummyMeshB &&
+              in.meshes[0].key == reinterpret_cast<uint64_t>(sm1) && in.meshes[1].transparent,
+              "정적 메시 추출: 순서 유지 · 숨긴/꺼진 메시 빠짐");
+        check(glm::length(glm::vec3(in.meshes[0].model[3]) - glm::vec3(2.f, 0.f, -5.f)) < 1e-6f &&
+              glm::length(glm::vec3(in.meshes[1].model[3]) - glm::vec3(-3.f, 1.f, -8.f)) < 1e-6f,
+              "정적 메시 model 행렬 추출");
+        check(in.skinned.size() == 1 &&
+              in.skinned[0].source == static_cast<const IRenderSkinSource*>(skOn) &&
+              in.skinned[0].baseMesh == dummySkinM &&
+              glm::length(glm::vec3(in.skinned[0].model[3]) - glm::vec3(4.f, 5.f, 6.f)) < 1e-6f,
+              "스킨 메시 추출: 숨긴 것 빠짐 · IRenderSkinSource 포인터 · model 행렬");
+
+        // S5d: 반사 캡처 · UI 패널 추출
+        check(!in.capture.present, "반사 캡처 없음: capture.present = false");
+
+        Actor* rcaOff = w.spawnActor("rcOff");
+        auto* rcOff = rcaOff->addComponent<ReflectionCaptureComponent>();
+        rcOff->setEnabled(false);
+
+        Actor* rcaOn = w.spawnActor("rcOn");
+        rcaOn->setLocalPosition({ 7.f, 2.f, -3.f });
+        auto* rcOn = rcaOn->addComponent<ReflectionCaptureComponent>();
+        rcOn->radius    = 12.5f;
+        rcOn->intensity = 1.75f;
+        rcOn->recapture();
+
+        Actor* pa1 = w.spawnActor("p1");
+        pa1->setLocalPosition({ 1.f, 2.f, 3.f });
+        auto* p1 = pa1->addComponent<UIPanelComponent>();
+        p1->width      = 2.f;
+        p1->height     = 0.5f;
+        p1->brightness = 0.01f;   // kMinBrightness(0.05) 로 올려야 함
+        p1->twoSided   = true;
+
+        Actor* paOff = w.spawnActor("pOff");
+        auto* pOff = paOff->addComponent<UIPanelComponent>();
+        pOff->setEnabled(false);
+
+        Actor* pa2 = w.spawnActor("p2");
+        auto* p2 = pa2->addComponent<UIPanelComponent>();
+        p2->width  = 1.5f;
+        p2->height = 1.f;
+
+        extractRenderScene(w, in);
+        check(in.capture.present &&
+              in.capture.actorId == rcaOn->id &&
+              glm::length(in.capture.pos - glm::vec3(7.f, 2.f, -3.f)) < 1e-6f &&
+              in.capture.radius == 12.5f &&
+              in.capture.intensity == 1.75f &&
+              in.capture.version == rcOn->version() &&
+              in.capture.worldToken == &w,
+              "반사 캡처 추출: 꺼진 첫째 건너뜀 · pos · radius · version · worldToken");
+        check(in.panels.size() == 2 &&
+              in.panels[0].source == static_cast<IRenderPanelSource*>(p1) &&
+              in.panels[1].source == static_cast<IRenderPanelSource*>(p2) &&
+              in.panels[0].twoSided &&
+              in.panels[0].brightness == UIPanelComponent::kMinBrightness &&
+              glm::length(glm::vec3(in.panels[0].model[0]) - glm::vec3(2.f, 0.f, 0.f)) < 1e-6f &&
+              glm::length(glm::vec3(in.panels[0].model[1]) - glm::vec3(0.f, 0.5f, 0.f)) < 1e-6f,
+              "UI 패널 추출: 순서 유지 · 꺼진 것 빠짐 · model 크기 곱함 · brightness 하한 · source 포인터");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cmath>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "Vertex.hpp"
@@ -37,7 +38,6 @@
 #include "RenderExtensionRegistry.hpp"
 #include "../core/EngineSettings.hpp"
 
-class World;
 class HSlateRenderer;
 struct TexSourceData;
 
@@ -118,7 +118,7 @@ public:
     void cleanup();
     // xr 이 있으면 두 눈을 XR 스왑체인의 두 층에 그리고, 에디터 뷰포트에는 왼쪽 눈을 비춥니다.
     // 그 프레임에 XR 이미지에 실제로 그렸으면 true(엔진이 투영 레이어를 제출할지 정함).
-    bool drawFrame(World& world, const RenderSceneInput& scene, const XrFrameTarget* xr = nullptr);
+    bool drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr = nullptr);
 
     // ── XR 연결 ───────────────────────────────────────────────────────────────
     bool             xrCompatible() const     { return xrCompatible_; }
@@ -320,8 +320,8 @@ private:
             return valid == o.valid && actor == o.actor && pos == o.pos && radius == o.radius && version == o.version && world == o.world;
         }
     };
-    void updateReflectionCapture(World& world, const RenderSceneInput& scene);
-    void performReflectionCapture(World& world, const RenderSceneInput& scene, const glm::vec3& pos);
+    void updateReflectionCapture(const RenderSceneInput& scene);
+    void performReflectionCapture(const RenderSceneInput& scene, const glm::vec3& pos);
     CaptureKey       captureKey_;
     glm::vec4        capturePos_{ 0.f };      // xyz 위치, w 반경(0 = 없음) → FrameUBO.capturePos
     float            captureIntensity_ = 1.f;
@@ -340,6 +340,20 @@ private:
     // 방향입니다(DEF-28). 액터마다 한 번만 경고합니다.
     MaterialHandle*              errorMaterial_ = nullptr;
     std::unordered_set<uint64_t> noMaterialWarned_;
+    struct LodState {
+        const MeshHandle* mesh    = nullptr;
+        int               current = 0;
+        uint64_t          stamp   = 0;
+    };
+    std::unordered_map<uint64_t, LodState> lodStates_;
+    uint64_t                               lodStamp_ = 0;
+    struct PanelState {
+        uint32_t   handle = 0;
+        glm::uvec2 size{ 0, 0 };
+        uint64_t   stamp  = 0;
+    };
+    std::unordered_map<uint64_t, PanelState> panelStates_;
+    uint64_t                                 panelStamp_ = 0;
     bool                         dropWarned_    = false;   // 행 예산 초과 경고(한 번)
     bool                         skinOverflowWarned_ = false;   // 스킨 메시 정점 구간 초과 경고(한 번, 2026-11-07)
     std::vector<Vertex>          skinScratch_;   // CPU 스키닝 결과(GPU 형식으로 옮기기 전, QTangent C2)
@@ -477,8 +491,8 @@ private:
         std::vector<GeometryPass::PanelDraw> panels;         // 월드 UI 패널(3D UI P1b)
     };
     // 월드의 UI 패널을 모아 텍스처를 맞추고(만들기 · 크기 변경 · 사라진 패널 정리) 더러운 패널을 다시 그리게 올립니다.
-    void gatherUIPanels(World& world, std::vector<GeometryPass::PanelDraw>& out);
-    RenderView extractRenderView(World& world, const RenderSceneInput& scene, const XrFrameTarget* xr);
+    void gatherUIPanels(const RenderSceneInput& scene, std::vector<GeometryPass::PanelDraw>& out);
+    RenderView extractRenderView(const RenderSceneInput& scene, const XrFrameTarget* xr);
 
     // Per-frame logic (extractRenderView 내부에서만 호출)
     // 라이트 개수는 updateLightSSBO가 실제로 채운 값을 반환하고 updateUBO가 그것을 받는다.
@@ -490,7 +504,7 @@ private:
     // opaqueOut/transpOut의 firstInstance와 materialRowsOut의 인덱스는 같은 배정(hbatch::build)
     // 에서 나오므로 세 출력은 항상 정합한다. CPU 드로우 항목은 이 출력에서 파생시킬 것.
     // 같은 지오메트리 · 머티리얼의 불투명 메시는 instanceCount = N 인 드로우 하나가 된다(DEF-16).
-    void buildDrawCommands(World& world,
+    void buildDrawCommands(const RenderSceneInput& scene,
                           std::vector<GpuDrawCmd>& opaqueOut,
                           std::vector<GpuDrawCmd>& transpOut,
                           std::vector<const MaterialHandle*>& materialRowsOut,
