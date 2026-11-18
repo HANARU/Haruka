@@ -1,6 +1,6 @@
 #include "PrefabManager.hpp"
 #include "PrefabRules.hpp"
-#include "AssetLog.hpp"
+#include "../assets/AssetLog.hpp"
 #include "SceneSerializer.hpp"
 #include "../scene/Actor.hpp"
 #include "../core/FileUtil.hpp"

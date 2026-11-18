@@ -31,24 +31,17 @@ module assets:    core, math, vfs, geometry, scene, renderer
 # ── 컴포넌트: 장면 모델과 시스템을 잇는 층 ──
 module components: core, math, vfs, platform, input, ui, scene, geometry, physics, audio, renderer, xr, assets
 
+# ── 씬 파일: 씬 · 프리팹 읽기 · 쓰기(옛 v3 형식은 컴포넌트 형을 직접 앎, 2026-11-18 S7 에 assets 에서 옮김) ──
+module sceneio:   core, math, vfs, scene, geometry, physics, audio, assets, components
+
 # ── 조립: 엔진 루프 · 앞단 ──
-module runtime:   core, math, vfs, memory, platform, input, ui, scene, geometry, physics, audio, renderer, xr, assets, components
-module game:      core, math, vfs, memory, platform, input, ui, scene, geometry, physics, audio, renderer, xr, assets, components, runtime
-module editor:    core, math, vfs, memory, platform, input, ui, scene, geometry, physics, audio, renderer, xr, assets, components, runtime
+module runtime:   core, math, vfs, memory, platform, input, ui, scene, geometry, physics, audio, renderer, xr, assets, components, sceneio
+module game:      core, math, vfs, memory, platform, input, ui, scene, geometry, physics, audio, renderer, xr, assets, components, sceneio, runtime
+module editor:    core, math, vfs, memory, platform, input, ui, scene, geometry, physics, audio, renderer, xr, assets, components, sceneio, runtime
 module tools:     core, vfs
-module main:      core, math, vfs, memory, platform, input, ui, scene, geometry, physics, audio, renderer, xr, assets, components, runtime, game, editor, tools
+module main:      core, math, vfs, memory, platform, input, ui, scene, geometry, physics, audio, renderer, xr, assets, components, sceneio, runtime, game, editor, tools
 
 # ── 허용 목록: 아직 고치지 않은 위반 ──
-
-# assets -> audio — 2단계 S4 · S7: 씬 직렬화가 컴포넌트 형을 직접 앎(레지스트리 경유로)
-allow assets/SceneSerializer.hpp -> audio/AudioAttenuation.hpp
-
-# assets -> components — 2단계 S4 · S7: 씬 직렬화가 컴포넌트 형을 직접 앎(레지스트리 경유로)
-allow assets/SceneSerializer.cpp -> components/StaticMeshComponent.hpp
-allow assets/SceneSerializer.cpp -> components/LightComponent.hpp
-allow assets/SceneSerializer.cpp -> components/CameraComponent.hpp
-allow assets/SceneSerializer.cpp -> components/AudioComponent.hpp
-allow assets/SceneSerializer.cpp -> components/RigidBodyComponent.hpp
 
 # audio -> components — 2단계 S7: 소리 컴포넌트를 audio 옆으로, 청취자 카메라는 질의로
 allow audio/AudioSystem.cpp -> components/AudioComponent.hpp

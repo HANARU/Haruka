@@ -458,7 +458,7 @@ graph TD
   에디터의 컴포넌트 추가 버튼도 레지스트리에서 만듭니다. Layer 2 는 `EngineContext::components` 로 등록합니다(전부 사용자 결정).
   상세는 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 "DEF-22 직렬화 타입 등록 수정 결과".
 
-* **위치**: [`SceneSerializer.hpp:L18-L40`](file:///e:/Haruka/src/assets/SceneSerializer.hpp#L18-L40)
+* **위치**: [`SceneSerializer.hpp:L18-L40`](file:///e:/Haruka/src/sceneio/SceneSerializer.hpp#L18-L40)
 * **문제점**: `ActorData`가 컴포넌트 5종을 구조체 필드로 하드코딩합니다. 새 컴포넌트는 `.hscene`과 `.hprefab` 왕복이 불가능합니다.
 * **해결 사양**: 컴포넌트별 직렬화를 타입 등록 기반으로 바꾸십시오. Layer 2 컴포넌트를 씬에 저장할 수 없다면 도메인 레이어가 성립하지 않습니다.
 
@@ -879,7 +879,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 > **해결(2026-08-27, 라이팅 Phase 0):** `LIGHT:` 줄이 타입·반경·Cone 각·방향을 기록하고 읽습니다. 아래는 등재 당시의 분석입니다(2026-10-02 대조).
 
-* **위치**: [`src/assets/SceneSerializer.cpp`](file:///e:/Haruka/src/assets/SceneSerializer.cpp)의 `LIGHT:` 기록 경로 및 복원 경로
+* **위치**: [`src/sceneio/SceneSerializer.cpp`](file:///e:/Haruka/src/sceneio/SceneSerializer.cpp)의 `LIGHT:` 기록 경로 및 복원 경로
 
 #### 1) 현상 및 발생 메커니즘
 
@@ -1007,7 +1007,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 
 > **미검증 항목입니다.** 설계 검토자가 제시했으나 코드로 확인하지 않았습니다. **먼저 실측하십시오.**
 
-* **위치(주장)**: [`src/assets/SceneSerializer.cpp`](file:///e:/Haruka/src/assets/SceneSerializer.cpp)의 `RIGID:` 기록 경로
+* **위치(주장)**: [`src/sceneio/SceneSerializer.cpp`](file:///e:/Haruka/src/sceneio/SceneSerializer.cpp)의 `RIGID:` 기록 경로
 * **주장 내용**: `RIGID:` 가 enum 서수를 그대로 기록하므로, `EPhysicsShape` 에 값을 **중간 삽입**하면 기존 씬이 조용히 깨진다는 것입니다.
 * **착수 전 실측 항목**:
   * `RIGID:` 가 실제로 정수 서수를 기록하는지 확인하십시오.

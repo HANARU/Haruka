@@ -7,7 +7,7 @@
 // 실행: build/Release/HarukaEditCmdTest.exe
 #include "../src/editor/EditorCommands.hpp"
 #include "../src/editor/EditTools.hpp"
-#include "../src/assets/PrefabRules.hpp"
+#include "../src/sceneio/PrefabRules.hpp"
 #include "../src/scene/World.hpp"
 #include "../src/scene/ComponentRegistry.hpp"
 

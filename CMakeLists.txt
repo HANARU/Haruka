@@ -312,9 +312,9 @@ set(RUNTIME_SOURCES
     src/assets/AssetManager.cpp
     src/assets/GassetCache.cpp
     src/assets/Skin.cpp
-    src/assets/PrefabManager.cpp
-    src/assets/SceneSerializer.cpp
-    src/assets/ComponentSerializer.cpp
+    src/sceneio/PrefabManager.cpp
+    src/sceneio/SceneSerializer.cpp
+    src/sceneio/ComponentSerializer.cpp
     src/audio/AudioSystem.cpp
     src/audio/AudioAttenuation.cpp
     src/audio/MiniaudioImpl.cpp
@@ -753,7 +753,7 @@ if(NOT ANDROID)
     # 타입 등록 · 이름 붙은 값의 왕복 · 원문 보존 · 옛 이름을 화면 없이 검산합니다(DEF-22).
     add_executable(HarukaSceneTest
         tests/SceneComponentTest.cpp
-        src/assets/ComponentSerializer.cpp
+        src/sceneio/ComponentSerializer.cpp
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp

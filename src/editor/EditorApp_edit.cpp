@@ -6,7 +6,7 @@
 #include "../scene/World.hpp"
 #include "../scene/Actor.hpp"
 #include "../components/CameraComponent.hpp"
-#include "../assets/SceneSerializer.hpp"
+#include "../sceneio/SceneSerializer.hpp"
 #include "../platform/IWindow.hpp"
 
 #include <algorithm>

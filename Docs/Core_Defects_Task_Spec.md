@@ -121,7 +121,7 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-19** | 물리 힘·임펄스·속도·레이캐스트 API 부재 | **해결됨 · 2026-10-04** (원래 HIGH · 경계, UE 식 규칙) | `src/physics/PhysicsSystem.cpp`, `src/components/RigidBodyComponent.cpp` | 끝 "3단계 VR 첫걸음 수정 결과" 절 |
 | **DEF-20** | 디지털 전용 입력 (아날로그 축·VR 포즈 부재) | **해결됨 · 2026-10-04** (원래 HIGH · 경계, XR 입력은 창이 아니라 `XrSystem`) | `src/xr/XrSystem.cpp`, `src/input/HInputSystem.cpp` | 끝 "3단계 VR 첫걸음 수정 결과" 절 |
 | **DEF-21** | 오일러각 카메라 (6DOF 자세 불가) | **해결됨 · 2026-10-04** (원래 HIGH · 경계, 쿼터니언 자세 · 눈별 투영) | `src/components/CameraComponent.cpp` | `projFromFov`, XR 원점 |
-| **DEF-22** | `SceneSerializer` 컴포넌트 하드코딩 | **해결됨 · 2026-10-14** (원래 HIGH · 경계, 타입 등록 · 씬 v4 · 프리팹 v2) | `src/scene/ComponentRegistry.hpp`, `src/assets/ComponentSerializer.cpp` | 끝 "DEF-22 직렬화 타입 등록 수정 결과" 절 |
+| **DEF-22** | `SceneSerializer` 컴포넌트 하드코딩 | **해결됨 · 2026-10-14** (원래 HIGH · 경계, 타입 등록 · 씬 v4 · 프리팹 v2) | `src/scene/ComponentRegistry.hpp`, `src/sceneio/ComponentSerializer.cpp` | 끝 "DEF-22 직렬화 타입 등록 수정 결과" 절 |
 | **DEF-23** | 스피어 인덱스 도메인 불일치 (DEF-01의 직계 형제) | **해결됨** (2026-08-25, 원래 CRITICAL) | `shaders/cull.comp`, `src/renderer/passes/CullPass.cpp`, `src/renderer/Renderer.hpp`, `src/renderer/Renderer_render.cpp` | L54·L57 |
 | **DEF-24** | 라이트 개수 이중 계산 | **해결됨 · 2026-08-25** (원래 HIGH) | `src/renderer/Renderer_render.cpp`, `src/renderer/Renderer.hpp`, `src/renderer/RenderTypes.hpp`, `shaders/pbr.frag` | 8-2절 |
 | **DEF-33** | 라이트 선택 정책 부재 (생성 순서로 절단) | **해결됨 · 2026-10-14** (원래 MEDIUM, 화면 밖 거르기 + 상한 초과 시 방향광 우선 · 가까운 순) | `src/renderer/LightSelection.hpp`, `Renderer::updateLightSSBO` | 8-2-a절 |
@@ -137,13 +137,13 @@ DEF-105(빌드마다 GLTF 캐시 무효화)도 고쳤습니다. DEF-34 는 PC �
 | **DEF-32** | 재투영 여유분만큼의 절두체 부풀리기 부재 | **보류 · 2026-10-04** (원래 MEDIUM. 컬링 · 렌더 · 제출이 한 프레임의 같은 자세를 쓰는 동안 필요 없음. 늦은 자세 갱신 · 과주사를 넣을 때 재개) | `src/renderer/Renderer_render.cpp` | `buildDrawCommands` 주석 |
 | **DEF-36** | 섀도 샘플러 비교 규약 반전 (모든 라이트 기여가 0이 됨) | **해결됨 · 2026-08-25** (원래 CRITICAL) | `src/renderer/passes/ShadowPass.cpp` | L37 (증상은 `shaders/pbr.frag` L165), 11-1절 |
 | **DEF-37** | IBL 조도 추정기의 코사인 중복 적용 (저장값 약 2.09배 과다) | **해결됨 · 2026-08-25** (원래 HIGH) | `src/renderer/Renderer.cpp` | IBL 조도 큐브맵 생성 루프, 11-2절 |
-| **DEF-38** | 라이트 종류와 방향이 직렬화되지 않음 | **해결됨 · 2026-08-27** (원래 HIGH, 라이팅 Phase 0) | `src/assets/SceneSerializer.cpp` | `LIGHT:` 기록 및 복원 경로 |
+| **DEF-38** | 라이트 종류와 방향이 직렬화되지 않음 | **해결됨 · 2026-08-27** (원래 HIGH, 라이팅 Phase 0) | `src/sceneio/SceneSerializer.cpp` | `LIGHT:` 기록 및 복원 경로 |
 | **DEF-39** | `defaultCube` 탄젠트 handedness 반전 (여섯 면 전부) | **해결됨 · 2026-08-25** (원래 MEDIUM · 미검증 → 실측으로 성립 확인) | `src/assets/GltfLoader.cpp` | `defaultCube`, 11-4절 |
 | **DEF-40** | 라인 오버레이 정점 버퍼의 GPU 인플라이트 레이스 | **해결됨 · 2026-10-02** (원래 MEDIUM, 라인·기즈모 삼각형 버퍼를 프레임 슬롯별로 분리) | `src/renderer/passes/GeometryPass.*` | 라인 오버레이 정점 버퍼 |
 | **DEF-41** | 콜라이더가 `Transform.scale`을 반영하지 않음 | **해결됨 · 2026-08-25** (원래 MEDIUM · 절차 도형 선결 조건) | `src/physics/PhysicsSystem.cpp` | 바디 생성 지점, 11-6절 |
 | **DEF-42** | 힙이 1GB 미만일 때 Zone 오프셋이 실제 할당 범위를 넘음 | **해결됨 · 2026-10-31** (원래 MEDIUM, 1GB 를 한 번에 잡고 못 잡으면 이유를 적은 예외로 멈춤. 축소 경로 삭제) | `src/memory/HarukaAllocator.cpp`, `src/memory/MemoryTypeSelect.hpp` | `init`, `hmem::planCoreHeap` |
 | **DEF-43** | 세터 안의 `resetIfLive`로 인한 매 프레임 바디 재생성 | **해결됨 · 2026-10-02** (원래 LOW, 재생성을 편집 확정 훅으로 옮김) | `src/components/RigidBodyComponent.cpp` | `resetIfLive` |
-| **DEF-44** | `RIGID:`의 enum 서수 직렬화 | **해결됨 · 2026-10-02** (원래 LOW, 이름으로 기록하고 옛 순번도 읽음) | `src/assets/SceneSerializer.cpp` | `RIGID:` 기록 경로 |
+| **DEF-44** | `RIGID:`의 enum 서수 직렬화 | **해결됨 · 2026-10-02** (원래 LOW, 이름으로 기록하고 옛 순번도 읽음) | `src/sceneio/SceneSerializer.cpp` | `RIGID:` 기록 경로 |
 | **DEF-45** | `uploadMesh`의 핸들 누수 | **해결됨 · 2026-08-25** (원래 LOW) | `src/renderer/GpuScene.cpp` | `uploadMesh`, 11-10절 |
 | **DEF-46** | 에디터 float 스텝 0.01 고정으로 1cm 미만 편집 불가 | **해결됨 · 2026-10-04** (원래 MEDIUM, 단위 종류 · UE 식 수정 키) | `src/scene/Reflect.hpp` | `PropDesc::step` |
 | **DEF-47** | glTF 스칼라 팩터를 한 번도 읽지 않음 (텍스처 없는 머티리얼이 전부 순백) | **해결됨 · 2026-08-25** (원래 HIGH) | `src/assets/GltfLoader.cpp` | 머티리얼 추출 경로, 11-12절 |
@@ -771,7 +771,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 > 옛 파일은 기본값을 씁니다([Lighting_UE_Design.md](Lighting_UE_Design.md)). 아래 본문은 등재 당시의 분석입니다.
 
 #### 대상 파일 및 위치
-* **파일**: [`src/assets/SceneSerializer.cpp`](file:///e:/Haruka/src/assets/SceneSerializer.cpp)
+* **파일**: [`src/sceneio/SceneSerializer.cpp`](file:///e:/Haruka/src/sceneio/SceneSerializer.cpp)
 * **위치**: `LIGHT:` 기록 경로 및 복원 경로
 
 #### 결함 메커니즘 (Root Cause)
@@ -943,7 +943,7 @@ DEF-36 수정과 함께 확인했습니다. 앰비언트가 정상 크기로 내
 > **미검증 항목입니다.** 설계 검토자가 제시했으나 코드로 확인하지 않았습니다. **아래 실측을 먼저 수행하십시오.**
 
 #### 대상 파일 및 위치 (주장)
-* [`src/assets/SceneSerializer.cpp`](file:///e:/Haruka/src/assets/SceneSerializer.cpp)의 `RIGID:` 기록 경로
+* [`src/sceneio/SceneSerializer.cpp`](file:///e:/Haruka/src/sceneio/SceneSerializer.cpp)의 `RIGID:` 기록 경로
 
 #### 주장 내용
 * `RIGID:` 가 enum 서수를 그대로 기록하므로, `EPhysicsShape` 에 값을 **중간 삽입**하면 기존 씬이 조용히 깨진다는 것입니다.
@@ -2212,7 +2212,7 @@ the scene" 경고가 사라지고 데스크톱 · 창 없는 실행도 머리 �
 - 에디터(130 · 132 ~ 139): `EditorApp.cpp` · `EditorApp_scene.cpp` · `EditorApp_edit.cpp`, 클립 형식 `EditTools.hpp`(`#SESSION` 줄),
   숫자 칸의 누름 추적 `SNumberField::anyPressed`.
 - 속성 Undo(131): `EditorCommands.hpp` 의 `hcmd::PropValues` 가 칸 이름 + 종류로 기억합니다.
-- 프리팹(140 ~ 142): 새 헤더 `src/assets/PrefabRules.hpp`(`hprefab::isValidName` · `stripBomAndDetectV3` · `discardOrphans`)를
+- 프리팹(140 ~ 142): 새 헤더 `src/sceneio/PrefabRules.hpp`(`hprefab::isValidName` · `stripBomAndDetectV3` · `discardOrphans`)를
   `PrefabManager.cpp` 와 에디터의 Save as Prefab 이 씁니다.
 - XR(143 · 144): `XrComponents.cpp` 의 놓기, 원점 고르기 `hxr::chooseOrigin`, `CameraComponent::setXrTrackedParent`, `Engine.cpp`.
 - 소리 장치(145 ~ 147): `AudioSystem` 의 후보 순서 `outputCandidates`, `reopenDevice` · `checkOutput` · `overrideActive`.

@@ -43,12 +43,13 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 시스템 | `audio` | miniaudio · 차폐 · 잔향 · HRTF | core, math, vfs, scene, physics |
 | 시스템 | `renderer` | Vulkan 렌더러 · 패스 | core, math, vfs, memory, platform, ui, geometry |
 | 시스템 | `xr` | OpenXR · 손 쥐기 풀이 | core, math, input, platform, renderer |
-| 시스템 | `assets` | 에셋 · 씬 · 프리팹 불러오기 | core, math, vfs, geometry, scene, renderer |
+| 시스템 | `assets` | 에셋(메시 · 텍스처 · glTF · 캐시) 불러오기 | core, math, vfs, geometry, scene, renderer |
 | 연결 | `components` | 장면 모델과 시스템을 잇는 컴포넌트 | 위의 모든 모듈 |
-| 조립 | `runtime` | Engine(루프) · 실행 옵션 · 앞단 · 게임 모듈 인터페이스 · ModuleManager · 셰이더 묶음 짝 확인 | components 와 그 아래 |
+| 씬 파일 | `sceneio` | 씬 · 프리팹 읽기 · 쓰기(SceneSerializer · ComponentSerializer · PrefabManager, 2026-11-18 S7 에 assets 에서 옮김) | components 와 그 아래(renderer · xr · ui 등은 쓰지 않음) |
+| 조립 | `runtime` | Engine(루프) · 실행 옵션 · 앞단 · 게임 모듈 인터페이스 · ModuleManager · 셰이더 묶음 짝 확인 | sceneio 와 그 아래 |
 | 앞단 | `game` · `editor` | 게임 실행 파일 · 에디터 | runtime 과 그 아래(서로는 안 됨) |
 | 도구 | `tools` | HarukaPak 등 | core, vfs |
-| 진입점 | `main`(src/main.cpp) | 실행 파일 진입점 | 모두 |
+| 진입점 | `main`(src/main.cpp · src/AndroidMain.cpp) | 실행 파일 진입점 | 모두 |
 
 규칙의 근거:
 - **기반은 장면을 모릅니다.** 설정 파일 해석이 컴포넌트 필드 헤더를 쓰던 것을 `core/FieldParse.hpp` 로 떼어 냈습니다(2026-11-18).
@@ -56,6 +57,8 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 - **렌더러는 장면을 모르는 것이 목표입니다.** 컴포넌트에서 렌더 데이터를 뽑는 추출 단계를 렌더러 밖으로 옮깁니다(2단계 S5,
   UE 의 SceneProxy · Godot 의 RenderingServer 와 같은 생각). 그때까지는 허용 목록에 있습니다.
 - **조립부(runtime)는 앞단을 모릅니다.** 게임 · 에디터가 `IEngineFrontend` 로 Engine 에 붙습니다.
+- **씬 파일은 컴포넌트 위에 있습니다.** 옛 v3 씬 형식(LIGHT: · CAMERA: · RIGID: 줄)을 읽으려면 컴포넌트 형을 알아야 해서, 에셋 층이
+  아니라 컴포넌트 위 `sceneio` 에 둡니다(UE 도 레벨 직렬화는 컴포넌트를 아는 Engine 모듈에 있음). v4 는 레지스트리로 씁니다(DEF-22).
 
 ## 3. core 분할 (S7 일부, 2026-11-18)
 
@@ -87,11 +90,10 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 - 변이 확인(2026-11-18): 기반 → 에디터 include 추가, 필요 없는 허용 항목, 표의 순환(math ↔ core), 규칙 없는 새 폴더, 필요한
   허용 항목 삭제 다섯 가지를 모두 잡았습니다.
 
-## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개, 모두 2단계 몫)
+## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개, 모두 2단계 몫)
 
 | 방향 | 수 | 원인 | 없앨 단계 |
 |---|---|---|---|
-| assets → audio · components | 6 | 씬 직렬화가 컴포넌트 형을 직접 앎 | 2단계 S4 · S7 |
 | audio → components | 3 | 소리 컴포넌트 · 청취자 카메라 | 2단계 S7 |
 | physics → components | 1 | RigidBodyComponent | 2단계 S7 |
 | geometry → assets | 1 | 메시 데이터(MeshSource)의 자리 | 2단계 S5 |

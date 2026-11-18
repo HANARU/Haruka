@@ -11,7 +11,7 @@
 #include "../vfs/Vfs.hpp"
 #include "../components/CameraComponent.hpp"
 #include "../components/UIPanelPointer.hpp"
-#include "../assets/SceneSerializer.hpp"
+#include "../sceneio/SceneSerializer.hpp"
 #include "../input/HInputSystem.hpp"
 #include "../platform/IWindow.hpp"
 

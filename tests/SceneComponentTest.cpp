@@ -7,8 +7,8 @@
 //
 // 실행: build/Release/HarukaSceneTest.exe
 
-#include "../src/assets/ComponentSerializer.hpp"
-#include "../src/assets/TransformText.hpp"
+#include "../src/sceneio/ComponentSerializer.hpp"
+#include "../src/sceneio/TransformText.hpp"
 #include "../src/components/CameraComponent.hpp"
 #include "../src/components/LightComponent.hpp"
 #include "../src/scene/Actor.hpp"

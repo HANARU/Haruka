@@ -2,7 +2,7 @@
 #include "../scene/SceneLog.hpp"
 #include "../core/TextFloat.hpp"
 #include "TransformText.hpp"
-#include "AssetManager.hpp"
+#include "../assets/AssetManager.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/World.hpp"
 #include "../components/StaticMeshComponent.hpp"

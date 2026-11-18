@@ -1805,8 +1805,8 @@ DEF-26과 DEF-27을 수정합니다.
 | `src/physics/PhysicsSystem.cpp` | Jolt 셰이프 생성, `transform.scale` 미반영, Capsule 인자 순서 |
 | `src/assets/GltfLoader.cpp` | `generateTangents` handedness 식, `defaultCube` 정점 24개 전체와 체커 생성 |
 | `src/assets/AssetManager.hpp` / `.cpp` | 캐시 구조, `loadAll` 폴백 경로, `clear()` 순회 |
-| `src/assets/SceneSerializer.hpp` / `.cpp` | `ActorData` 전체 필드, `writeActor` 와 `parseLine` 과 `spawn`, 라이트 방향 미직렬화, `RIGID:` 서수 |
-| `src/assets/PrefabManager.cpp` | `find(':')` 첫 콜론 파싱 |
+| `src/sceneio/SceneSerializer.hpp` / `.cpp` | `ActorData` 전체 필드, `writeActor` 와 `parseLine` 과 `spawn`, 라이트 방향 미직렬화, `RIGID:` 서수 |
+| `src/sceneio/PrefabManager.cpp` | `find(':')` 첫 콜론 파싱 |
 | `src/assets/GassetCache.cpp` | `cachePath` 해시, `isValid`의 mtime 검사 |
 | `src/memory/HarukaAllocator.hpp` / `.cpp` | Zone 상수, `init`의 `heapSize` 계산과 상수 free-list 초기화 |
 | `src/editor/EditorApp.cpp` | `PropsSnapshotCmd`, `compBegin` 과 `compEnd`, 프롭 행 분기, `rebuildBottomPanel`, `+ Add Empty`, `startPlay` 와 `stopPlay`, `serializeWorld` 와 `deserializeWorld` |
