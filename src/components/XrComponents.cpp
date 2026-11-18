@@ -1,6 +1,7 @@
 #include "XrComponents.hpp"
 #include "RigidBodyComponent.hpp"
 #include "HandPoseComponent.hpp"
+#include "FloorSurface.hpp"
 #include "../physics/PhysicsSystem.hpp"
 #include "../xr/GraspSolver.hpp"
 #include "../math/Damping.hpp"
@@ -68,7 +69,7 @@ bool hxr::floorBelow(const World& world, const glm::vec3& from, const Actor* ski
         bool has = false;
         for (const auto& c : a->getComponents()) {
             glm::vec3 cmin, cmax;
-            if (c->isEnabled() && c->blocksFloor() && c->localBounds(cmin, cmax)) {
+            if (c->isEnabled() && !dynamic_cast<const INotFloorSurface*>(c.get()) && c->localBounds(cmin, cmax)) {
                 lo  = has ? glm::min(lo, cmin) : cmin;
                 hi  = has ? glm::max(hi, cmax) : cmax;
                 has = true;

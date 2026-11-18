@@ -587,8 +587,10 @@ void PhysicsSystem::tick(float dt) {
                 const glm::vec3 ms = signedSc;
                 const bool flipWinding = ms.x * ms.y * ms.z < 0.f;
                 const CollisionMesh* cm = nullptr;
+                // 형상은 질의 인터페이스로 묻습니다(ICollisionMeshSource, 2026-11-18 S4).
                 for (const auto& c : a->getComponents())
-                    if (const CollisionMesh* m = c->collisionMesh(); m && !m->empty()) { cm = m; break; }
+                    if (const auto* src = dynamic_cast<const ICollisionMeshSource*>(c.get()))
+                        if (const CollisionMesh* m = src->collisionMesh(); m && !m->empty()) { cm = m; break; }
                 if (!cm) { noGeometry = "no mesh on this actor"; break; }
                 bool asMesh = rb->shape == EPhysicsShape::Mesh;
                 if (asMesh && rb->motionType == EMotionType::Dynamic) {

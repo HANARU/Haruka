@@ -1,5 +1,4 @@
 #include "ReflectionCaptureComponent.hpp"
-#include "../core/DebugDraw.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/ComponentFields.hpp"
 #include "../scene/Reflect.hpp"
@@ -37,8 +36,3 @@ bool ReflectionCaptureComponent::readField(const std::string& key, const std::st
     return true;
 }
 
-void ReflectionCaptureComponent::drawEditorVisual() const {
-    if (!owner) return;
-    hdebug::sphere(owner->worldPosition(), radius, { 0.8f, 0.85f, 1.f, 1.f });
-    hdebug::sphere(owner->worldPosition(), radius * 0.7f, { 0.8f, 0.85f, 1.f, 0.4f });   // 섞기 시작
-}

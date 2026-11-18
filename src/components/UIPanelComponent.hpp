@@ -1,5 +1,6 @@
 #pragma once
 #include "../scene/Component.hpp"
+#include "FloorSurface.hpp"
 #include "../ui/slate/HSlateContext.hpp"
 
 #define GLM_FORCE_RADIANS
@@ -21,7 +22,8 @@
 //  - 내용은 이름으로 고릅니다(content). 엔진에는 "Demo" 가 있고, 게임 모듈이 registerContent 로 더합니다.
 //  - 다시 그리기는 자동입니다: 렌더러가 보이는 패널마다 프레임마다 그리기 목록을 만들어 직전과 해시가 다를 때만 GPU 로
 //    다시 그리고 밉을 만듭니다(Attr 바인딩 글자 · 색도 따라감). markDirty 는 목록이 같아도 다시 그리게 하는 강제용입니다.
-class UIPanelComponent : public Component {
+// 눕힌 패널도 밟는 면이 아닙니다(XR 리그 바닥 찾기에서 뺌, INotFloorSurface).
+class UIPanelComponent : public Component, public INotFloorSurface {
 public:
     float       width          = 0.8f;   // m(액터 크기를 곱하기 전)
     float       height         = 0.5f;
@@ -113,7 +115,6 @@ public:
     bool followMoving() const { return followMoving_; }
 
     bool localBounds(glm::vec3& outMin, glm::vec3& outMax) const override;
-    bool blocksFloor() const override { return false; }   // 눕힌 패널도 밟는 면이 아님(XR 리그 바닥 찾기)
 
     void onAttach() override { applyTextureSize(); }
     void onPropsCommitted() override;

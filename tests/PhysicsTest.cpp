@@ -19,6 +19,7 @@
 #include "../src/geometry/CollisionMesh.hpp"
 #include "../src/scene/ComponentFields.hpp"
 #include "../src/components/XrComponents.hpp"
+#include "../src/components/FloorSurface.hpp"
 #include "../src/components/CameraComponent.hpp"
 #include "../src/input/HInputSystem.hpp"
 #include "../src/assets/AssetManager.hpp"
@@ -69,7 +70,7 @@ public:
 };
 
 // 충돌용 메시 형상만 내놓는 시험용 컴포넌트입니다(P2). GPU 메시 없이 ConvexHull · Mesh 충돌체를 시험합니다.
-class MeshProbe : public Component {
+class MeshProbe : public Component, public ICollisionMeshSource {
 public:
     std::shared_ptr<CollisionMesh> mesh = std::make_shared<CollisionMesh>();
     const char* typeName() const override { return "MeshProbe"; }
@@ -82,11 +83,10 @@ public:
     }
 };
 
-// 바운드는 있지만 밟는 면이 아니라고 알리는 컴포넌트입니다(3D UI 패널과 같은 경우).
-class NotFloor : public BoundsOnly {
+// 바운드는 있지만 밟는 면이 아니라고 알리는 컴포넌트입니다(3D UI 패널과 같은 경우, INotFloorSurface).
+class NotFloor : public BoundsOnly, public INotFloorSurface {
 public:
     const char* typeName() const override { return "NotFloor"; }
-    bool blocksFloor() const override { return false; }
 };
 
 // 위치 · 크기를 주면 단위 상자 바운드를 가진 액터를 만듭니다.
@@ -1285,7 +1285,7 @@ int main() {
         panel->setLocalPosition({ 0.f, 1.0f, 2.5f });
         panel->setLocalScale({ 1.f, 0.02f, 1.f });
         panel->addComponent<NotFloor>();
-        check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y) < 1e-5f, "blocksFloor=false 바운드(눕힌 패널)는 바닥이 아님");
+        check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y) < 1e-5f, "INotFloorSurface 바운드(눕힌 패널)는 바닥이 아님");
         panel->addComponent<BoundsOnly>();
         check(hxr::floorBelow(w, cam->worldPosition(), cam, y) && std::fabs(y - 1.01f) < 1e-4f, "같은 액터의 메시 바운드는 바닥 후보");
         panel->setActive(false);   // 아래 시험에 끼지 않게

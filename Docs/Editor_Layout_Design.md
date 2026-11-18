@@ -299,7 +299,7 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
 
 **Type 컬럼**
 - `Component::typeName()` 을 고정 우선순위표로 하나 고릅니다(추가 순서 비의존). 기여 컴포넌트가
-  둘 이상이면 `Mesh+` 처럼 `+` 를 붙입니다. 색은 각 컴포넌트가 이미 선언한 `editorIcon` 색을
+  둘 이상이면 `Mesh+` 처럼 `+` 를 붙입니다. 색은 각 컴포넌트가 이미 선언한 `editorIcon` 색(2026-11-18 부터 `editor/ComponentVisualizers` 의 아이콘 색)을
   재사용해, 아이콘 에셋 없이 타입을 시각 구분합니다. **타입 아이콘 자체는 계속 보류**입니다.
 
 **가시성**

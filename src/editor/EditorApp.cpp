@@ -362,11 +362,12 @@ void EditorApp::tick(float dt) {
         buildEditorIcons(*ctx_.world, wvp, lines, tris);
         // 손 추적 컴포넌트가 있으면 손 표시는 그쪽(디버그 선)이 그립니다. 없으면 예전처럼 카메라 원점 기준으로 그립니다.
         if (TrackedPoseComponent::liveHands() == 0) appendXrControllerLines(*ctx_.world, lines);
-        // 선택한 액터의 범위 표시(라이트 범위 · 원뿔, 카메라 절두체, 소리 반경, 충돌체 등, 2026-11-17 drawEditorVisual).
+        // 선택한 액터의 범위 표시(라이트 범위 · 원뿔, 카메라 절두체, 소리 반경, 충돌체 등, 2026-11-17, 형별 등록은
+        // ComponentVisualizers).
         for (Actor* o : ctx_.selection)
             if (o && o->activeInHierarchy())
                 for (const auto& c : o->getComponents())
-                    if (c->isEnabled()) c->drawEditorVisual();
+                    if (c->isEnabled()) visualizers_.drawSelected(*c);
         // 컴포넌트 · 게임 코드가 모은 디버그 선(2026-10-15). 앞 프레임의 월드 틱이 모은 것을 그리고 비웁니다.
         for (const hdebug::Line& l : hdebug::lines()) { lines.push_back({ l.a, l.color }); lines.push_back({ l.b, l.color }); }
         hdebug::lines().clear();
@@ -1785,7 +1786,7 @@ void EditorApp::deserializeWorld(const std::string& data) {
 
 // ── 아웃라이너 계층 헬퍼 (Phase 3) ─────────────────────────────────────────────
 // Type 라벨은 컴포넌트에서 유도하되, 추가 순서에 흔들리지 않도록 고정 우선순위로
-// 하나를 고릅니다. 색은 각 컴포넌트가 이미 선언한 editorIcon 색을 재사용해서,
+// 하나를 고릅니다. 색은 컴포넌트 형별 아이콘 색(ComponentVisualizers)을 재사용해서,
 // 아이콘 아틀라스 없이도 타입이 눈에 구분되게 합니다(타입 아이콘은 설계상 보류).
 std::string EditorApp::outlinerTypeLabel(const Actor* a, glm::vec4& outColor) const {
     outColor = kTextDim;
@@ -1823,7 +1824,7 @@ std::string EditorApp::outlinerTypeLabel(const Actor* a, glm::vec4& outColor) co
             bestRank = rank;
             label    = lbl;
             glm::vec4 ic;
-            color    = comp->editorIcon(ic) ? ic : kTextDim;
+            color    = visualizers_.icon(*comp, ic) ? ic : kTextDim;
         }
     }
     if (label.empty()) return "Actor";
@@ -3934,7 +3935,7 @@ void EditorApp::buildEditorIcons(World& world, const WorldViewport& /*wvp*/,
         if (!a->activeInHierarchy()) continue;
         glm::vec4 color{0.f}; bool has = false;
         for (const auto& comp : a->getComponents())
-            if (comp->editorIcon(color)) { has = true; break; }
+            if (visualizers_.icon(*comp, color)) { has = true; break; }
         if (!has) continue;
 
         const glm::vec3 pos  = a->worldPosition();
@@ -3943,14 +3944,14 @@ void EditorApp::buildEditorIcons(World& world, const WorldViewport& /*wvp*/,
         const bool      sel  = isSelected(a);
         const glm::vec4 col  = sel ? glm::vec4(1.f, 1.f, 1.f, 1.f) : color;
 
-        // 카메라를 향하는 아이콘(빌보드). 모양은 컴포넌트가 정합니다(2026-11-17, Component::editorIconShape):
+        // 카메라를 향하는 아이콘(빌보드). 모양은 컴포넌트 형마다 정합니다(2026-11-17, ComponentVisualizers):
         // 사각형 바탕 위에 종류별 그림(라이트 = 전구 원 + 빛살, 카메라 = 몸통 + 렌즈 삼각형, 소리 = 스피커, 구역 = 테두리 상자,
         // 안개 = 물결 세 줄, 반사 캡처 = 원 둘). 선택 테두리 · 피킹 크기는 예전 사각형 그대로입니다.
         const glm::vec3 r = right * ssz, u = up * ssz;
         const glm::vec3 p0 = pos - r - u, p1 = pos + r - u, p2 = pos + r + u, p3 = pos - r + u;
         int shape = 0;
         for (const auto& comp : a->getComponents())
-            if (glm::vec4 tmp; comp->editorIcon(tmp)) { shape = comp->editorIconShape(); break; }
+            if (glm::vec4 tmp; visualizers_.icon(*comp, tmp, &shape)) break;
         const glm::vec4 bg = glm::vec4(glm::vec3(col) * 0.35f, 1.f);
         auto quad = [&](glm::vec2 a0, glm::vec2 a1, const glm::vec4& c) {   // 아이콘 좌표 [-1, 1]² 의 사각형
             const glm::vec3 q0 = pos + right * (ssz * a0.x) + up * (ssz * a0.y), q1 = pos + right * (ssz * a1.x) + up * (ssz * a0.y);
@@ -4449,7 +4450,7 @@ void EditorApp::pickActor(float mx, float my, float winW, float winH) {
             if (!a->activeInHierarchy()) continue;   // 안 보이는 것은 잡히지도 않습니다
             glm::vec4 c; bool has = false;
             for (const auto& comp : a->getComponents())
-                if (comp->editorIcon(c)) { has = true; break; }
+                if (visualizers_.icon(*comp, c)) { has = true; break; }
             if (!has) continue;
             float d = glm::length(toFb(a->worldPosition()) - wvp.mouseFb);
             if (d < iconBestD) { iconBestD = d; iconBest = a; }

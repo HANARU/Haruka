@@ -26,8 +26,6 @@ public:
     static constexpr float kMaxDensity = 10.f;
     static constexpr float kMaxFalloff = 10.f;
 
-    bool editorIcon(glm::vec4& c) const override { c = { 0.7f, 0.75f, 0.8f, 1.f }; return true; }
-    int  editorIconShape() const override { return 5; }
     const char*           typeName() const override { return "HeightFogComponent"; }
     void                  writeFields(ComponentFieldWriter& w) const override;
     bool                  readField(const std::string& key, const std::string& value) override;

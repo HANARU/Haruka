@@ -29,9 +29,6 @@ public:
     void onFieldsLoaded(const ComponentLoadContext&) override { recapture(); }
     void onEnable() override { recapture(); }
 
-    bool editorIcon(glm::vec4& c) const override { c = { 0.8f, 0.85f, 1.f, 1.f }; return true; }
-    int  editorIconShape() const override { return 6; }
-    void drawEditorVisual() const override;   // 영향 반경 구
     const char*           typeName() const override { return "ReflectionCaptureComponent"; }
     void                  writeFields(ComponentFieldWriter& w) const override;
     bool                  readField(const std::string& key, const std::string& value) override;

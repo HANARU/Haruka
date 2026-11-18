@@ -5,18 +5,9 @@
 #include <glm/gtc/quaternion.hpp>
 #include <cstdint>
 #include <string>
+#include "../geometry/CollisionShape.hpp"   // EPhysicsShape · EMotionType · HalfExt(2026-11-18 S4 에 옮김)
 
 class PhysicsSystem;
-
-// 값은 옛 씬 파일의 `RIGID:` 순번과 같습니다. 지금은 이름으로 기록하지만(DEF-44) 옛 파일의
-// 숫자도 읽으므로, 기존 항목의 값을 바꾸지 말고 새 항목은 끝에 명시값으로 붙이십시오.
-// ConvexHull · Mesh(2026-11-17, 수학 보강 P2)는 같은 액터의 메시 형상(Component::collisionMesh)으로 만듭니다. 크기는 액터 월드
-// 크기를 점마다 곱해 비균등 크기도 정확합니다(halfExtent 는 쓰지 않음). Mesh(삼각형 그대로, 오목 가능)는 Static · Kinematic
-// 전용이고, Dynamic 이면 경고하고 볼록 껍질로 만듭니다(Jolt · UE · Unity 모두 움직이는 오목 메시 충돌을 지원하지 않음).
-enum class EPhysicsShape { Box = 0, Sphere = 1, Capsule = 2, ConvexHull = 3, Mesh = 4 };
-enum class EMotionType   { Static = 0, Dynamic = 1, Kinematic = 2 };
-
-struct HalfExt { float x = 0.5f, y = 0.5f, z = 0.5f; };
 
 class RigidBodyComponent : public Component {
 public:
@@ -41,7 +32,6 @@ public:
     bool          interpolate = false;
 
     void onDestroy() override;
-    void drawEditorVisual() const override;   // 충돌체(상자 · 구 · 캡슐, 중심 오프셋 포함)
     void onDisable() override;              // 꺼지면 바디를 지웁니다(DEF-80)
     void onPropsCommitted() override;       // 셰이프·모션·크기·질량이 바뀌었으면 바디 재생성(DEF-43)
     void onTransformCommitted() override;   // 스케일이 바뀌었으면 재생성, 아니면 바디를 옮김

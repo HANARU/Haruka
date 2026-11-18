@@ -1,5 +1,4 @@
 #include "ReverbZoneComponent.hpp"
-#include "../core/DebugDraw.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include "../scene/Actor.hpp"
 #include "../scene/ComponentFields.hpp"
@@ -119,14 +118,3 @@ bool ReverbZoneComponent::readField(const std::string& key, const std::string& v
     return true;
 }
 
-void ReverbZoneComponent::drawEditorVisual() const {
-    if (!owner || unbounded) return;
-    const glm::vec4 c{ 0.45f, 0.7f, 1.f, 1.f };
-    if (shape == EReverbZoneShape::Box) {
-        const glm::mat4 m = glm::translate(glm::mat4(1.f), owner->worldPosition()) * glm::mat4_cast(owner->worldRotation());
-        hdebug::box(m, glm::vec3(0.f), halfExtent * glm::abs(owner->worldScale()), c);
-    } else {
-        const glm::vec3 s = glm::abs(owner->worldScale());
-        hdebug::sphere(owner->worldPosition(), radius * std::max({ s.x, s.y, s.z }), c);
-    }
-}

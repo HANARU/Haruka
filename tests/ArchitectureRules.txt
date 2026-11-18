@@ -58,9 +58,6 @@ allow audio/AudioSystem.cpp -> components/CameraComponent.hpp
 # geometry -> assets — 2단계 S5: 메시 데이터(MeshSource)의 자리
 allow geometry/PrimitiveBuilder.hpp -> assets/MeshSource.hpp
 
-# geometry -> components — 2단계 S4 · S7: 절차 도형 설명이 충돌체 형(RigidBodyComponent)을 앎
-allow geometry/PrimitiveDesc.hpp -> components/RigidBodyComponent.hpp
-
 # physics -> components — 2단계 S7: RigidBodyComponent 를 physics 옆으로
 allow physics/PhysicsSystem.cpp -> components/RigidBodyComponent.hpp
 

@@ -57,13 +57,9 @@ public:
     // 기본 true 라 기존 씬은 그대로 그림자를 던집니다. UI 에는 Directional 일 때만 노출합니다.
     bool      castShadows = true;
     uint8_t   lightChannels = 1;
-    int  editorIconShape() const override { return 1; }
-    void drawEditorVisual() const override;
     // 접촉 그림자(Contact Shadows, 2026-11-17): 섀도 캐스터 방향광에서 화면 공간으로 태양 쪽 광선을 이 길이(m)만큼 걸어, 섀도맵
     // 텍셀보다 작은 접촉부의 그림자를 더합니다. 0 이면 끔(기본). UE 의 Contact Shadow Length 와 같은 역할(그쪽은 화면 비율).
     float     contactShadowLength = 0.f;   // 비출 메시의 채널(LightChannels.hpp, 2026-11-17). 기본 채널 0
-
-    bool editorIcon(glm::vec4& c) const override { c = {1.f, 0.85f, 0.2f, 1.f}; return true; }
 
     // 빛이 나아가는 월드 방향(발광 방향, 단위 벡터)입니다. 액터 월드 회전 × (0, 0, -1) 이며
     // owner 가 없으면 (0, 0, -1) 을 돌려줍니다. pbr.frag 가 spotDir 을 다시 정규화하지 않으므로

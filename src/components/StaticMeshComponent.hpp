@@ -1,6 +1,7 @@
 #pragma once
 #include "../scene/Component.hpp"
 #include "../geometry/PrimitiveDesc.hpp"
+#include "../geometry/CollisionMesh.hpp"   // ICollisionMeshSource
 #include <memory>
 #include <optional>
 #include <string>
@@ -15,7 +16,7 @@ class World;
     XPROP_Toggle(p, "Visible",      visible),    \
     XPROP_Toggle(p, "Transparent",  transparent)
 
-class StaticMeshComponent : public Component {
+class StaticMeshComponent : public Component, public ICollisionMeshSource {
 public:
     MeshHandle*     mesh        = nullptr;
     // 충돌용 CPU 형상(P2): 메시를 배정할 때 AssetPair::collision 을 함께 넣습니다. RigidBody 의 ConvexHull · Mesh 셰이프가 씁니다.

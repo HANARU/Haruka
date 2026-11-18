@@ -5,7 +5,6 @@
 #include <string>
 
 class Actor;
-struct CollisionMesh;
 class ComponentFieldWriter;
 struct ComponentLoadContext;
 
@@ -16,24 +15,15 @@ public:
     // ── 공간 표현 (Spatial_Representation_Design.md) ────────────────────────────
     // 에디터 픽·프레이밍·기즈모 박스용 **로컬 솔리드 바운드**. 눈에 보이는 솔리드
     // 지오메트리를 가진 컴포넌트(메시, 3D UI 패널)만 재정의합니다. 라이트·카메라처럼
-    // 솔리드 몸체가 없는 것은 false 를 두고 아이콘으로 잡힙니다(editorIcon).
+    // 솔리드 몸체가 없는 것은 false 를 두고 아이콘으로 잡힙니다(editor/ComponentVisualizers).
     // 반환하는 바운드는 액터 로컬 공간입니다. 픽은 여기에 worldMatrix 를 곱해 OBB 로 씁니다.
     virtual bool localBounds(glm::vec3& /*outMin*/, glm::vec3& /*outMax*/) const { return false; }
-    // localBounds 를 밟을 수 있는 면으로 볼지입니다(hxr::floorBelow 의 바닥 후보). 메시는 true, 3D UI 패널처럼
-    // 바운드가 있어도 서 있을 곳이 아닌 것은 false 를 돌려줍니다.
-    virtual bool blocksFloor() const { return true; }
-    // 볼록 껍질 · 메시 충돌체를 만들 CPU 형상(로컬 공간, geometry/CollisionMesh.hpp). 메시 컴포넌트만 내놓습니다(P2, 2026-11-17).
-    virtual const CollisionMesh* collisionMesh() const { return nullptr; }
+    // 시스템별 질의는 기반 클래스에 두지 않고, 그 질의를 받는 컴포넌트가 질의 인터페이스를 함께 상속합니다(2026-11-18,
+    // 엔진 구조 안정화 S4): 물리의 메시 형상 = ICollisionMeshSource(geometry/CollisionMesh.hpp), XR 리그 바닥 찾기에서
+    // 빼기 = INotFloorSurface(components/FloorSurface.hpp). 예전 가상 함수 collisionMesh · blocksFloor 자리입니다.
 
-    // 솔리드 바운드가 없는 엔티티(라이트·카메라·오디오)를 뷰포트에서 보이고 잡히게
-    // 하는 에디터 아이콘입니다. true 면 outColor 로 아이콘을 그리고 화면 원판 판정으로
-    // 픽합니다. 아이콘은 액터 원점에 화면 고정 크기로 그려집니다.
-    virtual bool editorIcon(glm::vec4& /*outColor*/) const { return false; }
-    // 에디터 아이콘 모양(2026-11-17): 0 사각형, 1 라이트, 2 카메라, 3 소리, 4 구역, 5 안개, 6 반사 캡처. 색은 editorIcon.
-    virtual int  editorIconShape() const { return 0; }
-    // 선택했을 때 에디터 뷰포트에 그리는 범위 표시(라이트 범위 · 원뿔, 카메라 절두체, 소리 반경, 충돌체 등, 2026-11-17).
-    // hdebug 선으로 그립니다. 기본은 없음.
-    virtual void drawEditorVisual() const {}
+    // 에디터 아이콘과 선택했을 때의 범위 표시는 에디터가 형마다 등록합니다(editor/ComponentVisualizers.hpp, 2026-11-18 S4,
+    // UE FComponentVisualizer 와 같은 자리). 예전 가상 함수 editorIcon · editorIconShape · drawEditorVisual 자리입니다.
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
     virtual void onAttach()         {}  // immediately after addComponent()

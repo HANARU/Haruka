@@ -44,10 +44,6 @@ public:
     // 재생할 파일을 바꿉니다. 이미 만든 사운드는 정리하고, 다음 틱에 새 파일로 다시 만듭니다.
     void setFile(const std::string& path);
 
-    bool editorIcon(glm::vec4& c) const override { c = {0.3f, 0.85f, 0.4f, 1.f}; return true; }
-    int  editorIconShape() const override { return 3; }
-    void drawEditorVisual() const override;   // 최소 · 최대 거리 구, 콘
-
     const char*           typeName()     const override { return "AudioComponent"; }
     // 직렬화 (DEF-22). 이름은 멤버 이름을 따릅니다.
     void writeFields(ComponentFieldWriter& w) const override;

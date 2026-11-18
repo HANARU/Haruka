@@ -6,7 +6,7 @@
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 
-#include "../components/RigidBodyComponent.hpp"   // EPhysicsShape, HalfExt
+#include "CollisionShape.hpp"   // EPhysicsShape, HalfExt
 
 // ── 절차 도형의 정체성 ────────────────────────────────────────────────────────
 // Vulkan 의존이 0입니다. 디바이스 없이 테스트할 수 있습니다.

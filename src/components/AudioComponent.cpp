@@ -1,5 +1,4 @@
 #include "AudioComponent.hpp"
-#include "../core/DebugDraw.hpp"
 #include "../scene/Actor.hpp"
 #include "../audio/AudioSystem.hpp"
 #include "../scene/ComponentFields.hpp"
@@ -213,17 +212,3 @@ bool AudioComponent::readField(const std::string& key, const std::string& value)
     return true;
 }
 
-void AudioComponent::drawEditorVisual() const {
-    if (!owner || !attenuation.spatialize) return;
-    const glm::vec3 p = owner->worldPosition();
-    hdebug::sphere(p, attenuation.minDistance, { 0.3f, 0.9f, 0.45f, 1.f });
-    hdebug::sphere(p, attenuation.maxDistance, { 0.3f, 0.9f, 0.45f, 0.45f });
-    if (cone.enabled()) {
-        const glm::vec3 d = owner->worldRotation() * glm::vec3(0.f, 0.f, -1.f);
-        const float r = attenuation.minDistance * 2.f;
-        for (float deg : { cone.innerDeg, cone.outerDeg }) {
-            const float h = glm::radians(std::min(deg, 179.f)) * 0.5f;
-            hdebug::circle(p + d * (r * std::cos(h)), d, r * std::sin(h), { 0.6f, 1.f, 0.6f, deg == cone.innerDeg ? 1.f : 0.5f });
-        }
-    }
-}

@@ -17,7 +17,7 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 2 | `Engine::run` 약 410줄에 관심사 약 열 가지 | XR 세션 복구 · 리그 원점 · 청취자 · Play 전이 · 틱 순서 · 패널 · UI 포인터 · 렌더 분기 · 통계. 프레임 단계 순서가 코드 위치로만 정해짐 | 1단계 S2(끝남, 7절) |
 | 3 | 시스템 접근 방식 다섯 가지 | `EngineContext` · `ModuleManager::get<T>` · 전역 싱글턴 · 정적 포인터 `PhysicsSystem::current()` · Engine 이 직접 든 멤버 | 1단계 S3(끝남, 8절) |
 | 4 | 렌더러가 장면 모델을 직접 읽음 | Renderer_render.cpp 가 World 와 컴포넌트 6종을 include, GPU 핸들을 컴포넌트에 씀 | 2단계 S5 |
-| 5 | Component 기반 클래스가 모든 계층의 일을 가짐 | 에디터(아이콘 · 범위 표시 · 속성 칸) · 물리(collisionMesh) · XR(blocksFloor) · 직렬화 | 2단계 S4 |
+| 5 | Component 기반 클래스가 모든 계층의 일을 가짐 | 에디터(아이콘 · 범위 표시 · 속성 칸) · 물리(collisionMesh) · XR(blocksFloor) · 직렬화 | 2단계 S4(끝남, 9절) |
 | 6 | 에디터 한 클래스 | EditorApp.cpp 4,492줄, 함수 85개 | 3단계 S6 |
 | 7 | World 가 에디터 상태를 앎 | `editorCam_` · `playing_` | 1단계 S3(끝남, 8절) |
 
@@ -87,14 +87,14 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 - 변이 확인(2026-11-18): 기반 → 에디터 include 추가, 필요 없는 허용 항목, 표의 순환(math ↔ core), 규칙 없는 새 폴더, 필요한
   허용 항목 삭제 다섯 가지를 모두 잡았습니다.
 
-## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개, 모두 2단계 몫)
+## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개, 모두 2단계 몫)
 
 | 방향 | 수 | 원인 | 없앨 단계 |
 |---|---|---|---|
 | assets → audio · components | 6 | 씬 직렬화가 컴포넌트 형을 직접 앎 | 2단계 S4 · S7 |
 | audio → components | 3 | 소리 컴포넌트 · 청취자 카메라 | 2단계 S7 |
 | physics → components | 1 | RigidBodyComponent | 2단계 S7 |
-| geometry → assets · components | 2 | 메시 데이터 자리, 절차 도형 설명이 충돌체 형을 앎 | 2단계 S4 · S5 · S7 |
+| geometry → assets | 1 | 메시 데이터(MeshSource)의 자리 | 2단계 S5 |
 | renderer → assets · components · scene | 17 | 렌더 데이터 추출이 렌더러 안 | 2단계 S5 |
 
 ## 6. 단계와 진행
@@ -106,14 +106,15 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 1 | S7 일부 core → core · scene · runtime | 끝남(2026-11-18) |
 | 1 | S2 `Engine::run` → 명시적 프레임 단계, XR 복구 · 리그 원점 · UI 포인터 · 프레임 통계를 각자 객체로 | 끝남(2026-11-18, 7절) |
 | 1 | S3 시스템 접근 통일(엔진 단위 · 월드 단위 서비스), 정적 포인터 · 흩어진 전역 정리, World 의 에디터 상태 | 끝남(2026-11-18, 8절) |
-| 2 | S4 Component 기반 정리(에디터 함수 → 등록식 visualizer, collisionMesh · blocksFloor → 질의) | 다음 |
-| 2 | S7 나머지: 컴포넌트를 소유 시스템 옆으로 | |
+| 2 | S4 Component 기반 정리(에디터 함수 → 등록식 visualizer, collisionMesh · blocksFloor → 질의) | 끝남(2026-11-18, 9절) |
+| 2 | S7 나머지: 컴포넌트를 소유 시스템 옆으로 | 다음 |
 | 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | |
 | 3 | S6 EditorApp 분해(아웃라이너 · 디테일 · 로그 · 도킹 · 메뉴와 툴바 · 뷰포트 컨트롤러) | |
 
 완료 기준:
 - 1단계: 1단계 몫의 허용 목록 항목 0(core · scene · runtime 순환 0), `Engine::run` 100줄 이하(단계 호출만), 정적 시스템 포인터 0. → **채움(2026-11-18, S3 뒤)**
-- 2단계: renderer 가 components 헤더를 include 하는 곳 0, Component 기반 클래스의 에디터 함수 0, 허용 목록의 컴포넌트 관련 항목 0.
+- 2단계: renderer 가 components 헤더를 include 하는 곳 0, Component 기반 클래스의 에디터 그리기 · 시스템별 질의 함수 0(S4 에서 채움.
+  속성 목록 · 편집 확정 알림은 리플렉션으로 남김, 9절), 허용 목록의 컴포넌트 관련 항목 0.
   매번 기준 PNG 전부(왼눈 · 오른눈 · Quest 값 · LightingProbe · UIPanelProbe) + 검증 레이어 0.
 - 3단계: EditorApp.cpp 1,000줄 이하, 함수 150줄 이하, 창 에디터 확인 통과.
 
@@ -190,7 +191,35 @@ UE 의 UWorldSubsystem 과 같은 자리이며, 월드(scene)는 형을 모른 �
 
 1단계 완료 기준을 모두 채웠습니다: 1단계 몫 허용 항목 0(36 → 29, 남은 것은 모두 2단계 몫), `Engine::run` 20줄, 정적 시스템 포인터 0.
 
-## 9. 다른 엔진 비교 (2026-11-18 보고)
+## 9. Component 기반 정리 (S4, 2026-11-18)
+
+예전 Component 기반 클래스는 장면 모델의 일 말고도 에디터 그리기 · 물리 질의 · XR 질의를 가상 함수로 들고 있었습니다(1절 5번).
+다른 엔진에서는 이 일들이 각각 다른 자리에 있습니다: 에디터 그리기는 에디터 모듈에 형별로 등록하고(UE FComponentVisualizer, Godot
+3D 기즈모 플러그인), 시스템별 질의는 그 질의를 받는 형만 인터페이스로 구현합니다(UE UINTERFACE). 반면 편집할 수 있는 속성 목록과
+편집 확정 알림은 UE(UPROPERTY · PostEditChangeProperty) · Godot(_get_property_list · _validate_property) 모두 객체 쪽에 둡니다.
+
+| 예전 Component 가상 함수 | 지금 자리 | 까닭 |
+|---|---|---|
+| `editorIcon` · `editorIconShape` · `drawEditorVisual` | `editor/ComponentVisualizers`(형별 등록, EditorApp 이 소유) | 에디터만 씀. 게임 실행 파일에 에디터 그리기 코드가 들어가지 않음 |
+| `collisionMesh` | `ICollisionMeshSource`(`geometry/CollisionMesh.hpp`), StaticMeshComponent 가 함께 상속 | 물리만 묻는 질의 |
+| `blocksFloor` | `INotFloorSurface`(`components/FloorSurface.hpp`), UIPanelComponent 가 함께 상속 | XR 리그 바닥 찾기만 묻는 질의 |
+| `localBounds` | 그대로(Component) | 공간 표현. 에디터 픽 · XR 바닥 찾기가 함께 씀(Spatial_Representation_Design) |
+| `buildProps` · `readOnlyInfo` · `onPropsCommitted` · `onTransformCommitted` | 그대로(Component) | 속성 리플렉션과 편집 확정 알림(다른 엔진도 객체 쪽) |
+| `writeFields` · `readField` · `onFieldsLoaded` | 그대로(Component) | 직렬화(DEF-22) |
+
+함께 옮긴 것: 충돌체 모양 열거형 `EPhysicsShape` · `EMotionType` · `HalfExt` 를 `components/RigidBodyComponent.hpp` 에서
+`geometry/CollisionShape.hpp` 로 옮겨, 절차 도형 설명(`geometry/PrimitiveDesc.hpp`)이 컴포넌트를 include 하지 않습니다(허용 목록
+geometry → components 1개, 29 → 28).
+
+시각화는 형을 정확히 맞춰 찾습니다(`typeid`). 엔진 컴포넌트에는 시각화를 등록한 형을 상속한 형이 없어 예전 가상 함수와 결과가 같습니다.
+게임 모듈의 컴포넌트에 아이콘을 붙이려면 에디터 쪽 등록 통로가 있어야 합니다(지금은 없음, 필요할 때 만듦).
+
+확인: 옮긴 그리기 함수 여섯 개(소리 · 카메라 · 라이트 · 반사 캡처 · 잔향 구역 · 강체)와 아이콘 여섯 개(색 · 모양)를 옛 코드와 기계 대조해
+차이 0(`build/chk/s4_cmp.py`, 멤버 앞 `c.` 와 색 변수 이름만 되돌림). 바닥 찾기 · 메시 충돌체 시험은 새 인터페이스로 그대로 통과합니다.
+시험 27 · 검사 1,947, 기준 PNG 전부 그대로, Debug · Quest Pro 형 프로필 검증 0, Android 빌드 통과. 에디터의 아이콘 · 범위 표시는 창 에디터
+확인 때 봅니다.
+
+## 10. 다른 엔진 비교 (2026-11-18 보고)
 
 | 주제 | 다른 엔진 | Haruka 적용 |
 |---|---|---|

@@ -328,6 +328,7 @@ set(RUNTIME_SOURCES
 )
 set(EDITOR_SOURCES
     src/editor/EditorApp.cpp
+    src/editor/ComponentVisualizers.cpp
     src/editor/EditorApp_scene.cpp
     src/editor/EditorApp_edit.cpp
     src/editor/EditorGizmo.cpp

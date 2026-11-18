@@ -1,5 +1,4 @@
 #include "RigidBodyComponent.hpp"
-#include "../core/DebugDraw.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include "../physics/PhysicsSystem.hpp"
 #include "../scene/Actor.hpp"
@@ -252,30 +251,3 @@ bool RigidBodyComponent::readField(const std::string& key, const std::string& va
     return true;
 }
 
-void RigidBodyComponent::drawEditorVisual() const {
-    if (!owner) return;
-    const glm::vec4 c{ 0.3f, 1.f, 0.6f, 1.f };
-    const glm::vec3 sc = glm::abs(owner->worldScale());
-    const glm::mat4 rt = glm::translate(glm::mat4(1.f), owner->worldPosition()) * glm::mat4_cast(owner->worldRotation());
-    const glm::vec3 off = center * owner->worldScale();
-    const float maxS = std::max({ sc.x, sc.y, sc.z });
-    switch (shape) {
-        case EPhysicsShape::Box:
-            hdebug::box(rt, off, glm::vec3(halfExtent.x, halfExtent.y, halfExtent.z) * sc, c);
-            break;
-        case EPhysicsShape::Sphere:
-            hdebug::sphere(glm::vec3(rt * glm::vec4(off, 1.f)), halfExtent.x * maxS, c);
-            break;
-        case EPhysicsShape::Capsule: {
-            const float r = halfExtent.x * maxS, h = halfExtent.y * maxS;
-            const glm::vec3 up(rt[1]);
-            const glm::vec3 mid = glm::vec3(rt * glm::vec4(off, 1.f));
-            hdebug::sphere(mid + up * h, r, c);
-            hdebug::sphere(mid - up * h, r, c);
-            const glm::vec3 x(rt[0]), z(rt[2]);
-            for (const glm::vec3& o : { x, -x, z, -z }) hdebug::line(mid + up * h + o * r, mid - up * h + o * r, c);
-            break;
-        }
-        default: break;   // 볼록 껍질 · 메시는 메시 자체가 모양
-    }
-}

@@ -14,6 +14,7 @@
 #include "../core/HDelegate.hpp"
 #include "../runtime/IEngineFrontend.hpp"
 #include "../components/CameraComponent.hpp"   // ViewCameraOverride(값 멤버)
+#include "ComponentVisualizers.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <algorithm>
@@ -111,6 +112,8 @@ private:
     CameraComponent* editorCam_      = nullptr;
     // 화면 카메라 고르기에 넣는 값(월드 단위 서비스, 2026-11-18 S3). 편집 중 preferred = 참, Play 중 거짓.
     ViewCameraOverride viewCamera_;
+    // 컴포넌트 형별 아이콘 · 범위 표시(2026-11-18 S4, 예전 Component::editorIcon · drawEditorVisual).
+    ComponentVisualizers visualizers_;
     bool             lmbOrbit_       = false;
     // 비행 카메라의 방향(라디안). 에디터만 갖는 값이고, 매 틱 액터 회전으로 옮깁니다(DEF-21).
     float            editorYaw_      = 0.f;

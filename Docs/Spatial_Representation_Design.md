@@ -258,6 +258,8 @@ D4 = 3D UI 는 개념만.**
 
 - `Component::editorIcon(color)` 가상 훅을 추가했습니다. Light(노랑)·Camera(파랑)·
   Audio(초록)가 재정의합니다.
+  (2026-11-18 엔진 구조 안정화 S4: 아이콘 · 범위 표시는 가상 훅에서 에디터의 형별 등록 `editor/ComponentVisualizers` 로 옮김,
+  Engine_Structure_Design.md 9절.)
 - 오버레이를 합쳤습니다. 기즈모가 렌더러에 직접 그리지 않고 리스트에 덧붙이도록 바꿔서,
   에디터가 기즈모 + 아이콘을 한 리스트에 모아 한 번에 설정합니다.
 - `buildEditorIcons` 가 아이콘 액터마다 카메라를 향하는 빌보드 사각형을 화면 고정 크기로

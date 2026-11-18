@@ -1,5 +1,4 @@
 #include "CameraComponent.hpp"
-#include "../core/DebugDraw.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/ComponentFields.hpp"
 #include "../scene/World.hpp"
@@ -118,24 +117,6 @@ bool CameraComponent::readField(const std::string& key, const std::string& value
     else return false;
     if (!ok) reportBadField(key, value);
     return true;
-}
-
-void CameraComponent::drawEditorVisual() const {
-    if (!owner) return;
-    const glm::mat4 w = glm::inverse(viewMatrix());
-    const float t = std::tan(glm::radians(fovY) * 0.5f);
-    const float a = 16.f / 9.f;
-    const glm::vec4 c{ 0.5f, 0.75f, 1.f, 1.f };
-    auto corner = [&](float d, float sx, float sy) { return glm::vec3(w * glm::vec4(sx * t * a * d, sy * t * d, -d, 1.f)); };
-    const float n = zNear, f = std::min(zFar, 5.f);
-    glm::vec3 pn[4], pf[4];
-    const float sx[4] = { -1, 1, 1, -1 }, sy[4] = { -1, -1, 1, 1 };
-    for (int i = 0; i < 4; ++i) { pn[i] = corner(n, sx[i], sy[i]); pf[i] = corner(f, sx[i], sy[i]); }
-    for (int i = 0; i < 4; ++i) {
-        hdebug::line(pn[i], pn[(i + 1) % 4], c);
-        hdebug::line(pf[i], pf[(i + 1) % 4], c);
-        hdebug::line(pn[i], pf[i], c);
-    }
 }
 
 CameraComponent* CameraComponent::activeIn(const World& world) {

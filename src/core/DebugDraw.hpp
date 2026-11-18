@@ -28,7 +28,7 @@ inline void axes(const glm::mat4& m, float length) {
     }
 }
 
-// 원(중심, 법선, 반지름). 에디터 범위 표시(drawEditorVisual, 2026-11-17)가 씁니다.
+// 원(중심, 법선, 반지름). 에디터 범위 표시(editor/ComponentVisualizers, 2026-11-17)가 씁니다.
 inline void circle(const glm::vec3& c, const glm::vec3& n, float r, const glm::vec4& color, int segments = 32) {
     const glm::vec3 nn  = glm::normalize(n);
     const glm::vec3 ref = std::abs(nn.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
