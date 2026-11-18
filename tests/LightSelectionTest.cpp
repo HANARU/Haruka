@@ -12,6 +12,12 @@
 #include "../src/renderer/ShadowFit.hpp"
 #include "../src/renderer/FrustumCull.hpp"
 #include "../src/renderer/SkyIbl.hpp"
+#include "../src/scene/World.hpp"
+#include "../src/scene/Actor.hpp"
+#include "../src/components/CameraComponent.hpp"
+#include "../src/components/HeightFogComponent.hpp"
+#include "../src/components/LightComponent.hpp"
+#include "../src/components/RenderExtract.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -329,6 +335,84 @@ int main() {
         const float dn = lum(hibl::prefilterGGX(sky, { 0, -1, 0 }, 1.0f, 4096));
         check(std::fabs(up / 0.1300f - 1.f) < 0.01f && std::fabs(hz / 0.2006f - 1.f) < 0.01f && std::fabs(dn / 0.1436f - 1.f) < 0.01f,
               "기준점 휘도(위 0.5: " + std::to_string(up) + ", 수평 0.5: " + std::to_string(hz) + ", 아래 1.0: " + std::to_string(dn) + ")");
+    }
+
+    std::printf("\n== 8. 렌더 입력 추출(extractRenderScene, S5b) ==\n");
+    {
+        World w;
+        RenderSceneInput in;
+        extractRenderScene(w, in);
+        check(!in.camera.present && in.lights.empty() && !in.fog.present,
+              "빈 월드: 카메라 · 안개 present = false, 라이트 0");
+
+        Actor* camA = w.spawnActor("cam");
+        auto* camC  = camA->addComponent<CameraComponent>();
+        camC->fovY       = 60.f;
+        camC->exposureEv = 1.5f;
+        extractRenderScene(w, in);
+        check(in.camera.present && in.camera.fovY == 60.f && in.camera.exposureEv == 1.5f,
+              "카메라 있음: present = true 및 fovY · exposureEv 일치");
+
+        Actor* dirA = w.spawnActor("dir");
+        auto* dirL  = dirA->addComponent<LightComponent>();
+        dirL->lightType           = LightType::Directional;
+        dirL->color               = { 0.8f, 0.9f, 1.0f };
+        dirL->intensity           = 2.5f;
+        dirL->useTemperature      = true;
+        dirL->temperatureK        = 3500.f;
+        dirL->castShadows         = true;
+        dirL->contactShadowLength = 0.25f;
+
+        Actor* offA = w.spawnActor("off");
+        auto* offL  = offA->addComponent<LightComponent>();
+        offL->lightType = LightType::Point;
+        offL->setEnabled(false);
+
+        Actor* spotA = w.spawnActor("spot");
+        spotA->setLocalPosition({ 1.f, 2.f, 3.f });
+        auto* spotL  = spotA->addComponent<LightComponent>();
+        spotL->lightType         = LightType::Spot;
+        spotL->color             = { 1.f, 0.5f, 0.25f };
+        spotL->intensity         = 4.f;
+        spotL->attenuationRadius = 0.f;   // kMinAttenuationRadius 로 올려야 함
+
+        extractRenderScene(w, in);
+        const glm::vec3 expectDirCol = dirL->effectiveColor() * dirL->intensity;
+        const bool lightsOk = in.lights.size() == 2 &&
+            in.lights[0].kind == RenderLightKind::Directional &&
+            in.lights[0].castShadows &&
+            in.lights[0].contactShadowLength == 0.25f &&
+            glm::length(in.lights[0].color - expectDirCol) < 1e-6f &&
+            in.lights[1].kind == RenderLightKind::Spot &&
+            glm::length(in.lights[1].position - glm::vec3(1.f, 2.f, 3.f)) < 1e-6f &&
+            in.lights[1].radius == LightComponent::kMinAttenuationRadius &&
+            glm::length(in.lights[1].color - spotL->effectiveColor() * 4.f) < 1e-6f;
+        check(lightsOk, "방향광 · 꺼진 점광원 · 스팟: 꺼진 것 빠짐, 순서 유지, color = effectiveColor * intensity, radius 하한");
+
+        extractRenderScene(w, in);
+        check(!in.fog.present, "안개 컴포넌트 없음: fog.present = false");
+
+        Actor* fogA1 = w.spawnActor("fog1");
+        auto* fog1   = fogA1->addComponent<HeightFogComponent>();
+        fog1->density = 0.5f;
+        fog1->setEnabled(false);
+
+        Actor* fogA2 = w.spawnActor("fog2");
+        fogA2->setLocalPosition({ 0.f, 3.5f, 0.f });
+        auto* fog2   = fogA2->addComponent<HeightFogComponent>();
+        fog2->color         = { 0.2f, 0.4f, 0.6f };
+        fog2->maxOpacity    = 0.75f;
+        fog2->density       = 0.08f;
+        fog2->heightFalloff = 0.3f;
+        fog2->startDistance = 5.f;
+
+        extractRenderScene(w, in);
+        check(in.fog.present &&
+              glm::length(in.fog.color - fog2->color) < 1e-6f &&
+              in.fog.maxOpacity == 0.75f && in.fog.density == 0.08f &&
+              in.fog.heightFalloff == 0.3f && in.fog.height == 3.5f &&
+              in.fog.startDistance == 5.f,
+              "안개 둘(첫째 꺼짐): 둘째 값 추출");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

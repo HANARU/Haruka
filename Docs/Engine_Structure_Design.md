@@ -30,7 +30,7 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 
 | 층 | 모듈 | 하는 일 | include 해도 되는 모듈 |
 |---|---|---|---|
-| 바닥 | `math` | 공통 수학(도형 · 판정 · 감쇠 · 곡선 · 난수 · 필터 · IK) | 없음 |
+| 바닥 | `math` | 공통 수학(도형 · 판정 · 감쇠 · 곡선 · 난수 · 필터 · IK · 투영 행렬(Reverse-Z, Projection.hpp, S5b)) | 없음 |
 | 바닥 | `vfs` | 가상 파일 시스템 · 묶음(.hpak) 형식 | 없음 |
 | 기반 | `core` | 로그(HLog) · 파일 · 경로 · 텍스트 도우미 · 값 해석(FieldParse) · 설정 파일(engine.ini · project.ini) · 계측(FrameTimings · FramePacing) · 디버그 선 · Transform · 델리게이트 · 모듈 인터페이스(IEngineModule) | math |
 | 기반 | `memory` | 존 기반 할당자 | core |
@@ -90,11 +90,11 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 - 변이 확인(2026-11-18): 기반 → 에디터 include 추가, 필요 없는 허용 항목, 표의 순환(math ↔ core), 규칙 없는 새 폴더, 필요한
   허용 항목 삭제 다섯 가지를 모두 잡았습니다.
 
-## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개 → 컴포넌트 이동 뒤 19개 → 청취자 선택 뒤 18개 → S5a 뒤 12개, 모두 2단계 S5 몫)
+## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개 → 컴포넌트 이동 뒤 19개 → 청취자 선택 뒤 18개 → S5a 뒤 12개 → S5b 뒤 7개, 모두 2단계 S5 몫)
 
 | 방향 | 수 | 원인 | 없앨 단계 |
 |---|---|---|---|
-| renderer → components · scene | 12 | 렌더 데이터 추출이 렌더러 안 | 2단계 S5 |
+| renderer → components · scene | 7 | 렌더 데이터 추출이 렌더러 안 | 2단계 S5 |
 
 ## 6. 단계와 진행
 
@@ -107,7 +107,7 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 1 | S3 시스템 접근 통일(엔진 단위 · 월드 단위 서비스), 정적 포인터 · 흩어진 전역 정리, World 의 에디터 상태 | 끝남(2026-11-18, 8절) |
 | 2 | S4 Component 기반 정리(에디터 함수 → 등록식 visualizer, collisionMesh · blocksFloor → 질의) | 끝남(2026-11-18, 9절) |
 | 2 | S7 나머지: 컴포넌트를 소유 시스템 옆으로 | 끝남(2026-11-18, 10절) |
-| 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | 진행 중(S5a 끝남) |
+| 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | 진행 중(S5a · S5b 끝남) |
 | 3 | S6 EditorApp 분해(아웃라이너 · 디테일 · 로그 · 도킹 · 메뉴와 툴바 · 뷰포트 컨트롤러) | |
 
 완료 기준:
@@ -243,7 +243,30 @@ miniaudio 기준값과 비교하는 검사가 잡음). 기준 PNG 전부 그대�
 |---|---|---|
 | 프레임 순서 | Unity PlayerLoop, UE TickGroup, Bevy schedule | `Engine::run` 의 순서를 단계 목록으로(S2) |
 | 시스템 접근 | UE Subsystem(엔진 단위 · 월드 단위), Bevy Resource | 엔진 단위 · 월드 단위 두 갈래(S3) |
-| 렌더 경계 | UE SceneProxy + FScene, Godot RenderingServer + RID | 추출을 렌더러 밖으로, GPU 핸들은 렌더러 표(S5) |
+| 렌더 경계 | UE SceneProxy + FScene, Godot RenderingServer + RID, Bevy Extract 단계 | 매 프레임 추출 단계가 렌더 입력 형을 채움, GPU 핸들은 렌더러 표(S5, 12절) |
 | 에디터 기능 | UE FComponentVisualizer, Unity Editor 어셈블리 | 에디터 가상 함수 → 등록식 visualizer(S4) |
 | 모듈 배치 | Godot · Bevy: 기능 모듈이 자기 컴포넌트 소유 | 컴포넌트를 소유 시스템 옆으로(S7 나머지) |
 | 의존 시험 | ArchUnit(Java) · NetArchTest(.NET)의 계층 규칙 시험 | include 방향 시험 + 줄기만 하는 허용 목록(S1) |
+
+## 12. 렌더 경계 (S5, 2026-11-18 진행 중)
+
+방향(사용자 결정, 2026-11-18): 렌더러는 장면(World · Actor · 컴포넌트)을 모르게 합니다. Bevy 의 Extract 단계처럼 엔진이 매 프레임 한 번
+**추출 단계**를 돌려 컴포넌트 값을 렌더 전용 입력 형에 옮기고, 렌더러는 그 형만 읽습니다. 입력 형은 `renderer`(아래 층), 추출 코드는
+`components`(renderer 를 include 해도 되는 층)에 둡니다. 결과 화면은 단계마다 비트 단위로 같아야 합니다(기준 PNG 7장, `build/chk/base7.sh`).
+
+| 단계 | 한 일 | 허용 목록 |
+|---|---|---|
+| S5a | CPU 메시 · 텍스처 데이터 형(`MeshSource.hpp`)을 assets → geometry. 렌더러에서 쓰지 않던 `GltfLoader.hpp` include 2줄 지움 | 18 → 12 |
+| S5b | 카메라 · 조명 · 안개를 입력 형으로: `renderer/RenderSceneInput.hpp`(`RenderCamera` · `RenderLight` · `RenderFog`), `components/RenderExtract`(`extractRenderScene`), `Engine::renderFrame` 첫머리에서 한 번 추출해 `drawFrame(world, scene, xr)` 로 넘김. 투영 행렬은 `math/Projection.hpp`(`hmath::perspectiveReverseZ` · `perspectiveFromFov`)로 옮겨 카메라 · 렌더러 · 반사 캡처가 함께 씀 | 12 → 7 |
+| S5c | 정적 · 스킨 메시를 입력 형으로, LOD 현재 단계 · 스킨 행렬을 렌더러 쪽 상태로 | (예정) |
+| S5d | UI 패널 GPU 핸들을 렌더러 표로, 반사 캡처 목록을 입력 형으로, `drawFrame` 의 World 인자 없앰 | (예정) → 0 |
+
+지킬 것:
+- 입력 형에는 렌더러가 컴포넌트에서 읽던 값을 **계산이 끝난 모양**으로 담습니다(예: 라이트 색 = `effectiveColor() × intensity`, 반경은 하한
+  적용 뒤). 식과 순서는 옛 코드 그대로라 화면이 같습니다. 품질 설정(안개 끄기 등)은 렌더러가 판단합니다.
+- 입력은 멤버 포인터로 들고 있지 않고 인자로 내려 보냅니다. 반사 캡처(6면)도 같은 프레임의 입력을 씁니다.
+- 엔진은 입력을 멤버(`Engine::sceneInput_`)로 두고 다시 써서 매 프레임 할당을 피합니다.
+
+확인(S5a · S5b): 시험 27 · 검사 1,956(추출 검사 +5, `HarukaLightTest` 8절), 경고 0(Release · Debug), 기준 PNG 7장 모두 그대로 · 검증 0,
+Android 빌드 통과. 기준 PNG 값은 2026-11-18 사용자가 PC 점검 중 저장한 `LightingProbe.hscene` 으로 다시 쟀습니다(기본 `ce6def24`, 오른눈
+`c283f276`, Quest Pro 형 `5d6e3e5f`, Quest 값 `9cf28353` · LightingProbe `201fad0e`. UIPanelProbe `7788eb5f` · `559660c0` 는 그대로).

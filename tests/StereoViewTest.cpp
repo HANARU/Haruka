@@ -6,6 +6,7 @@
 // 실행: build/Release/HarukaStereoTest.exe
 
 #include "../src/components/CameraComponent.hpp"
+#include "../src/math/Projection.hpp"
 #include "../src/renderer/FrustumCull.hpp"
 #include "../src/xr/SyntheticEyes.hpp"
 #include "../src/renderer/ScreenSize.hpp"
@@ -51,9 +52,9 @@ int main() {
         const float aspect = 1.6f;
         const float tanUp  = std::tan(glm::radians(cam.fovY) * 0.5f);
         const float tanR   = tanUp * aspect;
-        const glm::mat4 fromFov = CameraComponent::projFromFov(-std::atan(tanR), std::atan(tanR),
-                                                               std::atan(tanUp), -std::atan(tanUp),
-                                                               cam.zNear, cam.zFar);
+        const glm::mat4 fromFov = hmath::perspectiveFromFov(-std::atan(tanR), std::atan(tanR),
+                                                          std::atan(tanUp), -std::atan(tanUp),
+                                                          cam.zNear);
         check(nearM(fromFov, cam.projMatrix(aspect), 1e-5f), "대칭 시야각으로 만든 투영이 projMatrix 와 같음");
     }
 
@@ -64,7 +65,7 @@ int main() {
         const float L = glm::radians(-52.f), R = glm::radians(42.f);
         const float U = glm::radians(45.f),  D = glm::radians(-55.f);
         const float n = 0.1f, f = 100.f;
-        const glm::mat4 P = CameraComponent::projFromFov(L, R, U, D, n, f);
+        const glm::mat4 P = hmath::perspectiveFromFov(L, R, U, D, n);
         const float z = -2.f;   // 눈 앞 2m (눈은 -Z 를 봄)
         auto at = [&](float ax, float ay) { return glm::vec3(std::tan(ax) * 2.f, std::tan(ay) * 2.f, z); };
         const glm::vec3 left  = toNdc(P, at(L, 0.f)), right = toNdc(P, at(R, 0.f));
@@ -98,10 +99,10 @@ int main() {
     std::printf("\n== 3. 두 눈 컬링 ==\n");
     {
         const float n = 0.1f, f = 100.f, ipd = 0.064f;
-        const glm::mat4 projL = CameraComponent::projFromFov(glm::radians(-52.f), glm::radians(42.f),
-                                                             glm::radians(45.f), glm::radians(-50.f), n, f);
-        const glm::mat4 projR = CameraComponent::projFromFov(glm::radians(-42.f), glm::radians(52.f),
-                                                             glm::radians(45.f), glm::radians(-50.f), n, f);
+        const glm::mat4 projL = hmath::perspectiveFromFov(glm::radians(-52.f), glm::radians(42.f),
+                                                        glm::radians(45.f), glm::radians(-50.f), n);
+        const glm::mat4 projR = hmath::perspectiveFromFov(glm::radians(-42.f), glm::radians(52.f),
+                                                        glm::radians(45.f), glm::radians(-50.f), n);
         // 머리는 원점에서 -Z 를 봅니다. 눈은 좌우로 IPD 의 절반씩.
         const glm::mat4 viewL = glm::translate(glm::mat4(1.f), glm::vec3( ipd * 0.5f, 0.f, 0.f));
         const glm::mat4 viewR = glm::translate(glm::mat4(1.f), glm::vec3(-ipd * 0.5f, 0.f, 0.f));
@@ -149,8 +150,8 @@ int main() {
         CameraComponent cam;   // near 0.1 · far 100
         bool finite = true, ahead = true;
         for (const XrEyePose& p : e) {
-            const glm::mat4 proj = CameraComponent::projFromFov(p.angleLeft, p.angleRight, p.angleUp, p.angleDown,
-                                                                cam.zNear, cam.zFar);
+            const glm::mat4 proj = hmath::perspectiveFromFov(p.angleLeft, p.angleRight, p.angleUp, p.angleDown,
+                                                             cam.zNear);
             for (int c = 0; c < 4; ++c)
                 for (int r = 0; r < 4; ++r) finite = finite && std::isfinite(proj[c][r]);
             const glm::mat4 view = glm::inverse(glm::translate(glm::mat4(1.f), p.position));

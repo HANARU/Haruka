@@ -23,6 +23,7 @@
 #include "../components/CoreComponents.hpp"
 #include "../components/XrComponents.hpp"
 #include "../components/CameraComponent.hpp"
+#include "../components/RenderExtract.hpp"
 #include "../xr/SyntheticEyes.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "ShaderManifest.hpp"
@@ -608,12 +609,13 @@ void Engine::frontendInput(FrameState& f) {
 // 두 평행한 눈이고, 원점은 XR 과 같습니다(씬 리그면 리그 액터 + 눈높이, 아니면 카메라 위치 + 요).
 void Engine::renderFrame(FrameState& f) {
     Renderer& renderer = *renderer_;
+    extractRenderScene(world_, sceneInput_);
     if (f.xrBegun) {
         XrFrameTarget target;
         bool acquired = false;
         if (f.xrFrame.shouldRender && xr_->locateViews(f.xrFrame.displayTime, target.eyes))
             acquired = xr_->acquireImage(target.imageIndex);
-        const bool rendered = renderer.drawFrame(world_, acquired ? &target : nullptr);
+        const bool rendered = renderer.drawFrame(world_, sceneInput_, acquired ? &target : nullptr);
         if (acquired) xr_->releaseImage();
         xr_->endFrame(f.xrFrame.displayTime, acquired && rendered);
         if (acquired && rendered) ++drawnFrames_;
@@ -628,14 +630,14 @@ void Engine::renderFrame(FrameState& f) {
         target.imageIndex = syntheticImage_;
         target.eyes[0]    = eyes[0];
         target.eyes[1]    = eyes[1];
-        f.drewSynthetic = renderer.drawFrame(world_, &target);
+        f.drewSynthetic = renderer.drawFrame(world_, sceneInput_, &target);
         if (f.drewSynthetic) {
             lastSynthetic_  = syntheticImage_;
             syntheticImage_ = (syntheticImage_ + 1) % renderer.syntheticImageCount();
             ++drawnFrames_;
         }
     } else {
-        renderer.drawFrame(world_);
+        renderer.drawFrame(world_, sceneInput_);
         if (renderer.lastFrameDesktop()) ++drawnFrames_;
     }
 }

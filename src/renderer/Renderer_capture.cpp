@@ -9,7 +9,7 @@
 #include "Renderer.hpp"
 #include "SkyIbl.hpp"
 #include "RendererLog.hpp"
-#include "../components/CameraComponent.hpp"
+#include "../math/Projection.hpp"
 #include "../components/ReflectionCaptureComponent.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/World.hpp"
@@ -46,7 +46,7 @@ inline float halfToFloat(uint16_t h) {
 }
 } // namespace
 
-void Renderer::updateReflectionCapture(World& world) {
+void Renderer::updateReflectionCapture(World& world, const RenderSceneInput& scene) {
     const ReflectionCaptureComponent* rc = nullptr;
     if (quality_.reflectionCapture)   // 품질 단계에서 끄면 캡처 없음(하늘 IBL 만, 2026-11-18)
     for (const ReflectionCaptureComponent* c : world.componentsOf<ReflectionCaptureComponent>()) {
@@ -64,12 +64,12 @@ void Renderer::updateReflectionCapture(World& world) {
         capturePos_ = glm::vec4(key.pos, rc->radius);
         return;
     }
-    performReflectionCapture(world, key.pos);
+    performReflectionCapture(world, scene, key.pos);
     captureKey_ = key;
     capturePos_ = glm::vec4(key.pos, rc->radius);
 }
 
-void Renderer::performReflectionCapture(World& world, const glm::vec3& pos) {
+void Renderer::performReflectionCapture(World& world, const RenderSceneInput& scene, const glm::vec3& pos) {
     const auto t0 = std::chrono::steady_clock::now();
     vkDeviceWaitIdle(device);
     const uint32_t fi   = frameIdx;
@@ -115,13 +115,13 @@ void Renderer::performReflectionCapture(World& world, const glm::vec3& pos) {
         const glm::vec3 up    = -down;
         const bool flipX = glm::dot(glm::cross(fwd, up), right) < 0.f;   // 큐브 텍셀의 오른쪽이 카메라 왼쪽이면 좌우를 뒤집음
         captureEye_.view  = glm::lookAt(pos, pos + fwd, up);
-        captureEye_.proj  = CameraComponent::projFromFov(-std::atan(tanX), std::atan(tanX), std::atan(tanY), -std::atan(tanY),
-                                                         kCaptureNear, kCaptureFar);
+        captureEye_.proj  = hmath::perspectiveFromFov(-std::atan(tanX), std::atan(tanX), std::atan(tanY), -std::atan(tanY),
+                                                      kCaptureNear);
         captureEye_.pos   = pos;
         captureEye_.zNear = kCaptureNear;
         captureEye_.zFar  = kCaptureFar;
 
-        RenderView view = extractRenderView(world, nullptr);
+        RenderView view = extractRenderView(world, scene, nullptr);
         VkCommandBuffer cmd = beginOneTimeCmd();
         rc_.memoryBarrier(cmd, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
                                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,

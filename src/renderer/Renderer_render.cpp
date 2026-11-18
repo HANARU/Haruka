@@ -4,9 +4,7 @@
 #include "../components/StaticMeshComponent.hpp"
 #include "../components/SkinnedMeshComponent.hpp"
 #include "../geometry/MeshSource.hpp"
-#include "../components/CameraComponent.hpp"
-#include "../components/HeightFogComponent.hpp"
-#include "../components/LightComponent.hpp"
+#include "../math/Projection.hpp"
 #include "../components/UIPanelComponent.hpp"
 #include "../core/FrameTimings.hpp"
 #include "RendererLog.hpp"
@@ -82,7 +80,7 @@ void Renderer::createSamplers() {
 
 // ── updateLightSSBO ───────────────────────────────────────────────────────────
 
-uint32_t Renderer::updateLightSSBO(World& world) {
+uint32_t Renderer::updateLightSSBO(const std::vector<RenderLight>& lights) {
     auto* gpuLights = static_cast<GpuLight*>(frames_.lightPtr(frameIdx));
     uint32_t count  = 0;
     shadowCasterSlot_ = -1;                     // 이 프레임의 섀도 캐스터를 재선정
@@ -91,16 +89,14 @@ uint32_t Renderer::updateLightSSBO(World& world) {
     // 올릴 라이트를 고릅니다(DEF-33, LightSelection.hpp). 어느 눈에도 영향이 없는 점광원 · 스팟은 거르고,
     // 상한(render.maxLights)을 넘으면 방향광을 먼저, 나머지는 가까운 순으로 고릅니다. 상한 안이면 순서를
     // 바꾸지 않아 픽셀 합산 순서가 그대로입니다. 예전에는 생성 순서대로 앞에서부터 올리고 상한에서 잘랐습니다.
-    const std::vector<LightComponent*> lights = LightComponent::enabledIn(world);
     std::vector<hlight::Candidate> lightCands;
     lightCands.reserve(lights.size());
-    for (auto* lc : lights) {
+    for (const RenderLight& rl : lights) {
         hlight::Candidate c;
-        c.directional = (lc->lightType == LightType::Directional);
-        c.position    = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
-        c.radius      = std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius);
-        const glm::vec3 col = lc->effectiveColor() * lc->intensity;
-        c.brightness  = std::max({ col.r, col.g, col.b });
+        c.directional = (rl.kind == RenderLightKind::Directional);
+        c.position    = rl.position;
+        c.radius      = rl.radius;
+        c.brightness  = std::max({ rl.color.r, rl.color.g, rl.color.b });
         lightCands.push_back(c);
     }
     std::array<std::array<FrustumPlane, 6>, kMaxViews> lightViewPlanes{};
@@ -123,38 +119,35 @@ uint32_t Renderer::updateLightSSBO(World& world) {
     }
 
     for (uint32_t li : chosen.selected) {
-        LightComponent* lc = lights[li];
+        const RenderLight& rl = lights[li];
         const uint32_t slot = count;
         GpuLight& gl = gpuLights[count++];
-        glm::vec3 col = lc->effectiveColor() * lc->intensity;   // 색온도 틴트 포함
+        const glm::vec3 col = rl.color;   // 색온도 틴트 포함
         // 섀도 캐스터 = 첫 Directional 이면서 castShadows 가 켜진 라이트. 선택과 SSBO 채우기가
         // 같은 루프 안이라 슬롯 번호가 어긋날 수 없습니다(DEF-26). 캐스터가 없으면 -1 로 남습니다.
-        if (lc->lightType == LightType::Directional && lc->castShadows && shadowCasterSlot_ < 0) {
+        if (rl.kind == RenderLightKind::Directional && rl.castShadows && shadowCasterSlot_ < 0) {
             shadowCasterSlot_ = (int)slot;
-            shadowCasterDir_  = -lc->emitDirection();   // 빛을 향하는 벡터(표면 → 태양)
-            contactLength_    = quality_.contactShadows ? lc->contactShadowLength : 0.f;
+            shadowCasterDir_  = -rl.emitDirection;   // 빛을 향하는 벡터(표면 → 태양)
+            contactLength_    = quality_.contactShadows ? rl.contactShadowLength : 0.f;
         }
-        if (lc->lightType == LightType::Directional) {
+        if (rl.kind == RenderLightKind::Directional) {
             // 방향의 부호는 emitDirection()(발광 방향) 하나로 정합니다. 저장 형식은 그대로입니다.
-            const glm::vec3 toLight = -lc->emitDirection();   // 액터 회전 반영
+            const glm::vec3 toLight = -rl.emitDirection;   // 액터 회전 반영
             gl.posOrDir  = glm::vec4(-toLight, 0.f);   // w=0 → directional. 셰이더가 다시 뒤집어 L = toLight 로 읽음
             gl.colorRange= glm::vec4(col, 0.f);
             gl.spotDir   = glm::vec4(toLight, 0.f);    // Directional 에서는 셰이더가 읽지 않음(SSBO 바이트 유지)
-            gl.spotParams= glm::vec4(0.f, 0.f, (float)lc->lightChannels, 0.f);
-        } else if (lc->lightType == LightType::Point) {
-            glm::vec3 pos = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
-            gl.posOrDir  = glm::vec4(pos, 1.f);    // w=1 → point
-            gl.colorRange= glm::vec4(col, std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius));
+            gl.spotParams= glm::vec4(0.f, 0.f, (float)rl.channels, 0.f);
+        } else if (rl.kind == RenderLightKind::Point) {
+            gl.posOrDir  = glm::vec4(rl.position, 1.f);    // w=1 → point
+            gl.colorRange= glm::vec4(col, rl.radius);
             gl.spotDir   = glm::vec4(0.f);
-            gl.spotParams= glm::vec4(0.f, 0.f, (float)lc->lightChannels, 0.f);
+            gl.spotParams= glm::vec4(0.f, 0.f, (float)rl.channels, 0.f);
         } else { // Spot
-            glm::vec3 pos = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
-            const glm::vec3 emit = lc->emitDirection();   // 발광 방향(액터 회전 반영)
-            gl.posOrDir  = glm::vec4(pos, 2.f);    // w=2 → spot
-            gl.colorRange= glm::vec4(col, std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius));
-            gl.spotDir   = glm::vec4(emit, 0.f);   // pbr.frag 가 dot(-L, spotDir) 로 읽음
-            const glm::vec2 cone = hlight::spotConeParams(lc->innerConeAngle, lc->outerConeAngle);
-            gl.spotParams= glm::vec4(cone.x, cone.y, (float)lc->lightChannels, 0.f);
+            gl.posOrDir  = glm::vec4(rl.position, 2.f);    // w=2 → spot
+            gl.colorRange= glm::vec4(col, rl.radius);
+            gl.spotDir   = glm::vec4(rl.emitDirection, 0.f);   // pbr.frag 가 dot(-L, spotDir) 로 읽음
+            const glm::vec2 cone = hlight::spotConeParams(rl.innerCone, rl.outerCone);
+            gl.spotParams= glm::vec4(cone.x, cone.y, (float)rl.channels, 0.f);
         }
     }
     frameStats_.lights      = count;
@@ -178,7 +171,7 @@ PostPass::Params Renderer::postParams() const {
     return p;
 }
 
-void Renderer::updateUBO(World& world, uint32_t lightCount) {
+void Renderer::updateUBO(const RenderFog& fog, uint32_t lightCount) {
     FrameUBO ubo{};
     const PostPass::Params post = postParams();
 
@@ -239,12 +232,9 @@ void Renderer::updateUBO(World& world, uint32_t lightCount) {
     // 지수 고도 안개(2026-11-17): 켜진 첫 HeightFogComponent. 없으면 밀도 0(셰이더가 건너뜀).
     ubo.fogColor  = glm::vec4(0.f);
     ubo.fogParams = glm::vec4(0.f);
-    if (quality_.heightFog)
-    for (const HeightFogComponent* fog : world.componentsOf<HeightFogComponent>()) {
-        if (!fog->owner->activeInHierarchy() || !fog->isEnabled()) continue;
-        ubo.fogColor  = glm::vec4(fog->color, fog->maxOpacity);
-        ubo.fogParams = glm::vec4(fog->density, fog->heightFalloff, fog->owner->worldPosition().y, fog->startDistance);
-        break;
+    if (quality_.heightFog && fog.present) {
+        ubo.fogColor  = glm::vec4(fog.color, fog.maxOpacity);
+        ubo.fogParams = glm::vec4(fog.density, fog.heightFalloff, fog.height, fog.startDistance);
     }
     // lights 개수는 updateLightSSBO가 실제로 채운 수를 쓴다(범위 밖 읽기 방지).
     // miscParams.w 는 이제 **섀도 캐스터의 슬롯 번호**다(<0 이면 섀도 없음). 셰이더가 슬롯 0 을
@@ -475,9 +465,8 @@ void Renderer::buildDrawCommands(World& world,
 // ── gatherViews ────────────────────────────────────────────────────────────────
 // 이번 프레임에 그릴 눈을 정합니다. 단안은 활성 카메라 하나, 스테레오 흉내 모드는 카메라 좌우의
 // 두 눈입니다(DEF-09). 눈 위치는 뷰 행렬의 역에서 읽습니다(예전 cameraPos 와 같은 식).
-void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
-    CameraComponent* cam = CameraComponent::activeIn(world);
-    cameraExposureEv_ = cam ? cam->exposureEv : 0.f;
+void Renderer::gatherViews(const RenderCamera& cam, const XrFrameTarget* xr) {
+    cameraExposureEv_ = cam.present ? cam.exposureEv : 0.f;
     if (captureOverride_) {   // 반사 캡처 중: 큐브 한 면의 눈 하나(Renderer_capture.cpp)
         hasCamera_ = true;
         viewCount_ = 1;
@@ -488,9 +477,9 @@ void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
     // XR: 런타임이 준 두 눈 자세(원점 공간)를 활성 카메라의 XR 원점(위치 · 요)에 올립니다. 시야는
     // 런타임의 네 방향 각도로 눈마다 따로 만듭니다(DEF-21). 카메라가 없으면 월드 원점에 둡니다.
     if (xr && xrActive_) {
-        const glm::mat4 origin = cam ? cam->xrOrigin() : glm::mat4(1.f);
-        const float     zNear  = cam ? cam->zNear : 0.1f;
-        const float     zFar   = cam ? cam->zFar  : 100.f;
+        const glm::mat4 origin = cam.present ? cam.xrOrigin : glm::mat4(1.f);
+        const float     zNear  = cam.present ? cam.zNear : 0.1f;
+        const float     zFar   = cam.present ? cam.zFar  : 100.f;
         hasCamera_ = true;
         viewCount_ = kMaxViews;
         for (uint32_t e = 0; e < kMaxViews; ++e) {
@@ -502,19 +491,18 @@ void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
             v.pos   = glm::vec3(eyeWorld[3]);
             v.zNear = zNear;
             v.zFar  = zFar;
-            v.proj  = CameraComponent::projFromFov(p.angleLeft, p.angleRight, p.angleUp, p.angleDown,
-                                                   zNear, zFar);
+            v.proj  = hmath::perspectiveFromFov(p.angleLeft, p.angleRight, p.angleUp, p.angleDown, zNear);
         }
         return;
     }
 
-    hasCamera_ = (cam != nullptr);
-    if (!cam) {
+    hasCamera_ = cam.present;
+    if (!cam.present) {
         viewCount_ = 1;
         views_[0]  = EyeView{};   // 단위 행렬 · 원점 · near 0.1 · far 100 (예전 기본값)
         return;
     }
-    const glm::mat4 camView = cam->viewMatrix();
+    const glm::mat4 camView = cam.view;
 
     // 단안. 투영 비율은 합성할 뷰포트의 비율입니다. 평소에는 씬 타깃과 같은 크기이고, XR 이 붙어 있는데
     // 이번 프레임 헤드셋에 그리지 않을 때(헤드셋을 벗음 등)는 씬 타깃이 눈 크기라 비율이 다릅니다.
@@ -523,10 +511,10 @@ void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
         viewCount_ = 1;
         EyeView& v = views_[0];
         v.view  = camView;
-        v.proj  = cam->projMatrix(aspect);
+        v.proj  = hmath::perspectiveReverseZ(cam.fovY, aspect, cam.zNear);
         v.pos   = glm::vec3(glm::inverse(camView)[3]);
-        v.zNear = cam->zNear;
-        v.zFar  = cam->zFar;
+        v.zNear = cam.zNear;
+        v.zFar  = cam.zFar;
         return;
     }
 
@@ -535,7 +523,7 @@ void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
     // 코 쪽 45% · 바깥쪽 55% 로 나눠 실제 헤드셋처럼 비대칭 투영을 씁니다.
     const float     aspect  = (float)rc_.renderExtent.width / (float)rc_.renderExtent.height;
     constexpr float kIpd    = 0.064f;
-    const float tanUp       = std::tan(glm::radians(cam->fovY) * 0.5f);
+    const float tanUp       = std::tan(glm::radians(cam.fovY) * 0.5f);
     const float tanWidth    = 2.f * tanUp * aspect;
     const float tanOuter    = 0.55f * tanWidth;
     const float tanInner    = 0.45f * tanWidth;
@@ -546,13 +534,12 @@ void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
         // 카메라 공간에서 X 로 옮긴 눈: 월드 → 눈 = T(-offset) · 월드 → 카메라.
         v.view  = glm::translate(glm::mat4(1.f), glm::vec3(-side * kIpd * 0.5f, 0.f, 0.f)) * camView;
         v.pos   = glm::vec3(glm::inverse(v.view)[3]);
-        v.zNear = cam->zNear;
-        v.zFar  = cam->zFar;
+        v.zNear = cam.zNear;
+        v.zFar  = cam.zFar;
         const float tanLeft  = (e == 0) ? -tanOuter : -tanInner;
         const float tanRight = (e == 0) ?  tanInner :  tanOuter;
-        v.proj = CameraComponent::projFromFov(std::atan(tanLeft), std::atan(tanRight),
-                                              std::atan(tanUp), -std::atan(tanUp),
-                                              cam->zNear, cam->zFar);
+        v.proj = hmath::perspectiveFromFov(std::atan(tanLeft), std::atan(tanRight),
+                                           std::atan(tanUp), -std::atan(tanUp), cam.zNear);
     }
 }
 
@@ -600,15 +587,15 @@ void Renderer::gatherUIPanels(World& world, std::vector<GeometryPass::PanelDraw>
 }
 
 // ── extractRenderView ──────────────────────────────────────────────────────────
-// World를 읽는 유일한 지점 (docs/RendererRefactor.md §4). 이후 패스 기록에서는
-// World/Actor/Component 참조 금지 — 시뮬레이션/렌더 스레드 분리의 경계가 된다.
+// 카메라 · 조명 · 안개는 RenderSceneInput 으로 받고(S5b), 메시 · 스킨 · UI 패널은 아직 World 에서 읽습니다
+// (S5c~d 에서 마저 옮김). 이후 패스 기록에서는 World/Actor/Component 참조 금지.
 // v1: 프레임별 mapped 버퍼(UBO/라이트/트랜스폼) 업로드를 추출 단계에서 수행.
 
-Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarget* xr) {
+Renderer::RenderView Renderer::extractRenderView(World& world, const RenderSceneInput& scene, const XrFrameTarget* xr) {
     RenderView v;
 
     // 이번 프레임의 눈을 먼저 정합니다. 아래 UBO · 컬링 · AO 가 모두 이 한 벌을 씁니다.
-    gatherViews(world, xr);
+    gatherViews(scene.camera, xr);
     // 두 눈의 가운데(단안이면 카메라 위치, 카메라가 없으면 원점). 라이트 선택 · LOD · 투명 정렬이 함께 씁니다.
     viewCenter_ = glm::vec3(0.f);
     if (hasCamera_) {
@@ -617,8 +604,8 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
     }
 
     // 순서 주의: 라이트 SSBO를 먼저 채워 실제 개수를 확정한 뒤 UBO에 싣는다.
-    const uint32_t lightCount = updateLightSSBO(world);
-    updateUBO(world, lightCount);
+    const uint32_t lightCount = updateLightSSBO(scene.lights);
+    updateUBO(scene.fog, lightCount);
     buildDrawCommands(world, v.opaqueDraws, v.transpDraws, v.materialRows, v.rowFlags, v.shadowDraws);
     frameStats_.drawCalls = (uint32_t)v.opaqueDraws.size();
     gatherUIPanels(world, v.panels);
@@ -668,7 +655,7 @@ Renderer::RenderView Renderer::extractRenderView(World& world, const XrFrameTarg
 
 // ── drawFrame ─────────────────────────────────────────────────────────────────
 
-bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
+bool Renderer::drawFrame(World& world, const RenderSceneInput& scene, const XrFrameTarget* xr) {
     const bool xrFrame = (xr != nullptr) && xrActive_;
     // 데스크톱 창이 최소화되면(표면 크기 0) 스왑체인 이미지를 받을 수 없습니다. 데스크톱 화면은 건너뛰고,
     // XR 프레임이면 두 눈만 그려 헤드셋은 계속 보이게 합니다(DEF-106). UE · Godot 도 최소화한 창은 그리지
@@ -699,7 +686,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     // 반사 캡처: 캡처 컴포넌트가 새로 생기거나 옮겨지면 이 자리에서 장치를 멈추고 6면을 찍습니다(드묾).
     {
         ScopedCpuTimer t(ft.reflCapture);
-        updateReflectionCapture(world);
+        updateReflectionCapture(world, scene);
     }
 
     // Read previous frame's timestamps — skip until each slot has been written at least once
@@ -766,7 +753,7 @@ bool Renderer::drawFrame(World& world, const XrFrameTarget* xr) {
     RenderView view;
     {
         ScopedCpuTimer t(ft.extract);
-        view      = extractRenderView(world, xrFrame ? xr : nullptr);
+        view      = extractRenderView(world, scene, xrFrame ? xr : nullptr);
         // A-4: GPU 컬 입력 업로드 제거. 깊이 프리패스가 CPU opaqueItems 를 직접 그립니다.
     }
 

@@ -278,6 +278,7 @@ set(RUNTIME_SOURCES
     src/core/HLog.cpp
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp
+    src/components/RenderExtract.cpp
     src/components/StaticMeshComponent.cpp
     src/audio/AudioComponent.cpp
     src/audio/ReverbZoneComponent.cpp
@@ -769,7 +770,17 @@ if(NOT ANDROID)
 
     # -- 라이트 선택 · 상한 설정 테스트 ---------------------------------------
     # 화면 밖 라이트 거르기 · 상한에서 고르기(DEF-33)와 Config/engine.ini 읽기(DEF-10)를 화면 없이 검산합니다.
-    add_executable(HarukaLightTest tests/LightSelectionTest.cpp)
+    add_executable(HarukaLightTest
+        tests/LightSelectionTest.cpp
+        src/components/RenderExtract.cpp
+        src/components/CameraComponent.cpp
+        src/components/HeightFogComponent.cpp
+        src/components/LightComponent.cpp
+        src/scene/World.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
+        src/core/HLog.cpp
+    )
     target_link_libraries(HarukaLightTest PRIVATE glm::glm)
     target_include_directories(HarukaLightTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)

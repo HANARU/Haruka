@@ -6,6 +6,7 @@
 #include "EngineOptions.hpp"
 #include "FrameStats.hpp"
 #include "WorldUiDriver.hpp"
+#include "../renderer/RenderSceneInput.hpp"
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -122,4 +123,5 @@ private:
     // ── 게임 모듈 + 프레임 컨텍스트 ─────────────────────────────────────────────
     std::unique_ptr<IGameModule>   game_;
     std::unique_ptr<EngineContext> ctx_;
+    RenderSceneInput               sceneInput_;
 };

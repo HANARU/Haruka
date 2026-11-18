@@ -21,6 +21,7 @@
 #include "ISwapchain.hpp"
 #include "RenderContext.hpp"
 #include "RenderTypes.hpp"
+#include "RenderSceneInput.hpp"
 #include "FrameResources.hpp"
 #include "GpuScene.hpp"
 #include "passes/BloomPass.hpp"
@@ -117,7 +118,7 @@ public:
     void cleanup();
     // xr 이 있으면 두 눈을 XR 스왑체인의 두 층에 그리고, 에디터 뷰포트에는 왼쪽 눈을 비춥니다.
     // 그 프레임에 XR 이미지에 실제로 그렸으면 true(엔진이 투영 레이어를 제출할지 정함).
-    bool drawFrame(World& world, const XrFrameTarget* xr = nullptr);
+    bool drawFrame(World& world, const RenderSceneInput& scene, const XrFrameTarget* xr = nullptr);
 
     // ── XR 연결 ───────────────────────────────────────────────────────────────
     bool             xrCompatible() const     { return xrCompatible_; }
@@ -316,8 +317,8 @@ private:
             return valid == o.valid && actor == o.actor && pos == o.pos && radius == o.radius && version == o.version && world == o.world;
         }
     };
-    void updateReflectionCapture(World& world);
-    void performReflectionCapture(World& world, const glm::vec3& pos);
+    void updateReflectionCapture(World& world, const RenderSceneInput& scene);
+    void performReflectionCapture(World& world, const RenderSceneInput& scene, const glm::vec3& pos);
     CaptureKey       captureKey_;
     glm::vec4        capturePos_{ 0.f };      // xyz 위치, w 반경(0 = 없음) → FrameUBO.capturePos
     float            captureIntensity_ = 1.f;
@@ -354,7 +355,7 @@ private:
     uint32_t viewCount_     = 1;
     bool     hasCamera_     = false;
     bool     emulateStereo_ = false;
-    void       gatherViews(World& world, const XrFrameTarget* xr);
+    void       gatherViews(const RenderCamera& cam, const XrFrameTarget* xr);
     VkExtent2D desiredRenderExtent() const;   // 뷰포트와 모드로 정한 눈 하나의 렌더 크기
     // 장면 타깃 층 수(rc_.sceneLayers)를 XR · 스테레오 흉내 상태에 맞춥니다. 바뀌었으면 참(부른 쪽이 타깃을 다시 만듦).
     bool syncSceneLayers();
@@ -474,14 +475,14 @@ private:
     };
     // 월드의 UI 패널을 모아 텍스처를 맞추고(만들기 · 크기 변경 · 사라진 패널 정리) 더러운 패널을 다시 그리게 올립니다.
     void gatherUIPanels(World& world, std::vector<GeometryPass::PanelDraw>& out);
-    RenderView extractRenderView(World& world, const XrFrameTarget* xr);
+    RenderView extractRenderView(World& world, const RenderSceneInput& scene, const XrFrameTarget* xr);
 
     // Per-frame logic (extractRenderView 내부에서만 호출)
     // 라이트 개수는 updateLightSSBO가 실제로 채운 값을 반환하고 updateUBO가 그것을 받는다.
     // 양쪽이 각자 세면 라이트 상한(render.maxLights)에서 잘린 실제 개수와 UBO가 알려주는 개수가 어긋나,
     // pbr.frag가 SSBO 범위 밖을 읽는다. 계산 지점을 하나로 두는 것이 이 구조의 요점이다.
-    void     updateUBO(World& world, uint32_t lightCount);
-    uint32_t updateLightSSBO(World& world);   // 실제로 업로드한 라이트 수를 반환
+    void     updateUBO(const RenderFog& fog, uint32_t lightCount);
+    uint32_t updateLightSSBO(const std::vector<RenderLight>& lights);   // 실제로 업로드한 라이트 수를 반환
     // 드로우 커맨드와 transform SSBO 행의 유일한 생성 지점.
     // opaqueOut/transpOut의 firstInstance와 materialRowsOut의 인덱스는 같은 배정(hbatch::build)
     // 에서 나오므로 세 출력은 항상 정합한다. CPU 드로우 항목은 이 출력에서 파생시킬 것.

@@ -63,12 +63,6 @@ public:
     // 롤은 없습니다. yaw/pitch 는 에디터만 가지며, 게임 카메라는 액터 회전을 직접 씁니다.
     static glm::quat yawPitchRotation(float yaw, float pitch);
 
-    // 네 방향 시야각(라디안, 왼쪽 · 아래는 음수)으로 만든 비대칭 투영입니다. OpenXR 이 눈마다 주는
-    // XrFovf 를 그대로 받습니다(DEF-21). Vulkan 규약(깊이 [0,1], 클립 Y 아래)이고, 좌우 · 상하가
-    // 대칭이면 projMatrix 와 같은 행렬입니다.
-    static glm::mat4 projFromFov(float angleLeft, float angleRight, float angleUp, float angleDown,
-                                 float zNear, float zFar);
-
     // XR 원점: 헤드셋 트래킹 공간을 월드에 놓는 자리입니다. 카메라 액터의 월드 위치와 요(yaw)만 씁니다.
     // 숙임 · 롤까지 넣으면 헤드셋 안의 지평선이 기울어 멀미가 납니다. 액터가 없으면 단위 행렬입니다.
     // 렌더러의 눈 자세와 VR 입력(HXrInputState) 자세가 모두 이 원점 기준입니다.

@@ -44,17 +44,12 @@ module main:      core, math, vfs, memory, platform, input, ui, scene, geometry,
 # ── 허용 목록: 아직 고치지 않은 위반 ──
 
 # renderer -> components — 2단계 S5: 렌더 데이터 추출을 렌더러 밖으로
-allow renderer/Renderer_capture.cpp -> components/CameraComponent.hpp
 allow renderer/Renderer_capture.cpp -> components/ReflectionCaptureComponent.hpp
 allow renderer/Renderer_render.cpp -> components/StaticMeshComponent.hpp
 allow renderer/Renderer_render.cpp -> components/SkinnedMeshComponent.hpp
-allow renderer/Renderer_render.cpp -> components/CameraComponent.hpp
-allow renderer/Renderer_render.cpp -> components/HeightFogComponent.hpp
-allow renderer/Renderer_render.cpp -> components/LightComponent.hpp
 allow renderer/Renderer_render.cpp -> components/UIPanelComponent.hpp
 
 # renderer -> scene — 2단계 S5: 렌더 데이터 추출을 렌더러 밖으로
-allow renderer/Renderer.cpp -> scene/World.hpp
 allow renderer/Renderer_capture.cpp -> scene/Actor.hpp
 allow renderer/Renderer_capture.cpp -> scene/World.hpp
 allow renderer/Renderer_render.cpp -> scene/World.hpp

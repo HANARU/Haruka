@@ -1,7 +1,6 @@
 #include "Renderer.hpp"
 #include "LightingCalibration.hpp"
 #include "SkyIbl.hpp"
-#include "../scene/World.hpp"
 #include "../core/AppPaths.hpp"
 #include "../ui/slate/HSlateRenderer.hpp"
 #include "../geometry/MeshSource.hpp"
