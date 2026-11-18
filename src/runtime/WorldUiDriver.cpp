@@ -18,7 +18,7 @@ WorldUiDriver::WorldUiDriver()  = default;
 WorldUiDriver::~WorldUiDriver() = default;
 
 void WorldUiDriver::updateFollowPanels(World& world, bool xrSessionLive, float dt) {
-    CameraComponent* cam = world.getActiveCamera();
+    CameraComponent* cam = CameraComponent::activeIn(world);
     if (!cam || !cam->owner) return;
     glm::vec3 headPos = cam->owner->worldPosition();
     glm::quat headRot = cam->owner->worldRotation();
@@ -58,7 +58,7 @@ void WorldUiDriver::updatePointers(IEngineFrontend& front, World& world, Physics
 
     // 가림은 물리 레이캐스트로 봅니다. 플레이어(활성 카메라의 맨 위 조상) 아래의 액터는 모두 뺍니다. 광선이 몸 · 리그 · 손의
     // 충돌체 안에서 출발하면 거리 0 으로 맞기 때문입니다(Jolt 기본 동작).
-    CameraComponent*    cam = world.getActiveCamera();
+    CameraComponent*    cam = CameraComponent::activeIn(world);
     std::vector<Actor*> ignore;
     if (cam && cam->owner) {
         const Actor* root = cam->owner;

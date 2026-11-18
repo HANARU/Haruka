@@ -15,11 +15,11 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 |---|---|---|---|
 | 1 | core 가 바닥이자 꼭대기 | 기반(로그 · 파일 · 경로), 장면 모델(World · Actor · Component), 조립부(Engine)가 한 폴더. 모두가 core 를 include 하고 core 도 11개 모듈을 include → 순환 | 1단계(S7 일부 끝남) |
 | 2 | `Engine::run` 약 410줄에 관심사 약 열 가지 | XR 세션 복구 · 리그 원점 · 청취자 · Play 전이 · 틱 순서 · 패널 · UI 포인터 · 렌더 분기 · 통계. 프레임 단계 순서가 코드 위치로만 정해짐 | 1단계 S2(끝남, 7절) |
-| 3 | 시스템 접근 방식 다섯 가지 | `EngineContext` · `ModuleManager::get<T>` · 전역 싱글턴 · 정적 포인터 `PhysicsSystem::current()` · Engine 이 직접 든 멤버 | 1단계 S3 |
+| 3 | 시스템 접근 방식 다섯 가지 | `EngineContext` · `ModuleManager::get<T>` · 전역 싱글턴 · 정적 포인터 `PhysicsSystem::current()` · Engine 이 직접 든 멤버 | 1단계 S3(끝남, 8절) |
 | 4 | 렌더러가 장면 모델을 직접 읽음 | Renderer_render.cpp 가 World 와 컴포넌트 6종을 include, GPU 핸들을 컴포넌트에 씀 | 2단계 S5 |
 | 5 | Component 기반 클래스가 모든 계층의 일을 가짐 | 에디터(아이콘 · 범위 표시 · 속성 칸) · 물리(collisionMesh) · XR(blocksFloor) · 직렬화 | 2단계 S4 |
 | 6 | 에디터 한 클래스 | EditorApp.cpp 4,492줄, 함수 85개 | 3단계 S6 |
-| 7 | World 가 에디터 상태를 앎 | `editorCam_` · `playing_` | 1단계 S3 |
+| 7 | World 가 에디터 상태를 앎 | `editorCam_` · `playing_` | 1단계 S3(끝남, 8절) |
 
 그대로 둘 것: 시스템이 `world_->componentsOf<T>()` 로 끌어오는 방식, `IEngineFrontend` 로 에디터 · 게임 분리(DEF-12),
 렌더 확장 레지스트리(DEF-17 · 18), ComponentRegistry 직렬화(DEF-22).
@@ -81,17 +81,16 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
   4. 허용 방향 표에 순환이 없음
   5. 모듈마다 모든 include 가 허용 방향 안이거나 허용 목록에 있음
   6. 허용 목록의 항목이 모두 아직 남은 위반임(고친 것 · 원래 허용되는 것은 지워야 통과) → 목록은 줄기만 합니다
+  7. 정적 시스템 포인터가 없음(S3, 8절): `static inline T*` · `static T* current()` · `instance()`
+  8. 전역 싱글턴(`static T& get()`)이 정한 목록(`HInputSystem` · `ComponentRegistry`)과 같음(S3, 8절)
 - `HarukaArchTest --list`: 지금 위반을 허용 목록 형식으로 출력합니다.
 - 변이 확인(2026-11-18): 기반 → 에디터 include 추가, 필요 없는 허용 항목, 표의 순환(math ↔ core), 규칙 없는 새 폴더, 필요한
   허용 항목 삭제 다섯 가지를 모두 잡았습니다.
 
-## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개)
+## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개, 모두 2단계 몫)
 
 | 방향 | 수 | 원인 | 없앨 단계 |
 |---|---|---|---|
-| scene → components | 3 | World 의 카메라 · 메시 · 라이트 찾기 | 1단계 S3 |
-| runtime → game | 1 | 기본 게임 모듈을 Engine 이 직접 만듦 | 1단계 S3 |
-| platform → runtime | 3 | Android 진입점(AndroidMain.cpp)이 platform 안에 있음 | 1단계(진입점을 main 자리로) |
 | assets → audio · components | 6 | 씬 직렬화가 컴포넌트 형을 직접 앎 | 2단계 S4 · S7 |
 | audio → components | 3 | 소리 컴포넌트 · 청취자 카메라 | 2단계 S7 |
 | physics → components | 1 | RigidBodyComponent | 2단계 S7 |
@@ -106,14 +105,14 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 1 | S1 이 문서 + 아키텍처 시험 | 끝남(2026-11-18) |
 | 1 | S7 일부 core → core · scene · runtime | 끝남(2026-11-18) |
 | 1 | S2 `Engine::run` → 명시적 프레임 단계, XR 복구 · 리그 원점 · UI 포인터 · 프레임 통계를 각자 객체로 | 끝남(2026-11-18, 7절) |
-| 1 | S3 시스템 접근 통일(엔진 단위 · 월드 단위 서비스), 정적 포인터 · 흩어진 전역 정리, World 의 에디터 상태 | 다음 |
-| 2 | S4 Component 기반 정리(에디터 함수 → 등록식 visualizer, collisionMesh · blocksFloor → 질의) | |
+| 1 | S3 시스템 접근 통일(엔진 단위 · 월드 단위 서비스), 정적 포인터 · 흩어진 전역 정리, World 의 에디터 상태 | 끝남(2026-11-18, 8절) |
+| 2 | S4 Component 기반 정리(에디터 함수 → 등록식 visualizer, collisionMesh · blocksFloor → 질의) | 다음 |
 | 2 | S7 나머지: 컴포넌트를 소유 시스템 옆으로 | |
 | 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | |
 | 3 | S6 EditorApp 분해(아웃라이너 · 디테일 · 로그 · 도킹 · 메뉴와 툴바 · 뷰포트 컨트롤러) | |
 
 완료 기준:
-- 1단계: 1단계 몫의 허용 목록 항목 0(core · scene · runtime 순환 0), `Engine::run` 100줄 이하(단계 호출만), 정적 시스템 포인터 0.
+- 1단계: 1단계 몫의 허용 목록 항목 0(core · scene · runtime 순환 0), `Engine::run` 100줄 이하(단계 호출만), 정적 시스템 포인터 0. → **채움(2026-11-18, S3 뒤)**
 - 2단계: renderer 가 components 헤더를 include 하는 곳 0, Component 기반 클래스의 에디터 함수 0, 허용 목록의 컴포넌트 관련 항목 0.
   매번 기준 PNG 전부(왼눈 · 오른눈 · Quest 값 · LightingProbe · UIPanelProbe) + 검증 레이어 0.
 - 3단계: EditorApp.cpp 1,000줄 이하, 함수 150줄 이하, 창 에디터 확인 통과.
@@ -153,7 +152,45 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 간격 3배 · 또 잃을 때 마감 다시 잡기 · 복구 판정 1초를 모두 잡음). 기준 PNG 전부 그대로, Debug · Quest Pro 형 프로필 검증 0.
 헤드셋 확인(세션 시작 · Stop · 헤드셋 벗기 · 연결 끊김 다시 열기)은 다음 헤드셋 점검 때 함께 봅니다.
 
-## 8. 다른 엔진 비교 (2026-11-18 보고)
+## 8. 시스템 접근 (S3, 2026-11-18)
+
+예전에는 시스템에 닿는 길이 다섯 가지였습니다(1절 3번). 이제 아래 세 가지로 정했고, 아키텍처 시험이 셋째(전역 싱글턴)의 목록과
+정적 시스템 포인터 0 을 지킵니다.
+
+| 범위 | 찾는 길 | 들어 있는 것 |
+|---|---|---|
+| 엔진 단위 | `EngineContext`(게임 모듈이 받음). 동적 모듈은 `ctx.modules.get<T>()` | 월드 · 에셋 · 창 · 모듈 · 렌더 확장 등록 · 컴포넌트 형 등록 |
+| 월드 단위 | `World::service<T>()`. 컴포넌트는 `owner->world()` 로 자기 월드를 찾음 | `PhysicsSystem`(startup ~ shutdown 사이), `ViewCameraOverride`(에디터) |
+| 프로세스 전역 | `T::get()`, 정한 목록만 | `HInputSystem`(장치 입력은 프로세스에 하나), `ComponentRegistry`(컴포넌트 형 표) |
+
+Engine 이 직접 든 시스템 멤버(`physics_` · `audio_`)는 조립부 안의 배선이라 그대로 둡니다(바깥에 열지 않음). 월드 단위 서비스는
+UE 의 UWorldSubsystem 과 같은 자리이며, 월드(scene)는 형을 모른 채 포인터만 듭니다. 넣은 쪽이 소유하고, 없어지기 전에 뺍니다.
+
+바꾼 것:
+- **정적 포인터 `PhysicsSystem::current()` → 월드 서비스.** 물리 시스템은 startup 과 setWorld 가 모두 끝난 때 그 월드에 자신을 넣고,
+  shutdown 하거나 다른 월드로 옮길 때 뺍니다. 리그 이동 · 텔레포트(`XrComponents.cpp`)는 자기 월드의 물리를 씁니다. 예전에는
+  프로세스에 하나뿐인 포인터라 다른 월드의 액터도 같은 물리를 봤습니다.
+- **World 의 에디터 상태와 컴포넌트 찾기 → 컴포넌트 쪽.** `editorCam_` · `playing_` · `getActiveCamera` · `getVisibleMeshes` ·
+  `getLights` 를 지우고 `CameraComponent::activeIn` · `StaticMeshComponent::visibleIn` · `LightComponent::enabledIn` 으로 옮겼습니다.
+  에디터는 `ViewCameraOverride{camera, preferred}` 를 월드 서비스로 넣습니다(편집 중 preferred = 참, Play 중 거짓). 고르는 규칙은
+  예전과 같습니다. 게임 실행 파일은 넣지 않으므로 첫 primary 카메라입니다(예전에도 에디터 카메라가 없어 같았음). scene → components 3개.
+- **게임 모듈:** Engine 이 `DefaultGameModule` 을 직접 만들던 것을 `createGameModule()`(`runtime/IGameModule.hpp`, 앞단의
+  `createEngineFrontend` 처럼 링크한 쪽이 정의)로 바꿨습니다. runtime → game 1개.
+- **Android 진입점:** `platform/android/AndroidMain.cpp` → `src/AndroidMain.cpp`(main.cpp 와 같은 자리, 모듈 main). platform → runtime 3개.
+- **아키텍처 시험 검사 2개:** 정적 시스템 포인터(`static inline T*` · `static T* current()` · `instance()`) 0, 전역 싱글턴
+  (`static T& get()`)이 위 목록과 같음(늘어도 없어져도 실패). 임시 파일에 셋을 다 넣으면 둘 다 실패하는 것을 확인했습니다.
+
+남긴 것(2단계 S7 몫): `GrabbableComponent::live()`(잡을 수 있는 것의 정적 목록, 월드를 가리지 않음)와 `TrackedPoseComponent` 의
+`g_liveHands` 같은 컴포넌트 안의 정적 값은 컴포넌트를 소유 시스템 옆으로 옮길 때 월드 단위로 바꿉니다. 지금 `live()` 를 월드 목록으로
+바꾸면 잡기 후보의 거리 동점 순서가 켜진 순서에서 액터 순서로 바뀌어, 동작 보존 리팩터링이 아닙니다.
+
+확인: 시험 27 · 검사 1,947(아키텍처 +2, 물리의 월드 서비스 +3), 기준 PNG 전부 그대로(왼눈 · 오른눈 · UIPanelProbe), Debug · Quest Pro 형
+프로필 검증 0, Android 빌드 통과. 에디터의 화면 카메라(편집 중 에디터 카메라 · Play 중 플레이어 카메라 · Stop 뒤 되돌아옴)는 창 에디터
+확인 때 봅니다.
+
+1단계 완료 기준을 모두 채웠습니다: 1단계 몫 허용 항목 0(36 → 29, 남은 것은 모두 2단계 몫), `Engine::run` 20줄, 정적 시스템 포인터 0.
+
+## 9. 다른 엔진 비교 (2026-11-18 보고)
 
 | 주제 | 다른 엔진 | Haruka 적용 |
 |---|---|---|

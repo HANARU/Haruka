@@ -2,13 +2,10 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <typeindex>
 #include <unordered_map>
 #include "Actor.hpp"
 #include "../core/HDelegate.hpp"
-
-class StaticMeshComponent;
-class CameraComponent;
-class LightComponent;
 
 class World {
 public:
@@ -32,16 +29,26 @@ public:
     HEvent<Actor*> onActorSpawned;
     HEvent<Actor*> onActorDestroyed;
 
-    // 화면을 그릴 카메라. 편집 중에는 에디터 카메라(정해져 있으면)이고, Play 중에는 씬의 primary 카메라(액터 순서상
-    // 첫 번째)를 먼저 고르고 없으면 에디터 카메라입니다(2026-10-15). 예전에는 늘 액터 순서상 첫 primary 카메라였는데,
-    // 에디터 카메라가 가장 먼저 생겨 씬 카메라(플레이어)가 Play 에서도 쓰이지 않았습니다.
-    CameraComponent*                           getActiveCamera()  const;
-    // 에디터가 자기 카메라와 Play 여부를 알립니다. 에디터가 없으면 부르지 않으며, 그때는 첫 primary 카메라입니다.
-    void setEditorCamera(CameraComponent* cam) { editorCam_ = cam; }
-    void setPlaying(bool playing)              { playing_ = playing; }
-    bool isPlaying() const                     { return playing_; }
-    std::vector<StaticMeshComponent*>          getVisibleMeshes() const;
-    std::vector<LightComponent*>               getLights()        const;
+    // 화면 카메라 · 보이는 메시 · 라이트 찾기는 컴포넌트 쪽에 있습니다(2026-11-18, 엔진 구조 안정화 S3): CameraComponent::activeIn ·
+    // StaticMeshComponent::visibleIn · LightComponent::enabledIn. 월드(scene)는 컴포넌트 형을 모릅니다. 에디터 카메라와 Play
+    // 여부도 월드가 들지 않고, 에디터가 월드 단위 서비스(ViewCameraOverride)로 넣습니다.
+
+    // ── 월드 단위 서비스 (2026-11-18 S3) ─────────────────────────────────────────────────────────────
+    // 이 월드 하나에 붙은 시스템 · 정책입니다(UE UWorldSubsystem 과 같은 자리). 컴포넌트는 owner->world()->service<T>() 로 찾고,
+    // 월드는 형을 모른 채 포인터만 듭니다. 지금 넣는 것: PhysicsSystem(startup ~ shutdown 사이, 예전 정적 포인터
+    // PhysicsSystem::current 자리), ViewCameraOverride(에디터). 소유는 넣은 쪽이며, 없어지기 전에 nullptr 로 지웁니다.
+    // 엔진 단위 서비스(창 · 렌더러 · 에셋 · 모듈)는 EngineContext 로 받습니다(runtime/IGameModule.hpp).
+    template<class T>
+    void setService(T* s) {
+        if (s) services_[std::type_index(typeid(T))] = s;
+        else   services_.erase(std::type_index(typeid(T)));
+    }
+    template<class T>
+    T* service() const {
+        auto it = services_.find(std::type_index(typeid(T)));
+        return it != services_.end() ? static_cast<T*>(it->second) : nullptr;
+    }
+
     const std::vector<std::unique_ptr<Actor>>& getActors()        const { return actors; }
 
     // 정확한 형 T 의 컴포넌트를 액터 순서대로 모은 목록입니다(액터마다 getComponent<T> 가 돌려주는 첫 것, 2026-11-18 성능
@@ -64,6 +71,9 @@ public:
     }
 
 private:
+    // 액터보다 먼저 선언합니다(나중에 파괴). 액터를 지우는 중에 컴포넌트가 서비스를 찾을 수 있습니다(리그의 캐릭터 해제 등).
+    std::unordered_map<std::type_index, void*> services_;
+
     struct TypeListBase {
         virtual ~TypeListBase() = default;
         uint64_t version = 0;   // 0 = 아직 모으지 않음(구조 버전은 1 부터)
@@ -77,8 +87,6 @@ private:
     std::vector<Actor*>                  pendingDestroy_;
     uint64_t                             nextId_ = 1;
     bool                                 ticking_ = false;
-    CameraComponent*                     editorCam_ = nullptr;
-    bool                                 playing_   = false;
 
     void destroyImmediate(Actor* actor);
     void flushDestroyQueue();

@@ -158,7 +158,7 @@ void EditorGizmo::tick(Actor* selected, World& world,
     edge(4,5); edge(5,7); edge(7,6); edge(6,4);
     edge(0,4); edge(1,5); edge(2,6); edge(3,7);
 
-    CameraComponent* cam = world.getActiveCamera();
+    CameraComponent* cam = CameraComponent::activeIn(world);
     const bool haveCam = (mode >= 1 && mode <= 3) && cam && cam->owner &&
                          rect.width > 0.f && rect.height > 0.f;
     if (!haveCam) {
@@ -259,7 +259,7 @@ bool EditorGizmo::handleDrag(Actor* selected, World& world, HCommandStack& cmdSt
     const HViewportRect& rect  = wvp.fbRect;
     if (!selected || mode < 1 || mode > 3) return false;
 
-    CameraComponent* cam = world.getActiveCamera();
+    CameraComponent* cam = CameraComponent::activeIn(world);
     const bool haveCam = cam && cam->owner && rect.width > 0.f && rect.height > 0.f;
     glm::mat4 vp = haveCam ? cam->projMatrix(rect.width / rect.height) * cam->viewMatrix()
                            : glm::mat4(1.f);

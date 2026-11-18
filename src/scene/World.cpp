@@ -1,13 +1,11 @@
 #include "World.hpp"
-#include "../components/StaticMeshComponent.hpp"
-#include "../components/CameraComponent.hpp"
-#include "../components/LightComponent.hpp"
 #include <algorithm>
 
 Actor* World::spawnActor(const std::string& name) {
     auto  actor  = std::make_unique<Actor>();
     actor->name  = name;
     actor->id    = nextId_++;
+    actor->world_ = this;
     Actor* ptr   = actor.get();
     idMap_[ptr->id] = ptr;
     actors.push_back(std::move(actor));
@@ -97,30 +95,4 @@ bool World::reassignId(Actor* actor, uint64_t newId) {
     actors.insert(at, std::move(moved));
     hcore::bumpStructure();
     return true;
-}
-
-CameraComponent* World::getActiveCamera() const {
-    if (editorCam_ && !playing_) return editorCam_;
-    for (CameraComponent* c : componentsOf<CameraComponent>())
-        if (c->owner->activeInHierarchy())
-            if (c != editorCam_ && c->isEnabled() && c->primary) return c;
-    return editorCam_;
-}
-
-std::vector<StaticMeshComponent*> World::getVisibleMeshes() const {
-    std::vector<StaticMeshComponent*> result;
-    for (StaticMeshComponent* m : componentsOf<StaticMeshComponent>())
-        if (m->owner->activeInHierarchy())
-            // 머티리얼은 거르지 않습니다. 없으면 렌더러가 오류 머티리얼로 그립니다(DEF-28).
-            if (m->isEnabled() && m->visible && m->mesh)
-                result.push_back(m);
-    return result;
-}
-
-std::vector<LightComponent*> World::getLights() const {
-    std::vector<LightComponent*> result;
-    for (LightComponent* l : componentsOf<LightComponent>())
-        if (l->owner->activeInHierarchy() && l->isEnabled())
-            result.push_back(l);
-    return result;
 }

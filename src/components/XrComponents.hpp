@@ -25,7 +25,7 @@ class GrabInteractorComponent;
 //     ├ LeftHand  (TrackedPoseComponent[LeftHand]  + GrabInteractorComponent)
 //     └ RightHand (TrackedPoseComponent[RightHand] + GrabInteractorComponent)
 //
-// Play 중에는 리그의 카메라가 화면 카메라가 되고(World::getActiveCamera), 헤드셋 원점은 리그입니다. 리그가 있으면
+// Play 중에는 리그의 카메라가 화면 카메라가 되고(CameraComponent::activeIn), 헤드셋 원점은 리그입니다. 리그가 있으면
 // 헤드셋 자세를 바닥 기준 공간(LOCAL_FLOOR)으로 받아 실제 키가 반영됩니다.
 
 // 플레이어 원점(바닥). 자식의 추적 자세가 이 액터 기준 로컬로 들어갑니다.

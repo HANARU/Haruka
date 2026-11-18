@@ -700,7 +700,7 @@ void AudioSystem::releaseWorldSounds() {
 
 void AudioSystem::updateListener() {
     glm::vec3 pos, fwd, up;
-    CameraComponent* cam = world_->getActiveCamera();
+    CameraComponent* cam = CameraComponent::activeIn(*world_);
     // 차폐 레이에서 뺄 청취자 쪽 액터입니다. XR 이면 카메라는 XR 원점(리그)이고, 머리는 그 아래에 있습니다.
     listenerActor_ = cam ? cam->owner : nullptr;
     if (hasListenerPose_) {

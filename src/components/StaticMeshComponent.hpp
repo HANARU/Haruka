@@ -9,6 +9,7 @@
 struct MeshHandle;
 struct MaterialHandle;
 class AssetManager;
+class World;
 
 #define SM_PROPS(p) \
     XPROP_Toggle(p, "Visible",      visible),    \
@@ -61,6 +62,10 @@ public:
     // 확정하면(onPropsCommitted) 그 값의 머티리얼을 다시 받습니다(AssetManager 가 값마다 하나를 캐시하므로 같은 값은 공유).
     // 파일 메시의 머티리얼은 텍스처만 있어(인자 없음) 아직 편집하지 않습니다.
     void bindAssets(AssetManager* a) { assets_ = a; }
+
+    // 그릴 메시(예전 World::getVisibleMeshes, 2026-11-18 S3): 활성 · 켜짐 · visible · 메시 있음, 액터 순서. 머티리얼은 거르지
+    // 않습니다. 없으면 렌더러가 오류 머티리얼로 그립니다(DEF-28).
+    static std::vector<StaticMeshComponent*> visibleIn(const World& world);
     void onPropsCommitted() override;
 
 private:

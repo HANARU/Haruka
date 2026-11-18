@@ -46,7 +46,7 @@ static glm::vec3 quatToEulerDeg(const glm::quat& q) {
 static void appendXrControllerLines(World& world, std::vector<LineVertex>& lines) {
     const HXrInputState& xr = HInputSystem::get().xr();
     if (!xr.focused) return;
-    CameraComponent* cam = world.getActiveCamera();
+    CameraComponent* cam = CameraComponent::activeIn(world);
     const glm::mat4 origin = cam ? cam->xrOrigin() : glm::mat4(1.f);
     auto worldOf = [&](const HPose& p) {
         return origin * glm::translate(glm::mat4(1.f), p.position) * glm::mat4_cast(p.orientation);
@@ -173,8 +173,11 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
     editorCamActor_->setLocalPosition({ 0.f, 0.3f, 2.5f });
     editorCamActor_->setLocalRotation(CameraComponent::yawPitchRotation(editorYaw_, editorPitch_));
     editorCam_ = editorCamActor_->addComponent<CameraComponent>();
-    // World 가 편집 중에는 이 카메라를, Play 중에는 씬의 primary 카메라(플레이어)를 먼저 고릅니다(2026-10-15).
-    world.setEditorCamera(editorCam_);
+    // 편집 중에는 이 카메라를, Play 중에는 씬의 primary 카메라(플레이어)를 먼저 고릅니다(2026-10-15). 월드 단위 서비스로
+    // 넣습니다(2026-11-18 S3, 예전 World::setEditorCamera · setPlaying). cleanup 에서 뗍니다.
+    viewCamera_.camera    = editorCam_;
+    viewCamera_.preferred = true;
+    world.setService<ViewCameraOverride>(&viewCamera_);
     // 기즈모 드래그가 끝나면 주 선택과 함께 움직인 액터들을 한 커맨드로 쌓습니다(2026-10-15).
     gizmo_.onCommit = [this](const Transform& before, const Transform& after) { commitGizmoDrag(before, after); };
 
@@ -200,6 +203,7 @@ void EditorApp::cleanup() {
     saveDockLayout();   // 최종 레이아웃(활성 탭 포함)을 종료 시점에 영속화
     // 월드가 에디터보다 오래 살 수 있으므로, this 를 캡처한 리스너를 먼저 뗍니다.
     if (ctx_.world) ctx_.world->onActorDestroyed.remove(actorDestroyedSub_);
+    if (ctx_.world && ctx_.world->service<ViewCameraOverride>() == &viewCamera_) ctx_.world->setService<ViewCameraOverride>(nullptr);
     hotReloader_.stop();
     slateRenderer_.cleanup();
 }
@@ -301,7 +305,7 @@ void EditorApp::tick(float dt) {
     // Gizmo hotkeys Q/W/E/R (edge trigger, only when not in camera mode / not typing)
     // 드래그 중에는 모드를 바꾸지 않습니다. 바뀌면 UI 와 실제 조작이 어긋나고,
     // 크기 균등 핸들(axis_ == 3) 상태로 이동·회전 분기에 들어가 축 배열을 넘겨 읽습니다.
-    const bool drivingPlayer = ctx_.world && ctx_.world->getActiveCamera() != editorCam_;
+    const bool drivingPlayer = ctx_.world && CameraComponent::activeIn(*ctx_.world) != editorCam_;
     if (ctx_.window && currentFocus() == EFocusTarget::None && !gizmo_.isDragging() &&
         !ctx_.window->isCameraModeActive() && !modal_ && !drivingPlayer) {
         IWindow& win = *ctx_.window;
@@ -1710,7 +1714,7 @@ void EditorApp::beginPlay() {
     if (playState_ == EPlayState::Editor) {
         worldSnapshot_ = serializeWorld();
         doc_.beginPlay(cmdStack_.stateToken());
-        ctx_.world->setPlaying(true);
+        viewCamera_.preferred = false;   // Play 중에는 씬 카메라(플레이어)가 먼저
         HLOG(LogEditor, Log) << "Play";
     } else {
         HLOG(LogEditor, Log) << "Resume";
@@ -1733,7 +1737,7 @@ void EditorApp::pausePlay() {
 void EditorApp::stopPlay() {
     if (playState_ == EPlayState::Editor) return;
     playState_ = EPlayState::Editor;
-    ctx_.world->setPlaying(false);
+    viewCamera_.preferred = true;
     deserializeWorld(worldSnapshot_);
     worldSnapshot_.clear();
     cmdStack_.clear();
@@ -2197,7 +2201,7 @@ void EditorApp::addOutlinerRow(const OutlinerRow& r, float listW) {
             ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center))
         ->onClick([this, id] {
             Actor* t = ctx_.world ? ctx_.world->findById(id) : nullptr;
-            // 에디터 카메라를 끄면 getActiveCamera 가 비어 뷰포트·기즈모·픽이 전부
+            // 에디터 카메라를 끄면 CameraComponent::activeIn 이 비어 뷰포트·기즈모·픽이 전부
             // 죽습니다. 아웃라이너에 노출하지 않지만 여기서도 이중으로 막습니다.
             if (!t || t == editorCamActor_) return;
             const bool before = t->activeSelf();
@@ -3915,7 +3919,7 @@ void EditorApp::handleInput(float mouseX, float mouseY,
 void EditorApp::buildEditorIcons(World& world, const WorldViewport& /*wvp*/,
                                  std::vector<LineVertex>& lines,
                                  std::vector<LineVertex>& tris) {
-    CameraComponent* cam = world.getActiveCamera();
+    CameraComponent* cam = CameraComponent::activeIn(world);
     if (!cam || !cam->owner) return;
     const glm::vec3 camPos  = cam->owner->worldPosition();
     const glm::mat4 invView = glm::inverse(cam->viewMatrix());
@@ -3926,7 +3930,7 @@ void EditorApp::buildEditorIcons(World& world, const WorldViewport& /*wvp*/,
         Actor* a = ap.get();
         if (a == editorCamActor_) continue;
         // 아웃라이너의 눈으로 끈 액터는 아이콘도 사라져야 합니다. 메시 렌더는 이미
-        // getVisibleMeshes 에서 게이트되므로, 에디터 오버레이만 맞춰 줍니다.
+        // StaticMeshComponent::visibleIn 에서 게이트되므로, 에디터 오버레이만 맞춰 줍니다.
         if (!a->activeInHierarchy()) continue;
         glm::vec4 color{0.f}; bool has = false;
         for (const auto& comp : a->getComponents())
@@ -4072,7 +4076,7 @@ WorldViewport EditorApp::worldVP(float mx, float my, float winW, float winH) con
 
 bool EditorApp::pointerRay(float mx, float my, float winW, float winH, glm::vec3& origin, glm::vec3& dir) const {
     if (!ctx_.world || !inViewport(mx, my, winW, winH)) return false;
-    CameraComponent* cam = ctx_.world->getActiveCamera();
+    CameraComponent* cam = CameraComponent::activeIn(*ctx_.world);
     if (!cam || !cam->owner || cam == editorCam_) return false;   // 에디터 카메라로 보는 중이면 게임 화면이 아님
     const WorldViewport wvp = worldVP(mx, my, winW, winH);
     if (wvp.fbRect.width <= 0.f || wvp.fbRect.height <= 0.f) return false;
@@ -4342,7 +4346,7 @@ void EditorApp::tickEditorCamera(float dt, float scroll) {
 
     // Play 중 씬 카메라(플레이어)가 화면이면 에디터 카메라는 움직이지 않습니다. 오른쪽 버튼을 누른 채 끈 양은 게임의
     // 시선 축(LookX · LookY)으로 넘기고, 이동 키는 게임 입력(MoveX · MoveY)이 받습니다(2026-10-15).
-    if (ctx_.world && ctx_.world->getActiveCamera() != editorCam_) {
+    if (ctx_.world && CameraComponent::activeIn(*ctx_.world) != editorCam_) {
         float rx = 0.f, ry = 0.f, lx = 0.f, ly = 0.f;
         win.getRightMouseDelta(rx, ry);
         win.getMouseDelta(lx, ly);   // 쌓이지 않게 비움(DEF-79)
@@ -4409,7 +4413,7 @@ void EditorApp::tickEditorCamera(float dt, float scroll) {
 // ── pickActor ──────────────────────────────────────────────────────────────────
 void EditorApp::pickActor(float mx, float my, float winW, float winH) {
     if (!ctx_.world) return;
-    CameraComponent* cam = ctx_.world->getActiveCamera();
+    CameraComponent* cam = CameraComponent::activeIn(*ctx_.world);
     if (!cam || !cam->owner) return;
 
     // 씬은 뷰포트 서브렉트에 그려지므로(Viewport_Render_Design.md), 광선도 fb.left/top

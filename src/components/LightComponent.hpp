@@ -5,6 +5,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <optional>
+#include <vector>
+
+class World;
 
 enum class LightType : uint32_t {
     Directional = 0,
@@ -82,6 +85,9 @@ public:
 
     const char*           typeName()   const override { return "LightComponent"; }
     std::vector<PropDesc> buildProps()       override;
+
+    // 켜진 라이트(예전 World::getLights, 2026-11-18 S3): 활성 · 켜짐, 액터 순서.
+    static std::vector<LightComponent*> enabledIn(const World& world);
 
     // 직렬화 (DEF-22). 이름은 멤버 이름을 따릅니다.
     void writeFields(ComponentFieldWriter& w) const override;

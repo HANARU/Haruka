@@ -126,8 +126,14 @@ void PhysicsSystem::startup() {
         impl_->bpLayerInterface, impl_->objVsBpFilter, impl_->objLayerPairFilter);
     impl_->physics->SetGravity(JPH::Vec3(0.f, -9.81f, 0.f));
 
-    current_ = this;
+    if (world_) world_->setService<PhysicsSystem>(this);
     HLOG(LogPhysics, Log) << "Jolt initialized";
+}
+
+void PhysicsSystem::setWorld(World* w) {
+    if (world_ && world_->service<PhysicsSystem>() == this) world_->setService<PhysicsSystem>(nullptr);
+    world_ = w;
+    if (world_ && impl_) world_->setService<PhysicsSystem>(this);
 }
 
 void PhysicsSystem::shutdown() {
@@ -147,7 +153,7 @@ void PhysicsSystem::shutdown() {
     }
 
     impl_->characters.clear();
-    if (current_ == this) current_ = nullptr;
+    if (world_ && world_->service<PhysicsSystem>() == this) world_->setService<PhysicsSystem>(nullptr);
     impl_.reset();
     JPH::UnregisterTypes();
     delete JPH::Factory::sInstance;

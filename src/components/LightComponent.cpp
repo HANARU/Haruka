@@ -7,6 +7,7 @@
 #include "../scene/Reflect.hpp"
 #include "../scene/ComponentFields.hpp"
 #include "../scene/SceneLog.hpp"
+#include "../scene/World.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -236,4 +237,12 @@ void LightComponent::drawEditorVisual() const {
         hdebug::line(p, p + d * 2.f, c);
         hdebug::circle(p + d * 2.f, d, 0.15f, c, 12);
     }
+}
+
+std::vector<LightComponent*> LightComponent::enabledIn(const World& world) {
+    std::vector<LightComponent*> result;
+    for (LightComponent* l : world.componentsOf<LightComponent>())
+        if (l->owner->activeInHierarchy() && l->isEnabled())
+            result.push_back(l);
+    return result;
 }

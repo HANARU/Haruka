@@ -75,7 +75,7 @@
   창 제목 · 헤드셋 소리). 실행 파일마다 링크한 `createEngineFrontend()` 가 앞단을 고르므로 엔진 코드에 `#ifdef` 가 없습니다.
   실행 형태마다 다른 규칙은 `Policy`(프로젝트 폴더 · VR 시작 · 초점 일시정지 · EXITING 종료 · 재연결 · 쓰기 루트)로 넘깁니다.
 - `EditorApp` 이 이 인터페이스를 구현합니다(동작은 그대로). 앞단 멤버는 예전 에디터 자리에 두어 파괴 순서도 같습니다.
-- `GameFrontend`: 시작 씬을 `SceneSerializer::readScene` 으로 열고 `World::setPlaying(true)` 로 처음부터 Play 입니다. 에디터의 Play
+- `GameFrontend`: 시작 씬을 `SceneSerializer::readScene` 으로 열고 처음부터 Play 입니다(`isPlaying` 이 늘 참). 에디터의 Play
   와 같은 경로라 게임 코드는 두 실행 형태를 구별하지 않습니다. 씬에 켜진 primary 카메라가 없으면 에디터가 처음 여는 시점과 같은
   자리에 기본 카메라를 놓습니다(UE 의 기본 폰과 같은 자리). 오른쪽 버튼 끌기를 시선 축으로 넘깁니다.
 - 디버그 선(`hdebug`)은 에디터만 비워, 에디터가 없거나 최소화로 에디터 tick 을 건너뛰면 끝없이 쌓였습니다. 이제 엔진이 앞단 tick

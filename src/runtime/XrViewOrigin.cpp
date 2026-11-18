@@ -10,7 +10,7 @@
 
 XrViewChoice XrViewOrigin::choose(World& world) const {
     XrViewChoice v;
-    v.cam    = world.getActiveCamera();
+    v.cam    = CameraComponent::activeIn(world);
     v.origin = hxr::chooseOrigin(v.cam ? v.cam->owner : nullptr);
     v.rig    = v.origin.kind == hxr::EXrOrigin::SceneRig ? v.origin.actor : nullptr;
     return v;

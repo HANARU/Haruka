@@ -1135,7 +1135,20 @@ int main() {
         PhysicsSystem ps;
         ps.startup();
         ps.setWorld(&w);
-        check(PhysicsSystem::current() == &ps, "startup 뒤 current() 가 이 시스템");
+        // 월드 단위 서비스(2026-11-18 S3, 예전 정적 포인터 current()).
+        check(w.service<PhysicsSystem>() == &ps, "startup · setWorld 뒤 월드 서비스가 이 시스템");
+        {
+            // Jolt 는 전역(팩토리 · 형 등록)을 써서 두 번째 시스템을 startup 하지 않습니다. 시작 전 시스템과 월드 옮기기만 봅니다.
+            World other;
+            PhysicsSystem idle;
+            idle.setWorld(&other);
+            check(other.service<PhysicsSystem>() == nullptr, "startup 전에는 월드 서비스로 넣지 않음");
+            ps.setWorld(&other);
+            check(w.service<PhysicsSystem>() == nullptr && other.service<PhysicsSystem>() == &ps,
+                  "다른 월드로 옮기면 옛 월드에서 빼고 새 월드에 넣음");
+            ps.setWorld(&w);
+            check(w.service<PhysicsSystem>() == &ps && other.service<PhysicsSystem>() == nullptr, "되돌리면 다시 이 월드");
+        }
         auto staticBox = [&](const char* name, const glm::vec3& pos, const glm::vec3& size) {
             Actor* a = w.spawnActor(name);
             a->setLocalPosition(pos);
@@ -1212,7 +1225,7 @@ int main() {
         in.update(0.f, [](int) { return false; });
 
         ps.shutdown();
-        check(PhysicsSystem::current() == nullptr, "shutdown 뒤 current() 는 null");
+        check(w.service<PhysicsSystem>() == nullptr, "shutdown 뒤 월드 서비스에서 빠짐");
         ps.destroyCharacter(ch);   // 지운 뒤 불러도 안전
     }
     {

@@ -9,8 +9,10 @@
 #include "Component.hpp"
 
 // 구조 버전(2026-11-18, 성능 안정화 1-5). 액터 생성 · 삭제 · ID 재배치와 컴포넌트 추가 · 제거 · 순서 변경 때 오릅니다.
-// World::componentsOf<T> 가 이 값이 바뀔 때만 목록을 다시 모읍니다. 모든 World 가 함께 쓰는 값이라(액터는 자기 World 를
-// 모름) 한 월드의 변경이 다른 월드의 목록도 다시 모으게 하지만, 틀리지는 않습니다. 메인 스레드에서만 바꿉니다.
+// World::componentsOf<T> 가 이 값이 바뀔 때만 목록을 다시 모읍니다. 모든 World 가 함께 쓰는 값이라 한 월드의 변경이 다른
+// 월드의 목록도 다시 모으게 하지만, 틀리지는 않습니다. 메인 스레드에서만 바꿉니다.
+class World;
+
 namespace hcore {
 inline uint64_t gStructureVersion = 1;
 inline void     bumpStructure() { ++gStructureVersion; }
@@ -20,6 +22,10 @@ class Actor {
 public:
     uint64_t    id     = 0;   // assigned by World::spawnActor
     std::string name;
+
+    // 이 액터를 만든 월드(World::spawnActor 가 정함, 2026-11-18 S3). 컴포넌트가 월드 단위 서비스를 찾을 때 씁니다
+    // (owner->world()->service<PhysicsSystem>() 등, World.hpp).
+    World* world() const { return world_; }
 
     // ── 활성 상태 (유니티 activeSelf / activeInHierarchy) ─────────────────────
     // activeSelf_ 는 이 액터 자신의 플래그입니다. activeInHierarchy() 는 부모 체인을
@@ -155,6 +161,8 @@ public:
     void notifyTransformCommitted();
 
 private:
+    friend class World;   // world_ 를 정함
+
     // 이 액터와 자식 서브트리의 모든 컴포넌트에 대해 실효 활성을 다시 계산하고,
     // 전이된 것만 onEnable/onDisable 을 발화시킵니다. setActive·attachTo·detach 가 호출합니다.
     void refreshSubtreeActive();
@@ -163,6 +171,7 @@ private:
     // 리스트 조작과 실효 갱신을 분리하는 내부 헬퍼입니다.
     void unlinkFromParent();
 
+    World*              world_ = nullptr;   // 컴포넌트보다 먼저 선언(컴포넌트를 지우는 중에도 읽힘)
     std::vector<std::unique_ptr<Component>>      components;
     std::unordered_map<std::type_index, Component*> componentCache_;
 

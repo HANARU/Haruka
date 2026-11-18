@@ -191,7 +191,7 @@
 
 ### 5-2. 카메라와 헤드셋 원점
 
-- 편집 중 화면 카메라는 에디터 카메라이고, Play 중에는 켜진 첫 primary 씬 카메라입니다. 없으면 에디터 카메라입니다(`World::getActiveCamera`).
+- 편집 중 화면 카메라는 에디터 카메라이고, Play 중에는 켜진 첫 primary 씬 카메라입니다. 없으면 에디터 카메라입니다(`CameraComponent::activeIn`, 2026-11-18 전에는 `World::getActiveCamera`).
 - XR 에는 언제나 리그가 있습니다(2026-10-16).
   - 화면 카메라가 씬 리그의 Head(Tracked Pose[Head] + 부모가 XR Rig)이면 엔진이 프레임마다 그 리그를 헤드셋 원점으로 넘깁니다
     (`CameraComponent::setXrRig`).

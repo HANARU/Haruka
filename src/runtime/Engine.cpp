@@ -4,7 +4,6 @@
 #include "../assets/AssetManager.hpp"
 #include "../audio/AudioSystem.hpp"
 #include "../physics/PhysicsSystem.hpp"
-#include "../game/DefaultGameModule.hpp"
 #include "../input/HInputSystem.hpp"
 #include "../platform/IWindow.hpp"
 #include "../xr/XrSystem.hpp"
@@ -363,7 +362,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // 게임 모듈(씬 콘텐츠) + 프레임 컨텍스트.
     ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_, *renderer_,
                                   ComponentRegistry::get() });
-    game_ = std::make_unique<DefaultGameModule>();
+    game_ = createGameModule();   // 링크한 게임 모듈(runtime/IGameModule.hpp)
     game_->onStart(*ctx_);
 
     // 처음 열 씬은 앞단이 정합니다. 에디터는 마지막으로 연 씬(없으면 프로젝트 시작 씬), 게임 실행 파일은 프로젝트 시작
@@ -499,7 +498,7 @@ void Engine::applyViewPose(FrameState& f) {
     viewOrigin_->applyToCamera(f.view, xr_.get(), world_);
     if (audio_) {
         const HXrInputState& xr  = HInputSystem::get().xr();
-        CameraComponent*     cam = world_.getActiveCamera();
+        CameraComponent*     cam = CameraComponent::activeIn(world_);
         if (xr.focused && xr.head.valid && cam)
             audio_->setListenerPose(cam->xrOrigin() * glm::translate(glm::mat4(1.f), xr.head.position)
                                     * glm::mat4_cast(xr.head.orientation));

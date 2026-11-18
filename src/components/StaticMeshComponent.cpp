@@ -5,6 +5,7 @@
 #include "../scene/Actor.hpp"
 #include "../scene/ComponentFields.hpp"
 #include "../scene/SceneLog.hpp"
+#include "../scene/World.hpp"
 #include "../renderer/ScreenSize.hpp"
 #include <algorithm>
 #include <exception>
@@ -163,4 +164,13 @@ void StaticMeshComponent::onFieldsLoaded(const ComponentLoadContext& ctx) {
             HLOG(LogScene, Error) << "Mesh load failed (" << actorName << "): " << ex.what();
         }
     }
+}
+
+std::vector<StaticMeshComponent*> StaticMeshComponent::visibleIn(const World& world) {
+    std::vector<StaticMeshComponent*> result;
+    for (StaticMeshComponent* m : world.componentsOf<StaticMeshComponent>())
+        if (m->owner->activeInHierarchy())
+            if (m->isEnabled() && m->visible && m->mesh)
+                result.push_back(m);
+    return result;
 }

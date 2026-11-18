@@ -1,8 +1,8 @@
 // 게임 실행 파일(HarukaGame)의 엔진 앞단(2026-10-19, 런타임 분리 DEF-12). 에디터 실행 파일은 이 파일 대신
 // editor/EditorFrontend.cpp 를 링크합니다.
 //
-// 시작 씬을 열고 처음부터 Play 상태로 돕니다. 에디터의 Play 와 같은 경로(World::setPlaying, 엔진의 BeginPlay 통지)를
-// 쓰므로 게임 코드는 두 실행 형태를 구별하지 않습니다. 실행 규칙은 2026-10-19 사용자 결정입니다(policy()).
+// 시작 씬을 열고 처음부터 Play 상태로 돕니다. 에디터의 Play 와 같은 경로(엔진의 BeginPlay 통지)를 쓰므로
+// 게임 코드는 두 실행 형태를 구별하지 않습니다. 실행 규칙은 2026-10-19 사용자 결정입니다(policy()).
 #include "../runtime/IEngineFrontend.hpp"
 #include "../scene/World.hpp"
 #include "../scene/Actor.hpp"
@@ -53,7 +53,6 @@ public:
         }
         sceneName_ = std::filesystem::path(startScene).stem().string();
         ensureCamera();
-        world_->setPlaying(true);
     }
 
     void cleanup() override {}
@@ -77,7 +76,7 @@ public:
     bool inViewport(float, float, float, float) const override { return true; }   // 창 전체가 게임 화면
     // 창 전체가 게임 화면이라, 마우스 비율로 활성 카메라의 광선을 만듭니다(3D UI 구간 5).
     bool pointerRay(float mx, float my, float winW, float winH, glm::vec3& origin, glm::vec3& dir) const override {
-        CameraComponent* cam = world_ ? world_->getActiveCamera() : nullptr;
+        CameraComponent* cam = world_ ? CameraComponent::activeIn(*world_) : nullptr;
         if (!cam || !cam->owner || winW <= 0.f || winH <= 0.f) return false;
         UIPanelPointer::Ray r;
         if (!UIPanelPointer::rayFromScreen(cam->projMatrix(winW / winH) * cam->viewMatrix(), { mx / winW, my / winH }, r))
@@ -94,7 +93,7 @@ private:
     // 씬에 켜진 primary 카메라가 없으면 기본 카메라를 놓습니다(UE 가 플레이어 없이 시작하면 기본 폰을 놓는 것과 같은
     // 자리). 위치와 각도는 에디터가 처음 여는 시점과 같아, 에디터에서 본 첫 화면이 그대로 보입니다.
     void ensureCamera() {
-        if (world_->getActiveCamera()) return;
+        if (CameraComponent::activeIn(*world_)) return;
         Actor* a = world_->spawnActor("Default Camera");
         a->setLocalPosition({ 0.f, 0.3f, 2.5f });
         a->setLocalRotation(CameraComponent::yawPitchRotation(0.f, 0.15f));

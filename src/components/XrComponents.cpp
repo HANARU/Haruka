@@ -16,6 +16,11 @@
 #include <cfloat>
 #include <cmath>
 
+// 액터가 속한 월드의 물리(월드 단위 서비스, 2026-11-18 S3). 예전에는 정적 포인터 PhysicsSystem::current() 였습니다.
+static PhysicsSystem* physicsOf(const Actor& a) {
+    return a.world() ? a.world()->service<PhysicsSystem>() : nullptr;
+}
+
 // ── 리그 ─────────────────────────────────────────────────────────────────────────
 std::vector<PropDesc> XrRigComponent::buildProps() {
     auto* p = this;
@@ -241,7 +246,7 @@ void RigLocomotionComponent::tick(float dt) {
     if (glm::length(move) > 1.f) move = glm::normalize(move);
     if (flying) move += up * std::clamp(in.axis("MoveUp"), -1.f, 1.f);
     velocity_ = move * moveSpeed;
-    if (collide && PhysicsSystem::current()) moveCollide(rig, headPos, move, dt);
+    if (collide && physicsOf(rig)) moveCollide(rig, headPos, move, dt);
     else {
         releaseCharacter();
         if (glm::dot(move, move) > 0.f) rig.setWorldPosition(rig.worldPosition() + move * moveSpeed * dt);
@@ -285,7 +290,7 @@ static void rigIgnoreList(Actor& rig, std::vector<Actor*>& out, std::vector<Acto
 }
 
 void RigLocomotionComponent::moveCollide(Actor& rig, const glm::vec3& headPos, const glm::vec3& move, float dt) {
-    PhysicsSystem* ps = PhysicsSystem::current();
+    PhysicsSystem* ps = physicsOf(rig);
     // 캡슐은 머리 아래, 리그 바닥 높이에 섭니다(방 안에서 걸어간 자리를 따라감).
     const glm::vec3 feet{ headPos.x, rig.worldPosition().y, headPos.z };
     if (!character_) {
@@ -310,7 +315,7 @@ void RigLocomotionComponent::moveCollide(Actor& rig, const glm::vec3& headPos, c
 
 void RigLocomotionComponent::releaseCharacter() {
     if (character_) {
-        if (PhysicsSystem* ps = PhysicsSystem::current()) ps->destroyCharacter(character_);
+        if (PhysicsSystem* ps = owner ? physicsOf(*owner) : nullptr) ps->destroyCharacter(character_);
         character_ = 0;
     }
     fallSpeed_ = 0.f;
@@ -325,7 +330,7 @@ void RigLocomotionComponent::tickTeleport(Actor& rig, const glm::vec3& headPos) 
     Actor* hand = nullptr;
     for (Actor* c : rig.getChildren())
         if (auto* tp = c->getComponent<TrackedPoseComponent>(); tp && tp->source == ETrackedSource::RightHand) hand = c;
-    PhysicsSystem* ps = PhysicsSystem::current();
+    PhysicsSystem* ps = physicsOf(rig);
     if (!hand || !ps) { aiming_ = false; return; }
 
     if (!aiming_ && t > 0.7f) aiming_ = true;

@@ -2,6 +2,7 @@
 #include "../core/DebugDraw.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/ComponentFields.hpp"
+#include "../scene/World.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 
@@ -135,4 +136,14 @@ void CameraComponent::drawEditorVisual() const {
         hdebug::line(pf[i], pf[(i + 1) % 4], c);
         hdebug::line(pn[i], pf[i], c);
     }
+}
+
+CameraComponent* CameraComponent::activeIn(const World& world) {
+    const ViewCameraOverride* o     = world.service<ViewCameraOverride>();
+    CameraComponent*          front = o ? o->camera : nullptr;
+    if (front && o->preferred) return front;
+    for (CameraComponent* c : world.componentsOf<CameraComponent>())
+        if (c->owner->activeInHierarchy())
+            if (c != front && c->isEnabled() && c->primary) return c;
+    return front;
 }

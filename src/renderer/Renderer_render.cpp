@@ -91,7 +91,7 @@ uint32_t Renderer::updateLightSSBO(World& world) {
     // 올릴 라이트를 고릅니다(DEF-33, LightSelection.hpp). 어느 눈에도 영향이 없는 점광원 · 스팟은 거르고,
     // 상한(render.maxLights)을 넘으면 방향광을 먼저, 나머지는 가까운 순으로 고릅니다. 상한 안이면 순서를
     // 바꾸지 않아 픽셀 합산 순서가 그대로입니다. 예전에는 생성 순서대로 앞에서부터 올리고 상한에서 잘랐습니다.
-    const std::vector<LightComponent*> lights = world.getLights();
+    const std::vector<LightComponent*> lights = LightComponent::enabledIn(world);
     std::vector<hlight::Candidate> lightCands;
     lightCands.reserve(lights.size());
     for (auto* lc : lights) {
@@ -291,7 +291,7 @@ void Renderer::buildDrawCommands(World& world,
 
     auto* tfData = static_cast<GpuTransform*>(frames_.transformPtr(frameIdx));
 
-    const auto& allMeshes   = world.getVisibleMeshes();
+    const auto& allMeshes   = StaticMeshComponent::visibleIn(world);
     uint32_t totalCnt = (uint32_t)allMeshes.size();
 
     // LOD 와 투명 정렬의 기준점은 두 눈의 가운데입니다. 눈마다 다르게 고르면 두 눈이 다른 LOD 나
@@ -476,7 +476,7 @@ void Renderer::buildDrawCommands(World& world,
 // 이번 프레임에 그릴 눈을 정합니다. 단안은 활성 카메라 하나, 스테레오 흉내 모드는 카메라 좌우의
 // 두 눈입니다(DEF-09). 눈 위치는 뷰 행렬의 역에서 읽습니다(예전 cameraPos 와 같은 식).
 void Renderer::gatherViews(World& world, const XrFrameTarget* xr) {
-    CameraComponent* cam = world.getActiveCamera();
+    CameraComponent* cam = CameraComponent::activeIn(world);
     cameraExposureEv_ = cam ? cam->exposureEv : 0.f;
     if (captureOverride_) {   // 반사 캡처 중: 큐브 한 면의 눈 하나(Renderer_capture.cpp)
         hasCamera_ = true;

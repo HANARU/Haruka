@@ -21,7 +21,9 @@ public:
     void        onBeginPlay()  override;
     const char* name() const   override { return "PhysicsSystem"; }
 
-    void setWorld(World* w) { world_ = w; }
+    // 시뮬레이션할 월드. startup ~ shutdown 사이에는 그 월드의 서비스로 자신을 넣습니다(world.service<PhysicsSystem>(),
+    // 2026-11-18 S3). 컴포넌트(리그 이동 · 텔레포트)는 owner->world() 로 찾습니다. 예전 정적 포인터 current() 자리입니다.
+    void setWorld(World* w);
 
     // 물리 스텝 주기(Hz). 기본 60 입니다. XR 세션 동안 엔진이 헤드셋 주사율에 맞춥니다(Godot 의 XR
     // 문서 권고). 스텝이 화면보다 느리면 어떤 프레임은 스텝이 없어 움직이는 물체가 떨려 보입니다.
@@ -133,11 +135,7 @@ public:
     bool     moveCharacter(uint32_t handle, const glm::vec3& feet, const glm::vec3& velocity, float dt,
                            CharacterMove& out, std::span<Actor* const> ignore = {});
 
-    // 지금 살아 있는 물리 시스템(엔진에 하나). 컴포넌트가 질의에 씁니다. startup ~ shutdown 사이에만 null 이 아닙니다.
-    static PhysicsSystem* current() { return current_; }
-
 private:
-    static inline PhysicsSystem* current_ = nullptr;
     std::unique_ptr<JoltImpl> impl_;
     World* world_ = nullptr;
 

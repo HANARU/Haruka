@@ -5,6 +5,10 @@
 // 규칙 표가 허용하는 방향인지 봅니다. 아직 고치지 않은 위반은 허용 목록에 파일 쌍으로 적고, 고쳐서 필요 없어진 항목이 남아
 // 있으면 실패합니다(목록은 줄기만 함).
 //
+// 시스템 접근(S3, 2026-11-18): 정적 시스템 포인터(static inline T* · static T* current())는 0 개여야 하고, 프로세스 전역
+// 싱글턴(static T& get())은 정본 8절의 목록에 있는 것만 됩니다. 시스템은 엔진 단위(EngineContext) · 월드 단위
+// (World::service<T>)로 찾습니다.
+//
 // 실행: build/Release/HarukaArchTest.exe [--list]
 //   --list : 지금 위반을 허용 목록 형식으로 출력합니다(목록을 다시 만들 때).
 
@@ -14,6 +18,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -230,6 +235,40 @@ int main(int argc, char** argv) {
     for (const auto& p : rules.allow) if (!used.count(p)) stale.push_back(p.first + " -> " + p.second);
     for (const std::string& s : stale) std::printf("    필요 없어진 항목(지우십시오): %s\n", s.c_str());
     check(stale.empty(), "허용 목록의 항목이 모두 아직 남은 위반(고친 것은 목록에서 뺌)");
+
+    // ── 정적 시스템 포인터 · 전역 싱글턴 (S3) ──
+    // 줄 단위로 봅니다(// 뒤 주석은 뺌). 함수 안의 지역 정적(로그 레지스트리의 늦은 생성 등)은 대상이 아닙니다.
+    const std::regex staticPtr(R"(static\s+inline\s+[A-Za-z_][\w:<>]*\s*\*\s*\w+\s*[=;{])");
+    const std::regex accessor(R"(static\s+[A-Za-z_][\w:<>]*\s*\*\s*(current|instance)\s*\()");
+    const std::regex singleton(R"(static\s+([A-Za-z_]\w*)\s*&\s*(get|instance)\s*\(\s*\))");
+    // 프로세스에 하나뿐인 것(장치 입력 · 컴포넌트 형 표). 늘리려면 정본 8절에 이유를 적고 여기에 더합니다.
+    const std::set<std::string> kSingletons = { "HInputSystem", "ComponentRegistry" };
+    std::vector<std::string> pointers;
+    std::set<std::string>    singletonsSeen, singletonsBad;
+    for (const std::string& rel : files) {
+        std::ifstream in(src / rel);
+        int n = 0;
+        for (std::string line; std::getline(in, line);) {
+            ++n;
+            const size_t c = line.find("//");
+            if (c != std::string::npos) line.resize(c);
+            if (std::regex_search(line, staticPtr) || std::regex_search(line, accessor))
+                pointers.push_back(rel + ":" + std::to_string(n) + "  " + trim(line));
+            std::smatch m;
+            if (std::regex_search(line, m, singleton)) {
+                singletonsSeen.insert(m[1].str());
+                if (!kSingletons.count(m[1].str())) singletonsBad.insert(m[1].str() + "  (" + rel + ":" + std::to_string(n) + ")");
+            }
+        }
+    }
+    std::printf("\n[시스템 접근] 정적 시스템 포인터 %zu 개, 전역 싱글턴 %zu 개\n", pointers.size(), singletonsSeen.size());
+    for (const std::string& v : pointers) std::printf("    정적 포인터: %s\n", v.c_str());
+    check(pointers.empty(), "정적 시스템 포인터 없음(월드 단위는 World::service<T>, 엔진 단위는 EngineContext)");
+    for (const std::string& v : singletonsBad) std::printf("    목록에 없는 싱글턴: %s\n", v.c_str());
+    std::vector<std::string> goneSingletons;
+    for (const std::string& k : kSingletons) if (!singletonsSeen.count(k)) goneSingletons.push_back(k);
+    for (const std::string& v : goneSingletons) std::printf("    없어진 싱글턴(목록에서 지우십시오): %s\n", v.c_str());
+    check(singletonsBad.empty() && goneSingletons.empty(), "전역 싱글턴은 정한 목록(HInputSystem · ComponentRegistry)과 같음");
 
     std::printf("\n결과: %s (검사 %d, 실패 %d)\n", g_failed ? "FAIL" : "PASS", g_checks, g_failed);
     return g_failed ? 1 : 0;

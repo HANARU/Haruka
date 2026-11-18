@@ -4,6 +4,16 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+class World;
+class CameraComponent;
+
+// 앞단이 정하는 화면 카메라(2026-11-18, 엔진 구조 안정화 S3). 에디터가 자기 카메라를 월드 단위 서비스로 넣습니다
+// (world.setService<ViewCameraOverride>). 예전에는 World 가 에디터 카메라와 Play 여부(editorCam_ · playing_)를 들었습니다.
+struct ViewCameraOverride {
+    CameraComponent* camera    = nullptr;   // 앞단의 카메라(에디터 카메라)
+    bool             preferred = false;     // 참이면 씬 카메라보다 먼저 고름(에디터 편집 중). 거짓이면 씬 카메라가 없을 때만
+};
+
 // zFar uses makePropFloat directly to clamp against the live zNear value.
 #define CAMERA_PROPS(p) \
     XPROP_FloatClamp(p, "FovY",  PropColor::Neutral, 1.f,   fovY,  10.f, 170.f), \
@@ -23,6 +33,11 @@ public:
     // 노출 보정(EV, 2026-11-17 노출 배선): 화면 밝기 × 2^EV. 0 이면 프로젝트 기준 노출 그대로(UE Exposure Compensation 과 같은 뜻,
     // 자동 노출은 쓰지 않음, Lighting_UE_Design Phase 3).
     float exposureEv = 0.f;
+
+    // 화면을 그릴 카메라(예전 World::getActiveCamera). 앞단 카메라가 먼저이면(에디터 편집 중) 그것이고, 아니면 씬의 primary
+    // 카메라(활성 · 켜짐, 액터 순서상 첫 번째, 앞단 카메라 제외)를 먼저 고르고 없으면 앞단 카메라입니다(2026-10-15). 앞단
+    // 카메라가 없으면(게임 실행 파일) 첫 primary 카메라이고, 그것도 없으면 nullptr 입니다.
+    static CameraComponent* activeIn(const World& world);
 
     bool editorIcon(glm::vec4& c) const override { c = {0.35f, 0.6f, 1.f, 1.f}; return true; }
     int  editorIconShape() const override { return 2; }

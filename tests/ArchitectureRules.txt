@@ -86,11 +86,3 @@ allow renderer/Renderer.cpp -> scene/World.hpp
 allow renderer/Renderer_capture.cpp -> scene/Actor.hpp
 allow renderer/Renderer_capture.cpp -> scene/World.hpp
 allow renderer/Renderer_render.cpp -> scene/World.hpp
-
-# runtime -> game — 1단계 S3: 기본 게임 모듈을 엔진이 직접 만듦(앞단이 넘기게)
-allow runtime/Engine.cpp -> game/DefaultGameModule.hpp
-
-# scene -> components — 1단계 S3: World 의 카메라 · 메시 · 라이트 찾기(컴포넌트를 아는 쪽으로)
-allow scene/World.cpp -> components/StaticMeshComponent.hpp
-allow scene/World.cpp -> components/CameraComponent.hpp
-allow scene/World.cpp -> components/LightComponent.hpp

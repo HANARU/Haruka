@@ -6,3 +6,7 @@
 // 씬이 있으면 그것, 없으면 시작 씬이고(그래야 지금 열린 파일을 알고 저장할 수 있음), 게임 실행 파일은 GameFrontend 가
 // 시작 씬을 엽니다(2026-10-19). 이 함수는 게임 규칙을 넣을 자리로 남겨 둡니다.
 void DefaultGameModule::onStart(EngineContext& /*ctx*/) {}
+
+std::unique_ptr<IGameModule> createGameModule() {
+    return std::make_unique<DefaultGameModule>();
+}

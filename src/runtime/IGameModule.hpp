@@ -1,5 +1,6 @@
 #pragma once
 #include "ModuleManager.hpp"
+#include <memory>
 
 class World;
 class AssetManager;
@@ -31,3 +32,7 @@ public:
     virtual void onEndPlay  ()                             {}
     virtual void onShutdown ()                             {}
 };
+
+// 게임 모듈 선택(2026-11-18, 엔진 구조 안정화 S3). 앞단의 createEngineFrontend 처럼 링크한 쪽이 정의합니다. 지금은
+// game/DefaultGameModule.cpp 하나입니다. 예전에는 Engine 이 DefaultGameModule 을 직접 만들어 runtime 이 game 을 include 했습니다.
+std::unique_ptr<IGameModule> createGameModule();
