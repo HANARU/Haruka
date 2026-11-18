@@ -8,6 +8,7 @@
 // 실행: build/Release/HarukaGeometryTest.exe
 
 #include "../src/geometry/PrimitiveBuilder.hpp"
+#include "../src/geometry/MeshLod.hpp"
 #include "../src/geometry/MeshOptimize.hpp"
 #include "../src/geometry/QTangent.hpp"
 #include "../src/core/TextFloat.hpp"
@@ -460,6 +461,104 @@ int main() {
             check(std::fabs(dn[1] - 1.f) < 2e-4f && std::fabs(dt[0] * dn[0] + dt[1] * dn[1] + dt[2] * dn[2]) < 1e-3f,
                   "접선이 0 이면 법선은 그대로, 접선은 아무 직교 방향");
         }
+    }
+
+    {
+        std::printf("\n== O13 자동 LOD 생성(MeshLod) ==\n");
+        PrimitiveDesc dense;
+        dense.shape = EPrimitiveShape::Sphere;
+        dense.segU  = 64;
+        dense.segV  = 32;
+        const MeshSourceData sm = PrimitiveBuilder::build(dense);
+        // Sphere 는 UV 이음매·극점 링이 위상 경계이므로 lockBorder=true 로 감기 방향까지 확인
+        const auto lods = hmesh::buildLods(sm.vertices, sm.indices, 0.5f, true);
+        check(lods.size() >= 1 && lods.size() <= hmesh::kLodMaxLevels,
+              "조밀한 구에서 1 ~ 3단계 LOD 생성 (실제 " + std::to_string(lods.size()) + "단계)");
+
+        bool monoOk = !lods.empty();
+        bool rangeOk = true;
+        bool windOk = true;
+        size_t prevIdx = sm.indices.size();
+        float prevErr = 0.f;
+        float prevScr = 1e9f;
+        for (const auto& lv : lods) {
+            if (lv.indices.empty() || lv.indices.size() >= prevIdx || lv.indices.size() % 3 != 0) monoOk = false;
+            if (!(lv.error > prevErr) || !(lv.screenSize > 0.f && lv.screenSize < prevScr)) monoOk = false;
+            prevIdx = lv.indices.size();
+            prevErr = lv.error;
+            prevScr = lv.screenSize;
+
+            for (size_t i = 0; i + 2 < lv.indices.size(); i += 3) {
+                const uint32_t i0 = lv.indices[i], i1 = lv.indices[i + 1], i2 = lv.indices[i + 2];
+                if (i0 >= sm.vertices.size() || i1 >= sm.vertices.size() || i2 >= sm.vertices.size()) {
+                    rangeOk = false;
+                    break;
+                }
+                const glm::vec3 p0(sm.vertices[i0].pos[0], sm.vertices[i0].pos[1], sm.vertices[i0].pos[2]);
+                const glm::vec3 p1(sm.vertices[i1].pos[0], sm.vertices[i1].pos[1], sm.vertices[i1].pos[2]);
+                const glm::vec3 p2(sm.vertices[i2].pos[0], sm.vertices[i2].pos[1], sm.vertices[i2].pos[2]);
+                const glm::vec3 n = glm::cross(p1 - p0, p2 - p0);
+                const glm::vec3 c = (p0 + p1 + p2) / 3.f;
+                if (glm::length(n) > 1e-8f && glm::dot(n, c) <= 0.f) windOk = false;
+            }
+        }
+        check(monoOk, "단계마다 인덱스 감소 · 오차 증가 · 화면 크기 감소");
+        check(rangeOk, "모든 LOD 인덱스가 정점 수 범위 안");
+        check(windOk, "모든 LOD 삼각형의 감기 방향(바깥 법선)이 유지됨");
+
+        PrimitiveDesc smallDesc;
+        smallDesc.shape = EPrimitiveShape::Sphere;
+        smallDesc.segU  = 12;
+        smallDesc.segV  = 8;
+        const MeshSourceData smallMesh = PrimitiveBuilder::build(smallDesc);
+        const auto smallLods = hmesh::buildLods(smallMesh.vertices, smallMesh.indices, 0.5f);
+        check(smallLods.empty(), "삼각형 512개 미만 메시는 LOD 0단계");
+
+        // 열린 곡면 격자(20x20 = 800 tris): lockBorder=true 는 경계 정점을 보존하고, false 는 자유롭게 줄임
+        constexpr int N = 20;
+        std::vector<MeshSourceVertex> gridV((N + 1) * (N + 1));
+        for (int iy = 0; iy <= N; ++iy)
+            for (int ix = 0; ix <= N; ++ix) {
+                const float x = (float)ix / N * 2.f - 1.f;
+                const float y = (float)iy / N * 2.f - 1.f;
+                const float z = 0.25f * (x * x + y * y);
+                auto& v = gridV[iy * (N + 1) + ix];
+                v = { { x, y, z }, { 0.f, 0.f, 1.f }, { (float)ix / N, (float)iy / N }, { 1.f, 0.f, 0.f, 1.f } };
+            }
+        std::vector<uint32_t> gridI;
+        gridI.reserve(N * N * 6);
+        for (int iy = 0; iy < N; ++iy)
+            for (int ix = 0; ix < N; ++ix) {
+                const uint32_t a = (uint32_t)(iy * (N + 1) + ix);
+                const uint32_t b = a + 1, c = a + (N + 1), d = c + 1;
+                gridI.insert(gridI.end(), { a, b, d, a, d, c });
+            }
+        const auto lodLocked   = hmesh::buildLods(gridV, gridI, 1.5f, true);
+        const auto lodUnlocked = hmesh::buildLods(gridV, gridI, 1.5f, false);
+        check(!lodLocked.empty() && !lodUnlocked.empty() &&
+              lodUnlocked.back().indices.size() <= lodLocked.back().indices.size(),
+              "열린 격자: lockBorder=false 가 경계 고정보다 같거나 더 많이 줄임");
+
+        // UV 솔기가 있는 메시(Sphere 64x32, lockBorder=false)에서 보호한 UV-split 정점 쌍이 LOD 결과에 남는지 확인
+        const auto seamLods = hmesh::buildLods(sm.vertices, sm.indices, 0.5f, false);
+        bool seamPreserved = !seamLods.empty();
+        for (const auto& lv : seamLods) {
+            std::vector<uint8_t> used(sm.vertices.size(), 0);
+            for (uint32_t idx : lv.indices) {
+                if (idx < sm.vertices.size()) used[idx] = 1;
+            }
+            // 적도 부근 U=0 (ix=0) 과 U=1 (ix=64) 솔기 정점 쌍 중 실제로 양쪽이 모두 참조되는 쌍이 남아야 함
+            size_t pairsKept = 0;
+            const uint32_t stride = 65;
+            for (uint32_t iy = 1; iy < 32; ++iy) {
+                const uint32_t a = iy * stride;
+                const uint32_t b = iy * stride + 64;
+                if (used[a] && used[b] && std::fabs(sm.vertices[a].uv[0] - sm.vertices[b].uv[0]) > 1e-4f)
+                    ++pairsKept;
+            }
+            if (pairsKept == 0) seamPreserved = false;
+        }
+        check(seamPreserved, "UV 솔기: Permissive에서도 보호된 UV 갈라짐 정점 쌍이 LOD에 남음");
     }
 
     std::printf("\n실패 %d 건\n", g_failed);

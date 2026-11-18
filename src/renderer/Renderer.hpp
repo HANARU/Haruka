@@ -157,6 +157,9 @@ public:
                            const MeshBounds* precomputed = nullptr) {
         return scene_.uploadMesh(verts, indices, precomputed);
     }
+    MeshHandle* uploadLodIndices(const MeshHandle& base, const std::vector<uint32_t>& indices) {
+        return scene_.uploadLodIndices(base, indices);
+    }
     GpuScene::MeshBudget meshBudget() const { return scene_.budget(); }
     MaterialHandle* uploadMaterial(
         const TexSourceData& albedo, const TexSourceData& normalMap,

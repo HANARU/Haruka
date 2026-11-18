@@ -88,6 +88,14 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
             p.bindVertices = std::make_shared<const std::vector<MeshSourceVertex>>(data.vertices);
         }
         p.mesh      = renderer->uploadMesh(verts, data.indices);
+        if (autoLod_ && !data.skin && p.mesh) {
+            for (const auto& lod : data.lods) {
+                if (MeshHandle* lm = renderer->uploadLodIndices(*p.mesh, lod.indices)) {
+                    p.lods.push_back(lm);
+                    p.lodScreenSizes.push_back(lod.screenSize);
+                }
+            }
+        }
         p.collision = makeCollisionMesh(*src, data.indices);
         p.material  = renderer->uploadMaterial(
             data.albedo, data.normalMap, data.metalRough, data.ao, data.emissive);
@@ -243,6 +251,7 @@ void AssetManager::clear() {
         // 여기서 같이 풀면 이중 해제입니다.
         const bool isPrim = key.rfind("@prim/", 0) == 0;
         for (auto& p : pairs) {
+            for (MeshHandle* lm : p.lods) renderer->freeMesh(lm);
             renderer->freeMesh(p.mesh);
             if (!isPrim) renderer->freeMaterial(p.material);
         }

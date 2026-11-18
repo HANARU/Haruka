@@ -28,6 +28,11 @@ struct MeshSourceVertex {
     float tangent[4];  // xyz=tangent direction, w=handedness (+1 or -1)
 };
 
+struct MeshLodSource {
+    std::vector<uint32_t> indices;
+    float                 screenSize = 0.f;
+};
+
 struct MeshSourceData {
     std::string                   name;
     bool                          isBlend = false;  // alphaMode == "BLEND"
@@ -36,6 +41,7 @@ struct MeshSourceData {
     float                         alphaCutoff = 0.5f;   // glTF material.alphaCutoff(MASK 일 때만 의미, 기본 0.5)
     std::vector<MeshSourceVertex> vertices;
     std::vector<uint32_t>         indices;
+    std::vector<MeshLodSource>    lods;     // O13: 자동 생성 LOD (거친 단계 순, 비어 있을 수 있음)
     TexSourceData albedo;
     TexSourceData normalMap;
     TexSourceData metalRough;

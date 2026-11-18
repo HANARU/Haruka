@@ -67,6 +67,7 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (a == "--no-multiview")   o.multiview     = false;
         else if (a == "--ssao")           o.ssao          = true;
         else if (a == "--no-ssao")        o.ssao          = false;
+        else if (a == "--no-auto-lod")    o.autoLod       = false;
         else if (valueOf(a, "--synthetic-eyes", v)) {
             if (parseSize(v, o.syntheticEyeW, o.syntheticEyeH)) o.syntheticEyes = true;
             else unknown.push_back(a);

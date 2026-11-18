@@ -43,6 +43,7 @@ struct EngineOptions {
     // --ssao · --no-ssao : 화면 공간 AO 를 켜거나 끔(AO 를 뺀 비교 실측 · 끔 경로 시험). 없으면 프로젝트 설정
     // render.ao. 진단용이라 프로젝트 설정을 덮어씁니다.
     std::optional<bool> ssao;
+    bool                autoLod = true;  // --no-auto-lod : glTF 자동 LOD 를 컴포넌트에 배정하지 않음(O13 검증용)
 
     // ── 플랫폼 진입점이 정하는 것 (명령줄 아님, 2026-10-31 패키징 3단계) ────────────────────────────
     PlatformContext platform;            // Android: android_app · JavaVM · 액티비티

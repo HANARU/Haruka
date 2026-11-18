@@ -177,14 +177,11 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
             if (!pairs.empty()) {
                 int idx = std::min(d.meshIndex, (int)pairs.size() - 1);
                 auto* mc        = a->addComponent<StaticMeshComponent>();
-                mc->mesh        = pairs[idx].mesh;
-                mc->collision   = pairs[idx].collision;
+                mc->assignMeshFromPair(pairs[idx]);
                 mc->material    = pairs[idx].material;
                 mc->modelPath   = d.model;
                 mc->meshIndex   = idx;
                 mc->transparent = pairs[idx].isBlend;
-                mc->vertCount   = pairs[idx].vertCount;
-                mc->triCount    = pairs[idx].triCount;
                 mc->visible     = (d.meshVisible != 0);
                 mc->setEnabled(d.meshEnabled != 0);
             }

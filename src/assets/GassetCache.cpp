@@ -24,7 +24,8 @@ static constexpr uint32_t kMagic   = 0x47415354u; // "GAST"
 //    만듭니다(2026-11-07, Hand_Grasp_Design 4-1).
 // 8: 내용 형식은 7 과 같습니다. 가져오기가 접선을 법선 행렬 대신 모델 행렬로 옮기고 거울 변환이면 손잡이를 뒤집도록
 //    고쳐(수학 보강 O1, 2026-11-17) 버전 7 이하 캐시는 다시 만듭니다.
-static constexpr uint32_t kVersion = 8u;
+// 9: 메시마다 스킨 뒤에 자동 생성 LOD(u32 개수, 각 screenSize(f32) · 인덱스 수(u32) · 인덱스 배열)를 둡니다(O13, 2026-11-18).
+static constexpr uint32_t kVersion = 9u;
 // 머리: magic(4) version(4) mtime(8) size(8) hash(8) meshCount(4)
 static constexpr std::streamoff kMtimeOffset = 8;
 
@@ -171,6 +172,14 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
             f.write((const char*)m.indices.data(),
                     (std::streamsize)(m.indices.size()  * sizeof(uint32_t)));
             wSkin(f, m.skin.get());   // 버전 7
+            wU32(f, (uint32_t)m.lods.size());   // 버전 9 (O13)
+            for (const auto& lod : m.lods) {
+                wF32(f, lod.screenSize);
+                wU32(f, (uint32_t)lod.indices.size());
+                if (!lod.indices.empty())
+                    f.write((const char*)lod.indices.data(),
+                            (std::streamsize)(lod.indices.size() * sizeof(uint32_t)));
+            }
         }
 
         if (!f) {
@@ -273,6 +282,19 @@ std::vector<MeshSourceData> GassetCache::load(const std::string& srcPath) {
         f.read((char*)m.indices.data(),  (std::streamsize)(ic * sizeof(uint32_t)));
         if (!f) throw std::runtime_error("GassetCache: corrupted file " + cp);
         m.skin = rSkin(f, vc, cp);   // 버전 7. save 와 같은 순서
+        const uint32_t lodCount = rU32(f);   // 버전 9 (O13)
+        if (!f || lodCount > 16u) throw std::runtime_error("GassetCache: invalid lodCount in " + cp);
+        m.lods.resize(lodCount);
+        for (uint32_t li = 0; li < lodCount; ++li) {
+            m.lods[li].screenSize = rF32(f);
+            const uint32_t lic = rU32(f);
+            if (!f) throw std::runtime_error("GassetCache: corrupted LOD header in " + cp);
+            m.lods[li].indices.resize(lic);
+            if (lic > 0) {
+                f.read((char*)m.lods[li].indices.data(), (std::streamsize)(lic * sizeof(uint32_t)));
+                if (!f) throw std::runtime_error("GassetCache: corrupted LOD indices in " + cp);
+            }
+        }
         result.push_back(std::move(m));
     }
 

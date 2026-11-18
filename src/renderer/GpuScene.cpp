@@ -171,6 +171,40 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
     return h;
 }
 
+MeshHandle* GpuScene::uploadLodIndices(const MeshHandle& base, const std::vector<uint32_t>& indices) {
+    if (indices.empty() || base.vertexCount == 0) return nullptr;
+    const uint32_t iCount = (uint32_t)indices.size();
+    const bool     use16  = base.index16;
+    if (use16 ? (uint64_t)(megaIdx16Count_ + iCount) * sizeof(uint16_t) > kMegaIdxBytes - kIdx16Base
+              : (uint64_t)(megaIdxCount_ + iCount) * sizeof(uint32_t) > kIdx16Base)
+        throw std::runtime_error("Mega buffer overflow! Too many LOD indices.");
+
+    std::vector<uint32_t> ordered(indices);
+    hmesh::optimizeVertexCache(ordered, base.vertexCount);
+
+    auto* h = new MeshHandle();
+    h->firstVertex = base.firstVertex;
+    h->firstIndex  = use16 ? megaIdx16Count_ : megaIdxCount_;
+    h->indexCount  = iCount;
+    h->vertexCount = 0;   // 정점은 base 가 소유
+    h->index16     = use16;
+    h->aabbMin     = base.aabbMin;
+    h->aabbMax     = base.aabbMax;
+    h->boundCenter = base.boundCenter;
+    h->boundRadius = base.boundRadius;
+
+    uint8_t* idxBase = static_cast<uint8_t*>(megaIdxAlloc_.mappedPtr);
+    if (use16) {
+        uint16_t* dst = reinterpret_cast<uint16_t*>(idxBase + kIdx16Base) + megaIdx16Count_;
+        for (uint32_t i = 0; i < iCount; ++i) dst[i] = (uint16_t)ordered[i];
+        megaIdx16Count_ += iCount;
+    } else {
+        memcpy(idxBase + (size_t)megaIdxCount_ * sizeof(uint32_t), ordered.data(), iCount * sizeof(uint32_t));
+        megaIdxCount_ += iCount;
+    }
+    return h;
+}
+
 GpuScene::MeshBudget GpuScene::budget() const {
     MeshBudget b{};
     b.verts   = megaVertCount_;

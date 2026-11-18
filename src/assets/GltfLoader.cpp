@@ -6,6 +6,7 @@
 #include "GltfLoader.hpp"
 #include "AssetLog.hpp"
 #include "Skin.hpp"
+#include "../geometry/MeshLod.hpp"
 #include "../vfs/PakFormat.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "../vfs/Vfs.hpp"
@@ -18,6 +19,8 @@
 #include <algorithm>
 #include <set>
 #include <unordered_map>
+#include <chrono>
+#include <cstdio>
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -685,6 +688,40 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
                                       (float)pbr.metallicFactor,
                                       (float)pbr.roughnessFactor);
                 applyColorFactor(d.emissive, mat.emissiveFactor, /*srgbEncoded=*/true);
+            }
+
+            // 스킨 메시는 LOD 를 만들지 않습니다(O13).
+            if (!d.skin && !d.vertices.empty() && d.indices.size() >= hmesh::kLodMinTriangles * 3) {
+                glm::vec3 lo( std::numeric_limits<float>::max());
+                glm::vec3 hi(-std::numeric_limits<float>::max());
+                for (const auto& v : d.vertices) {
+                    const glm::vec3 p(v.pos[0], v.pos[1], v.pos[2]);
+                    lo = glm::min(lo, p);
+                    hi = glm::max(hi, p);
+                }
+                const float radius = glm::length(hi - (lo + hi) * 0.5f);
+                const bool lockBorder = (mesh.primitives.size() > 1);
+                const auto t0 = std::chrono::steady_clock::now();
+                const auto lods = hmesh::buildLods(d.vertices, d.indices, radius, lockBorder);
+                const double ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - t0).count();
+                if (!lods.empty()) {
+                    d.lods.reserve(lods.size());
+                    std::string triList, scrList;
+                    for (size_t li = 0; li < lods.size(); ++li) {
+                        d.lods.push_back({ lods[li].indices, lods[li].screenSize });
+                        if (li > 0) { triList += " / "; scrList += " / "; }
+                        triList += std::to_string(lods[li].indices.size() / 3);
+                        char sbuf[32];
+                        std::snprintf(sbuf, sizeof(sbuf), "%.2f", lods[li].screenSize);
+                        scrList += sbuf;
+                    }
+                    char tbuf[32];
+                    std::snprintf(tbuf, sizeof(tbuf), "%.2f", ms);
+                    HLOG(LogAsset, Log) << "Auto LOD: " << (d.name.empty() ? path : d.name)
+                                        << " " << (d.indices.size() / 3) << " -> " << triList
+                                        << " tris, screen size " << scrList << " (" << tbuf << " ms)";
+                }
             }
 
             result.push_back(std::move(d));

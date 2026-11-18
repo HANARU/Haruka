@@ -94,6 +94,7 @@ int main() {
     m.doubleSided = true;
     m.alphaMask   = true;
     m.alphaCutoff = 0.25f;
+    m.lods        = { { { 0, 2, 1 }, 0.42f } };
     GassetCache::save(src, { m });
 
     std::printf("\n== 1. 그대로 ==\n");
@@ -103,6 +104,9 @@ int main() {
           loaded[0].vertices[2].pos[0] == 2.f, "읽은 메시가 저장한 것과 같음");
     check(loaded.size() == 1 && loaded[0].doubleSided && !loaded[0].isBlend, "doubleSided 왕복(버전 6, isBlend 와 섞이지 않음)");
     check(loaded.size() == 1 && loaded[0].alphaMask && loaded[0].alphaCutoff == 0.25f, "alphaMask · alphaCutoff 왕복(버전 6)");
+    check(loaded.size() == 1 && loaded[0].lods.size() == 1 &&
+          loaded[0].lods[0].screenSize == 0.42f && loaded[0].lods[0].indices == std::vector<uint32_t>{ 0, 2, 1 },
+          "자동 LOD 왕복(버전 9)");
 
     std::printf("\n== 2. 수정 시각만 바뀜(빌드의 에셋 복사) ==\n");
     const uint64_t before = storedMtime(src);
@@ -136,6 +140,8 @@ int main() {
     check(!GassetCache::isValid(src), "버전 4 캐시(doubleSided 없음)도 다시 만듦");
     setVersion(5);
     check(!GassetCache::isValid(src), "버전 5 캐시(alphaMask 없음)도 다시 만듦");
+    setVersion(8);
+    check(!GassetCache::isValid(src), "버전 8 캐시(LOD 없음)도 다시 만듦");
 
     // 캐시 키(2026-10-24): 실제 경로의 std::hash 대신 정규화한 논리 경로라, 표기가 달라도 · 마운트 위치가 달라도 같습니다.
     std::printf("\n== 5. 키 ==\n");

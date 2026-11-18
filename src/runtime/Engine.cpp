@@ -332,6 +332,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     }
 
     assets_ = std::make_unique<AssetManager>(renderer_.get());
+    assets_->setAutoLod(options_.autoLod);
 
     // 동적 모듈: 표준 세트(Audio, Physics). 각자 월드를 참조합니다. noAudio(Quest 첫 실행)면 소리 장치를 열지 않습니다.
     if (options.noAudio) { HLOG(LogEngine, Log) << "Audio output is off for this run"; }

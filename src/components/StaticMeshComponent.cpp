@@ -12,12 +12,23 @@
 #include <cstdio>
 
 MeshHandle* StaticMeshComponent::selectMeshForScreenSize(float screenSize) {
+    if (!autoLod) { lodCurrent_ = 0; return mesh; }
     const size_t n = std::min(lodScreenSizes.size(), lodMeshes.size());
     lodCurrent_    = hscreen::selectLod(screenSize, std::span<const float>(lodScreenSizes.data(), n), lodCurrent_);
     // 비어 있는 단계는 더 고운 쪽으로 물러납니다.
     for (int i = lodCurrent_; i > 0; --i)
         if (lodMeshes[i - 1]) return lodMeshes[i - 1];
     return mesh;
+}
+
+void StaticMeshComponent::assignMeshFromPair(const AssetPair& pair) {
+    mesh           = pair.mesh;
+    collision      = pair.collision;
+    vertCount      = pair.vertCount;
+    triCount       = pair.triCount;
+    lodMeshes      = pair.lods;
+    lodScreenSizes = pair.lodScreenSizes;
+    lodCurrent_    = 0;
 }
 
 std::vector<PropDesc> StaticMeshComponent::buildProps() {
@@ -85,6 +96,7 @@ bool StaticMeshComponent::localBounds(glm::vec3& outMin, glm::vec3& outMax) cons
 void StaticMeshComponent::writeFields(ComponentFieldWriter& w) const {
     w.b("visible",     visible);
     w.b("transparent", transparent);
+    if (!autoLod) w.b("autoLod", false);
     hchan::write(w, lightChannels);
     if (primitive) {
         w.s("prim",         primitive->toKey());
@@ -118,6 +130,8 @@ bool StaticMeshComponent::readField(const std::string& key, const std::string& v
         modelPath = value;
     } else if (key == "meshIndex") {
         ok = fieldparse::toInt(value, meshIndex);
+    } else if (key == "autoLod") {
+        ok = fieldparse::toBool(value, autoLod);
     } else {
         return false;
     }
@@ -151,12 +165,9 @@ void StaticMeshComponent::onFieldsLoaded(const ComponentLoadContext& ctx) {
             auto pairs = ctx.assets->loadAll(modelPath);
             if (!pairs.empty()) {
                 const int idx = std::clamp(meshIndex, 0, (int)pairs.size() - 1);
-                mesh      = pairs[idx].mesh;
-                collision = pairs[idx].collision;
+                assignMeshFromPair(pairs[idx]);
                 material  = pairs[idx].material;
                 meshIndex = idx;
-                vertCount = pairs[idx].vertCount;
-                triCount  = pairs[idx].triCount;
                 // 파일에 transparent 가 있으면 그 값(사용자가 디테일에서 바꾼 값)을 지킵니다(DEF-101).
                 if (!transparentLoaded_) transparent = pairs[idx].isBlend;
             }

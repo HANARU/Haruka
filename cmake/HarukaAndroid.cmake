@@ -25,7 +25,7 @@ list(APPEND RUNTIME_SOURCES
     src/xr/XrSystem.cpp
 )
 add_library(HarukaRuntime STATIC ${RUNTIME_SOURCES})
-target_link_libraries(HarukaRuntime PUBLIC Vulkan::Vulkan android log glm::glm tinygltf Jolt openxr_loader HarukaVfs)
+target_link_libraries(HarukaRuntime PUBLIC Vulkan::Vulkan android log glm::glm tinygltf Jolt openxr_loader HarukaVfs meshoptimizer)
 target_include_directories(HarukaRuntime PUBLIC ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
 # AndroidWindow.cpp 가 android_native_app_glue.h 를 씁니다.
 set(HARUKA_APP_GLUE_DIR ${ANDROID_NDK}/sources/android/native_app_glue)

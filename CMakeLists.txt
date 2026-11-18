@@ -108,6 +108,18 @@ if(MSVC AND TARGET Jolt)
     target_compile_options(Jolt PRIVATE /wd4865 /wd4100 /Wv:18)
 endif()
 
+# ── meshoptimizer (메시 LOD 자동 생성, O13) ───────────────────────────────────
+FetchContent_Declare(
+    meshoptimizer
+    GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+    GIT_TAG        v1.3
+)
+set(MESHOPT_BUILD_DEMO     OFF CACHE BOOL "" FORCE)
+set(MESHOPT_BUILD_GLTFPACK OFF CACHE BOOL "" FORCE)
+set(MESHOPT_BUILD_TOOLS    OFF CACHE BOOL "" FORCE)
+set(MESHOPT_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(meshoptimizer)
+
 # ── 셰이더 컴파일 (glslc → SPIR-V) ───────────────────────────────────────────
 find_program(GLSLC glslc
     HINTS
@@ -309,6 +321,7 @@ set(RUNTIME_SOURCES
     src/renderer/passes/UIPanelPass.cpp
     src/geometry/PrimitiveDesc.cpp
     src/geometry/PrimitiveBuilder.cpp
+    src/geometry/MeshLod.cpp
     src/assets/GltfLoader.cpp
     src/assets/AssetManager.cpp
     src/assets/GassetCache.cpp
@@ -394,7 +407,7 @@ else()
         src/xr/XrSystem.cpp
     )
     add_library(HarukaRuntime STATIC ${RUNTIME_SOURCES})
-    target_link_libraries(HarukaRuntime PUBLIC Vulkan::Vulkan glfw glm::glm tinygltf Jolt openxr_loader HarukaVfs)
+    target_link_libraries(HarukaRuntime PUBLIC Vulkan::Vulkan glfw glm::glm tinygltf Jolt openxr_loader HarukaVfs meshoptimizer)
     target_include_directories(HarukaRuntime PUBLIC ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
     if(WIN32)
         # 쓰기 루트(%LOCALAPPDATA%)를 구하는 SHGetKnownFolderPath · CoTaskMemFree(core/AppPaths.cpp).
@@ -678,9 +691,10 @@ if(NOT ANDROID)
         tests/GeometryTest.cpp
         src/geometry/PrimitiveDesc.cpp
         src/geometry/PrimitiveBuilder.cpp
+    src/geometry/MeshLod.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaGeometryTest PRIVATE glm::glm)
+    target_link_libraries(HarukaGeometryTest PRIVATE glm::glm meshoptimizer)
     target_include_directories(HarukaGeometryTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaGeometryTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
@@ -1057,9 +1071,10 @@ if(NOT ANDROID)
         tests/GltfLoaderTest.cpp
         src/assets/GltfLoader.cpp
         src/assets/Skin.cpp
+        src/geometry/MeshLod.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaGltfTest PRIVATE HarukaVfs tinygltf glm::glm)
+    target_link_libraries(HarukaGltfTest PRIVATE HarukaVfs tinygltf glm::glm meshoptimizer)
     target_include_directories(HarukaGltfTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaGltfTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
@@ -1074,6 +1089,7 @@ if(NOT ANDROID)
         src/assets/GltfLoader.cpp
         src/assets/GassetCache.cpp
         src/assets/Skin.cpp
+        src/geometry/MeshLod.cpp
         src/components/SkinnedMeshComponent.cpp
         src/components/HandPoseComponent.cpp
         src/components/CameraComponent.cpp
@@ -1088,7 +1104,7 @@ if(NOT ANDROID)
         src/core/HLog.cpp
     )
     # 자동 맞춤 쥐기(손 쥐기 D)는 잡기(XrComponents) · Jolt 바디 판정을 함께 시험합니다.
-    target_link_libraries(HarukaHandTest PRIVATE HarukaVfs tinygltf glm::glm Jolt)
+    target_link_libraries(HarukaHandTest PRIVATE HarukaVfs tinygltf glm::glm Jolt meshoptimizer)
     target_include_directories(HarukaHandTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
     target_compile_definitions(HarukaHandTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     if(MSVC)

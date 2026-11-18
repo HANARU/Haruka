@@ -13,8 +13,9 @@ class AssetManager;
 class World;
 
 #define SM_PROPS(p) \
-    XPROP_Toggle(p, "Visible",      visible),    \
-    XPROP_Toggle(p, "Transparent",  transparent)
+    XPROP_Toggle(p, "Visible",      visible),     \
+    XPROP_Toggle(p, "Transparent",  transparent), \
+    XPROP_Toggle(p, "Auto LOD",     autoLod)
 
 class StaticMeshComponent : public Component, public ICollisionMeshSource {
 public:
@@ -41,6 +42,10 @@ public:
     // (renderer/ScreenSize.hpp). 예전 거리² 문턱은 시야각 · 해상도와 무관했습니다.
     std::vector<MeshHandle*> lodMeshes;
     std::vector<float>       lodScreenSizes;
+    bool                     autoLod = true;   // 꺼져 있으면 늘 가장 고운 메시를 씀(O13)
+
+    // AssetPair 의 메시 · 충돌 · LOD 를 한 경로로 채웁니다(StaticMeshComponent · SceneSerializer 공용).
+    void assignMeshFromPair(const struct AssetPair& pair);
 
     // 화면 크기로 LOD 를 고르고 지금 단계를 기억합니다(렌더러 전용, 이력 띠 때문에 상태가 있음).
     MeshHandle* selectMeshForScreenSize(float screenSize);

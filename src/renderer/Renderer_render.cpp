@@ -375,9 +375,16 @@ void Renderer::buildDrawCommands(World& world,
         // LOD: 가장 고운 메시(mc->mesh)의 바운딩 구가 화면에서 차지하는 크기로 고릅니다(O6). distSq 는 투명 정렬 키입니다.
         const float distSq = glm::length2(camPos - glm::vec3(model[3]));
         MeshHandle* mesh   = mc->mesh;
-        if (!mc->lodMeshes.empty())
-            mesh = mc->selectMeshForScreenSize(sphereScreenSize(glm::vec3(model * glm::vec4(mc->mesh->boundCenter, 1.f)),
-                                                                mc->mesh->boundRadius * maxAxisScale(model)));
+        if (!mc->lodMeshes.empty()) {
+            const float ss = sphereScreenSize(glm::vec3(model * glm::vec4(mc->mesh->boundCenter, 1.f)),
+                                              mc->mesh->boundRadius * maxAxisScale(model));
+            mesh = mc->selectMeshForScreenSize(ss);
+            if (frameNum_ == 0 && mesh) {
+                HLOG(LogRenderer, Log) << "LOD pick: " << (mc->owner ? mc->owner->name : "?")
+                                       << " lod=" << mc->currentLod() << "/" << mc->lodMeshes.size()
+                                       << " screenSize=" << ss << " tris=" << (mesh->indexCount / 3);
+            }
+        }
         if (!mesh) continue;
 
         pushCandidate(material, model, mesh->boundCenter, mesh->boundRadius, mesh->indexCount, mesh->firstIndex,

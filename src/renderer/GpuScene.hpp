@@ -30,6 +30,8 @@ public:
     MeshHandle* uploadMesh(const std::vector<Vertex>& verts,
                            const std::vector<uint32_t>& indices,
                            const MeshBounds* precomputed = nullptr);
+    // LOD 용 인덱스만 올립니다(O13): base 와 같은 정점 구간(firstVertex) · 16비트 여부 · 바운드를 씁니다.
+    MeshHandle* uploadLodIndices(const MeshHandle& base, const std::vector<uint32_t>& indices);
 
     struct MeshBudget {
         uint32_t verts, indices;
