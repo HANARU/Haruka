@@ -156,6 +156,7 @@ int main() {
     World       world;
     AudioSystem sys(true);
     sys.setWorld(&world);
+    sys.setListenerSelector(CameraComponent::activeOwnerIn);   // 엔진과 같은 청취자(화면 카메라의 액터)
     sys.startup();
 
     Actor* camActor = world.spawnActor("Camera");
@@ -742,6 +743,7 @@ int main() {
         World       w2;
         AudioSystem s2(true);
         s2.setWorld(&w2);
+        s2.setListenerSelector(CameraComponent::activeOwnerIn);   // 엔진과 같은 청취자(화면 카메라의 액터)
         s2.startup();
         Actor* cam2 = w2.spawnActor("Camera");
         auto*  camc = cam2->addComponent<CameraComponent>();
@@ -913,6 +915,7 @@ int main() {
         ps.setWorld(&w3);
         AudioSystem s3(true);
         s3.setWorld(&w3);
+        s3.setListenerSelector(CameraComponent::activeOwnerIn);   // 엔진과 같은 청취자(화면 카메라의 액터)
         s3.setPhysics(&ps);
         s3.startup();
         Actor* cam3 = w3.spawnActor("Camera");
@@ -1326,6 +1329,7 @@ int main() {
             World       w;
             AudioSystem s(true);
             s.setWorld(&w);
+            s.setListenerSelector(CameraComponent::activeOwnerIn);   // 엔진과 같은 청취자(화면 카메라의 액터)
             s.startup();
             w.spawnActor("Camera")->addComponent<CameraComponent>();
             s.onBeginPlay();
@@ -1377,6 +1381,7 @@ int main() {
         World       w5;
         AudioSystem s5(true);
         s5.setWorld(&w5);
+        s5.setListenerSelector(CameraComponent::activeOwnerIn);   // 엔진과 같은 청취자(화면 카메라의 액터)
         s5.startup();
         Actor* cam5 = w5.spawnActor("Camera");
         cam5->addComponent<CameraComponent>();
@@ -1519,6 +1524,7 @@ int main() {
         auto makeScene = [](bool fake) {
             auto sc = std::make_unique<HrtfScene>();
             sc->s.setWorld(&sc->w);
+            sc->s.setListenerSelector(CameraComponent::activeOwnerIn);   // 엔진과 같은 청취자(화면 카메라의 액터)
             sc->s.startup();
             sc->cam = sc->w.spawnActor("Camera");
             sc->cam->addComponent<CameraComponent>();

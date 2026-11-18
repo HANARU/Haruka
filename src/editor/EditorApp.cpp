@@ -361,7 +361,7 @@ void EditorApp::tick(float dt) {
                 EditorGizmo::appendSelectionBox(o, lines, { 0.85f, 0.65f, 0.15f, 1.f });
         buildEditorIcons(*ctx_.world, wvp, lines, tris);
         // 손 추적 컴포넌트가 있으면 손 표시는 그쪽(디버그 선)이 그립니다. 없으면 예전처럼 카메라 원점 기준으로 그립니다.
-        if (TrackedPoseComponent::liveHands() == 0) appendXrControllerLines(*ctx_.world, lines);
+        if (TrackedPoseComponent::liveHandsIn(*ctx_.world) == 0) appendXrControllerLines(*ctx_.world, lines);
         // 선택한 액터의 범위 표시(라이트 범위 · 원뿔, 카메라 절두체, 소리 반경, 충돌체 등, 2026-11-17, 형별 등록은
         // ComponentVisualizers).
         for (Actor* o : ctx_.selection)

@@ -12,10 +12,10 @@
 #include "../scene/World.hpp"
 #include "../vfs/Vfs.hpp"
 #include "../scene/Actor.hpp"
-#include "../components/CameraComponent.hpp"
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -700,19 +700,21 @@ void AudioSystem::releaseWorldSounds() {
 
 void AudioSystem::updateListener() {
     glm::vec3 pos, fwd, up;
-    CameraComponent* cam = CameraComponent::activeIn(*world_);
+    Actor* listener = listenerSelector_ ? listenerSelector_(*world_) : nullptr;
     // 차폐 레이에서 뺄 청취자 쪽 액터입니다. XR 이면 카메라는 XR 원점(리그)이고, 머리는 그 아래에 있습니다.
-    listenerActor_ = cam ? cam->owner : nullptr;
+    listenerActor_ = listener;
     if (hasListenerPose_) {
         // XR 세션 동안의 머리 자세. 카메라와 같은 규약(-Z 정면, +Y 위)입니다.
         pos = glm::vec3(listenerPose_[3]);
         fwd = -glm::normalize(glm::vec3(listenerPose_[2]));
         up  =  glm::normalize(glm::vec3(listenerPose_[1]));
     } else {
-        if (!cam || !cam->owner) return;
-        pos = cam->owner->worldPosition();
-        fwd = cam->forward();
-        up  = cam->up();
+        if (!listener) return;
+        // 카메라와 같은 규약(CameraComponent::forward · up 과 같은 식)
+        const glm::quat r = glm::normalize(listener->worldRotation());
+        pos = listener->worldPosition();
+        fwd = r * glm::vec3(0.f, 0.f, -1.f);
+        up  = r * glm::vec3(0.f, 1.f, 0.f);
     }
     listenerPos_ = pos;
     listenerFwd_ = fwd;   // HRTF 방향의 기준(miniaudio 청취자와 같은 값)

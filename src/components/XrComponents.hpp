@@ -127,20 +127,15 @@ public:
     bool           showDebug = true;
 
     int  handIndex() const { return source == ETrackedSource::LeftHand ? 0 : source == ETrackedSource::RightHand ? 1 : -1; }
-    // 살아 있는 손 추적 컴포넌트 수. 0 이면 에디터가 예전처럼 카메라 원점 기준으로 손 표시를 그립니다.
-    static int liveHands();
-    ~TrackedPoseComponent() override;
+    // 이 월드에서 살아 있는(켜진) 손 추적 컴포넌트 수. 0 이면 에디터가 예전처럼 카메라 원점 기준으로 손 표시를 그립니다.
+    // 2026-11-18 S7: 예전에는 프로세스 전역 개수(g_liveHands)라 월드를 가리지 않았습니다.
+    static int liveHandsIn(const World& world);
 
     void tick(float dt) override;
-    void onEnable() override;
-    void onDisable() override;
     const char* typeName() const override { return "TrackedPoseComponent"; }
     std::vector<PropDesc> buildProps() override;
     void writeFields(ComponentFieldWriter& w) const override;
     bool readField(const std::string& key, const std::string& value) override;
-
-private:
-    bool countedHand_ = false;
 };
 
 // 리그의 기본 이동(Layer 1 기본값, Layer 2 가 바꿀 수 있음).
@@ -214,13 +209,12 @@ public:
     // 벽을 뚫고 지나감). 대신 손보다 한 스텝쯤 늦고, 무거운 것에 막히면 손에서 떨어져 보입니다. 끄면(기본) Kinematic 으로 손에 붙음.
     bool velocityTracking = false;
 
-    // 지금 살아 있는(켜진) 잡을 수 있는 컴포넌트들. 손이 잡을 대상을 고를 때 씁니다.
-    static const std::vector<GrabbableComponent*>& live();
+    // 손이 잡을 대상은 이 월드의 살아 있는(켜진) 것에서 고릅니다(world.componentsOf<GrabbableComponent>() 중 isLive,
+    // 2026-11-18 S7). 예전에는 켜진 순서의 프로세스 전역 목록 live() 였습니다.
     GrabInteractorComponent* holder() const { return holder_; }
-    // 월드를 통째로 지우면 onDisable 없이 해제되므로 소멸자에서도 목록 · 잡은 손과의 연결을 정리합니다.
+    // 월드를 통째로 지우면 onDisable 없이 해제되므로 소멸자에서도 잡은 손과의 연결을 정리합니다.
     ~GrabbableComponent() override;
 
-    void onEnable() override;
     void onDisable() override;
     const char* typeName() const override { return "GrabbableComponent"; }
     std::vector<PropDesc> buildProps() override;
@@ -240,8 +234,9 @@ public:
 
     GrabbableComponent* held() const { return held_; }
     ~GrabInteractorComponent() override;
-    // 잡을 대상 고르기: 손 위치 hand 에서 바운드(없으면 액터 위치)까지 거리가 radius 안이면서 가장 가까운 것.
-    static GrabbableComponent* pick(const glm::vec3& hand, float radius);
+    // 잡을 대상 고르기: 월드의 살아 있는 잡을 수 있는 것 중 손 위치 hand 에서 바운드(없으면 액터 위치)까지 거리가 radius
+    // 안이면서 가장 가까운 것. 거리가 같으면 액터 순서상 뒤의 것입니다(2026-11-18 S7 전에는 켜진 순서상 뒤의 것).
+    static GrabbableComponent* pick(const World& world, const glm::vec3& hand, float radius);
     // 손 자세(월드)로 잡기 · 따라가기 · 놓기. tick 이 입력을 읽어 부르고, 테스트가 직접 부릅니다.
     void grab(GrabbableComponent* g, const glm::vec3& handPos, const glm::quat& handRot);
     // dt 는 속도 추적 잡기(P5)만 씁니다(다음 틱까지 목표 자세에 닿는 속도). 0 이면 속도 추적은 아무 일도 하지 않습니다.

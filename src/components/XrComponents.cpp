@@ -89,16 +89,12 @@ bool hxr::floorBelow(const World& world, const glm::vec3& from, const Actor* ski
 }
 
 // ── 추적 자세 ─────────────────────────────────────────────────────────────────────
-static int g_liveHands = 0;
-int TrackedPoseComponent::liveHands() { return g_liveHands; }
-
-void TrackedPoseComponent::onEnable() {
-    if (handIndex() >= 0 && !countedHand_) { ++g_liveHands; countedHand_ = true; }
+int TrackedPoseComponent::liveHandsIn(const World& world) {
+    int n = 0;
+    for (const TrackedPoseComponent* t : world.componentsOf<TrackedPoseComponent>())
+        if (t->isLive() && t->handIndex() >= 0) ++n;
+    return n;
 }
-void TrackedPoseComponent::onDisable() {
-    if (countedHand_) { --g_liveHands; countedHand_ = false; }
-}
-TrackedPoseComponent::~TrackedPoseComponent() { onDisable(); }
 
 hxr::XrOriginChoice hxr::chooseOrigin(const Actor* cam) {
     XrOriginChoice c;
@@ -114,8 +110,6 @@ hxr::XrOriginChoice hxr::chooseOrigin(const Actor* cam) {
 }
 
 void TrackedPoseComponent::tick(float /*dt*/) {
-    // 손 · 머리를 바꿔 고른 뒤에도 셈이 맞도록 매 틱 맞춥니다.
-    if ((handIndex() >= 0) != countedHand_) { if (countedHand_) onDisable(); else onEnable(); }
     const HXrInputState& xr = HInputSystem::get().xr();
     if (!xr.focused || !owner) return;
     const int     hand = handIndex();
@@ -286,8 +280,9 @@ static void rigIgnoreList(Actor& rig, std::vector<Actor*>& out, std::vector<Acto
         out.push_back(a);
         for (Actor* c : a->getChildren()) stack.push_back(c);
     }
-    for (GrabbableComponent* g : GrabbableComponent::live())
-        if (g->holder() && g->owner) out.push_back(g->owner);
+    if (const World* w = rig.world())
+        for (GrabbableComponent* g : w->componentsOf<GrabbableComponent>())
+            if (g->isLive() && g->holder() && g->owner) out.push_back(g->owner);
 }
 
 void RigLocomotionComponent::moveCollide(Actor& rig, const glm::vec3& headPos, const glm::vec3& move, float dt) {
@@ -405,24 +400,10 @@ bool RigLocomotionComponent::readField(const std::string& key, const std::string
 }
 
 // ── 잡을 수 있는 것 ───────────────────────────────────────────────────────────────
-static std::vector<GrabbableComponent*>& grabbables() {
-    static std::vector<GrabbableComponent*> v;
-    return v;
-}
-const std::vector<GrabbableComponent*>& GrabbableComponent::live() { return grabbables(); }
-
-void GrabbableComponent::onEnable() {
-    auto& v = grabbables();
-    if (std::find(v.begin(), v.end(), this) == v.end()) v.push_back(this);
-}
 void GrabbableComponent::onDisable() {
-    auto& v = grabbables();
-    v.erase(std::remove(v.begin(), v.end(), this), v.end());
     if (holder_) holder_->drop();
 }
 GrabbableComponent::~GrabbableComponent() {
-    auto& v = grabbables();
-    v.erase(std::remove(v.begin(), v.end(), this), v.end());
     if (holder_) { holder_->held_ = nullptr; holder_->wasDynamic_ = false; holder_->tracking_ = false; holder_ = nullptr; }
 }
 
@@ -469,11 +450,11 @@ hxr::ThrowVelocity hxr::throwVelocity(const glm::vec3& handLinear, const glm::ve
     return t;
 }
 
-GrabbableComponent* GrabInteractorComponent::pick(const glm::vec3& hand, float radius) {
+GrabbableComponent* GrabInteractorComponent::pick(const World& world, const glm::vec3& hand, float radius) {
     GrabbableComponent* best  = nullptr;
     float               bestD = radius;
-    for (GrabbableComponent* g : GrabbableComponent::live()) {
-        if (!g->owner || !g->owner->activeInHierarchy()) continue;
+    for (GrabbableComponent* g : world.componentsOf<GrabbableComponent>()) {
+        if (!g->isLive() || !g->owner || !g->owner->activeInHierarchy()) continue;
         const float d = distanceToActor(hand, *g->owner);
         if (d <= bestD) { bestD = d; best = g; }
     }
@@ -649,7 +630,7 @@ void GrabInteractorComponent::tick(float dt) {
     const glm::quat rigR = rig ? rig->worldRotation() : glm::quat(1.f, 0.f, 0.f, 0.f);
     if (held_) velHistory_.push(rigR * xr.hands[hand].linearVelocity, rigR * xr.hands[hand].angularVelocity);
     if (held && !prevHeld_) {
-        if (GrabbableComponent* g = pick(hp, radius)) {
+        if (GrabbableComponent* g = owner->world() ? pick(*owner->world(), hp, radius) : nullptr) {
             grab(g, hp, hr);
             in.haptic(hand, 0.6f, 0.04f);
         }

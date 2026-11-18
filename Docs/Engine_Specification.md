@@ -69,7 +69,7 @@
 |---|---|
 | 소스 | `src/` 의 `.cpp` · `.hpp` 179 파일, 30,275 줄 |
 | 셰이더 | GLSL 20 파일(셰이더 19 + 공용 헤더 1), 841 줄(2026-11-02). 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 27개 실행 파일, 검사 1,948개(`ctest -C Release`, 2026-11-18) |
+| 자동 테스트 | 27개 실행 파일, 검사 1,951개(`ctest -C Release`, 2026-11-18) |
 | 문서 | `Docs/` 활성 문서 28개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳤습니다. 같은 날 빛 · 그림자 조사 후속에서 DEF-148 을 고치고 DEF-158 ~ 161(4건)을 등재해 모두 고쳤습니다. 2026-11-02 헤드셋 확인에서 DEF-162 · 163, 마지막 점검에서 DEF-164 를 등재해 모두 고쳤습니다. 2026-11-06 검토 결함 묶음 DEF-130 ~ 147(18건)을 모두 고쳤고, 같은 날 임포트 검토에서 DEF-165(텍스처 밉맵)를, 공간 음향 조사에서 DEF-166(패닝 문서 오류)을 등재해 고쳐, 지금은 166건 중 해결 155 · 열림 5 · 보류 3 · 닫음 3 입니다. 그 뒤 DEF-167(보류, 2026-11-16)과 DEF-168 ~ 172(2026-11-17 ~ 18, 모두 해결)를 등재해 172건 중 해결 160 · 열림 5 · 보류 4 · 닫음 3 입니다 |
@@ -164,16 +164,19 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 
 | 디렉터리 | 파일 · 줄 | 내용 |
 |---|---|---|
-| `src/`(루트) | 1 · 128 | `main.cpp`(진입점: 실행 파일의 앞단을 만들어 쓰기 루트를 정하고, 콘솔 없이 직접 실행할 때 C stdio 출력을 `Logs/stdout.txt` 로 돌린 뒤 `Engine` 을 만들고 돌림. 에디터 · 게임 실행 파일이 함께 씀) |
-| `src/core/` | 32 · 3,107 | `Engine`, 엔진 앞단 인터페이스(`IEngineFrontend.hpp`), `World` · `Actor` · `Component`, `ModuleManager`, `HLog`, `ComponentRegistry`, `EngineSettings`, 프로젝트 설정(`ProjectSettings.hpp`), 실행 폴더 · 쓰기 루트(`AppPaths`), 원자적 저장(`FileUtil.hpp`), 디버그 선(`DebugDraw.hpp`), 에셋 루트(`ProjectPaths.hpp`), 리플렉션(`Reflect.hpp`) |
+| `src/`(루트) | 2 · 306 | `main.cpp`(진입점: 실행 파일의 앞단을 만들어 쓰기 루트를 정하고, 콘솔 없이 직접 실행할 때 C stdio 출력을 `Logs/stdout.txt` 로 돌린 뒤 `Engine` 을 만들고 돌림. 에디터 · 게임 실행 파일이 함께 씀), `AndroidMain.cpp`(Android `android_main`) |
+| `src/core/` | 18 · 1,850 | 기반: `HLog`, `EngineSettings`, 값 해석(`FieldParse.hpp`), 프로젝트 설정(`ProjectSettings.hpp`), 실행 폴더 · 쓰기 루트(`AppPaths`), 원자적 저장(`FileUtil.hpp`), 디버그 선(`DebugDraw.hpp`), 에셋 루트(`ProjectPaths.hpp`), 계측(`FrameTimings` · `FramePacing`), `Transform`, 모듈 인터페이스(`IEngineModule`) |
+| `src/scene/` | 11 · 949 | 장면 모델: `World`(월드 단위 서비스 포함) · `Actor` · `Component`, 컴포넌트 필드 · `ComponentRegistry` · 리플렉션(`Reflect.hpp`) |
+| `src/runtime/` | 18 · 1,936 | 조립: `Engine`(프레임 단계), 실행 옵션, 엔진 앞단 인터페이스(`IEngineFrontend.hpp`), 게임 모듈 인터페이스, `ModuleManager`, XR 세션 제어 · 다시 열기 · 원점, 월드 UI 포인터, 프레임 통계, 셰이더 묶음 짝 확인 |
+| `src/sceneio/` | 8 · 860 | 씬 · 프리팹 직렬화(`SceneSerializer` · `PrefabManager`), 컴포넌트 블록 직렬화, 회전 글자 표현 |
 | `src/renderer/` | 24 · 4,223 | `Renderer`(프레임 구성), `RenderContext`, `GpuScene`, `FrameResources`, 스왑체인, 인스턴싱 묶기 · 라이트 선택 · 절두체 컬링 헤더, 렌더 확장 |
 | `src/renderer/passes/` | 11 · 2,106 | Shadow · Geometry · AO · Bloom · Post 패스(`HPass` 수명주기) |
 | `src/memory/` | 2 · 388 | `HarukaAllocator`(1GB 단일 힙, 세 구역) |
-| `src/assets/` | 15 · 1,916 | `AssetManager`, glTF 로더, `.gasset` 캐시, 씬 · 프리팹 직렬화, 컴포넌트 블록 직렬화, 회전 글자 표현 |
+| `src/assets/` | 10 · 1,669 | `AssetManager`, glTF 로더, `.gasset` 캐시, 스킨 |
 | `src/geometry/` | 5 · 1,321 | 절차 도형 기술자와 메시 생성기 |
-| `src/components/` | 16 · 1,954 | Light · Camera · StaticMesh · Audio · RigidBody · Reverb Zone, XR 리그 · 추적 자세 · 이동 · 잡기(`XrComponents`), 기본 컴포넌트 등록 |
-| `src/physics/` | 2 · 711 | `PhysicsSystem`(Jolt) |
-| `src/audio/` | 10 · 2,096 | `AudioSystem`(miniaudio, 출력 장치 선택, 가상 파일 시스템 파일 콜백, 음원별 노드 사슬 · 차폐 · 공용 리버브 · HRTF 노드), 3D 감쇠 · 차폐 설정, 차폐 · 잔향 계산(`AudioOcclusion` · `AudioReverb`), verblib 설정, HRTF 인터페이스(`AudioHrtf`)와 Steam Audio 구현(`SteamAudioHrtf`, 라이브러리를 실행 중에 엶) |
+| `src/components/` | 24 · 3,316 | Light · Camera · StaticMesh · SkinnedMesh · HeightFog · ReflectionCapture · UIPanel · HandPose, XR 리그 · 추적 자세 · 이동 · 잡기(`XrComponents`), 기본 컴포넌트 등록 |
+| `src/physics/` | 4 · 1,352 | `PhysicsSystem`(Jolt), `RigidBodyComponent` |
+| `src/audio/` | 15 · 3,106 | `AudioSystem`(miniaudio, 출력 장치 선택, 가상 파일 시스템 파일 콜백, 음원별 노드 사슬 · 차폐 · 공용 리버브 · HRTF 노드), 3D 감쇠 · 차폐 설정, 차폐 · 잔향 계산(`AudioOcclusion` · `AudioReverb`), verblib 설정, HRTF 인터페이스(`AudioHrtf`)와 Steam Audio 구현(`SteamAudioHrtf`, 라이브러리를 실행 중에 엶), `AudioComponent` · `ReverbZoneComponent` |
 | `src/input/` | 3 · 456 | `HInputSystem`(액션 · 축 바인딩, 키 · 마우스 축, 설정 줄 바인딩, 햅틱), XR 입력 상태 |
 | `src/xr/` | 2 · 894 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력 · 진동 · 바닥 기준 공간 · 세션을 잃은 이유) |
 | `src/platform/` | 5 · 602 | `IWindow`, GLFW 구현, Android 스텁 |
@@ -443,7 +446,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 27개, 검사 1,948개(2026-11-18).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 27개, 검사 1,951개(2026-11-18).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -454,7 +457,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `log_category` | 61 | 로그 카테고리 |
 | `audio_system` | 264 | 오디오(헤드리스 출력 검산, XR 머리 자세 청취자, 스테레오 패닝 값(DEF-166), 출력 장치 설정 · 장치 ID 변환 · 열 장치 후보 순서(DEF-146 · 147), 묶음 안 음원 디코딩, 음원별 노드 사슬, 차폐 · 회절 근사, 잔향 · 잔향 구역, HRTF(가짜 구현으로 FIFO · 꼬리 · 블록 경계, 실제 Steam Audio 로 방향 단서 · 크기 맞춤), 들리지 않는 소리의 가상화 · 최대 거리 밖 무음(2026-11-17)) |
 | `slate_input` | 210 | UI 입력 · 숫자 칸, 그리기 목록 고정(GPU 없이 만든 정점 · 배치의 해시) · 층 정렬 안정성 · 문맥별 포인터 캡처 · 슬롯 정점 오프셋, 글꼴 아틀라스 넘침(오류 한 번), 월드 UI 패널 컴포넌트(텍스처 크기 · 직렬화 왕복 · 확정 때만 크기 반영 · 선택 판정 상자 · 내용 만들기 · 배치 배율 · 패널별 값 · 동작 · 밝기), 자동 다시 그리기(그리기 목록 해시), 패널 포인터(광선 판정 · 호버 · 클릭 · 캡처 · 가림 · XR 조준 · 트리거 · 스틱 휠 · 레이저), 따라오는 패널 |
-| `physics_lifecycle` | 194 | 바디 생명주기 · 물리 API · 얇은 콜라이더, 레이캐스트에서 액터 빼기(소리 차폐용, 출발점을 감싼 충돌체 포함), 잡기 · 던지기(던지지 않고 놓기, DEF-143) · 플레이어 리그 · 추적 자세 · XR 원점(리그가 아닌 부모의 머리 추적, DEF-144), 카메라 아래 바닥 찾기(밟는 면이 아닌 바운드 제외) · 보이지 않는 리그 · 리그 높이 값, 던지기 속도 ω × r · 프레임 평균(DEF-168), 연속 충돌, 볼록 껍질 · 메시 충돌체(2026-11-17), 물리의 월드 단위 서비스(S3) |
+| `physics_lifecycle` | 197 | 바디 생명주기 · 물리 API · 얇은 콜라이더, 레이캐스트에서 액터 빼기(소리 차폐용, 출발점을 감싼 충돌체 포함), 잡기 · 던지기(던지지 않고 놓기, DEF-143) · 플레이어 리그 · 추적 자세 · XR 원점(리그가 아닌 부모의 머리 추적, DEF-144), 카메라 아래 바닥 찾기(밟는 면이 아닌 바운드 제외) · 보이지 않는 리그 · 리그 높이 값, 던지기 속도 ω × r · 프레임 평균(DEF-168), 연속 충돌, 볼록 껍질 · 메시 충돌체(2026-11-17), 물리의 월드 단위 서비스(S3) · 잡기 대상과 손 추적 수의 월드 단위(S7) |
 | `stereo_views` | 45 | 눈별 투영 · 두 눈 컬링 · 합성 눈, 화면 크기 · LOD 이력 띠 · 작은 물체 컬링(2026-11-17) |
 | `xr_input` | 31 | VR 입력, 키 · 마우스 축, 설정 줄 바인딩, 햅틱 |
 | `draw_batching` | 34 | 자동 인스턴싱 묶기 · 행 배정 |

@@ -38,6 +38,8 @@ public:
     // 카메라(활성 · 켜짐, 액터 순서상 첫 번째, 앞단 카메라 제외)를 먼저 고르고 없으면 앞단 카메라입니다(2026-10-15). 앞단
     // 카메라가 없으면(게임 실행 파일) 첫 primary 카메라이고, 그것도 없으면 nullptr 입니다.
     static CameraComponent* activeIn(const World& world);
+    // activeIn 의 액터(없으면 nullptr). 소리 청취자를 고르는 함수로 넘깁니다(AudioSystem::setListenerSelector).
+    static Actor* activeOwnerIn(const World& world) { CameraComponent* c = activeIn(world); return c ? c->owner : nullptr; }
 
     const char*           typeName()   const override { return "CameraComponent"; }
     std::vector<PropDesc> buildProps()       override;

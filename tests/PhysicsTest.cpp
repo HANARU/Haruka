@@ -843,8 +843,26 @@ int main() {
         const uint32_t body = rb->bodyId_;
         check(body != kNoBody, "(준비) 바디가 생김");
 
-        check(GrabInteractorComponent::pick({ 0.05f, 1.f, 0.f }, 0.12f) == g, "반지름 안의 가장 가까운 것을 고름");
-        check(GrabInteractorComponent::pick({ 2.5f, 1.f, 0.f }, 0.12f) == nullptr, "반지름 밖이면 없음");
+        check(GrabInteractorComponent::pick(w, { 0.05f, 1.f, 0.f }, 0.12f) == g, "반지름 안의 가장 가까운 것을 고름");
+        check(GrabInteractorComponent::pick(w, { 2.5f, 1.f, 0.f }, 0.12f) == nullptr, "반지름 밖이면 없음");
+        {
+            // 월드 단위(2026-11-18 S7): 다른 월드의 잡을 수 있는 것은 고르지 않고, 손 추적 수도 월드마다 셉니다.
+            World other;
+            Actor* o = other.spawnActor("OtherGrab");
+            o->setLocalPosition({ 2.5f, 1.f, 0.f });
+            o->addComponent<GrabbableComponent>();
+            Actor* oh = other.spawnActor("OtherHand");
+            oh->addComponent<TrackedPoseComponent>()->source = ETrackedSource::LeftHand;
+            check(GrabInteractorComponent::pick(w, { 2.5f, 1.f, 0.f }, 0.12f) == nullptr &&
+                  GrabInteractorComponent::pick(other, { 2.5f, 1.f, 0.f }, 0.12f) == o->getComponent<GrabbableComponent>(),
+                  "잡을 대상은 그 월드에서만 고름");
+            check(TrackedPoseComponent::liveHandsIn(other) == 1 && TrackedPoseComponent::liveHandsIn(w) == 0,
+                  "손 추적 수는 월드마다 셈");
+            o->getComponent<GrabbableComponent>()->setEnabled(false);
+            oh->getComponent<TrackedPoseComponent>()->source = ETrackedSource::Head;
+            check(GrabInteractorComponent::pick(other, { 2.5f, 1.f, 0.f }, 0.12f) == nullptr && TrackedPoseComponent::liveHandsIn(other) == 0,
+                  "꺼진 것은 고르지 않고, 머리로 바꾼 추적은 손으로 세지 않음");
+        }
 
         const glm::vec3 hp{ 0.f, 1.2f, 0.f };
         const glm::quat hr(1.f, 0.f, 0.f, 0.f);

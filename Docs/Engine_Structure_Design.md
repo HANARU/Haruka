@@ -90,11 +90,10 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 - 변이 확인(2026-11-18): 기반 → 에디터 include 추가, 필요 없는 허용 항목, 표의 순환(math ↔ core), 규칙 없는 새 폴더, 필요한
   허용 항목 삭제 다섯 가지를 모두 잡았습니다.
 
-## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개 → 컴포넌트 이동 뒤 19개, 모두 2단계 몫)
+## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개 → 컴포넌트 이동 뒤 19개 → 청취자 선택 뒤 18개, 모두 2단계 S5 몫)
 
 | 방향 | 수 | 원인 | 없앨 단계 |
 |---|---|---|---|
-| audio → components | 1 | 청취자 카메라 | 2단계 S7 |
 | geometry → assets | 1 | 메시 데이터(MeshSource)의 자리 | 2단계 S5 |
 | renderer → assets · components · scene | 17 | 렌더 데이터 추출이 렌더러 안 | 2단계 S5 |
 
@@ -108,8 +107,8 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 1 | S2 `Engine::run` → 명시적 프레임 단계, XR 복구 · 리그 원점 · UI 포인터 · 프레임 통계를 각자 객체로 | 끝남(2026-11-18, 7절) |
 | 1 | S3 시스템 접근 통일(엔진 단위 · 월드 단위 서비스), 정적 포인터 · 흩어진 전역 정리, World 의 에디터 상태 | 끝남(2026-11-18, 8절) |
 | 2 | S4 Component 기반 정리(에디터 함수 → 등록식 visualizer, collisionMesh · blocksFloor → 질의) | 끝남(2026-11-18, 9절) |
-| 2 | S7 나머지: 컴포넌트를 소유 시스템 옆으로 | 다음 |
-| 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | |
+| 2 | S7 나머지: 컴포넌트를 소유 시스템 옆으로 | 끝남(2026-11-18, 10절) |
+| 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | 다음 |
 | 3 | S6 EditorApp 분해(아웃라이너 · 디테일 · 로그 · 도킹 · 메뉴와 툴바 · 뷰포트 컨트롤러) | |
 
 완료 기준:
@@ -182,7 +181,7 @@ UE 의 UWorldSubsystem 과 같은 자리이며, 월드(scene)는 형을 모른 �
 - **아키텍처 시험 검사 2개:** 정적 시스템 포인터(`static inline T*` · `static T* current()` · `instance()`) 0, 전역 싱글턴
   (`static T& get()`)이 위 목록과 같음(늘어도 없어져도 실패). 임시 파일에 셋을 다 넣으면 둘 다 실패하는 것을 확인했습니다.
 
-남긴 것(2단계 S7 몫): `GrabbableComponent::live()`(잡을 수 있는 것의 정적 목록, 월드를 가리지 않음)와 `TrackedPoseComponent` 의
+남긴 것(2단계 S7 몫, 10절에서 끝남): `GrabbableComponent::live()`(잡을 수 있는 것의 정적 목록, 월드를 가리지 않음)와 `TrackedPoseComponent` 의
 `g_liveHands` 같은 컴포넌트 안의 정적 값은 컴포넌트를 소유 시스템 옆으로 옮길 때 월드 단위로 바꿉니다. 지금 `live()` 를 월드 목록으로
 바꾸면 잡기 후보의 거리 동점 순서가 켜진 순서에서 액터 순서로 바뀌어, 동작 보존 리팩터링이 아닙니다.
 
@@ -220,7 +219,26 @@ geometry → components 1개, 29 → 28).
 시험 27 · 검사 1,947, 기준 PNG 전부 그대로, Debug · Quest Pro 형 프로필 검증 0, Android 빌드 통과. 에디터의 아이콘 · 범위 표시는 창 에디터
 확인 때 봅니다.
 
-## 10. 다른 엔진 비교 (2026-11-18 보고)
+## 10. 컴포넌트를 소유 시스템 옆으로 (S7 나머지, 2026-11-18)
+
+Godot · Bevy 처럼 기능 모듈이 자기 컴포넌트를 갖게 하고, 컴포넌트 형을 알아야 하는 씬 파일 코드는 컴포넌트 위로 올렸습니다.
+
+| 바꾼 것 | 예전 | 지금 | 없어진 허용 항목 |
+|---|---|---|---|
+| 씬 · 프리팹 파일 코드 | `assets/`(SceneSerializer · ComponentSerializer · PrefabManager · PrefabRules · TransformText) | 새 모듈 `sceneio/`(컴포넌트 위, 2절) | assets → audio · components 6 |
+| 물리 · 소리 컴포넌트 | `components/`(RigidBody · Audio · ReverbZone) | `physics/RigidBodyComponent` · `audio/AudioComponent` · `audio/ReverbZoneComponent` | physics → components 1, audio → components 2 |
+| 소리 청취자 | AudioSystem 이 `CameraComponent::activeIn` 으로 직접 고름 | Engine 이 `setListenerSelector(CameraComponent::activeOwnerIn)` 으로 고르는 함수를 넘김. 방향은 그 액터의 월드 회전(카메라와 같은 식). 부르는 때(소리 tick)는 같음 | audio → components 1 |
+| 손 추적 수 | 프로세스 전역 `g_liveHands`(켜질 때 셈, 틱마다 맞춤) | `TrackedPoseComponent::liveHandsIn(world)`: 그 월드의 살아 있는 손 추적을 셀 때마다 셈 | (정적 값) |
+| 잡을 수 있는 것 | 켜진 순서의 프로세스 전역 목록 `GrabbableComponent::live()` | `world.componentsOf<GrabbableComponent>()` 중 `isLive`, `pick(world, …)` | (정적 값) |
+
+동작이 달라진 것 한 가지(사용자 확인, 2026-11-18): 잡을 대상의 거리가 정확히 같을 때 예전에는 켜진 순서상 뒤의 것, 지금은 액터 순서상
+뒤의 것을 고릅니다. 손 · 물리 시험은 그대로 통과합니다. 다른 월드(예: 다른 씬 미리보기)의 것을 잡거나 세지 않게 된 것은 고친 것입니다.
+
+확인: 시험 27 · 검사 1,951(물리에 월드 단위 잡기 · 손 수 +3), 청취자 선택을 넣지 않으면 audio_system 이 실패하는 것을 확인(청취자 방향을
+miniaudio 기준값과 비교하는 검사가 잡음). 기준 PNG 전부 그대로, Debug · Quest Pro 형 프로필 검증 0, Android 빌드 통과. 허용 목록 28 → 18,
+남은 것은 모두 S5(렌더 경계) 몫입니다.
+
+## 11. 다른 엔진 비교 (2026-11-18 보고)
 
 | 주제 | 다른 엔진 | Haruka 적용 |
 |---|---|---|

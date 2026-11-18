@@ -43,9 +43,6 @@ module main:      core, math, vfs, memory, platform, input, ui, scene, geometry,
 
 # ── 허용 목록: 아직 고치지 않은 위반 ──
 
-# audio -> components — 2단계 S7: 청취자 카메라를 질의로(소리 컴포넌트는 audio 로 옮김)
-allow audio/AudioSystem.cpp -> components/CameraComponent.hpp
-
 # geometry -> assets — 2단계 S5: 메시 데이터(MeshSource)의 자리
 allow geometry/PrimitiveBuilder.hpp -> assets/MeshSource.hpp
 

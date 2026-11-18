@@ -4,6 +4,7 @@
 #include "AudioHrtf.hpp"
 #include "AudioPropagation.hpp"
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -87,6 +88,10 @@ public:
     // 청취자를 활성 카메라 대신 이 월드 자세(위치 + 방향, -Z 가 정면 · +Y 가 위)에 둡니다. XR 세션이 입력을
     // 받는 동안 Engine 이 매 프레임 헤드셋(두 눈 사이)의 자세를 넘깁니다. 카메라는 XR 원점일 뿐이라, 넘기지
     // 않으면 고개를 돌려도 소리의 좌우가 바뀌지 않습니다. clearListenerPose 뒤에는 다시 카메라를 따릅니다.
+    // 청취자가 될 액터를 고르는 함수(2026-11-18, 엔진 구조 안정화 S7). 엔진이 화면 카메라의 액터를 고르는 함수를 넘깁니다
+    // (CameraComponent::activeIn). 소리 시스템은 카메라 형을 모르고, 방향은 그 액터의 월드 회전(-Z 정면, +Y 위)으로 정합니다.
+    // 없거나 nullptr 을 돌려주면 청취자를 옮기지 않습니다. tick 마다(청취자를 옮길 때) 부릅니다.
+    void setListenerSelector(std::function<Actor*(const World&)> select) { listenerSelector_ = std::move(select); }
     void setListenerPose(const glm::mat4& worldPose) { listenerPose_ = worldPose; hasListenerPose_ = true; }
     void clearListenerPose()                          { hasListenerPose_ = false; }
 
@@ -178,6 +183,7 @@ private:
     glm::vec3            listenerVel_{ 0.f };
     bool                 listenerHasPrev_ = false;
     Actor*               listenerActor_ = nullptr;   // 레이에서 뺄 청취자 쪽 액터(활성 카메라의 액터)
+    std::function<Actor*(const World&)> listenerSelector_;   // setListenerSelector
     std::vector<Actor*>    ignore_;                   // 판정마다 다시 채우는 제외 목록(할당을 재사용)
     std::vector<glm::vec3> samples_;
     uint32_t               voiceSerial_ = 0;          // 판정 시점을 엇갈리게 하는 일련번호
