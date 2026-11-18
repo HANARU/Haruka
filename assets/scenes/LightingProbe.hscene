@@ -1,10 +1,8 @@
 # Haruka Scene v4
-# Lighting and shadow probe. Player rig: walk with WASD or the left stick, snap-turn with the right stick,
-# grab the props on the table with the grip button.
 ACTOR:Sun
 POS:0 0 0
-ROT:0 0 0
-QUAT:0 0 0 1
+ROT:-47.968887 33.69007 0
+QUAT:-0.389047 0.264763 0.117793955 0.87445277
 SCALE:1 1 1
 ACTIVE:1
 COMPONENT:LightComponent
@@ -15,7 +13,6 @@ intensity=3
 attenuationRadius=10
 innerConeAngle=15
 outerConeAngle=30
-direction=0.37139067 0.74278134 0.557086
 useTemperature=0
 temperatureK=6500
 castShadows=1
@@ -119,7 +116,7 @@ primMaterial=color B4B4B4FF 0 0.6
 END_COMPONENT
 END_ACTOR
 ACTOR:ProbeCapsule
-POS:3 1 -2.5
+POS:3 2.1755643 -2.5
 ROT:0 0 0
 QUAT:0 0 0 1
 SCALE:2 2 2
@@ -337,6 +334,8 @@ moveSpeed=2
 snapTurn=45
 flying=0
 lookSensitivity=0.15
+collide=0
+teleport=1
 END_COMPONENT
 END_ACTOR
 ACTOR:Head
