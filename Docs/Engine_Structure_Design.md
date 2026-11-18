@@ -38,7 +38,7 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 기반 | `input` | 입력 장치 · 바인딩 | core, math, platform |
 | 기반 | `ui` | HSlate UI | core, math, vfs, input |
 | 장면 | `scene` | Actor · Component · World · 컴포넌트 필드 · 레지스트리 · Reflect | core, math |
-| 시스템 | `geometry` | 절차 도형 · 메시 처리 | core, math |
+| 시스템 | `geometry` | 절차 도형 · 메시 처리 · CPU 메시 · 텍스처 데이터 형(MeshSource, 2026-11-18 S5a 에 assets 에서 옮김) | core, math |
 | 시스템 | `physics` | Jolt 물리, RigidBodyComponent(2026-11-18 S7 에 components 에서 옮김) | core, math, scene, geometry |
 | 시스템 | `audio` | miniaudio · 차폐 · 잔향 · HRTF, AudioComponent · ReverbZoneComponent(2026-11-18 S7 에 옮김) | core, math, vfs, scene, physics |
 | 시스템 | `renderer` | Vulkan 렌더러 · 패스 | core, math, vfs, memory, platform, ui, geometry |
@@ -90,12 +90,11 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 - 변이 확인(2026-11-18): 기반 → 에디터 include 추가, 필요 없는 허용 항목, 표의 순환(math ↔ core), 규칙 없는 새 폴더, 필요한
   허용 항목 삭제 다섯 가지를 모두 잡았습니다.
 
-## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개 → 컴포넌트 이동 뒤 19개 → 청취자 선택 뒤 18개, 모두 2단계 S5 몫)
+## 5. 남은 위반 (허용 목록, 2026-11-18 시작 36개 → S3 뒤 29개 → S4 뒤 28개 → S7 씬 파일 이동 뒤 22개 → 컴포넌트 이동 뒤 19개 → 청취자 선택 뒤 18개 → S5a 뒤 12개, 모두 2단계 S5 몫)
 
 | 방향 | 수 | 원인 | 없앨 단계 |
 |---|---|---|---|
-| geometry → assets | 1 | 메시 데이터(MeshSource)의 자리 | 2단계 S5 |
-| renderer → assets · components · scene | 17 | 렌더 데이터 추출이 렌더러 안 | 2단계 S5 |
+| renderer → components · scene | 12 | 렌더 데이터 추출이 렌더러 안 | 2단계 S5 |
 
 ## 6. 단계와 진행
 
@@ -108,7 +107,7 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 1 | S3 시스템 접근 통일(엔진 단위 · 월드 단위 서비스), 정적 포인터 · 흩어진 전역 정리, World 의 에디터 상태 | 끝남(2026-11-18, 8절) |
 | 2 | S4 Component 기반 정리(에디터 함수 → 등록식 visualizer, collisionMesh · blocksFloor → 질의) | 끝남(2026-11-18, 9절) |
 | 2 | S7 나머지: 컴포넌트를 소유 시스템 옆으로 | 끝남(2026-11-18, 10절) |
-| 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | 다음 |
+| 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | 진행 중(S5a 끝남) |
 | 3 | S6 EditorApp 분해(아웃라이너 · 디테일 · 로그 · 도킹 · 메뉴와 툴바 · 뷰포트 컨트롤러) | |
 
 완료 기준:

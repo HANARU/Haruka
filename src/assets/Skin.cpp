@@ -1,5 +1,5 @@
 #include "Skin.hpp"
-#include "MeshSource.hpp"
+#include "../geometry/MeshSource.hpp"
 
 #include <algorithm>
 #include <cmath>

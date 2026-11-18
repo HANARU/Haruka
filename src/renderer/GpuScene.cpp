@@ -2,8 +2,7 @@
 #include "MipChain.hpp"
 #include "RendererLog.hpp"
 #include "RenderTypes.hpp"
-#include "../assets/GltfLoader.hpp"
-#include "../assets/MeshSource.hpp"
+#include "../geometry/MeshSource.hpp"
 #include "../geometry/MeshOptimize.hpp"
 
 #include <algorithm>

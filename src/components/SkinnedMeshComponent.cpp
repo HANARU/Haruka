@@ -1,7 +1,7 @@
 #include "SkinnedMeshComponent.hpp"
 #include "LightChannels.hpp"
 #include "../assets/AssetManager.hpp"
-#include "../assets/MeshSource.hpp"
+#include "../geometry/MeshSource.hpp"
 #include "../assets/Skin.hpp"
 #include "../renderer/MeshHandle.hpp"
 #include "../scene/Actor.hpp"

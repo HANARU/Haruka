@@ -3,7 +3,7 @@
 #include "../scene/World.hpp"
 #include "../components/StaticMeshComponent.hpp"
 #include "../components/SkinnedMeshComponent.hpp"
-#include "../assets/MeshSource.hpp"
+#include "../geometry/MeshSource.hpp"
 #include "../components/CameraComponent.hpp"
 #include "../components/HeightFogComponent.hpp"
 #include "../components/LightComponent.hpp"

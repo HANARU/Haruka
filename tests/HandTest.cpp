@@ -14,7 +14,7 @@
 #include "../src/assets/AssetManager.hpp"
 #include "../src/assets/GassetCache.hpp"
 #include "../src/assets/GltfLoader.hpp"
-#include "../src/assets/MeshSource.hpp"
+#include "../src/geometry/MeshSource.hpp"
 #include "../src/assets/Skin.hpp"
 #include "../src/components/HandPoseComponent.hpp"
 #include "../src/components/SkinnedMeshComponent.hpp"

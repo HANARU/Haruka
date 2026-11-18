@@ -4,8 +4,7 @@
 #include "../scene/World.hpp"
 #include "../core/AppPaths.hpp"
 #include "../ui/slate/HSlateRenderer.hpp"
-#include "../assets/GltfLoader.hpp"
-#include "../assets/MeshSource.hpp"
+#include "../geometry/MeshSource.hpp"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/norm.hpp>
 #include <glm/gtc/random.hpp>

@@ -1,6 +1,6 @@
 #pragma once
 #include "PrimitiveDesc.hpp"
-#include "../assets/MeshSource.hpp"
+#include "MeshSource.hpp"
 #include "../core/Bounds.hpp"
 
 #include <string>
