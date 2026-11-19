@@ -3,6 +3,8 @@
 // 모든 편집은 Undo 커맨드로 쌓습니다(EditorCommands.hpp, 액터를 ID 로 기억).
 #include "EditorApp.hpp"
 #include "EditorCommands.hpp"
+#include "ActorPicker.hpp"
+#include "../core/HText.hpp"
 #include "../scene/World.hpp"
 #include "../scene/Actor.hpp"
 #include "../components/CameraComponent.hpp"
@@ -122,7 +124,9 @@ std::vector<Actor*> EditorApp::spawnActorSet(const std::string& clip) {
     }
     std::set<std::string> names;
     for (const auto& ap : ctx_.world->getActors()) names.insert(ap->name);
-    const std::vector<Actor*> slots = SceneSerializer::readScene(setText, *ctx_.world, *ctx_.assets);
+    // 붙여넣기 · 복제는 새 GUID 를 주고, 복사한 세트 안을 가리키던 참조는 새 사본을 가리키게 합니다(참조 체계 R-5).
+    const std::vector<Actor*> slots = SceneSerializer::readScene(setText, *ctx_.world, *ctx_.assets,
+                                                                 SceneSerializer::GuidPolicy::Fresh);
     std::vector<Actor*> roots;
     for (Actor* a : slots)
         if (a && !a->getParent()) roots.push_back(a);
@@ -167,6 +171,25 @@ void EditorApp::duplicateSelection() {
     outlinerPanel_.revealSelected();
     outlinerPanel_.markDirty();
     HLOG(LogEditorEdit, Log) << "Duplicated " << roots.size() << (roots.size() == 1 ? " actor" : " actors");
+}
+
+// ── 액터 참조 칸의 대상 고르기(참조 체계 R-7) ───────────────────────────────────────
+void EditorApp::openActorPicker(const std::string& title, uint64_t current, std::function<void(uint64_t)> pick) {
+    if (!ctx_.world) return;
+    const std::string none    = HTEXT("Editor.Details", "ActorRef.None", "None").toString();
+    const std::string missing = HTEXT("Editor.Details", "ActorRef.Missing", "(missing)").toString();
+    auto entries = std::make_shared<std::vector<hpick::Entry>>(hpick::buildList(*ctx_.world, viewport_.cameraActor(), none));
+    ModalSpec m;
+    m.title   = title;
+    m.message = HText::format(HTEXT("Editor.Dialog", "PickActor.Message", "Choose the actor this field points to.\nNow: {0}"),
+                              { hpick::labelFor(*ctx_.world, current, none, missing) }).toString();
+    for (const auto& e : *entries) m.list.push_back(e.label);
+    m.onPick = [entries, pick](const std::string& label) {
+        for (const auto& e : *entries)
+            if (e.label == label) { if (pick) pick(e.guid); return; }
+    };
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Cancel", "Cancel").toString(), {}, false, true });
+    openModal(std::move(m));
 }
 
 // ── 부모 바꾸기 ───────────────────────────────────────────────────────────────────

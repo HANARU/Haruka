@@ -50,8 +50,9 @@ struct PropValue {
     float          f    = 0.f;
     int            i    = 0;
     bool           b    = false;
+    uint64_t       g    = 0;   // ActorRef: 대상 GUID(참조 체계 R-7)
     bool operator==(const PropValue& o) const {
-        return label == o.label && kind == o.kind && f == o.f && i == o.i && b == o.b;
+        return label == o.label && kind == o.kind && f == o.f && i == o.i && b == o.b && g == o.g;
     }
 };
 struct PropValues {
@@ -73,6 +74,7 @@ inline PropValues captureProps(Component& c) {
         if (pd.kind == PropDesc::Float && pd.getF)       e.f = pd.getF();
         else if (pd.kind == PropDesc::Toggle && pd.getB) e.b = pd.getB();
         else if (pd.kind == PropDesc::Enum && pd.getI)   e.i = pd.getI();
+        else if (pd.kind == PropDesc::ActorRef && pd.getG) e.g = pd.getG();
         else continue;
         out.v.push_back(std::move(e));
     }
@@ -93,6 +95,7 @@ inline void applyProps(Component& c, const PropValues& v) {
                 if (pd.kind == PropDesc::Float && pd.setF)       pd.setF(e.f);
                 else if (pd.kind == PropDesc::Toggle && pd.setB) { pd.setB(e.b); layoutMayChange = true; }
                 else if (pd.kind == PropDesc::Enum && pd.setI)   { pd.setI(e.i); layoutMayChange = true; }
+                else if (pd.kind == PropDesc::ActorRef && pd.setG) { pd.setG(e.g); layoutMayChange = true; }
                 done[k] = 1;
                 break;
             }
@@ -121,6 +124,7 @@ inline bool setProp(Component& c, const PropValue& e) {
         if (pd.kind == PropDesc::Float && pd.setF)       { pd.setF(e.f); return true; }
         if (pd.kind == PropDesc::Toggle && pd.setB)      { pd.setB(e.b); return true; }
         if (pd.kind == PropDesc::Enum && pd.setI)        { pd.setI(e.i); return true; }
+        if (pd.kind == PropDesc::ActorRef && pd.setG)    { pd.setG(e.g); return true; }
     }
     return false;
 }

@@ -8,6 +8,9 @@ Actor* World::spawnActor(const std::string& name) {
     actor->world_ = this;
     Actor* ptr   = actor.get();
     idMap_[ptr->id] = ptr;
+    // 새 GUID 를 줍니다. 64비트 무작위라 겹칠 일이 거의 없지만, 겹치면 다시 뽑습니다.
+    do { ptr->guid_ = HGuid::make(); } while (guidMap_.count(ptr->guid_));
+    guidMap_[ptr->guid_] = ptr;
     actors.push_back(std::move(actor));
     hcore::bumpStructure();
     onActorSpawned.broadcast(ptr);
@@ -38,6 +41,7 @@ void World::destroyImmediate(Actor* actor) {
     onActorDestroyed.broadcast(actor);
     actor->notifyDestroy();
     idMap_.erase(actor->id);
+    guidMap_.erase(actor->guid_);
     // 자식 서브트리 재귀 파괴 (부모 파괴 시 자식도 파괴 — 유니티 규약). 복사 후
     // 순회하는 이유는 destroyImmediate → 자식 detach 가 원본 children_ 을 수정하기
     // 때문입니다. 각 자식도 onActorDestroyed 를 발행하므로 커맨드 purge·선택 포인터
@@ -70,6 +74,26 @@ void World::tick(float dt) {
 Actor* World::findById(uint64_t id) const {
     auto it = idMap_.find(id);
     return it != idMap_.end() ? it->second : nullptr;
+}
+
+Actor* World::findByGuid(HGuid guid) const {
+    if (!guid.valid()) return nullptr;
+    auto it = guidMap_.find(guid);
+    return it != guidMap_.end() ? it->second : nullptr;
+}
+
+bool World::assignGuid(Actor* actor, HGuid guid) {
+    if (!actor || !guid.valid()) return false;
+    if (actor->guid_ == guid) return true;
+    auto it = guidMap_.find(guid);
+    if (it != guidMap_.end()) return false;
+    if (!findById(actor->id) || findById(actor->id) != actor) return false;   // 이 월드의 액터가 아님
+    guidMap_.erase(actor->guid_);
+    actor->guid_    = guid;
+    guidMap_[guid]  = actor;
+    // 참조 캐시(HActorRef)가 다시 찾도록 구조 버전을 올립니다.
+    hcore::bumpStructure();
+    return true;
 }
 
 bool World::reassignId(Actor* actor, uint64_t newId) {

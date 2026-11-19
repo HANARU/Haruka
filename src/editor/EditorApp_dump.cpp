@@ -20,6 +20,9 @@ void EditorApp::setOptions(const EngineOptions& options) {
     uiLogCategories_    = options.uiLogCategories;
     uiOutlinerSearch_   = options.uiOutlinerSearch;
     uiRename_           = options.uiRename;
+    uiAssetActions_     = options.uiAssetActions;
+    uiActorPicker_      = options.uiActorPicker;
+    uiMoveAsset_        = options.uiMoveAsset;
     uiType_             = options.uiType;
     uiCaretLeft_        = options.uiCaretLeft;
     uiSelectLeft_       = options.uiSelectLeft;
@@ -158,6 +161,24 @@ void EditorApp::applyDumpState() {
             for (int i = 0; i < uiSelectLeft_; ++i) st->moveLeft(false, true);
             if (!uiImeCompose_.empty()) st->setComposition(uiImeCompose_, uiImeCompose_.size());
             outlinerPanel_.markDirty();
+        }
+    }
+    if (!uiMoveAsset_.empty()) {
+        const size_t bar = uiMoveAsset_.find('|');
+        moveAsset(uiMoveAsset_.substr(0, bar), uiMoveAsset_.substr(bar + 1));
+    }
+    if (!uiAssetActions_.empty()) openAssetActions(uiAssetActions_);
+    if (uiActorPicker_ && ctx_.selected) {
+        // 선택한 액터의 첫 액터 참조 칸(디테일 패널에서 그 칸을 누른 것과 같음).
+        bool opened = false;
+        for (const auto& c : ctx_.selected->getComponents()) {
+            for (const PropDesc& pd : c->buildProps()) {
+                if (pd.kind != PropDesc::ActorRef || !pd.getG) continue;
+                openActorPicker(pd.label ? pd.label : "", pd.getG(), [](uint64_t) {});
+                opened = true;
+                break;
+            }
+            if (opened) break;
         }
     }
     if (uiPlay_ && playState_ == EPlayState::Editor) beginPlay();

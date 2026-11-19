@@ -58,6 +58,11 @@ struct EngineOptions {
     bool        uiLogCategories = false; // --ui-log-categories : 첫 프레임 뒤 로그 Categories 팝업 열기(에디터 전용)
     std::string uiOutlinerSearch;        // --ui-outliner-search=<text> : 아웃라이너 검색어(에디터 전용)
     std::string uiRename;                // --ui-rename=<actor> : 액터 이름 바꾸기 시작(에디터 전용)
+    std::string uiAssetActions;          // --ui-asset-actions=<logical path> : 에셋 대화상자 열기(참조 체계 A-5, 에디터 전용)
+    bool        uiActorPicker = false;   // --ui-actor-picker : 선택한 액터의 첫 액터 참조 칸의 고르기 목록 열기(R-7, 에디터 전용)
+    // --ui-move-asset=<from>|<to> : 첫 프레임 뒤 에셋을 옮김(참조 체계 A-5, 에디터 전용). 프로젝트 파일을 실제로 옮기므로
+    // --project=<사본 폴더> 와 함께만 쓰십시오.
+    std::string uiMoveAsset;
     // 글자 체계 T1 · T2(2026-11-19): 포커스된 글 칸에 입력 흉내. 포커스가 없으면 아웃라이너 검색에 포커스를 줍니다.
     std::string culture;                 // --culture=<en|ko|...> : 표시 글 문화권(글자 체계 T3, 저장하지 않음)
     std::string uiType;                  // --ui-type=<UTF-8 글> : 선택을 이 글로 바꿈

@@ -20,6 +20,6 @@ public:
     // Deserialize and spawn. Returns the root (children are attached), nullptr on failure.
     static Actor* spawn(const std::string& path, World& world, AssetManager& assets);
 
-    // List .hprefab stem names found in kDir.
+    // .hprefab names under kDir: path relative to kDir without the extension (subfolders included, UTF-8).
     static std::vector<std::string> scan();
 };

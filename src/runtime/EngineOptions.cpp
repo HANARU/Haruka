@@ -104,6 +104,15 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (!v.empty()) o.uiRename = v;
             else unknown.push_back(a);
         }
+        else if (valueOf(a, "--ui-asset-actions", v)) {
+            if (!v.empty()) o.uiAssetActions = v;
+            else unknown.push_back(a);
+        }
+        else if (a == "--ui-actor-picker") o.uiActorPicker = true;
+        else if (valueOf(a, "--ui-move-asset", v)) {
+            if (v.find('|') != std::string::npos) o.uiMoveAsset = v;
+            else unknown.push_back(a);
+        }
         else if (valueOf(a, "--culture", v)) {
             if (!v.empty()) o.culture = v;
             else unknown.push_back(a);

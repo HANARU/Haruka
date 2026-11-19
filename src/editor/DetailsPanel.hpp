@@ -29,6 +29,8 @@ public:
         Transform*            undoSnapshot = nullptr;
         HLogCategory*         logCat       = nullptr;
         std::function<void()> onPrefabSaved;
+        // 액터 참조 칸(참조 체계 R-7)을 누르면 부릅니다: 제목 · 지금 값(GUID) · 고른 값을 받을 함수. EditorApp 이 목록 대화상자를 엽니다.
+        std::function<void(const std::string&, uint64_t, std::function<void(uint64_t)>)> pickActor;
     };
 
     void init(Deps deps);
@@ -65,6 +67,7 @@ private:
                     const std::vector<const char*>& opts,
                     std::function<int()>    getI,
                     std::function<void(int)> setI);
+    void addActorRefRow(const char* lbl, std::function<uint64_t()> getG, std::function<void(uint64_t)> setG);
     void addBoolRow(const char* lbl,
                     std::function<bool()>    getB,
                     std::function<void(bool)> setB);

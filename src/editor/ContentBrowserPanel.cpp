@@ -8,6 +8,7 @@
 #include "../scene/Actor.hpp"
 #include "../scene/World.hpp"
 #include "../sceneio/PrefabManager.hpp"
+#include "../vfs/PathUtf8.hpp"
 #include <algorithm>
 #include <filesystem>
 
@@ -18,6 +19,34 @@ namespace {
 constexpr const char* kScenesDir = "/Game/scenes";
 constexpr const char* kModelsDir = "/Game/models";
 constexpr const char* kAudioDir  = "/Game/audio";
+
+// 논리 경로의 파일 이름에서 확장자를 뺀 것(UTF-8 그대로). fs::path(std::string) 은 Windows 코드 페이지로 해석해 한글 이름이 깨집니다.
+std::string stemOf(const std::string& logical) {
+    const size_t slash = logical.find_last_of('/');
+    std::string name = slash == std::string::npos ? logical : logical.substr(slash + 1);
+    const size_t dot = name.find_last_of('.');
+    if (dot != std::string::npos && dot > 0) name.resize(dot);
+    return name;
+}
+
+// dir 아래 파일 중 확장자가 맞는 것을 "dir/상대 경로"(UTF-8)로 모아 정렬합니다. 하위 폴더도 훑습니다(옮긴 에셋도 보이게).
+std::vector<std::string> listFiles(const char* logicalDir, std::initializer_list<const char*> exts) {
+    std::vector<std::string> out;
+    std::error_code ec;
+    const fs::path dir = hproj::resolve(logicalDir);
+    if (!fs::exists(dir, ec)) return out;
+    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        std::string ext = hpak::utf8Of(it->path().extension());
+        for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+        if (std::find_if(exts.begin(), exts.end(), [&](const char* e) { return ext == e; }) == exts.end()) continue;
+        const std::string rel = hpak::utf8Of(fs::relative(it->path(), dir, ec));
+        if (!ec && !rel.empty()) out.push_back(std::string(logicalDir) + "/" + rel);
+        ec.clear();
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
 
 // 콘텐츠 브라우저에서 소리 파일을 지정(2026-10-15). setFile 이 이전 소리를 놓아 주므로 값 문자열을 다시 읽는
 // 일반 경로(readField) 대신 이것으로 되돌립니다. 액터는 ID 로 찾습니다(EditorCommands.hpp 머리말).
@@ -40,53 +69,33 @@ void ContentBrowserPanel::init(Deps deps) {
 }
 
 void ContentBrowserPanel::scanAll() {
-    modelFiles_.clear();
-    try {
-        // 프로젝트 폴더를 훑지만, 컴포넌트와 씬에는 논리 경로(/Game/models/...)를 남깁니다(hproj).
-        const fs::path dir = hproj::resolve(kModelsDir);
-        if (fs::exists(dir)) {
-            for (auto& e : fs::recursive_directory_iterator(dir)) {
-                auto ext = e.path().extension();
-                if (ext == ".glb" || ext == ".gltf")
-                    modelFiles_.push_back(std::string(kModelsDir) + "/" + e.path().lexically_relative(dir).generic_string());
-            }
-            std::sort(modelFiles_.begin(), modelFiles_.end());
-        }
-    } catch (...) {}
-
+    // 프로젝트 폴더를 훑지만, 컴포넌트와 씬에는 논리 경로(/Game/models/...)를 남깁니다(hproj). 이름은 UTF-8 로 다룹니다(글자 체계).
+    modelFiles_ = listFiles(kModelsDir, { ".glb", ".gltf" });
+    // 소리는 하위 폴더도 훑습니다(참조 체계: 옮긴 소리도 목록에 남게). 항목은 /Game/audio 아래 상대 경로입니다.
     audioFiles_.clear();
-    try {
-        const fs::path dir = hproj::resolve(kAudioDir);
-        if (fs::exists(dir)) {
-            for (auto& e : fs::directory_iterator(dir)) {
-                auto ext = e.path().extension().string();
-                if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac")
-                    audioFiles_.push_back(e.path().filename().string());
-            }
-            std::sort(audioFiles_.begin(), audioFiles_.end());
-        }
-    } catch (...) {}
+    for (const std::string& p : listFiles(kAudioDir, { ".wav", ".mp3", ".ogg", ".flac" }))
+        audioFiles_.push_back(p.substr(std::string(kAudioDir).size() + 1));
 
     refreshPrefabs();
     scanScenes();
 }
 
 void ContentBrowserPanel::scanScenes() {
-    sceneFiles_.clear();
-    std::error_code ec;
-    const fs::path dir = hproj::resolve(kScenesDir);
-    if (!fs::exists(dir, ec)) return;
-    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
-         it.increment(ec)) {
-        if (!it->is_regular_file(ec) || it->path().extension() != ".hscene") continue;
-        const std::string rel = fs::relative(it->path(), dir, ec).generic_string();
-        if (!ec && !rel.empty()) sceneFiles_.push_back(std::string(kScenesDir) + "/" + rel);
-    }
-    std::sort(sceneFiles_.begin(), sceneFiles_.end());
+    sceneFiles_ = listFiles(kScenesDir, { ".hscene" });
 }
 
 void ContentBrowserPanel::refreshPrefabs() {
     prefabFiles_ = PrefabManager::scan();
+}
+
+std::shared_ptr<HWidget> ContentBrowserPanel::withActions(std::shared_ptr<HWidget> row, const std::string& path) const {
+    auto more = deps_.ui->textButton("...", 12.f, EditorUiKit::kTextDim, {4.f, 2.f},
+                                     EditorTheme::transparent, EditorTheme::ctlHover,
+                                     [this, path] { if (deps_.onAssetActions) deps_.onAssetActions(path); });
+    more->setTooltip(HTEXT("Editor.Content", "Tip.AssetActions", "References, rename and move"));
+    return HNew(SHorizontalBox)
+        ->addSlot(row, SHorizontalBox::ESizeRule::Fill)
+        ->addSlot(more, SHorizontalBox::ESizeRule::Fixed, s(28.f));
 }
 
 void ContentBrowserPanel::buildTab(SVerticalBox& content) const {
@@ -115,7 +124,7 @@ void ContentBrowserPanel::buildScenesSection(SVerticalBox& content) const {
     for (const auto& path : sceneFiles_) {
         const std::string display = path.substr(std::string(kScenesDir).size() + 1);
         const bool current = (hvfs::toCanonical(path) == curPath);
-        content.addSlot(
+        content.addSlot(withActions(
             HNew(SButton)
                 ->style(EditorUiKit::buttonStyle())
                 ->cornerRadius(0.f)
@@ -131,7 +140,7 @@ void ContentBrowserPanel::buildScenesSection(SVerticalBox& content) const {
                     ->addSlot(HNew(STextBlock)->text("[S]")->fontSize(s(12.f))->color(EditorTheme::badgeScene)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fixed, s(30.f))
                     ->addSlot(HNew(STextBlock)->text(display)->fontSize(s(13.f))->color(EditorUiKit::kTextBody)
-                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)),
+                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)), path),
             SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     }
     content.addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
@@ -143,8 +152,8 @@ void ContentBrowserPanel::buildModelsSection(SVerticalBox& content) const {
         deps_.ui->sectionHeader("MODELS", EditorUiKit::kTextDim),
         SVerticalBox::ESizeRule::Fixed, s(22.f));
     for (const auto& path : modelFiles_) {
-        std::string display = fs::path(path).stem().string();
-        content.addSlot(
+        std::string display = stemOf(path);
+        content.addSlot(withActions(
             HNew(SButton)
                 ->style(EditorUiKit::buttonStyle())
                 ->cornerRadius(0.f)
@@ -185,7 +194,7 @@ void ContentBrowserPanel::buildModelsSection(SVerticalBox& content) const {
                     ->addSlot(HNew(STextBlock)->text("[M]")->fontSize(s(12.f))->color(EditorTheme::badgeModel)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fixed, s(30.f))
                     ->addSlot(HNew(STextBlock)->text(display)->fontSize(s(13.f))->color(EditorUiKit::kTextBody)
-                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)),
+                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)), path),
             SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     }
 }
@@ -198,7 +207,7 @@ void ContentBrowserPanel::buildAudioSection(SVerticalBox& content) const {
         SVerticalBox::ESizeRule::Fixed, s(22.f));
     for (const auto& stem : audioFiles_) {
         std::string fullPath = std::string(kAudioDir) + "/" + stem;
-        content.addSlot(
+        content.addSlot(withActions(
             HNew(SButton)
                 ->style(EditorUiKit::buttonStyle())
                 ->cornerRadius(0.f)
@@ -238,7 +247,7 @@ void ContentBrowserPanel::buildAudioSection(SVerticalBox& content) const {
                         ->color(EditorTheme::badgeAudio)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fixed, s(30.f))
                     ->addSlot(HNew(STextBlock)->text(stem)->fontSize(s(13.f))->color(EditorUiKit::kTextBody)
-                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)),
+                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)), fullPath),
             SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     }
 }
@@ -251,7 +260,7 @@ void ContentBrowserPanel::buildPrefabsSection(SVerticalBox& content) const {
         SVerticalBox::ESizeRule::Fixed, s(22.f));
     for (const auto& stem : prefabFiles_) {
         std::string path = std::string(PrefabManager::kDir) + "/" + stem + PrefabManager::kExt;
-        content.addSlot(
+        content.addSlot(withActions(
             HNew(SButton)
                 ->style(EditorUiKit::buttonStyle())
                 ->cornerRadius(0.f)
@@ -272,7 +281,7 @@ void ContentBrowserPanel::buildPrefabsSection(SVerticalBox& content) const {
                     ->addSlot(HNew(STextBlock)->text("[P]")->fontSize(s(12.f))->color(EditorTheme::badgePrefab)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fixed, s(30.f))
                     ->addSlot(HNew(STextBlock)->text(stem)->fontSize(s(13.f))->color(EditorUiKit::kTextBody)
-                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)),
+                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)), path),
             SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     }
 }

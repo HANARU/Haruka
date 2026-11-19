@@ -4,102 +4,162 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: ko\n"
 
-#: src/editor/DetailsPanel.cpp:295
+#: src/editor/ContentBrowserPanel.cpp:95
+msgctxt "Editor.Content,Tip.AssetActions"
+msgid "References, rename and move"
+msgstr "참조 · 이름 바꾸기 · 옮기기"
+
+#: src/editor/DetailsPanel.cpp:131
+msgctxt "Editor.Details,ActorRef.Missing"
+msgid "(missing)"
+msgstr "(찾을 수 없음)"
+
+#: src/editor/DetailsPanel.cpp:130
+msgctxt "Editor.Details,ActorRef.None"
+msgid "None"
+msgstr "없음"
+
+#: src/editor/DetailsPanel.cpp:327
 msgctxt "Editor.Details,Tip.Enable"
 msgid "Enable/Disable Component"
 msgstr "컴포넌트 켜기/끄기"
 
-#: src/editor/DetailsPanel.cpp:299
+#: src/editor/DetailsPanel.cpp:331
 msgctxt "Editor.Details,Tip.Remove"
 msgid "Remove Component"
 msgstr "컴포넌트 제거"
 
-#: src/editor/EditorApp_scene.cpp:156
+#: src/editor/EditorApp_scene.cpp:526
+msgctxt "Editor.Dialog,Asset.NoRefs"
+msgid "{0}\nNo scene, prefab or setting refers to it."
+msgstr "{0}\n이 에셋을 쓰는 씬 · 프리팹 · 설정이 없습니다."
+
+#: src/editor/EditorApp_scene.cpp:528
+msgctxt "Editor.Dialog,Asset.Refs"
+msgid "{0}\nReferenced by {1} file(s). Pick a scene to open it."
+msgstr "{0}\n파일 {1}개가 씁니다. 씬을 고르면 그 씬을 엽니다."
+
+#: src/editor/EditorApp_scene.cpp:524
+msgctxt "Editor.Dialog,Asset.Title"
+msgid "Asset"
+msgstr "에셋"
+
+#: src/editor/EditorApp_scene.cpp:157
 msgctxt "Editor.Dialog,Audio.Title"
 msgid "Audio Output"
 msgstr "오디오 출력"
 
-#: src/editor/EditorApp_scene.cpp:220
+#: src/editor/EditorApp_edit.cpp:191
 msgctxt "Editor.Dialog,Button.Cancel"
 msgid "Cancel"
 msgstr "취소"
 
-#: src/editor/EditorApp_scene.cpp:201
+#: src/editor/EditorApp_scene.cpp:202
 msgctxt "Editor.Dialog,Button.Close"
 msgid "Close"
 msgstr "닫기"
 
-#: src/editor/EditorApp_scene.cpp:307
+#: src/editor/EditorApp_scene.cpp:308
 msgctxt "Editor.Dialog,Button.DontSave"
 msgid "Don't Save"
 msgstr "저장 안 함"
 
-#: src/editor/EditorApp_scene.cpp:285
+#: src/editor/EditorApp_scene.cpp:553
+msgctxt "Editor.Dialog,Button.Move"
+msgid "Move"
+msgstr "옮기기"
+
+#: src/editor/EditorApp_scene.cpp:537
+msgctxt "Editor.Dialog,Button.RenameMove"
+msgid "Rename / Move..."
+msgstr "이름 바꾸기 / 옮기기..."
+
+#: src/editor/EditorApp_scene.cpp:286
 msgctxt "Editor.Dialog,Button.Replace"
 msgid "Replace"
 msgstr "바꾸기"
 
-#: src/editor/EditorApp_scene.cpp:266
+#: src/editor/EditorApp_scene.cpp:267
 msgctxt "Editor.Dialog,Button.Save"
 msgid "Save"
 msgstr "저장"
 
-#: src/editor/EditorApp_scene.cpp:214
+#: src/editor/EditorApp_scene.cpp:548
+msgctxt "Editor.Dialog,Move.Message"
+msgid "New path under /Game for {0}\n(folders are created; files that refer to it are updated;\nthe Undo history is cleared):"
+msgstr "{0} 의 새 경로(/Game 아래)\n(폴더는 만들고, 이 에셋을 쓰는 파일을 고치며,\n실행 취소 기록은 비웁니다):"
+
+#: src/editor/EditorApp_scene.cpp:547
+msgctxt "Editor.Dialog,Move.Title"
+msgid "Rename / Move Asset"
+msgstr "에셋 이름 바꾸기 / 옮기기"
+
+#: src/editor/EditorApp_scene.cpp:575
+msgctxt "Editor.Dialog,MoveFailed.Title"
+msgid "Cannot Move"
+msgstr "옮길 수 없음"
+
+#: src/editor/EditorApp_scene.cpp:215
 msgctxt "Editor.Dialog,Open.List"
 msgid "Scenes in assets/scenes:"
 msgstr "assets/scenes 의 씬:"
 
-#: src/editor/EditorApp_scene.cpp:212
+#: src/editor/EditorApp_scene.cpp:213
 msgctxt "Editor.Dialog,Open.None"
 msgid "No .hscene files in assets/scenes."
 msgstr "assets/scenes 에 .hscene 파일이 없습니다."
 
-#: src/editor/EditorApp_scene.cpp:209
+#: src/editor/EditorApp_scene.cpp:210
 msgctxt "Editor.Dialog,Open.Title"
 msgid "Open Scene"
 msgstr "씬 열기"
 
-#: src/editor/EditorApp_scene.cpp:284
+#: src/editor/EditorApp_edit.cpp:184
+msgctxt "Editor.Dialog,PickActor.Message"
+msgid "Choose the actor this field points to.\nNow: {0}"
+msgstr "이 칸이 가리킬 액터를 고르십시오.\n지금: {0}"
+
+#: src/editor/EditorApp_scene.cpp:285
 msgctxt "Editor.Dialog,Replace.Message"
 msgid "{0} already exists.\nReplace it?"
 msgstr "{0} 이(가) 이미 있습니다.\n바꿀까요?"
 
-#: src/editor/EditorApp_scene.cpp:283
+#: src/editor/EditorApp_scene.cpp:284
 msgctxt "Editor.Dialog,Replace.Title"
 msgid "Replace Scene"
 msgstr "씬 바꾸기"
 
-#: src/editor/EditorApp_scene.cpp:263
+#: src/editor/EditorApp_scene.cpp:264
 msgctxt "Editor.Dialog,SaveAs.Message"
 msgid "Name under /Game/scenes (letters in any language, digits, space, - _ and / for folders):"
 msgstr "/Game/scenes 아래 이름(모든 언어의 글자, 숫자, 공백, - _ , 폴더는 /):"
 
-#: src/editor/EditorApp_scene.cpp:262
+#: src/editor/EditorApp_scene.cpp:263
 msgctxt "Editor.Dialog,SaveAs.Title"
 msgid "Save Scene As"
 msgstr "다른 이름으로 씬 저장"
 
-#: src/editor/EditorApp_scene.cpp:301
+#: src/editor/EditorApp_scene.cpp:302
 msgctxt "Editor.Dialog,Unsaved.Message"
 msgid "Save changes to {0}\nbefore {1}?"
 msgstr "{1} 전에\n{0} 의 변경 내용을 저장할까요?"
 
-#: src/editor/EditorApp_scene.cpp:299
+#: src/editor/EditorApp_scene.cpp:300
 msgctxt "Editor.Dialog,Unsaved.Title"
 msgid "Unsaved Changes"
 msgstr "저장하지 않은 변경"
 
-#: src/editor/EditorApp_scene.cpp:325
+#: src/editor/EditorApp_scene.cpp:326
 msgctxt "Editor.Dialog,Verb.Closing"
 msgid "closing"
 msgstr "닫기"
 
-#: src/editor/EditorApp_scene.cpp:138
+#: src/editor/EditorApp_scene.cpp:139
 msgctxt "Editor.Dialog,Verb.NewScene"
 msgid "creating a new scene"
 msgstr "새 씬 만들기"
 
-#: src/editor/EditorApp.cpp:218
+#: src/editor/EditorApp.cpp:221
 msgctxt "Editor.Dialog,Verb.OpenAnother"
 msgid "opening another scene"
 msgstr "다른 씬 열기"
@@ -109,117 +169,117 @@ msgctxt "Editor.Dock,Tip.CloseTab"
 msgid "Close Tab"
 msgstr "탭 닫기"
 
-#: src/editor/EditorApp.cpp:587
+#: src/editor/EditorApp.cpp:591
 msgctxt "Editor.Menu,Actor"
 msgid "Actor"
 msgstr "액터"
 
-#: src/editor/EditorApp.cpp:588
+#: src/editor/EditorApp.cpp:592
 msgctxt "Editor.Menu,Actor.AddEmpty"
 msgid "Add Empty"
 msgstr "빈 액터 추가"
 
-#: src/editor/EditorApp.cpp:595
+#: src/editor/EditorApp.cpp:599
 msgctxt "Editor.Menu,Actor.AttachToPrev"
 msgid "Attach To Prev Selected"
 msgstr "직전 선택에 붙이기"
 
-#: src/editor/EditorApp.cpp:603
+#: src/editor/EditorApp.cpp:607
 msgctxt "Editor.Menu,Actor.Detach"
 msgid "Detach Selected"
 msgstr "선택 떼어 내기"
 
-#: src/editor/EditorApp.cpp:570
+#: src/editor/EditorApp.cpp:574
 msgctxt "Editor.Menu,Edit"
 msgid "Edit"
 msgstr "편집"
 
-#: src/editor/EditorApp.cpp:585
+#: src/editor/EditorApp.cpp:589
 msgctxt "Editor.Menu,Edit.AudioOutput"
 msgid "Audio Output..."
 msgstr "오디오 출력..."
 
-#: src/editor/EditorApp.cpp:573
+#: src/editor/EditorApp.cpp:577
 msgctxt "Editor.Menu,Edit.Copy"
 msgid "Copy"
 msgstr "복사"
 
-#: src/editor/EditorApp.cpp:576
+#: src/editor/EditorApp.cpp:580
 msgctxt "Editor.Menu,Edit.Delete"
 msgid "Delete"
 msgstr "삭제"
 
-#: src/editor/EditorApp.cpp:575
+#: src/editor/EditorApp.cpp:579
 msgctxt "Editor.Menu,Edit.Duplicate"
 msgid "Duplicate"
 msgstr "복제"
 
-#: src/editor/EditorApp.cpp:577
+#: src/editor/EditorApp.cpp:581
 msgctxt "Editor.Menu,Edit.FrameSelected"
 msgid "Frame Selected"
 msgstr "선택 항목 맞추기"
 
-#: src/editor/EditorApp.cpp:579
+#: src/editor/EditorApp.cpp:583
 msgctxt "Editor.Menu,Edit.GizmoSize"
 msgid "Gizmo Size (S/M/L)"
 msgstr "기즈모 크기 (작게/보통/크게)"
 
-#: src/editor/EditorApp.cpp:574
+#: src/editor/EditorApp.cpp:578
 msgctxt "Editor.Menu,Edit.Paste"
 msgid "Paste"
 msgstr "붙여넣기"
 
-#: src/editor/EditorApp.cpp:572
+#: src/editor/EditorApp.cpp:576
 msgctxt "Editor.Menu,Edit.Redo"
 msgid "Redo"
 msgstr "다시 실행"
 
-#: src/editor/EditorApp.cpp:571
+#: src/editor/EditorApp.cpp:575
 msgctxt "Editor.Menu,Edit.Undo"
 msgid "Undo"
 msgstr "실행 취소"
 
-#: src/editor/EditorApp.cpp:564
+#: src/editor/EditorApp.cpp:568
 msgctxt "Editor.Menu,File"
 msgid "File"
 msgstr "파일"
 
-#: src/editor/EditorApp.cpp:565
+#: src/editor/EditorApp.cpp:569
 msgctxt "Editor.Menu,File.NewScene"
 msgid "New Scene"
 msgstr "새 씬"
 
-#: src/editor/EditorApp.cpp:566
+#: src/editor/EditorApp.cpp:570
 msgctxt "Editor.Menu,File.OpenScene"
 msgid "Open Scene..."
 msgstr "씬 열기..."
 
-#: src/editor/EditorApp.cpp:567
+#: src/editor/EditorApp.cpp:571
 msgctxt "Editor.Menu,File.SaveScene"
 msgid "Save Scene"
 msgstr "씬 저장"
 
-#: src/editor/EditorApp.cpp:568
+#: src/editor/EditorApp.cpp:572
 msgctxt "Editor.Menu,File.SaveSceneAs"
 msgid "Save Scene As..."
 msgstr "다른 이름으로 씬 저장..."
 
-#: src/editor/EditorApp.cpp:618
+#: src/editor/EditorApp.cpp:622
 msgctxt "Editor.Menu,View"
 msgid "View"
 msgstr "보기"
 
-#: src/editor/EditorApp.cpp:614
+#: src/editor/EditorApp.cpp:618
 msgctxt "Editor.Menu,View.Language"
 msgid "Language"
 msgstr "언어"
 
-#: src/editor/EditorApp.cpp:609
+#: src/editor/EditorApp.cpp:613
 msgctxt "Editor.Menu,View.ResetLayout"
 msgid "Reset Layout"
 msgstr "레이아웃 초기화"
 
-#: src/editor/EditorApp.cpp:629
+#: src/editor/EditorApp.cpp:633
 msgctxt "Editor.Menu,Window"
 msgid "Window"
 msgstr "창"
@@ -259,37 +319,37 @@ msgctxt "Editor.OutputLog,SearchHint"
 msgid "Search log..."
 msgstr "로그 검색..."
 
-#: src/editor/EditorApp.cpp:496
+#: src/editor/EditorApp.cpp:500
 msgctxt "Editor.Panels,ContentBrowser"
 msgid "Content Browser"
 msgstr "콘텐츠 브라우저"
 
-#: src/editor/EditorApp.cpp:513
+#: src/editor/EditorApp.cpp:517
 msgctxt "Editor.Panels,ContentDrawer"
 msgid "Content Drawer"
 msgstr "콘텐츠 서랍"
 
-#: src/editor/EditorApp.cpp:512
+#: src/editor/EditorApp.cpp:516
 msgctxt "Editor.Panels,Details"
 msgid "Details"
 msgstr "디테일"
 
-#: src/editor/EditorApp.cpp:498
+#: src/editor/EditorApp.cpp:502
 msgctxt "Editor.Panels,GpuStats"
 msgid "GPU Stats"
 msgstr "GPU 통계"
 
-#: src/editor/EditorApp.cpp:510
+#: src/editor/EditorApp.cpp:514
 msgctxt "Editor.Panels,Outliner"
 msgid "Outliner"
 msgstr "아웃라이너"
 
-#: src/editor/EditorApp.cpp:497
+#: src/editor/EditorApp.cpp:501
 msgctxt "Editor.Panels,OutputLog"
 msgid "Output Log"
 msgstr "출력 로그"
 
-#: src/editor/EditorApp.cpp:511
+#: src/editor/EditorApp.cpp:515
 msgctxt "Editor.Panels,Viewport"
 msgid "Viewport"
 msgstr "뷰포트"

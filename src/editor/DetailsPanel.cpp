@@ -1,5 +1,7 @@
 #include "DetailsPanel.hpp"
 #include "EditorCommands.hpp"
+#include "ActorPicker.hpp"
+#include "../core/HText.hpp"
 #include "../scene/World.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/Component.hpp"
@@ -117,6 +119,36 @@ void DetailsPanel::addEnumRow(const char* lbl,
                                          dirty_ = true;
                                      }),
                 SHorizontalBox::ESizeRule::Fixed, s(88.f))
+            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space8)),
+        SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
+}
+
+// 액터 참조 칸(참조 체계 R-7): 대상 이름(비었으면 None, 못 찾으면 (missing))을 보이는 단추. 누르면 액터 목록에서 고릅니다.
+void DetailsPanel::addActorRefRow(const char* lbl,
+                                  std::function<uint64_t()> getG,
+                                  std::function<void(uint64_t)> setG) {
+    const std::string none    = HTEXT("Editor.Details", "ActorRef.None", "None").toString();
+    const std::string missing = HTEXT("Editor.Details", "ActorRef.Missing", "(missing)").toString();
+    const std::string cur     = deps_.ctx && deps_.ctx->world ? hpick::labelFor(*deps_.ctx->world, getG(), none, missing) : none;
+    const std::string title   = lbl ? lbl : "";
+    list_->addSlot(
+        HNew(SHorizontalBox)
+            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space12))
+            ->addSlot(
+                HNew(STextBlock)->text(lbl)->fontSize(s(12.f))->color(EditorUiKit::kTextBody)
+                    ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                SHorizontalBox::ESizeRule::Fill)
+            ->addSlot(
+                deps_.ui->textButton(cur, 12.f, EditorUiKit::kTextBody, {5.f, 2.f},
+                                     EditorTheme::ctlNormal, EditorTheme::ctlHover,
+                                     [this, title, getG, setG]{
+                                         if (!deps_.pickActor) return;
+                                         deps_.pickActor(title, getG(), [this, setG](uint64_t g) {
+                                             setG(g);
+                                             dirty_ = true;
+                                         });
+                                     }),
+                SHorizontalBox::ESizeRule::Fixed, s(120.f))
             ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space8)),
         SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
 }
@@ -344,6 +376,13 @@ void DetailsPanel::buildComponentProp(Actor& /*sel*/, Component& /*comp*/, const
                        hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Enum; e.i = v;
                        toPeers(e);
                    }); });
+    else if (pd.kind == PropDesc::ActorRef)
+        addActorRefRow(pd.label, pd.getG,
+                       [commitClick, toPeers, lbl, setG = pd.setG](uint64_t v){ commitClick([&]{
+                           setG(v);
+                           hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::ActorRef; e.g = v;
+                           toPeers(e);
+                       }); });
 }
 
 void DetailsPanel::buildComponentsSection(Actor& sel) {

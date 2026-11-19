@@ -322,6 +322,7 @@ set(RUNTIME_SOURCES
     src/scene/Component.cpp
     src/core/HLog.cpp
     src/core/HText.cpp
+    src/core/AssetRefs.cpp
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp
     src/components/RenderExtract.cpp
@@ -505,7 +506,7 @@ if(NOT ANDROID)
     if(WIN32)
         set(UTF8_MANIFEST res/Haruka.manifest)
     endif()
-    add_executable(HarukaPak src/tools/HarukaPak.cpp src/core/HText.cpp ${UTF8_MANIFEST})
+    add_executable(HarukaPak src/tools/HarukaPak.cpp src/core/HText.cpp src/core/AssetRefs.cpp ${UTF8_MANIFEST})
     target_link_libraries(HarukaPak PRIVATE HarukaVfs)
     haruka_target_defaults(HarukaPak)
     if(MSVC)
@@ -995,6 +996,22 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaTextTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 참조 체계 테스트(Docs/Object_References.md) ---------------------------
+    # 액터 GUID · 액터 참조 · GUID 정책(Keep · Fresh) · 디테일 칸 · 에셋 참조 색인 · 검사 · 옮기기를 창 · GPU 없이 검산합니다.
+    # 씬 읽기 · 쓰기(SceneSerializer)를 그대로 쓰려고 엔진 정적 라이브러리를 링크합니다(메시 없는 씬만 읽어 렌더러를 부르지 않음).
+    # 샘플 프로젝트에 끊긴 참조가 없는지도 봅니다.
+    add_executable(HarukaRefTest
+        tests/ReferenceTest.cpp
+        src/editor/ActorSnapshot.cpp
+    )
+    target_link_libraries(HarukaRefTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaRefTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(HarukaRefTest PRIVATE HARUKA_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Projects/Samples")
+    if(MSVC)
+        target_compile_options(HarukaRefTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaRefTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 오디오 테스트 ------------------------------------------------------
     # 출력 장치 없는 miniaudio 엔진(noDevice)에서 출력 샘플을 직접 당겨, 청취자 방향·거리
     # 감쇠·일시정지·비활성 정지·OGG 디코딩을 귀가 아니라 숫자로 검산합니다. Vulkan 도 창도
@@ -1168,6 +1185,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME actor_undo           COMMAND HarukaActorUndoTest)
     add_test(NAME log_category         COMMAND HarukaLogTest)
     add_test(NAME text_system          COMMAND HarukaTextTest)
+    add_test(NAME object_refs          COMMAND HarukaRefTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)

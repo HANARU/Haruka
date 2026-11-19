@@ -505,3 +505,16 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
   (`Config/editor_state.txt` 의 `culture=`)에 남습니다. 바꾸면 UI 를 처음부터 다시 만듭니다(배율이 바뀔 때와 같은 경로).
 - 새 화면 글을 넣으면 `HarukaPak gather-text -o Engine/Content/Localization/Engine.pot <엔진>/src` 로 틀을 다시 만들고
   `Engine/Content/Localization/ko/Engine.po` 에 번역을 더합니다. 빠지면 `text_system` 시험이 실패합니다.
+
+### 8.2 액터 참조 칸 · 에셋 참조 (참조 체계, 2026-11-19)
+
+- 디테일 패널의 액터 참조 칸(`PropDesc::ActorRef`, 컴포넌트는 `XPROP_ActorRef` 로 만듦)은 대상 이름을 보이는 단추입니다. 비었으면 "None",
+  대상이 씬에 없으면 "(missing)". 누르면 목록 대화상자(None + 아웃라이너 순서, 에디터 카메라 뺌, 같은 이름은 " #2" 처럼 구분)에서 고릅니다.
+  실행 취소 · 여러 선택에 같은 값 넣기는 다른 칸과 같습니다.
+- 콘텐츠 브라우저의 각 항목 오른쪽 "..." 단추는 에셋 대화상자를 엽니다: 경로, 그 에셋을 쓰는 파일 목록(씬을 고르면 그 씬을 엶),
+  "Rename / Move..."(새 경로 입력). 옮기면 참조하는 씬 · 프리팹 · `project.ini` 의 값을 고쳐 쓰고, 열린 씬(메모리)도 같은 값으로 고치며
+  (저장하지 않은 편집은 남음), 실행 취소 기록은 비웁니다. Play 중에는 막습니다. C++ 소스의 같은 문자열은 로그 경고로만 알립니다.
+- 콘텐츠 목록은 하위 폴더의 모델 · 소리 · 씬 · 프리팹도 보이고, 이름은 UTF-8 그대로입니다(한글 이름 에셋).
+- 덤프 옵션: `--ui-actor-picker`(선택한 액터의 첫 액터 참조 칸 목록), `--ui-asset-actions=<논리 경로>`(에셋 대화상자),
+  `--ui-move-asset=<옛 경로>|<새 경로>`(실제로 옮김, `--project=<사본>` 과 함께만). Git Bash 에서는 `/Game/...` 값이 Windows 경로로
+  바뀌지 않게 `MSYS2_ARG_CONV_EXCL` 을 씁니다(`build/chk/uidump.sh`).

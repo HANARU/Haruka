@@ -542,10 +542,12 @@ int main() {
     }
 
     // ── 7. 씬 v5 · 프리팹 v4 머리 줄 상수 (P2) ─────────────────────────────────
-    std::printf("\n== 7. 씬 v5 · 프리팹 v4 형식 상수 ==\n");
+    std::printf("\n== 7. 씬 v6 · 프리팹 v5 형식 상수 ==\n");
     {
-        check(std::string_view(SceneSerializer::kSceneHeader) == "# Haruka Scene v5", "SceneSerializer::kSceneHeader == v5");
-        check(hprefab::kPrefabHeaderV4 == "# Haruka Prefab v4", "kPrefabHeaderV4 == v4");
+        // v6 · v5(2026-11-19): 액터마다 GUID: 줄(참조 체계, Docs/Object_References.md).
+        check(std::string_view(SceneSerializer::kSceneHeader) == "# Haruka Scene v6", "SceneSerializer::kSceneHeader == v6");
+        check(hprefab::kPrefabHeaderV5 == "# Haruka Prefab v5", "kPrefabHeaderV5 == v5");
+        check(hprefab::kPrefabHeaderV4 == "# Haruka Prefab v4", "kPrefabHeaderV4 == v4 (호환 유지)");
         check(hprefab::kPrefabHeaderV3 == "# Haruka Prefab v3", "kPrefabHeaderV3 == v3 (호환 유지)");
     }
 

@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -22,7 +23,8 @@ namespace PropColor {
 enum class PropUnit { Scalar, Offset, Size, Angle, Ratio };
 
 struct PropDesc {
-    enum Kind { Float, Toggle, Enum };
+    // ActorRef(참조 체계 R-7): 다른 액터를 가리키는 값. 디테일 패널은 대상 이름을 보이고 누르면 액터 목록에서 고릅니다.
+    enum Kind { Float, Toggle, Enum, ActorRef };
 
     const char*                   label   = "";
     glm::vec4                     color   {PropColor::Neutral};
@@ -36,6 +38,8 @@ struct PropDesc {
     std::vector<const char*>      options;   // Enum kind
     std::function<int()>          getI;
     std::function<void(int)>      setI;
+    std::function<uint64_t()>     getG;      // ActorRef kind: 대상 GUID 값(0 = 없음)
+    std::function<void(uint64_t)> setG;
 };
 
 // ── Factory helpers ────────────────────────────────────────────────────────────
@@ -54,6 +58,15 @@ inline PropDesc makePropFloat(const char* lbl, glm::vec4 col, float stp,
     PropDesc d;
     d.label = lbl; d.color = col; d.kind = PropDesc::Float; d.step = stp; d.unit = unit;
     d.getF  = std::move(g); d.setF = std::move(s);
+    return d;
+}
+
+// 액터 참조 칸. 값은 대상 GUID(HGuid::value, 0 = 없음)입니다. 필드가 HActorRef 이면 XPROP_ActorRef 를 쓰십시오(scene/ActorRef.hpp).
+inline PropDesc makePropActorRef(const char* lbl,
+                                 std::function<uint64_t()> g, std::function<void(uint64_t)> s) {
+    PropDesc d;
+    d.label = lbl; d.kind = PropDesc::ActorRef;
+    d.getG  = std::move(g); d.setG = std::move(s);
     return d;
 }
 
@@ -90,6 +103,12 @@ inline PropDesc makePropToggle(const char* lbl,
     makePropFloat(lbl, col, stp, \
         [p]() -> float { return static_cast<float>((p)->field); }, \
         [p](float _v){ (p)->field = std::clamp(_v, static_cast<float>(mn), static_cast<float>(mx)); })
+
+// field 는 HActorRef 여야 합니다(scene/ActorRef.hpp 를 포함한 곳에서 씀).
+#define XPROP_ActorRef(p, lbl, field) \
+    makePropActorRef(lbl, \
+        [p]() -> uint64_t { return (p)->field.guid().value; }, \
+        [p](uint64_t _v){ (p)->field.setGuid(HGuid{ _v }); })
 
 #define XPROP_Toggle(p, lbl, field) \
     makePropToggle(lbl, \

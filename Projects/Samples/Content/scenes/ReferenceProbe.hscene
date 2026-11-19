@@ -1,0 +1,94 @@
+# Haruka Scene v6
+# Actor reference check (2026-11-19, Docs/Object_References.md R-8). Watcher turns to face Target during Play
+# (LookAtComponent, target=actor:<GUID>). Orphan points at an actor that is not in the scene, so its Target shows (missing).
+ACTOR:Sun
+GUID:5a1e0c7d00000001
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:LightComponent
+enabled=1
+type=directional
+color=1 1 1
+intensity=3
+attenuationRadius=10
+innerConeAngle=15
+outerConeAngle=30
+direction=0.37139067 0.74278134 0.557086
+useTemperature=0
+temperatureK=6500
+castShadows=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Ground
+GUID:5a1e0c7d00000002
+POS:0 -0.1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:10 0.2 10
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+END_ACTOR
+ACTOR:Target
+GUID:5a1e0c7d00000003
+POS:2 0.5 -3
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.6 0.6 0.6
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color D04040FF 0 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:Watcher
+GUID:5a1e0c7d00000004
+POS:0 0.5 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.3 0.3 1
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color 4070D0FF 0 0.5
+END_COMPONENT
+COMPONENT:LookAtComponent
+enabled=1
+target=actor:5a1e0c7d00000003
+yawOnly=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Orphan
+GUID:5a1e0c7d00000005
+POS:-2 0.5 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.3 0.3 1
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color 808080FF 0 0.5
+END_COMPONENT
+COMPONENT:LookAtComponent
+enabled=1
+target=actor:5a1e0c7d000000ff
+yawOnly=1
+END_COMPONENT
+END_ACTOR

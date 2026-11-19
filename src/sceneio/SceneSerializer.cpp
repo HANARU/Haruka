@@ -2,6 +2,7 @@
 #include "../scene/SceneLog.hpp"
 #include "../core/TextFloat.hpp"
 #include "TransformText.hpp"
+#include "GuidRemap.hpp"
 #include "../assets/AssetManager.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/World.hpp"
@@ -33,6 +34,8 @@ void SceneSerializer::writeActor(std::ostream& os, const Actor* actor, int paren
     const glm::quat rot   = actor->transform().rotation();
     const glm::vec3 euler = transform_text::quatToEulerDeg(rot);
     const glm::vec3 scale = actor->transform().scale();
+    // 파일에 남는 고유 ID(v6, 참조 체계 R-3). 액터 참조(actor:<16진수>)가 이것을 가리킵니다.
+    if (actor->guid().valid()) os << "GUID:" << actor->guid().toString() << "\n";
     os << "POS:"   << F(pos.x)   << " " << F(pos.y)   << " " << F(pos.z)   << "\n";
     os << "ROT:"   << F(euler.x) << " " << F(euler.y) << " " << F(euler.z) << "\n";
     // 회전의 정확한 값입니다. ROT 를 손으로 고치면 ROT 가 이깁니다(TransformText.hpp, DEF-108).
@@ -57,7 +60,12 @@ void SceneSerializer::parseActorLine(const std::string& line, ActorData& d) {
 
 // ── parseLine ──────────────────────────────────────────────────────────────────
 bool SceneSerializer::parseLine(const std::string& key, const std::string& val, ActorData& d) {
-    if      (key == "POS")        { d.pos   = parseVec3(val); }
+    if      (key == "GUID") {
+        HGuid g;
+        if (HGuid::parse(val, g)) d.guid = g;
+        else HLOG(LogScene, Warning) << "actor '" << d.name << "': invalid GUID '" << val << "'; a new one is given";
+    }
+    else if (key == "POS")        { d.pos   = parseVec3(val); }
     else if (key == "ROT")        { d.euler = parseVec3(val); }
     else if (key == "QUAT")       { d.hasQuat = transform_text::parseQuat(val, d.quat); }
     else if (key == "SCALE")      { d.scale = parseVec3(val); }
@@ -140,6 +148,11 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
     if (d.name.empty()) return nullptr;
 
     Actor* a = world.spawnActor(d.name);
+    // 파일의 GUID 를 넣습니다. 이미 다른 액터가 쓰면(손으로 블록을 복사한 파일 등) 받은 새 값을 두고 알립니다. 그 GUID 를
+    // 가리키는 참조는 먼저 읽은 액터를 가리킵니다.
+    if (d.guid.valid() && !world.assignGuid(a, d.guid))
+        HLOG(LogScene, Warning) << "actor '" << d.name << "': GUID " << d.guid.toString()
+                                << " is already used by another actor; gave it " << a->guid().toString();
     // 컴포넌트를 붙이기 전에 활성 상태를 먼저 정합니다. 비활성으로 저장된 액터라면,
     // 아직 컴포넌트가 없어 setActive 는 플래그만 바꾸고, 이후 addComponent 의 syncLive
     // 가 처음부터 비활성 기준으로 판정하므로 불필요한 onEnable→onDisable 이 없습니다.
@@ -284,7 +297,12 @@ std::string SceneSerializer::writeActorSet(const std::vector<const Actor*>& acto
     return oss.str();
 }
 
-std::vector<Actor*> SceneSerializer::readScene(const std::string& text, World& world, AssetManager& assets) {
+std::vector<Actor*> SceneSerializer::readScene(const std::string& source, World& world, AssetManager& assets,
+                                               GuidPolicy guids) {
+    // Fresh: 세트 안 GUID 를 새로 주고 세트 안을 가리키는 참조를 바꾼 글을 읽습니다(GuidRemap.hpp).
+    const std::string text = guids == GuidPolicy::Fresh
+        ? hguid::remapFresh(source, [&world](HGuid g) { return world.findByGuid(g) != nullptr; })
+        : source;
     // 직렬화 순서대로 블록마다 정확히 한 슬롯을 만듭니다(스폰 실패 시 nullptr 자리표시자).
     // writeScene 이 액터마다 위치 인덱스를 매기므로, 이름 빈 블록 등으로 스폰이
     // 실패해도 슬롯을 예약해야 그 뒤 PARENT 인덱스가 밀리지 않습니다. 부모 배선은 전부

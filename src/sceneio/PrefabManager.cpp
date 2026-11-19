@@ -6,6 +6,7 @@
 #include "../core/FileUtil.hpp"
 #include "../core/ProjectPaths.hpp"
 #include "../vfs/Vfs.hpp"
+#include "../vfs/PathUtf8.hpp"
 
 #include <fstream>
 #include <filesystem>
@@ -33,7 +34,7 @@ void PrefabManager::save(const Actor* root, const std::string& path) {
     // 임시 파일에 다 쓴 뒤 바꿔, 쓰다 실패해도 원래 프리팹이 남습니다.
     std::string err;
     if (!hfile::writeAtomic(hproj::resolve(path),
-                           std::string(hprefab::kPrefabHeaderV4) + "\n" + SceneSerializer::writeActorSet(set, parents),
+                           std::string(hprefab::kPrefabHeaderV5) + "\n" + SceneSerializer::writeActorSet(set, parents),
                            &err)) {
         HLOG(LogAsset, Error) << "Prefab cannot write: " << path << " (" << err << ")";
         return;
@@ -49,7 +50,8 @@ Actor* PrefabManager::spawn(const std::string& path, World& world, AssetManager&
 
     // BOM 을 떼고, 머리 줄 앞의 빈 줄 · 주석을 건너뛰어 v3 를 판별합니다(DEF-142).
     if (hprefab::stripBomAndDetectV3(text)) {
-        const std::vector<Actor*> slots = SceneSerializer::readScene(text, world, assets);
+        // 프리팹은 여러 번 꺼내므로 언제나 새 GUID 를 주고, 프리팹 안을 가리키던 참조는 이번 사본 안을 가리키게 합니다(R-5).
+        const std::vector<Actor*> slots = SceneSerializer::readScene(text, world, assets, SceneSerializer::GuidPolicy::Fresh);
         // 루트 · 중간 블록이 실패해 서브트리 밖에 남은 액터는 지웁니다(DEF-141). 루트가 없으면 꺼낸 것을 모두 지웁니다.
         if (const int n = hprefab::discardOrphans(world, slots); n > 0) {
             HLOG(LogAsset, Warning) << "Prefab " << path << ": removed " << n
@@ -85,9 +87,14 @@ std::vector<std::string> PrefabManager::scan() {
     std::error_code ec;
     const fs::path dir = hproj::resolve(kDir);
     if (!fs::exists(dir, ec)) return result;
-    for (auto& e : fs::directory_iterator(dir, ec)) {
-        if (e.path().extension() == kExt)
-            result.push_back(e.path().stem().string());
+    // 하위 폴더도 훑습니다(참조 체계: 옮긴 프리팹도 목록에 남게). 항목은 kDir 아래 상대 경로에서 확장자를 뺀 것(UTF-8)입니다.
+    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (!it->is_regular_file(ec) || it->path().extension() != kExt) continue;
+        fs::path rel = fs::relative(it->path(), dir, ec);
+        if (ec) { ec.clear(); continue; }
+        rel.replace_extension();
+        const std::string s = hpak::utf8Of(rel);
+        if (!s.empty()) result.push_back(s);
     }
     std::sort(result.begin(), result.end());
     return result;

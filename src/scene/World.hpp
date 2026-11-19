@@ -19,6 +19,11 @@ public:
     // Look up any actor by its unique ID (returns nullptr if not found / already destroyed).
     Actor* findById(uint64_t id) const;
 
+    // 파일에 남는 고유 ID 로 찾습니다(참조 체계 R-2). 없거나 지워졌으면 nullptr.
+    Actor* findByGuid(HGuid guid) const;
+    // 액터의 GUID 를 바꿉니다(씬 · 프리팹을 읽을 때 파일 값을 넣음). 0 이거나 다른 액터가 쓰고 있으면 false 이고 바꾸지 않습니다.
+    bool   assignGuid(Actor* actor, HGuid guid);
+
     // 지웠던 액터를 되살릴 때 원래 ID 를 돌려줍니다(에디터 생성 · 삭제 Undo). 새 ID 가 0 이거나 다른
     // 액터가 쓰고 있으면 false 입니다. actors 는 ID 오름차순(= 스폰 순서)을 유지하므로, 바꾼 액터를 ID 자리로
     // 옮깁니다. 그래야 되살린 뒤 저장해도 파일 안의 순서와 아웃라이너 자리가 지우기 전과 같습니다.
@@ -84,6 +89,7 @@ private:
 
     std::vector<std::unique_ptr<Actor>> actors;
     std::unordered_map<uint64_t, Actor*> idMap_;
+    std::unordered_map<HGuid, Actor*>    guidMap_;
     std::vector<Actor*>                  pendingDestroy_;
     uint64_t                             nextId_ = 1;
     bool                                 ticking_ = false;

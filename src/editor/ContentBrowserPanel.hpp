@@ -26,6 +26,8 @@ public:
         std::function<void(const std::vector<Actor*>&)> onRecordCreation;
         std::function<bool(const Actor*)>            isEditorCam;
         std::function<void()>                        onDetailsDirty;
+        // 항목 끝의 "..." 단추(참조 체계 A-5): 그 에셋의 참조 · 이름 바꾸기 · 옮기기 대화상자를 엽니다.
+        std::function<void(const std::string&)>      onAssetActions;
     };
 
     void init(Deps deps);
@@ -42,6 +44,8 @@ private:
     void buildModelsSection(SVerticalBox& content) const;
     void buildAudioSection(SVerticalBox& content) const;
     void buildPrefabsSection(SVerticalBox& content) const;
+    // 항목 단추 오른쪽에 "..." 단추를 붙인 한 줄(참조 체계 A-5).
+    std::shared_ptr<HWidget> withActions(std::shared_ptr<HWidget> row, const std::string& path) const;
 
     Deps deps_;
     std::vector<std::string> sceneFiles_;    // assets/scenes 아래 .hscene 논리 경로(정렬)

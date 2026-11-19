@@ -1,8 +1,14 @@
 #include "SamplesGameModule.hpp"
+#include "LookAtComponent.hpp"
+#include "scene/ComponentRegistry.hpp"
 #include "components/UIPanelComponent.hpp"
 #include "ui/slate/HSlate.hpp"
 
 void SamplesGameModule::onRegister() {
+    // 액터 참조를 쓰는 예(참조 체계 R-8). 씬을 열기 전에 등록해야 씬의 LookAtComponent 블록을 읽습니다.
+    auto& reg = ComponentRegistry::get();
+    if (!reg.find("LookAtComponent")) reg.registerType<LookAtComponent>("LookAtComponent", "Look At");
+
     // 3D UI 패널 "Demo" 내용 등록 (P3b: 엔진에서 게임 모듈로 분리).
     // 에디터는 Play 전에도 씬의 패널을 그리므로 첫 씬을 열기 전에 등록합니다.
     UIPanelComponent::registerContent("Demo", [](UIPanelComponent& panel, float s) {

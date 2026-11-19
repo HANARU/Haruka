@@ -5,6 +5,8 @@
 //   HarukaPak verify <pak>                                     모든 항목을 풀어 내용 해시를 확인합니다
 //   HarukaPak extract <pak> <폴더>                             모든 항목을 폴더에 풉니다
 //   HarukaPak shader-manifest -o <out.inc> <.spv | 폴더>...    엔진에 넣을 셰이더 목록(경로 · 내용 해시)을 씁니다(DEF-149)
+//   HarukaPak refs <프로젝트> [에셋 | 폴더] [--check]          에셋 참조: 누가 쓰는지 · 끊긴 참조(참조 체계 A-4)
+//   HarukaPak move-asset <프로젝트> <옛 경로> <새 경로> [--dry-run]  참조를 고쳐 쓰며 에셋을 옮깁니다(참조 체계 A-4)
 //
 // 목록 파일(Packaging/game.pack.txt)은 한 줄에 명령 하나입니다. '#' 은 주석이고 ${이름} 은 -D 값으로 바꿉니다.
 //   map <폴더> <논리 접두어>   폴더 아래 모든 파일을 "<접두어>/<상대 경로>" 로 넣습니다
@@ -23,6 +25,7 @@
 #include "../vfs/PathUtf8.hpp"
 #include "PakGlob.hpp"
 #include "../core/HTextGather.hpp"
+#include "../core/AssetRefs.hpp"
 
 #include <cstdio>
 #include <exception>
@@ -43,6 +46,9 @@ using hpak::utf8Of;
 
 // gather-text(글자 체계 T3-9): 소스의 HTEXT("ns", "key", "원문") 을 모아 번역 틀(.pot)을 씁니다. 같은 키에 다른 원문이 있으면 1.
 int cmdGatherText(int argc, char** argv);
+// refs · move-asset(참조 체계 A-4, Docs/Object_References.md).
+int cmdRefs(int argc, char** argv);
+int cmdMoveAsset(int argc, char** argv);
 
 int usage() {
     std::fprintf(stderr,
@@ -52,7 +58,9 @@ int usage() {
         "  HarukaPak verify <pack>\n"
         "  HarukaPak extract <pack> <folder>\n"
         "  HarukaPak shader-manifest -o <out.inc> <file.spv | folder>...\n"
-        "  HarukaPak gather-text -o <out.pot> <source folder>...\n");
+        "  HarukaPak gather-text -o <out.pot> <source folder>...\n"
+        "  HarukaPak refs <project folder> [/Game/asset-or-folder] [--check]\n"
+        "  HarukaPak move-asset <project folder> <from> <to> [--dry-run]\n");
     return 2;
 }
 
@@ -351,6 +359,8 @@ int main(int argc, char** argv) {
         if (cmd == "extract" && argc == 4) return cmdExtract(argv[2], argv[3]);
         if (cmd == "shader-manifest") return cmdShaderManifest(argc, argv);
         if (cmd == "gather-text") return cmdGatherText(argc, argv);
+        if (cmd == "refs") return cmdRefs(argc, argv);
+        if (cmd == "move-asset") return cmdMoveAsset(argc, argv);
         return usage();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
@@ -385,6 +395,76 @@ int cmdGatherText(int argc, char** argv) {
     f.write(pot.data(), (std::streamsize)pot.size());
     if (!f) { std::fprintf(stderr, "error: cannot write %s\n", outPath.c_str()); return 1; }
     std::printf("gather-text: %zu entries -> %s\n", r.entries.size(), outPath.c_str());
+    return 0;
+}
+} // namespace
+
+namespace {
+// 프로젝트 폴더의 루트: /Game = Content, /Config = Config. 엔진 콘텐츠(/Engine)는 프로젝트가 고치지 않으므로 넣지 않습니다.
+bool projectRoots(const std::string& dir, std::vector<hrefs::Root>& roots, fs::path& proj) {
+    if (!pathFromUtf8(dir, proj)) { std::fprintf(stderr, "error: path is not valid UTF-8\n"); return false; }
+    std::error_code ec;
+    if (!fs::is_directory(proj / "Content", ec)) { std::fprintf(stderr, "error: no Content folder in %s\n", dir.c_str()); return false; }
+    roots = { { "/Game", proj / "Content" }, { "/Config", proj / "Config" } };
+    return true;
+}
+
+void printRef(const hrefs::Ref& r) {
+    std::printf("  %s:%d  %s -> %s%s\n", r.file.c_str(), r.line, r.key.c_str(), r.target.c_str(), r.readOnly ? "  (glTF uri)" : "");
+}
+
+int cmdRefs(int argc, char** argv) {
+    if (argc < 3) return usage();
+    std::string asset;
+    bool check = false;
+    for (int i = 3; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--check") check = true;
+        else if (asset.empty()) asset = a;
+        else return usage();
+    }
+    std::vector<hrefs::Root> roots;
+    fs::path proj;
+    if (!projectRoots(argv[2], roots, proj)) return 1;
+    const hrefs::Index idx = hrefs::scan(roots);
+    if (!asset.empty()) {
+        fs::path disk;
+        std::error_code ec;
+        const bool folder = hrefs::toDisk(roots, asset, disk) && fs::is_directory(disk, ec);
+        const auto refs = hrefs::referencesTo(idx, asset, folder);
+        std::printf("%s: %zu reference(s)\n", asset.c_str(), refs.size());
+        for (const auto& r : refs) printRef(r);
+        return 0;
+    }
+    const auto miss = hrefs::missing(idx, roots);
+    std::printf("%zu file(s), %zu reference(s), %zu missing\n", idx.assets.size(), idx.refs.size(), miss.size());
+    for (const auto& r : miss) printRef(r);
+    return check && !miss.empty() ? 1 : 0;
+}
+
+int cmdMoveAsset(int argc, char** argv) {
+    if (argc < 5) return usage();
+    bool dry = false;
+    for (int i = 5; i < argc; ++i) {
+        if (std::string(argv[i]) == "--dry-run") dry = true;
+        else return usage();
+    }
+    std::vector<hrefs::Root> roots;
+    fs::path proj;
+    if (!projectRoots(argv[2], roots, proj)) return 1;
+    const hrefs::Index idx = hrefs::scan(roots);
+    const hrefs::MovePlan plan = hrefs::planMove(idx, roots, argv[3], argv[4], { proj / "Source" });
+    if (!plan.ok()) { std::fprintf(stderr, "error: %s\n", plan.error.c_str()); return 1; }
+    std::printf("%s %s -> %s: %d value(s) in %zu file(s)\n", plan.folder ? "folder" : "file", plan.from.c_str(), plan.to.c_str(),
+                plan.valueCount(), plan.edits.size());
+    for (const auto& e : plan.edits)
+        for (const auto& [r, v] : e.values) std::printf("  %s:%d  %s -> %s\n", r.file.c_str(), r.line, r.target.c_str(), v.c_str());
+    for (const auto& w : plan.codeWarnings)
+        std::printf("  warning: %s has the old path in code; change it by hand\n", w.c_str());
+    if (dry) { std::printf("dry run: nothing changed\n"); return 0; }
+    std::string err;
+    if (!hrefs::applyMove(plan, roots, &err)) { std::fprintf(stderr, "error: %s\n", err.c_str()); return 1; }
+    std::printf("moved\n");
     return 0;
 }
 } // namespace

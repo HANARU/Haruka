@@ -10,6 +10,7 @@
 #include "../geometry/PrimitiveDesc.hpp"
 #include "../audio/AudioAttenuation.hpp"
 #include "ComponentSerializer.hpp"
+#include "../core/Guid.hpp"
 
 class Actor;
 class World;
@@ -26,11 +27,18 @@ class AssetManager;
 // 옛 파일을 읽으려고 계속 받는다(아래 ActorData 의 v3 필드). 쓰기는 v4 만 한다.
 class SceneSerializer {
 public:
-    static constexpr const char* kSceneHeader = "# Haruka Scene v5";
+    // v6(2026-11-19): 액터마다 GUID: 줄(참조 체계, Docs/Object_References.md). v5 이하는 GUID 없이 읽고 새 값을 줍니다.
+    static constexpr const char* kSceneHeader = "# Haruka Scene v6";
+
+    // 읽을 때 GUID 를 어떻게 다룰지(참조 체계 D4).
+    //   Keep  = 파일 값을 지킴(씬 열기 · Play 되돌리기 · Undo 되살리기 · 게임 시작 씬). 이미 쓰는 값이면 새 값 + 경고.
+    //   Fresh = 세트 안 GUID 를 모두 새로 주고 세트 안을 가리키던 참조를 바꿈(프리팹 꺼내기 · 붙여넣기 · 복제).
+    enum class GuidPolicy { Keep, Fresh };
 
     // 파싱된 액터 필드를 스폰 전까지 담아두는 중간 표현
     struct ActorData {
         std::string name;
+        HGuid       guid;      // GUID: 줄(v6). 없으면 스폰할 때 받은 새 값을 그대로 씀
         glm::vec3   pos{}, euler{}, scale{1.f};
         // QUAT: 줄(회전의 정확한 값, DEF-108). 없거나 ROT 를 손으로 고쳤으면 euler 를 씁니다.
         glm::quat   quat{ 1.f, 0.f, 0.f, 0.f };
@@ -108,5 +116,6 @@ public:
     static std::string writeActorSet(const std::vector<const Actor*>& actors, const std::vector<int>& parentIndex);
     // 블록마다 한 슬롯을 돌려준다(스폰 실패면 nullptr). 부모 배선까지 마친다. 기존 액터는
     // 건드리지 않으므로, 씬을 갈아 끼우려면 호출자가 먼저 비운다.
-    static std::vector<Actor*> readScene(const std::string& text, World& world, AssetManager& assets);
+    static std::vector<Actor*> readScene(const std::string& text, World& world, AssetManager& assets,
+                                         GuidPolicy guids = GuidPolicy::Keep);
 };

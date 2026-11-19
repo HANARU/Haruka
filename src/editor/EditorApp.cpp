@@ -209,7 +209,10 @@ void EditorApp::initPanels() {
         [this] { pasteClipboard(); }
     });
     detailsPanel_.init({ &ui_, &ctx_, &cmdStack_, &cachedEuler_, &undoSnapshot_,
-                         &LogEditor, [this] { contentPanel_.refreshPrefabs(); rebuildBottomPanel(); } });
+                         &LogEditor, [this] { contentPanel_.refreshPrefabs(); rebuildBottomPanel(); },
+                         [this](const std::string& title, uint64_t current, std::function<void(uint64_t)> pick) {
+                             openActorPicker(title, current, std::move(pick));
+                         } });
     contentPanel_.init({
         &ui_, &ctx_, &cmdStack_, &LogEditor,
         [this] { return doc_.path(); },
@@ -220,7 +223,8 @@ void EditorApp::initPanels() {
         [this](Actor* a) { selectOnly(a); },
         [this](const std::vector<Actor*>& made) { recordActorCreation(made); },
         [this](const Actor* a) { return a == viewport_.cameraActor(); },
-        [this] { detailsPanel_.markDirty(); }
+        [this] { detailsPanel_.markDirty(); },
+        [this](const std::string& path) { openAssetActions(path); }
     });
     gpuStatsPanel_.init(&ui_, &ctx_, &vpTimings_, dumpMode_);
     logPanel_.init(&ui_, &LogEditor, kMenuBarH, dumpMode_, [this] {

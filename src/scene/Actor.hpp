@@ -6,6 +6,7 @@
 #include <typeindex>
 #include <unordered_map>
 #include "../core/Transform.hpp"
+#include "../core/Guid.hpp"
 #include "Component.hpp"
 
 // 구조 버전(2026-11-18, 성능 안정화 1-5). 액터 생성 · 삭제 · ID 재배치와 컴포넌트 추가 · 제거 · 순서 변경 때 오릅니다.
@@ -22,6 +23,10 @@ class Actor {
 public:
     uint64_t    id     = 0;   // assigned by World::spawnActor
     std::string name;
+
+    // 파일에 남는 고유 ID(참조 체계 D1, Docs/Object_References.md). World::spawnActor 가 새 값을 주고, 씬 · 프리팹을 읽을 때
+    // World::assignGuid 로 파일 값을 넣습니다. id 는 실행 중 번호(Undo 커맨드가 씀)라 열 때마다 바뀌지만 guid 는 그대로입니다.
+    HGuid guid() const { return guid_; }
 
     // 이 액터를 만든 월드(World::spawnActor 가 정함, 2026-11-18 S3). 컴포넌트가 월드 단위 서비스를 찾을 때 씁니다
     // (owner->world()->service<PhysicsSystem>() 등, World.hpp).
@@ -172,6 +177,7 @@ private:
     void unlinkFromParent();
 
     World*              world_ = nullptr;   // 컴포넌트보다 먼저 선언(컴포넌트를 지우는 중에도 읽힘)
+    HGuid               guid_;              // World 만 바꿈(색인과 함께)
     std::vector<std::unique_ptr<Component>>      components;
     std::unordered_map<std::type_index, Component*> componentCache_;
 

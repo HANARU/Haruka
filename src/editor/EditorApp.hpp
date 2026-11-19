@@ -306,6 +306,13 @@ private:
     void markSceneDirty() { doc_.markDirty(); }
     void newScene();
     void openSceneDialog();
+    // 액터 참조 칸의 대상 고르기(참조 체계 R-7). 목록은 None + 아웃라이너 순서, 고르면 pick(GUID 값, 0 = 없음).
+    void openActorPicker(const std::string& title, uint64_t current, std::function<void(uint64_t)> pick);
+    // 콘텐츠 브라우저의 "..." (참조 체계 A-5): 참조 목록 · 이름 바꾸기 · 옮기기.
+    void openAssetActions(const std::string& path);
+    void openAssetMoveDialog(const std::string& path);
+    // from 을 to 로 옮기고 참조 파일과 열린 씬(메모리)을 고칩니다. 성공하면 true.
+    bool moveAsset(const std::string& from, const std::string& to);
     void openScene(const std::string& logicalPath);
     void saveScene();                                     // 현재 파일에, 이름이 없으면 다른 이름으로
     void saveSceneAs(std::function<void()> then = {});    // then: 저장에 성공하면 이어서 할 일
@@ -379,6 +386,9 @@ private:
     bool        uiLogCategories_ = false;
     std::string uiOutlinerSearch_;
     std::string uiRename_;
+    std::string uiAssetActions_;          // --ui-asset-actions(참조 체계 A-5)
+    bool        uiActorPicker_ = false;   // --ui-actor-picker(참조 체계 R-7)
+    std::string uiMoveAsset_;             // --ui-move-asset(참조 체계 A-5)
     std::string uiType_;          // 글자 체계 T1 · T2 덤프
     int         uiCaretLeft_  = 0;
     int         uiSelectLeft_ = 0;

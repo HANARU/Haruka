@@ -13,6 +13,7 @@
 #include "../core/AppPaths.hpp"
 #include "../core/ProjectPaths.hpp"
 #include "../core/ProjectSettings.hpp"
+#include "../core/AssetRefs.hpp"
 #include "../vfs/LogicalPath.hpp"
 #include "../core/TextUtf.hpp"
 #include "../audio/AudioSystem.hpp"
@@ -498,4 +499,105 @@ void EditorApp::rebuildModal() {
     inner->addSlot(panel, EHAlign::Center, EVAlign::Center);
     modalHost_->content(inner);
     modalPanel_ = panel;
+}
+
+// ── 에셋 참조 · 옮기기(참조 체계 A-5, Docs/Object_References.md) ─────────────────────────────
+namespace {
+// 열린 프로젝트의 루트. /Game = Content, /Config = Config(엔진이 같은 폴더를 마운트함). 엔진 콘텐츠는 옮기지 않습니다.
+std::vector<hrefs::Root> projectRefRoots() {
+    const fs::path& root = hproj::root();
+    if (root.empty()) return {};
+    return { { "/Game", root / "Content" }, { "/Config", root / "Config" } };
+}
+} // namespace
+
+void EditorApp::openAssetActions(const std::string& path) {
+    const std::vector<hrefs::Root> roots = projectRefRoots();
+    if (roots.empty()) return;
+    const std::string canon = hvfs::toCanonical(path);
+    const hrefs::Index idx = hrefs::scan(roots);
+    std::vector<std::string> files;
+    for (const hrefs::Ref& r : hrefs::referencesTo(idx, canon))
+        if (std::find(files.begin(), files.end(), r.file) == files.end()) files.push_back(r.file);
+
+    ModalSpec m;
+    m.title = HTEXT("Editor.Dialog", "Asset.Title", "Asset").toString();
+    if (files.empty()) {
+        m.message = HText::format(HTEXT("Editor.Dialog", "Asset.NoRefs", "{0}\nNo scene, prefab or setting refers to it."), { canon }).toString();
+    } else {
+        m.message = HText::format(HTEXT("Editor.Dialog", "Asset.Refs", "{0}\nReferenced by {1} file(s). Pick a scene to open it."),
+                                  { canon, HText::asInteger((int64_t)files.size()) }).toString();
+        m.list   = files;
+        m.onPick = [this](const std::string& file) {
+            if (file.size() < 7 || file.compare(file.size() - 7, 7, ".hscene") != 0) return;
+            if (hvfs::toCanonical(file) == hvfs::toCanonical(doc_.path()) || blockedDuringPlay("opening a scene")) return;
+            guardUnsaved(HTEXT("Editor.Dialog", "Verb.OpenAnother", "opening another scene"), [this, file] { openScene(file); });
+        };
+    }
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.RenameMove", "Rename / Move...").toString(),
+                          [this, canon] { openAssetMoveDialog(canon); }, true, false });
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Close", "Close").toString(), {}, false, true });
+    openModal(std::move(m));
+}
+
+void EditorApp::openAssetMoveDialog(const std::string& path) {
+    if (blockedDuringPlay("moving an asset")) return;
+    dialogEdit_.setText(path);
+    ModalSpec m;
+    m.title            = HTEXT("Editor.Dialog", "Move.Title", "Rename / Move Asset").toString();
+    m.message          = HText::format(HTEXT("Editor.Dialog", "Move.Message",
+                                             "New path under /Game for {0}\n(folders are created; files that refer to it are updated;\nthe Undo history is cleared):"),
+                                       { path }).toString();
+    m.hasInput         = true;
+    m.inputPlaceholder = path;
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Move", "Move").toString(), [this, path] {
+        const std::string typed = dialogEdit_.text;
+        if (!moveAsset(path, typed)) {
+            // 실패 이유는 대화상자로 알렸습니다(moveAsset). 같은 입력으로 다시 물을 수 있게 입력은 그대로 둡니다.
+            dialogEdit_.setText(typed);
+        }
+    }, true, false });
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Cancel", "Cancel").toString(), {}, false, true });
+    openModal(std::move(m));
+}
+
+bool EditorApp::moveAsset(const std::string& from, const std::string& to) {
+    if (blockedDuringPlay("moving an asset")) return false;
+    const std::vector<hrefs::Root> roots = projectRefRoots();
+    if (roots.empty()) return false;
+    const hrefs::Index    idx  = hrefs::scan(roots);
+    const hrefs::MovePlan plan = hrefs::planMove(idx, roots, from, to, { hproj::root() / "Source" });
+    std::string err = plan.error;
+    const bool moved = plan.ok() && hrefs::applyMove(plan, roots, &err);
+    if (!moved) {
+        HLOG(LogEditorScene, Warning) << "Cannot move " << from << " to " << to << ": " << err;
+        ModalSpec m;
+        m.title   = HTEXT("Editor.Dialog", "MoveFailed.Title", "Cannot Move").toString();
+        m.message = err;
+        m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Close", "Close").toString(), {}, false, true });
+        openModal(std::move(m));
+        return false;
+    }
+    HLOG(LogEditorScene, Log) << "Moved " << plan.from << " -> " << plan.to << " (" << plan.valueCount() << " reference(s) in "
+                              << plan.edits.size() << " file(s) updated)";
+    for (const std::string& w : plan.codeWarnings)
+        HLOG(LogEditorScene, Warning) << w << " has the old path " << plan.from << " in code; change it by hand";
+
+    // 열린 씬(메모리)도 디스크와 같게 고칩니다. 저장하지 않은 편집은 그대로 남습니다(D7). Undo 스냅샷에는 옛 경로가 남아
+    // 되살리면 끊긴 참조가 되므로 Undo 기록은 비웁니다.
+    const bool wasDirty = sceneDirty();
+    int changed = 0;
+    const std::string fixed = hrefs::rewriteText("/Game/open.hscene", serializeWorld(), plan, &changed);
+    if (changed > 0) deserializeWorld(fixed);
+    cmdStack_.clear();
+    const std::string docPath = doc_.untitled() ? std::string() : hrefs::mapPath(plan, hvfs::toCanonical(doc_.path()));
+    doc_.reset(docPath, cmdStack_.stateToken());
+    if (wasDirty) doc_.markDirty();
+    if (!lastScene_.empty()) lastScene_ = hrefs::mapPath(plan, hvfs::toCanonical(lastScene_));
+    saveEditorState();
+    contentPanel_.scanAll();
+    bottomDirty_ = true;
+    detailsPanel_.markDirty();
+    outlinerPanel_.markDirty();
+    return true;
 }
