@@ -321,6 +321,7 @@ set(RUNTIME_SOURCES
     src/scene/Actor.cpp
     src/scene/Component.cpp
     src/core/HLog.cpp
+    src/core/HText.cpp
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp
     src/components/RenderExtract.cpp
@@ -504,7 +505,7 @@ if(NOT ANDROID)
     if(WIN32)
         set(UTF8_MANIFEST res/Haruka.manifest)
     endif()
-    add_executable(HarukaPak src/tools/HarukaPak.cpp ${UTF8_MANIFEST})
+    add_executable(HarukaPak src/tools/HarukaPak.cpp src/core/HText.cpp ${UTF8_MANIFEST})
     target_link_libraries(HarukaPak PRIVATE HarukaVfs)
     haruka_target_defaults(HarukaPak)
     if(MSVC)
@@ -974,6 +975,26 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaLogTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 글자 체계 테스트(2026-11-19, Docs/Text_System.md) -------------------
+    # UTF-8 · 글자 경계 · 편집 상태 · 입력 처리기(가짜 창, IME 조합) · 표시 글 HText 를 창 없이 검산합니다.
+    add_executable(HarukaTextTest
+        tests/TextTest.cpp
+        src/editor/TextInputController.cpp
+        src/core/HText.cpp
+        src/ui/slate/HFontAtlas.cpp
+        src/ui/slate/HPaintContext.cpp
+        src/core/HLog.cpp
+    )
+    target_link_libraries(HarukaTextTest PRIVATE Vulkan::Vulkan glm::glm HarukaVfs)
+    target_include_directories(HarukaTextTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR} ${Vulkan_INCLUDE_DIRS})
+    # 번역 표가 소스의 HTEXT 키를 모두 덮는지 맞대어 봅니다(T3-8).
+    target_compile_definitions(HarukaTextTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src"
+                                                      HARUKA_ENGINE_CONTENT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Engine/Content")
+    if(MSVC)
+        target_compile_options(HarukaTextTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaTextTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 오디오 테스트 ------------------------------------------------------
     # 출력 장치 없는 miniaudio 엔진(noDevice)에서 출력 샘플을 직접 당겨, 청취자 방향·거리
     # 감쇠·일시정지·비활성 정지·OGG 디코딩을 귀가 아니라 숫자로 검산합니다. Vulkan 도 창도
@@ -1014,6 +1035,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     # Vulkan 을 부르지 않지만, 같은 파일의 렌더 코드 때문에 Vulkan 로더에 링크합니다.
     add_executable(HarukaSlateTest
         tests/SlateInputTest.cpp
+        src/core/HText.cpp
         src/ui/slate/HSlateRenderer.cpp
         src/ui/slate/HFontAtlas.cpp
         src/ui/slate/HPaintContext.cpp
@@ -1145,6 +1167,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME command_stack_purge  COMMAND HarukaCommandTest)
     add_test(NAME actor_undo           COMMAND HarukaActorUndoTest)
     add_test(NAME log_category         COMMAND HarukaLogTest)
+    add_test(NAME text_system          COMMAND HarukaTextTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)

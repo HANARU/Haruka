@@ -58,6 +58,12 @@ struct EngineOptions {
     bool        uiLogCategories = false; // --ui-log-categories : 첫 프레임 뒤 로그 Categories 팝업 열기(에디터 전용)
     std::string uiOutlinerSearch;        // --ui-outliner-search=<text> : 아웃라이너 검색어(에디터 전용)
     std::string uiRename;                // --ui-rename=<actor> : 액터 이름 바꾸기 시작(에디터 전용)
+    // 글자 체계 T1 · T2(2026-11-19): 포커스된 글 칸에 입력 흉내. 포커스가 없으면 아웃라이너 검색에 포커스를 줍니다.
+    std::string culture;                 // --culture=<en|ko|...> : 표시 글 문화권(글자 체계 T3, 저장하지 않음)
+    std::string uiType;                  // --ui-type=<UTF-8 글> : 선택을 이 글로 바꿈
+    int         uiCaretLeft = 0;         // --ui-caret-left=<n> : 커서를 글자 n 개 왼쪽으로
+    int         uiSelectLeft = 0;        // --ui-select-left=<n> : Shift+왼쪽 n 번(선택)
+    std::string uiImeCompose;            // --ui-ime-compose=<UTF-8 글> : IME 조합 중인 글
     std::string uiOutlinerCollapse;      // --ui-outliner-collapse=<actor> : 아웃라이너 접힘(에디터 전용)
     bool        uiPlay          = false; // --ui-play : 첫 프레임 뒤 Play 시작(에디터 전용)
     std::string uiLayout;                // --ui-layout=<file> : 도크 배치 파일 읽기 전용 오버라이드(에디터 전용)

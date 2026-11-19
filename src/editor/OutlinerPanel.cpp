@@ -1,4 +1,5 @@
 #include "OutlinerPanel.hpp"
+#include "../core/Utf8.hpp"
 #include "../ui/slate/widgets/SIcon.hpp"
 #include "EditorCommands.hpp"
 #include "../components/LightComponent.hpp"
@@ -22,11 +23,11 @@ std::shared_ptr<HWidget> OutlinerPanel::build() {
     searchBox_ = HNew(SSearchBox);
     auto outlinerSearch = searchBox_
         ->style(EditorUiKit::searchBoxStyle(s(1.f)))
-        ->placeholder("Search...")
-        ->text(AttrStr([this]() -> std::string { return search_; }))
+        ->placeholder(HTEXT("Editor.Outliner", "SearchHint", "Search...").toString())
+        ->edit(&searchEdit_)
         ->focused([this]() -> bool { return searchFocused_; })
-        ->selectedAll([this]() -> bool { return searchSelAll_; })
         ->onClick([this]{ if (deps_.onSearchClicked) deps_.onSearchClicked(); })
+        ->onEdited([this] { dirty_ = true; })
         ->fontSize(s(12.f));
 
     return HNew(BR)
@@ -88,8 +89,8 @@ void OutlinerPanel::onActorDestroyed(Actor* a) {
     if (!a) return;
     collapsed_.erase(a->id);
     if (deps_.ctx->selected == a) {
-        renaming_     = false;
-        renameSelAll_ = false;
+        renaming_ = false;
+        renameEdit_.clear();
     }
     dirty_ = true;
 }
@@ -117,9 +118,8 @@ void OutlinerPanel::setPressHeldIfContains(glm::vec2 p) {
 
 TextInputField OutlinerPanel::searchField() {
     return TextInputField{
-        search_,
+        searchEdit_,
         searchFocused_,
-        searchSelAll_,
         [this](glm::vec2 p) { return searchBox_ && searchBox_->cachedGeometry().contains(p); },
         [this] { dirty_ = true; },
         {},
@@ -129,24 +129,24 @@ TextInputField OutlinerPanel::searchField() {
 
 TextInputField OutlinerPanel::renameField() {
     return TextInputField{
-        renameBuffer_,
+        renameEdit_,
         renaming_,
-        renameSelAll_,
         [this](glm::vec2 p) { return list_ && list_->cachedGeometry().contains(p); },
         [this] { dirty_ = true; },
         [this]() -> bool {
             Actor* sel = deps_.ctx ? deps_.ctx->selected : nullptr;
             if (!sel || (deps_.isEditorCam && deps_.isEditorCam(sel))) return false;
-            renameBuffer_ = sel->name;
+            renameEdit_.setText(sel->name, true);
             return true;
         },
         [this] {
             Actor* sel = deps_.ctx ? deps_.ctx->selected : nullptr;
             // 빈 이름은 적용하지 않되 편집은 끝냅니다. 예전에는 버퍼가 비면 Enter 가
             // 아무 일도 하지 않아 확정도 탈출도 못 하는 상태에 갇혔습니다.
-            if (!renameBuffer_.empty() && sel && sel->name != renameBuffer_) {
-                deps_.cmdStack->push(std::make_unique<RenameActorCmd>(*deps_.ctx->world, sel, sel->name, renameBuffer_));
-                sel->name = renameBuffer_;
+            const std::string& newName = renameEdit_.text;
+            if (!newName.empty() && sel && sel->name != newName) {
+                deps_.cmdStack->push(std::make_unique<RenameActorCmd>(*deps_.ctx->world, sel, sel->name, newName));
+                sel->name = newName;
             }
         }
     };
@@ -207,9 +207,7 @@ void OutlinerPanel::flatten(const std::string& filt, std::vector<Row>& out) cons
     const bool filtering = !filt.empty();
 
     auto matches = [&](const Actor* a) {
-        std::string n = a->name;
-        std::transform(n.begin(), n.end(), n.begin(), ::tolower);
-        return n.find(filt) != std::string::npos;
+        return utf8::containsIgnoreCase(a->name, filt);
     };
 
     std::function<bool(Actor*, int)> visit = [&](Actor* a, int depth) -> bool {
@@ -263,8 +261,7 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
     // 이름이 바뀌는 것은 주 선택 하나이므로 이름 칸도 그 행에만 보입니다. 예전에는 선택된 모든 행이 주 선택의 이름
     // 칸을 보여 주었습니다(DEF-134).
     const bool     ren       = a == deps_.ctx->selected && renaming_;
-    const bool     renAll    = ren && renameSelAll_;
-    const bool     filtering = !search_.empty();
+    const bool     filtering = !searchEdit_.text.empty();
 
     // 폭 사다리. 고정폭 합이 패널 폭을 넘으면 이름 Fill 슬롯이 0 이 되어 그리기는
     // 넘쳐 보여도 히트테스트가 죽습니다(행 선택 자체가 불가능해짐). 들여쓰기 클램프 →
@@ -296,17 +293,23 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
 
     glm::vec4   typeCol;
     std::string typeStr = typeLabel(a, typeCol);
-    std::string shown   = ren ? (renAll ? renameBuffer_ : renameBuffer_ + "|")
-                              : deps_.ui->ellipsizeText(a->name, nameW, s(14.f));
-
-    std::shared_ptr<HWidget> nameWidget =
-        HNew(STextBlock)->text(shown)->fontSize(s(14.f))
-            ->color(sel ? EditorTheme::textOnAccent
-                        : (r.dimPath || r.dimOff) ? EditorTheme::textDisabled : EditorUiKit::kTextBody)
-            ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center);
-    if (renAll)   // Ctrl+A 전체 선택 하이라이트
-        nameWidget = HNew(SBorder)->background(EditorTheme::accent)
-                         ->content(nameWidget);
+    const glm::vec4 nameCol = sel ? EditorTheme::textOnAccent
+                                  : (r.dimPath || r.dimOff) ? EditorTheme::textDisabled : EditorUiKit::kTextBody;
+    std::shared_ptr<HWidget> nameWidget;
+    if (ren) {
+        // 이름 바꾸기 칸(글자 체계 T1): 커서 · 선택 · IME 조합 글을 제자리에 그립니다(예전에는 글 뒤에 '|' 를 붙임).
+        SEditableText::Style es;
+        es.text        = nameCol;
+        es.composition = nameCol;
+        es.selection   = sel ? EditorTheme::accentHover : EditorTheme::accent;
+        es.caret       = nameCol;
+        es.caretWidth  = std::max(1.f, std::floor(s(1.f)));
+        nameWidget = HNew(SEditableText)->state(&renameEdit_)->focused([this] { return renaming_; })
+                         ->fontSize(s(14.f))->textHeight(s(18.f))->style(es);
+    } else {
+        nameWidget = HNew(STextBlock)->text(deps_.ui->ellipsizeText(a->name, nameW, s(14.f)))->fontSize(s(14.f))
+                         ->color(nameCol)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center);
+    }
 
     const char* arrowGlyph = (!r.hasKids || filtering) ? "" : (r.expanded ? "v" : ">");
     auto smallBtn = [&] {
@@ -336,7 +339,8 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
               })
             : std::function<void()>(selectRow));
     if (r.hasKids && !filtering)
-        arrowBtn->tooltip.set(r.expanded ? "Collapse Children" : "Expand Children");
+        arrowBtn->setTooltip(r.expanded ? HTEXT("Editor.Outliner", "Tip.Collapse", "Collapse Children")
+                                        : HTEXT("Editor.Outliner", "Tip.Expand", "Expand Children"));
 
     std::shared_ptr<HWidget> eyeContent;
     if (icons) {
@@ -372,7 +376,7 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
             deps_.cmdStack->push(std::make_unique<SetActiveCmd>(*deps_.ctx->world, t, before, !before));
             dirty_ = true;
         });
-    eyeBtn->tooltip.set("Toggle Visibility");
+    eyeBtn->setTooltip(HTEXT("Editor.Outliner", "Tip.Visibility", "Toggle Visibility"));
 
     auto row = HNew(SHorizontalBox)
         ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f) + indent)
@@ -411,7 +415,7 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
                                            }
                                            if (deps_.onDeleteActor) deps_.onDeleteActor(t);
                                        }, "x");
-    delBtn->tooltip.set("Delete Actor");
+    delBtn->setTooltip(HTEXT("Editor.Outliner", "Tip.Delete", "Delete Actor"));
     row->addSlot(eyeBtn, SHorizontalBox::ESizeRule::Fixed, s(kEyeW))
        ->addSlot(delBtn, SHorizontalBox::ESizeRule::Fixed, s(kDelW));
 
@@ -430,7 +434,7 @@ void OutlinerPanel::rebuild() {
     list_->addSlot(
         HNew(SBorder)->background(EditorTheme::transparent)->padding({s(6.f), s(4.f)})
             ->content(
-                deps_.ui->iconButton("plus", 14.f, EditorTheme::accentHover, "Add Empty", 13.f, EditorTheme::accentHover,
+                deps_.ui->iconButton("plus", 14.f, EditorTheme::accentHover, HTEXT("Editor.Outliner", "AddEmpty", "Add Empty").toString().c_str(), 13.f, EditorTheme::accentHover,
                                      {6.f, 4.f}, EditorTheme::ctlNormal, EditorTheme::ctlHover,
                                      [this]{
                                          std::string nm = nextActorName();
@@ -441,8 +445,8 @@ void OutlinerPanel::rebuild() {
         SVerticalBox::ESizeRule::Fixed, s(kHeaderH));
 
     // Case-insensitive search filter
-    std::string filter = search_;
-    std::transform(filter.begin(), filter.end(), filter.begin(), ::tolower);
+    // 대소문자 무시 검색(ASCII 만 접음, 한글 등은 그대로 비교, 글자 체계 T1-4).
+    const std::string filter = utf8::asciiLower(searchEdit_.text);
     flatten(filter, rows_);
 
     const HGeometry& lg = list_->cachedGeometry();

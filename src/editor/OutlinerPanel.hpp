@@ -64,7 +64,10 @@ public:
     void revealActor(Actor* a);
     void collapseActor(uint64_t id)         { collapsed_.insert(id); dirty_ = true; }
     void uncollapseActor(uint64_t id)       { collapsed_.erase(id); }
-    void setSearchText(const std::string& t){ search_ = t; dirty_ = true; }
+    void setSearchText(const std::string& t){ searchEdit_.setText(t); dirty_ = true; }
+    // 덤프(--ui-type · --ui-ime-compose): 포커스된 칸의 편집 상태.
+    HTextEditState& searchEdit()            { return searchEdit_; }
+    HTextEditState& renameEdit()            { return renameEdit_; }
 
     void checkLayoutSize();
     bool renamingChanged() const            { return renaming_ != prevRenaming_; }
@@ -108,14 +111,13 @@ private:
     std::shared_ptr<SSearchBox>   searchBox_;
     std::shared_ptr<SDockOverlay> dropOverlay_;
 
-    std::string search_;
+    // 글 · 커서 · 선택은 HTextEditState(글자 체계 T1). 검색어는 searchEdit_.text 입니다.
+    HTextEditState searchEdit_;
     bool        searchFocused_ = false;
-    bool        searchSelAll_  = false;
 
     bool        renaming_     = false;
     bool        prevRenaming_ = false;
-    std::string renameBuffer_;
-    bool        renameSelAll_ = false;
+    HTextEditState renameEdit_;
 
     std::unordered_set<uint64_t> collapsed_;
     std::vector<Row>             rows_;

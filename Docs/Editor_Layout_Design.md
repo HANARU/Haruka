@@ -482,6 +482,26 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
 - 아이콘 이름은 Lucide 파일 이름 그대로입니다(`EditorIcons::names()`). 새 아이콘은 Lucide 에서 SVG 를 받아 `Engine/Content/Editor/Icons/` 에 넣고
   목록에 더합니다.
 - 공용 위젯의 아이콘(`SCollapseSection` 화살표 · `SSearchBox` 돋보기)은 `Style` 의 아이콘 이름이 있을 때만 쓰고, 기본은 예전 글자입니다.
-- 게임 쪽 3D UI 패널의 글꼴은 아직 시스템 글꼴입니다(기준 PNG `panel` · `panelR` 이 바뀌는 일이라 따로 정함). Android · Quest 에서도 같은 글꼴을
-  쓰려면 게임 묶음에 `/Engine/Fonts` 를 넣고 패널 아틀라스가 그것을 읽게 합니다.
-- 한글 입력(IME)은 아직 없습니다. 표시만 됩니다(이름 바꾸기 칸은 ASCII 입력).
+- 게임 쪽 3D UI 패널도 Pretendard 를 씁니다(2026-11-19 글자 체계 T4-4: 게임 묶음 · 빌드 출력에 `/Engine/Fonts` · `/Engine/Localization` 을
+  담고 패널 전용 렌더러가 읽음, 에디터 아이콘은 게임 묶음에서 뺌).
+- 글 입력 · 표시 글(번역)은 [Text_System.md](Text_System.md) 입니다(2026-11-19). 요점은 아래 8.1 절입니다.
+
+### 8.1 글 편집 칸 · 표시 글 (글자 체계, 2026-11-19)
+
+- 편집 칸의 상태는 `HTextEditState`(`src/ui/slate/HTextEdit.hpp`) 하나입니다: UTF-8 글 · 커서 · 선택 기준점 · IME 조합 글. 커서는 늘 글자(grapheme)
+  경계이고 지우기 · 이동은 글자 단위, Ctrl 이면 단어 단위입니다. 패널이 상태를 가지고 `SSearchBox::edit()` · `SEditableText` 가 포인터로 그립니다.
+- 키: 인쇄 가능한 모든 글자, Backspace · Delete · 화살표 · Home · End(OS 자동 반복), Shift 선택, Ctrl+A · C · X · V(UTF-8, 한 줄로 고침).
+  포커스가 바뀔 때 눌려 있던 편집 키는 뗄 때까지 무시합니다(DEF-58 규칙을 모든 반복 키로).
+- 마우스: 검색 · 대화상자 칸은 누르면 그 자리에 커서(포커스가 없었으면 포커스를 얻고), 끌면 선택, Shift+누르기는 선택을 늘립니다. 키보드로
+  들어오면(Ctrl+F · F2) 전체 선택입니다.
+- 그림: 선택 사각형 → 글 → 조합 글 밑줄 → 커서 막대(배율 1 에서 1px). 커서가 칸 밖이면 글을 왼쪽으로 밀어 보입니다. 커서는 깜박이지 않습니다
+  (덤프 · 화면 비교가 결정적이도록).
+- IME(Windows): 글 칸에 포커스가 있을 때만 켭니다. 꺼 두면 한글 모드에서도 W · E · R 단축키가 먹힙니다. 조합 중에는 Enter · Esc · 편집 키를
+  IME 가 가집니다. 후보 창은 커서 사각형 아래에 둡니다.
+- 덤프 옵션: `--ui-type=<글>`(포커스 칸에 넣음, 없으면 아웃라이너 검색), `--ui-caret-left=<n>`, `--ui-select-left=<n>`, `--ui-ime-compose=<글>`,
+  `--culture=<en|ko>`.
+- 화면 글은 `HTEXT("ns", "key", "원문")` 으로 쓰고(메뉴 · 툴바 · 툴팁 · 패널 · 탭 · 대화상자), 액터 이름 · 경로 · 로그 · 디테일 속성 이름은
+  `std::string` 그대로입니다. 메뉴 항목의 단축키는 따로 오른쪽 열에 그립니다(번역 안 함). 언어는 View > Language, 에디터 상태
+  (`Config/editor_state.txt` 의 `culture=`)에 남습니다. 바꾸면 UI 를 처음부터 다시 만듭니다(배율이 바뀔 때와 같은 경로).
+- 새 화면 글을 넣으면 `HarukaPak gather-text -o Engine/Content/Localization/Engine.pot <엔진>/src` 로 틀을 다시 만들고
+  `Engine/Content/Localization/ko/Engine.po` 에 번역을 더합니다. 빠지면 `text_system` 시험이 실패합니다.

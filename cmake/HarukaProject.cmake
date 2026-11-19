@@ -175,6 +175,8 @@ function(haruka_add_project)
         add_custom_target(${RT_TGT} ALL
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${HARUKA_SHADER_BIN_DIR} $<TARGET_FILE_DIR:${HP_GAME_TARGET}>/shaders
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${HP_PROJECT_DIR}/Content $<TARGET_FILE_DIR:${HP_GAME_TARGET}>/Content
+            # 엔진 콘텐츠(글꼴 · 아이콘 · 번역, 글자 체계 T4-4): 게임 실행 파일이 실행 폴더의 Engine/Content 를 /Engine/ 으로 씀
+            COMMAND ${CMAKE_COMMAND} -E copy_directory ${HARUKA_ENGINE_ROOT}/Engine/Content $<TARGET_FILE_DIR:${HP_GAME_TARGET}>/Engine/Content
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HP_PROJECT_DIR}/Config/project.ini $<TARGET_FILE_DIR:${HP_GAME_TARGET}>/Config/project.ini
             COMMENT "Copying SPIR-V shaders and project files to the output dir (${HP_NAME})"
         )
@@ -197,11 +199,13 @@ function(haruka_add_project)
     # ── 묶음 파일 (game.hpak) ────────────────────────────────────────────────────
     file(GLOB_RECURSE PROJECT_PACK_ASSETS CONFIGURE_DEPENDS
         ${HP_PROJECT_DIR}/Content/*
-        ${HP_PROJECT_DIR}/Config/*)
+        ${HP_PROJECT_DIR}/Config/*
+        ${HARUKA_ENGINE_ROOT}/Engine/Content/*)
     add_custom_command(
         OUTPUT  ${PACK_OUT}
         COMMAND ${HARUKA_PAK_TOOL} build ${HARUKA_ENGINE_ROOT}/Packaging/game.pack.txt -o ${PACK_OUT}
                 -D PROJECT_DIR=${HP_PROJECT_DIR} -D SHADER_DIR=${HARUKA_SHADER_BIN_DIR}
+                -D ENGINE_CONTENT_DIR=${HARUKA_ENGINE_ROOT}/Engine/Content
         DEPENDS ${HARUKA_PAK_DEPENDS} ${HARUKA_SPIRV_OUTPUTS} ${PROJECT_PACK_ASSETS} ${HARUKA_ENGINE_ROOT}/Packaging/game.pack.txt
         COMMENT "HarukaPak -> game.hpak (${HP_NAME})"
         VERBATIM

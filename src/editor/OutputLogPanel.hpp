@@ -67,9 +67,8 @@ private:
     std::vector<char>        catHidden_;
     std::set<std::string>    hiddenNames_;
     bool                     showVerb_[5]  = { false, true, true, true, true };
-    std::string              search_;
+    HTextEditState           searchEdit_;   // 글자 체계 T1
     bool                     searchFocused_ = false;
-    bool                     searchSelAll_  = false;
     uint64_t                 clearedSeq_    = 0;
     std::string              errText_  = "E 0";
     std::string              warnText_ = "W 0";

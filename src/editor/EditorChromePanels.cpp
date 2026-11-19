@@ -37,10 +37,10 @@ void EditorToolbar::rebuild() {
     const bool inGame  = playing || paused;
 
     // Play · Pause · Stop 은 아이콘만(20px, D3). 아이콘 파일이 없으면 예전 글자를 그립니다.
-    auto playBtn = [&](const char* icon, glm::vec4 iconColor, const char* label, glm::vec4 norm, glm::vec4 hov,
-                       bool en, const char* tip, std::function<void()> fn) {
+    auto playBtn = [&](const char* icon, glm::vec4 iconColor, const std::string& label, glm::vec4 norm, glm::vec4 hov,
+                       bool en, const std::string& tip, std::function<void()> fn) {
         auto b = deps_.ui->iconButton(icon, 20.f, iconColor, "", 13.f, EditorUiKit::kTextBody, {EditorTheme::space12, 6.f},
-                                      norm, hov, std::move(fn), label);
+                                      norm, hov, std::move(fn), label.c_str());
         b->enabled.set(en);
         b->tooltip.set(tip);
         box_->addSlot(b, HR::ESizeRule::Auto);
@@ -51,28 +51,32 @@ void EditorToolbar::rebuild() {
     glm::vec4 pauseNorm = paused  ? EditorTheme::warnBg : EditorTheme::ctlNormal;
     glm::vec4 stopNorm  = inGame  ? EditorTheme::errorBg : EditorTheme::ctlNormal;
 
-    playBtn("play",   EditorTheme::ok,    paused ? "Resume" : "Play", playNorm, EditorTheme::okHover,
-            true, paused ? "Resume Play" : "Play", deps_.onPlay);
-    playBtn("pause",  EditorTheme::warn,  "Pause", pauseNorm, EditorTheme::warnHover,
-            inGame, "Pause", deps_.onPause);
-    playBtn("square", EditorTheme::error, "Stop",  stopNorm,  EditorTheme::errorHover,
-            inGame, "Stop", deps_.onStop);
+    // 글 · 툴팁은 지금 문화권(글자 체계 T3).
+    const std::string tPlay  = HTEXT("Editor.Toolbar", "Play", "Play").toString();
+    const std::string tPause = HTEXT("Editor.Toolbar", "Pause", "Pause").toString();
+    const std::string tStop  = HTEXT("Editor.Toolbar", "Stop", "Stop").toString();
+    playBtn("play",   EditorTheme::ok,    paused ? HTEXT("Editor.Toolbar", "Resume", "Resume").toString() : tPlay, playNorm, EditorTheme::okHover,
+            true, paused ? HTEXT("Editor.Toolbar", "ResumeTip", "Resume Play").toString() : tPlay, deps_.onPlay);
+    playBtn("pause",  EditorTheme::warn,  tPause, pauseNorm, EditorTheme::warnHover,
+            inGame, tPause, deps_.onPause);
+    playBtn("square", EditorTheme::error, tStop,  stopNorm,  EditorTheme::errorHover,
+            inGame, tStop, deps_.onStop);
 
     box_->addSlot(HNew(SBorder)->background(EditorUiKit::kBorder), HR::ESizeRule::Fixed, 1.f);
     box_->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(4.f));
 
     // ── Scene buttons ──────────────────────────────────────────────────────────
-    auto sceneBtn = [&](const char* icon, const char* label, bool en, const char* tip, std::function<void()> cb) {
-        auto b = deps_.ui->iconButton(icon, 16.f, EditorUiKit::kTextDim, label, 13.f, EditorUiKit::kTextBody, {10.f, 6.f},
+    auto sceneBtn = [&](const char* icon, const std::string& label, bool en, const std::string& tip, std::function<void()> cb) {
+        auto b = deps_.ui->iconButton(icon, 16.f, EditorUiKit::kTextDim, label.c_str(), 13.f, EditorUiKit::kTextBody, {10.f, 6.f},
                                       EditorTheme::ctlNormal, EditorTheme::ctlHover, std::move(cb));
         b->enabled.set(en);
         b->tooltip.set(tip);
         box_->addSlot(b, HR::ESizeRule::Auto);
         box_->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(2.f));
     };
-    sceneBtn("save",        "Save",    !inGame, "Save Scene (Ctrl+S)", deps_.onSave);
-    sceneBtn("folder-open", "Open",    !inGame, "Open Scene (Ctrl+O)", deps_.onOpen);
-    sceneBtn("refresh-cw",  "Refresh", true,    "Refresh Content",     deps_.onRefresh);
+    sceneBtn("save",        HTEXT("Editor.Toolbar", "Save", "Save").toString(),    !inGame, HTEXT("Editor.Toolbar", "SaveTip", "Save Scene (Ctrl+S)").toString(), deps_.onSave);
+    sceneBtn("folder-open", HTEXT("Editor.Toolbar", "Open", "Open").toString(),    !inGame, HTEXT("Editor.Toolbar", "OpenTip", "Open Scene (Ctrl+O)").toString(), deps_.onOpen);
+    sceneBtn("refresh-cw",  HTEXT("Editor.Toolbar", "Refresh", "Refresh").toString(), true,    HTEXT("Editor.Toolbar", "RefreshTip", "Refresh Content").toString(),     deps_.onRefresh);
 
     box_->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fill);
 

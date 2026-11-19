@@ -533,7 +533,7 @@ static bool buildDrawListFromElements(const std::vector<HDrawElement>& elements,
             if (!fonts.getIcon(e.text, (int)e.fontSize, g)) continue;
             HDrawElement icon{};
             icon.type    = HDrawElement::Type::Texture;
-            icon.texture = fonts.atlasView();
+            icon.texture = fonts.pageView(g.page);
             icon.color   = e.color;
             icon.layer   = e.layer;
             icon.clip    = e.clip;
@@ -566,7 +566,7 @@ static bool buildDrawListFromElements(const std::vector<HDrawElement>& elements,
             }
             HDrawElement glyph{};
             glyph.type    = HDrawElement::Type::Texture;
-            glyph.texture = fonts.atlasView();
+            glyph.texture = fonts.pageView(g.page);
             glyph.color   = e.color;
             glyph.layer   = e.layer;
             glyph.clip    = e.clip;

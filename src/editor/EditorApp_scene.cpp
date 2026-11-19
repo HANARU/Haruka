@@ -5,6 +5,7 @@
 // assets/scenes 아래 논리 경로로 열고 저장하며(hproj), SceneDocument 가 열린 파일과 변경 여부를 기억합니다.
 // 파일 고르기와 이름 입력은 에디터 안의 대화상자로 합니다(OS 대화상자는 플랫폼마다 다르고 assets 밖의
 // 경로를 고를 수 있어 논리 경로 규칙을 지키기 어렵습니다).
+#include "../core/Utf8.hpp"
 #include "EditorApp.hpp"
 #include "../scene/World.hpp"
 #include "../scene/Actor.hpp"
@@ -46,6 +47,7 @@ void EditorApp::loadEditorState() {
         const std::string key = project_settings::trim(line.substr(0, eq));
         const std::string val = project_settings::trim(line.substr(eq + 1));
         if (key == "lastScene") lastScene_ = val;
+        else if (key == "culture") culture_ = val;
         else if (key == "audioOutput") audioOutput_ = val;
         else if (key == "audioHeadsetInVr") headsetAudioInVr_ = (val != "0");
         else if (key == "audioHrtf" && !AudioSystem::hrtfModeFromText(val, hrtfMode_))
@@ -56,6 +58,7 @@ void EditorApp::loadEditorState() {
 void EditorApp::saveEditorState() const {
     std::string text = "# Haruka editor state for this machine (not part of the project).\n";
     if (!lastScene_.empty()) text += "lastScene=" + lastScene_ + "\n";
+    if (!culture_.empty() && culture_ != "en") text += "culture=" + culture_ + "\n";   // 에디터 언어(글자 체계 T3)
     // 소리 출력 장치(비면 시스템 기본)와 XR Play 동안 헤드셋으로 바꿀지(2026-10-16).
     if (!audioOutput_.empty()) text += "audioOutput=" + audioOutput_ + "\n";
     text += std::string("audioHeadsetInVr=") + (headsetAudioInVr_ ? "1" : "0") + "\n";
@@ -77,8 +80,26 @@ bool EditorApp::blockedDuringPlay(const char* what) const {
 }
 
 // ── 열기 · 새 씬 ─────────────────────────────────────────────────────────────────
+void EditorApp::applyCulture(const std::string& c, bool save) {
+    std::vector<std::string> errors;
+    const size_t n = htext::useCulture(c, &errors);
+    for (const std::string& e : errors) HLOG(LogEditorScene, Warning) << "Localization: " << e;
+    if (n) HLOG(LogEditorScene, Log) << "Localization: " << c << " (" << n << " entries)";
+    if (save) { culture_ = c; saveEditorState(); }
+    // 글 폭이 바뀌므로 UI 를 처음부터 다시 만듭니다(배율이 바뀔 때와 같은 경로).
+    buildWidgetTree();
+    outlinerPanel_.rebuild();
+    detailsPanel_.rebuild();
+    rebuildBottomPanel();
+    toolbar_.markDirty();
+}
+
 void EditorApp::openInitialScene(const std::string& startScene) {
     loadEditorState();
+    {
+        const std::string c = !cultureOverride_.empty() ? cultureOverride_ : culture_;
+        if (!c.empty() && c != htext::culture()) applyCulture(c, false);
+    }
     if (audio_ && !audioOutput_.empty()) audio_->setOutputDevice(audioOutput_);
     if (audio_) audio_->setHrtfMode(hrtfMode_);
     contentPanel_.scanScenes();
@@ -114,7 +135,7 @@ void EditorApp::openScene(const std::string& logicalPath) {
 
 void EditorApp::newScene() {
     if (blockedDuringPlay("creating a new scene")) return;
-    guardUnsaved("creating a new scene", [this] {
+    guardUnsaved(HTEXT("Editor.Dialog", "Verb.NewScene", "creating a new scene"), [this] {
         deserializeWorld("");   // 에디터 카메라만 남기고 비움
         cmdStack_.clear();
         doc_.reset("", cmdStack_.stateToken());
@@ -132,8 +153,8 @@ void EditorApp::openAudioOutputDialog() {
     }
     const std::vector<AudioOutputDevice> devices = audio_->outputDevices();
     ModalSpec m;
-    m.title   = "Audio Output";
-    m.message = "Now playing on: " + hutf::asciiLabel(audio_->activeOutputName(), "(none)") +
+    m.title   = HTEXT("Editor.Dialog", "Audio.Title", "Audio Output").toString();
+    m.message = "Now playing on: " + hutf::displayLabel(audio_->activeOutputName(), "(none)") +
                 (audio_->overrideActive() ? " (headset during VR Play)" : "") +   // 헤드셋 장치가 실제로 열렸을 때만(DEF-147)
                 "\nChoose the editor's output device:";
     // 항목 글 -> 동작. 같은 이름의 장치가 둘이면 번호를 붙여 구별합니다.
@@ -147,7 +168,7 @@ void EditorApp::openAudioOutputDialog() {
     for (size_t i = 0; i < devices.size(); ++i) {
         const AudioOutputDevice& d = devices[i];
         std::string label = std::string(hutf::equalsIgnoreCase(d.id, audioOutput_) ? "> " : "  ") +
-                            hutf::asciiLabel(d.name, "Device " + std::to_string(i + 1)) +
+                            hutf::displayLabel(d.name, "Device " + std::to_string(i + 1)) +
                             (d.isDefault ? "  (Windows default)" : "");
         for (const auto& it : items)
             if (it.first == label) { label += " #" + std::to_string(i + 1); break; }
@@ -177,7 +198,7 @@ void EditorApp::openAudioOutputDialog() {
         for (const auto& it : items)
             if (it.first == label) { it.second(); return; }
     };
-    m.buttons.push_back({ "Close", {}, false, true });
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Close", "Close").toString(), {}, false, true });
     openModal(std::move(m));
 }
 
@@ -185,18 +206,18 @@ void EditorApp::openSceneDialog() {
     if (blockedDuringPlay("opening a scene")) return;
     contentPanel_.scanScenes();
     ModalSpec m;
-    m.title = "Open Scene";
+    m.title = HTEXT("Editor.Dialog", "Open.Title", "Open Scene").toString();
     const auto& scenes = contentPanel_.sceneFiles();
     if (scenes.empty()) {
-        m.message = "No .hscene files in assets/scenes.";
+        m.message = HTEXT("Editor.Dialog", "Open.None", "No .hscene files in assets/scenes.").toString();
     } else {
-        m.message = "Scenes in assets/scenes:";
+        m.message = HTEXT("Editor.Dialog", "Open.List", "Scenes in assets/scenes:").toString();
         m.list    = scenes;
         m.onPick  = [this](const std::string& path) {
-            guardUnsaved("opening another scene", [this, path] { openScene(path); });
+            guardUnsaved(HTEXT("Editor.Dialog", "Verb.OpenAnother", "opening another scene"), [this, path] { openScene(path); });
         };
     }
-    m.buttons.push_back({ "Cancel", {}, false, true });
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Cancel", "Cancel").toString(), {}, false, true });
     openModal(std::move(m));
 }
 
@@ -226,7 +247,7 @@ void EditorApp::saveSceneAs(std::function<void()> then) {
     if (blockedDuringPlay("saving the scene")) return;
     // 입력 칸은 지금 이름(폴더 · 확장자 제외)으로 채우고 전체 선택해 바로 바꿔 쓸 수 있게 합니다.
     if (doc_.untitled()) {
-        dialogText_ = "NewScene";
+        dialogEdit_.setText("NewScene");
     } else {
         // assets/scenes/ 아래면 그 접두를 떼고, 다른 폴더의 씬이면 파일 이름 부분만 채웁니다. 예전에는 접두가 늘
         // 있다고 보고 14글자를 잘라, 다른 폴더의 씬이면 엉뚱한 이름이 채워졌습니다(DEF-138).
@@ -235,57 +256,56 @@ void EditorApp::saveSceneAs(std::function<void()> then) {
         std::string rel = path.rfind(prefix, 0) == 0 ? path.substr(prefix.size())
                                                      : path.substr(path.find_last_of('/') + 1);   // 없으면 npos + 1 = 0
         if (rel.size() > 7 && rel.compare(rel.size() - 7, 7, ".hscene") == 0) rel.resize(rel.size() - 7);
-        dialogText_ = rel;
+        dialogEdit_.setText(rel);
     }
     ModalSpec m;
-    m.title            = "Save Scene As";
-    m.message          = "Name under /Game/scenes (letters, digits, space, - _ and / for folders):";
+    m.title            = HTEXT("Editor.Dialog", "SaveAs.Title", "Save Scene As").toString();
+    m.message          = HTEXT("Editor.Dialog", "SaveAs.Message", "Name under /Game/scenes (letters in any language, digits, space, - _ and / for folders):").toString();
     m.hasInput         = true;
     m.inputPlaceholder = "SceneName";
-    m.buttons.push_back({ "Save", [this, then] {
-        std::string name = project_settings::trim(dialogText_);
-        if (name.size() > 7 && name.compare(name.size() - 7, 7, ".hscene") == 0) name.resize(name.size() - 7);
-        const bool charsOk = !name.empty() && std::all_of(name.begin(), name.end(), [](char c) {
-            return std::isalnum((unsigned char)c) || c == ' ' || c == '-' || c == '_' || c == '/';
-        });
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Save", "Save").toString(), [this, then] {
+        // 이름 규칙(모든 언어의 글자 · 숫자 · 공백 · - _ /)은 project_settings::normalizeSceneName(글자 체계 T1-11).
+        std::string name;
+        const bool charsOk = project_settings::normalizeSceneName(dialogEdit_.text, name);
         const std::string logical = std::string(kScenesDir) + "/" + name + ".hscene";
-        if (!charsOk || name.front() == '/' || name.back() == '/' || name.find("//") != std::string::npos ||
-            !project_settings::isSceneLogicalPath(logical)) {
-            HLOG(LogEditorScene, Warning) << "Invalid scene name '" << dialogText_
+        if (!charsOk || !project_settings::isSceneLogicalPath(logical)) {
+            HLOG(LogEditorScene, Warning) << "Invalid scene name '" << dialogEdit_.text
                                           << "'. Use letters, digits, space, - _ and / between folder names.";
-            const std::string typed = dialogText_;
+            const std::string typed = dialogEdit_.text;
             saveSceneAs(then);   // 입력한 내용 그대로 다시 묻습니다
-            dialogText_ = typed;
+            dialogEdit_.setText(typed);
             return;
         }
         std::error_code ec;
         auto commit = [this, logical, then] { if (writeSceneTo(logical) && then) then(); };
         if (hvfs::toCanonical(logical) != hvfs::toCanonical(doc_.path()) && fs::exists(hproj::resolve(logical), ec)) {
             ModalSpec c;
-            c.title   = "Replace Scene";
-            c.message = logical + " already exists.\nReplace it?";
-            c.buttons.push_back({ "Replace", commit, true, false });
-            c.buttons.push_back({ "Cancel", {}, false, true });
+            c.title   = HTEXT("Editor.Dialog", "Replace.Title", "Replace Scene").toString();
+            c.message = HText::format(HTEXT("Editor.Dialog", "Replace.Message", "{0} already exists.\nReplace it?"), { logical }).toString();
+            c.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Replace", "Replace").toString(), commit, true, false });
+            c.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Cancel", "Cancel").toString(), {}, false, true });
             openModal(std::move(c));
             return;
         }
         commit();
     }, true, false });
-    m.buttons.push_back({ "Cancel", {}, false, true });
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Cancel", "Cancel").toString(), {}, false, true });
     openModal(std::move(m));
 }
 
-void EditorApp::guardUnsaved(const std::string& verb, std::function<void()> action) {
+void EditorApp::guardUnsaved(const HText& verb, std::function<void()> action) {
     if (!sceneDirty()) { action(); return; }
     ModalSpec m;
-    m.title   = "Unsaved Changes";
-    m.message = "Save changes to " + doc_.displayName() + "\nbefore " + verb + "?";
-    m.buttons.push_back({ "Save", [this, action] {
+    m.title   = HTEXT("Editor.Dialog", "Unsaved.Title", "Unsaved Changes").toString();
+    // 어순이 언어마다 다르므로 문장 전체를 틀로 번역합니다(글자 체계 T3-5).
+    m.message = HText::format(HTEXT("Editor.Dialog", "Unsaved.Message", "Save changes to {0}\nbefore {1}?"),
+                              { doc_.displayName(), verb }).toString();
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Save", "Save").toString(), [this, action] {
         if (doc_.untitled()) saveSceneAs(action);
         else if (writeSceneTo(doc_.path())) action();
     }, true, false });
-    m.buttons.push_back({ "Don't Save", action, false, false });
-    m.buttons.push_back({ "Cancel", {}, false, true });
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.DontSave", "Don't Save").toString(), action, false, false });
+    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Cancel", "Cancel").toString(), {}, false, true });
     openModal(std::move(m));
 }
 
@@ -302,7 +322,7 @@ bool EditorApp::requestClose() {
     if (!sceneDirty()) return true;
     // Play 중이면 먼저 멈춥니다. 저장은 Play 월드가 아니라 편집 중이던 월드를 써야 합니다.
     if (playState_ != EPlayState::Editor) stopPlay();
-    guardUnsaved("closing", [this] {
+    guardUnsaved(HTEXT("Editor.Dialog", "Verb.Closing", "closing"), [this] {
         quitApproved_ = true;
         if (ctx_.window) ctx_.window->setShouldClose(true);
     });
@@ -402,10 +422,9 @@ void EditorApp::rebuildModal() {
         add(spacer(), s(8.f));
         dialogBox_ = HNew(SSearchBox)
             ->style(EditorUiKit::searchBoxStyle(s(1.f)))
-            ->text(AttrStr([this]() -> std::string { return dialogText_; }))
+            ->edit(&dialogEdit_)
             ->placeholder(m.inputPlaceholder)
             ->focused([this] { return dialogFocused_; })
-            ->selectedAll([this] { return dialogSelAll_; })
             ->onClick([this] { setTextFocus(EFocusTarget::Dialog); })
             ->icon(false)
             ->fontSize(s(13.f));

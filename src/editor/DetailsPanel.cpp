@@ -292,11 +292,11 @@ void DetailsPanel::buildComponentHeader(Actor& sel, Component& comp) {
             deps_.cmdStack->push(std::make_unique<ComponentEnabledCmd>(*deps_.ctx->world, selPtr, compPtr, before, !before));
             dirty_ = true;
         });
-    enBox->tooltip.set("Enable/Disable Component");
+    enBox->setTooltip(HTEXT("Editor.Details", "Tip.Enable", "Enable/Disable Component"));
     auto rmBtn = deps_.ui->iconButton("trash-2", 14.f, EditorTheme::error, "", 12.f, EditorTheme::error, {5.f, 2.f},
                                       EditorTheme::errorBg, EditorTheme::errorHover,
                                       removeFn ? removeFn : std::function<void()>([]{}), "x");
-    rmBtn->tooltip.set("Remove Component");
+    rmBtn->setTooltip(HTEXT("Editor.Details", "Tip.Remove", "Remove Component"));
 
     list_->addSlot(
         HNew(SBorder)->background(EditorUiKit::kBgHeader)->padding({s(EditorTheme::space4), s(EditorTheme::space2)})

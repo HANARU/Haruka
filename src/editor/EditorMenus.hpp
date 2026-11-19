@@ -12,9 +12,10 @@
 class EditorMenus {
 public:
     struct Item {
-        std::string           label;
+        std::string           label;      // 지금 문화권으로 푼 글(글자 체계 T3: HTEXT(...).toString())
         std::function<void()> action;
-        std::function<bool()> checked;   // 비어 있지 않으면 앞쪽에 체크 박스를 그립니다
+        std::function<bool()> checked;    // 비어 있지 않으면 앞쪽에 체크 박스를 그립니다
+        std::string           shortcut;   // 오른쪽 열의 단축키(번역하지 않음). 예전에는 label 에 공백으로 줄 맞춰 붙였음
     };
     struct Def {
         std::string       name;

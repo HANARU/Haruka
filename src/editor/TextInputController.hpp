@@ -1,8 +1,10 @@
 #pragma once
 #include "../ui/slate/HSlate.hpp"
+#include "../ui/slate/HTextEdit.hpp"
 #include <glm/glm.hpp>
 #include <functional>
 #include <string>
+#include <vector>
 
 class IWindow;
 
@@ -10,10 +12,10 @@ enum class EFocusTarget { None, Rename, Search, LogSearch, NumberField, Dialog }
 
 // 텍스트 입력 칸의 공용 바인딩(S6d).
 // 아웃라이너 리네임 · 아웃라이너 검색 · 로그 검색이 같은 구조로 TextInputController 에 등록됩니다.
+// 글 · 커서 · 선택 · IME 조합 글은 HTextEditState 하나에 있습니다(글자 체계 T1, 2026-11-19). 예전의 버퍼 + "전체 선택" 깃발을 대신합니다.
 struct TextInputField {
-    std::string&                   buffer;
+    HTextEditState&                edit;
     bool&                          focused;
-    bool&                          selectedAll;
     std::function<bool(glm::vec2)> contains;
     std::function<void()>          onChanged;
     std::function<bool()>          onBegin  = {};   // false 이면 진입을 취소합니다
@@ -36,7 +38,7 @@ public:
         std::function<bool()> isDialogFocused;
         std::function<void()> beginDialogFocus;
         std::function<void()> endDialogFocus;
-        std::function<void(std::string*&, bool*&)> dialogBuffer;
+        std::function<HTextEditState*()> dialogEdit;
         std::function<void()> onModalDefault;
         std::function<void()> onModalCancel;
 
@@ -56,32 +58,48 @@ public:
     void tickInput();
 
 private:
+public:
+    // 편집 키 한 프레임 묶음. 반복 수는 OS 자동 반복을 따릅니다(DEF-58). 시험이 직접 만들어 applyEdit 에 넘기기도 합니다.
     struct KeyEdges {
         bool ctrlHeld   = false;
+        bool shiftHeld  = false;
         bool pasteEdge  = false;
         bool copyEdge   = false;
+        bool cutEdge    = false;
         bool selAllEdge = false;
         bool f2Edge     = false;
         bool delEdge    = false;
         bool enterEdge  = false;
         bool escEdge    = false;
         int  bsCount    = 0;
+        int  delCount   = 0;
+        int  leftCount  = 0;
+        int  rightCount = 0;
+        int  homeCount  = 0;
+        int  endCount   = 0;
     };
+    // 한 편집 칸에 글자 · 키 · 클립보드를 적용합니다(창 없이 시험 가능). 글이 바뀌었으면 참.
+    static bool applyEdit(HTextEditState& st, const std::vector<unsigned int>& chars, const KeyEdges& k,
+                          IWindow* clipboard);
 
+private:
     KeyEdges sampleEdges(IWindow& win);
-    bool editBuffer(IWindow& win, std::string& buf, bool& selAll, const KeyEdges& k);
+    bool editField(IWindow& win, HTextEditState& st, const KeyEdges& k);
+    void syncIme(IWindow& win);
     void handleModalInput(IWindow& win, EFocusTarget focus, const KeyEdges& k);
     void handleNumberFieldInput(IWindow& win, const KeyEdges& k);
     void handleTextFieldInput(IWindow& win, EFocusTarget focus, const KeyEdges& k);
 
     Deps deps_;
     EFocusTarget backspaceFocus_   = EFocusTarget::None;
-    bool         backspaceBlocked_ = false;
+    // 포커스가 바뀔 때 눌려 있던 편집 키는 뗄 때까지 무시합니다(Backspace 로 시작한 DEF-58 규칙을 모든 반복 키로).
+    uint32_t     blockedKeys_      = 0;
     bool         prevEnterDown_    = false;
     bool         prevF2Down_       = false;
     bool         prevDeleteDown_   = false;
     bool         prevVDown_        = false;
     bool         prevCDown_        = false;
     bool         prevADown_        = false;
+    bool         prevXDown_        = false;
     bool         prevEscapeDown_   = false;
 };

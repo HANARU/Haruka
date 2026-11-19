@@ -782,10 +782,12 @@ void testTextMeasure() {
     {
         HFontAtlas full;
         if (full.initCpuOnly()) {
-            for (int c = 33; c < 127; ++c) full.getGlyph((char)c, 400.f);   // 400 px 글자는 2048 x 512 에 한 줄(약 20자)만 들어감
+            // 400 px 글자는 2048 x 512 페이지에 한 줄만 들어감. 페이지(최대 8, 글자 체계 T4-3)를 다 채우도록 크기 셋으로 넣음
+            for (float px : { 400.f, 380.f, 360.f })
+                for (int c = 33; c < 127; ++c) full.getGlyph((char)c, px);
             const uint32_t dropped = full.droppedGlyphs();
             check(dropped > 0, "큰 글자를 많이 올리면 아틀라스가 넘침 (전제)");
-            const HGlyphInfo g = full.getGlyph('~', 400.f);
+            const HGlyphInfo g = full.getGlyph('~', 360.f);   // 마지막 크기의 끝 글자는 넘친 쪽
             check(g.uvMin == g.uvMax && g.advance > 0.f, "넘친 글자는 그리지 않지만 자리(advance)는 차지함");
             check(full.droppedGlyphs() == dropped, "넘친 글자를 다시 찾으면 캐시에서 나옴 (수가 늘지 않음)");
             full.initCpuOnly();
@@ -1959,6 +1961,213 @@ void testTooltipAndDisabled() {
           "SCheckBox 비활성: 기본 바탕 + 기본 테두리 + disabledColor 체크 색");
 }
 
+// 글자 체계 T1-7 · T1-9(2026-11-19): 편집 칸의 x ↔ 커서, 커서 · 선택 · 조합 밑줄 그리기, 누르기 · 끌기로 커서 · 선택.
+static void testEditableText() {
+    hvfs::reset();
+    hvfs::mountDirectoryAs(HARUKA_ENGINE_CONTENT_DIR, "/Engine/", 10);
+    HFontAtlas atlas;
+    if (!atlas.initCpuOnly("/Engine/Fonts/Pretendard-Regular.ttf")) {
+        check(false, "편집 칸: Pretendard 를 읽음");
+        hvfs::reset();
+        return;
+    }
+    const std::string han = "\xED\x95\x9C";   // 한
+    HTextEditState st;
+    st.setText("ab" + han + "cd");
+    const float fs = 14.f;
+    const float xAb  = atlas.measureText("ab", fs);
+    const float xHan = atlas.measureText("ab" + han, fs);
+    check(st.caretFromX(&atlas, fs, 0, 0.f) == 0 && st.caretFromX(&atlas, fs, 0, 999.f) == st.text.size(),
+          "caretFromX: 왼쪽 끝 · 오른쪽 끝");
+    check(st.caretFromX(&atlas, fs, 0, xAb + (xHan - xAb) * 0.3f) == 2, "caretFromX: 한글 앞쪽 30% 는 글자 앞");
+    check(st.caretFromX(&atlas, fs, 0, xAb + (xHan - xAb) * 0.7f) == 2 + han.size(), "caretFromX: 한글 뒤쪽 70% 는 글자 뒤");
+    check(HTextEditState::xOf(&atlas, st.text, fs, 0, 2 + han.size()) == xHan, "xOf: 그리기 · 폭 재기와 같은 값");
+
+    // 그리기: 포커스 + 선택(한) → 선택 사각형 폭 = 한글 폭, 커서 막대 하나, 글 하나
+    st.setCaret(2);
+    st.setCaret(2 + han.size(), true);
+    HPaintContext ctx(&atlas);
+    HGeometry g; g.position = { 100.f, 50.f }; g.size = { 200.f, 20.f };
+    SEditableText::Style es;
+    es.caretWidth = 2.f;
+    SEditableText::paintState(ctx, g, &st, true, "", fs, 18.f, es);
+    int rects = 0, texts = 0;
+    float selW = -1.f, caretX = -1.f;
+    for (const auto& e : ctx.elements) {
+        if (e.type == HDrawElement::Type::Text) ++texts;
+        if (e.type == HDrawElement::Type::Rect) {
+            ++rects;
+            if (e.color == es.selection) selW = e.rect.z;
+            if (e.color == es.caret)     caretX = e.rect.x;
+        }
+    }
+    check(texts == 1 && rects == 2, "paintState: 선택 · 글 · 커서(요소 " + std::to_string(ctx.elements.size()) + ")");
+    check(std::abs(selW - (xHan - xAb)) < 0.01f, "paintState: 선택 폭 = 한글 한 글자 폭");
+    check(std::abs(caretX - (100.f + xHan)) < 0.01f, "paintState: 커서는 선택 끝(한 뒤)");
+    check(st.caretRect.x == caretX && st.caretRect.z == 2.f, "paintState: 커서 사각형을 상태에 남김(IME 자리)");
+
+    // 포커스 없음: 커서 · 선택 없이 글만
+    HPaintContext ctx2(&atlas);
+    SEditableText::paintState(ctx2, g, &st, false, "", fs, 18.f, es);
+    check(ctx2.elements.size() == 1 && ctx2.elements[0].type == HDrawElement::Type::Text, "포커스 없음: 글만");
+
+    // 조합 글: 밑줄 하나(조합 글 폭), 선택 사각형 없음
+    st.setText("ab");
+    st.setComposition(han, han.size());
+    HPaintContext ctx3(&atlas);
+    SEditableText::paintState(ctx3, g, &st, true, "", fs, 18.f, es);
+    float underW = -1.f;
+    for (const auto& e : ctx3.elements)
+        if (e.type == HDrawElement::Type::Rect && e.color == es.composition && e.rect.w <= 2.f) underW = e.rect.z;
+    check(std::abs(underW - (xHan - xAb)) < 0.01f, "조합 글: 밑줄 폭 = 조합 글 폭");
+    check(!ctx3.elements.empty() && ctx3.elements[0].text == "ab" + han, "조합 글: 커서 자리에 끼워 그림");
+
+    // 긴 글: 커서가 칸 밖이면 글을 왼쪽으로 밀어 커서가 칸 안에 보임
+    HTextEditState lng;
+    lng.setText(std::string(60, 'W'));
+    HPaintContext ctx4(&atlas);
+    SEditableText::paintState(ctx4, g, &lng, true, "", fs, 18.f, es);
+    float cx = -1.f;
+    for (const auto& e : ctx4.elements) if (e.type == HDrawElement::Type::Rect && e.color == es.caret) cx = e.rect.x;
+    check(cx >= g.position.x && cx + es.caretWidth <= g.position.x + g.size.x + 0.01f, "긴 글: 커서가 칸 안");
+
+    // 검색 칸 위젯: 누르면 포커스를 얻고 그 자리에 커서, 끌면 선택
+    HTextEditState sst;
+    sst.setText("hello world");
+    bool foc = false;
+    int edited = 0;
+    auto box = HNew(SSearchBox)->edit(&sst)->focused([&] { return foc; })->onClick([&] { foc = true; sst.selectAll(); })
+                   ->onEdited([&] { ++edited; })->icon(false)->fontSize(10.f);
+    HGeometry bg; bg.position = { 0.f, 0.f }; bg.size = { 300.f, 24.f };
+    box->onArrangeChildren(bg);
+    HPaintContext pc(&atlas);
+    box->paint(pc, bg);   // 글 칸 자리를 정함
+    const float textX = 6.f;   // icon(false) 의 글 시작
+    const float xHello = atlas.measureText("hello", 10.f);
+    HPointerEvent down;
+    down.button = 0; down.down = true; down.position = { textX + xHello + 0.5f, 12.f };
+    box->onMouseButton(down);
+    check(foc && !sst.hasSelection() && sst.caret == 5, "검색 칸 누르기: 포커스 + 그 자리 커서(전체 선택 대신)");
+    HPointerEvent mv = down;
+    mv.button = -1; mv.position.x = textX + 1.f;
+    box->onMouseMove(mv);
+    check(sst.selectedText() == "hello", "검색 칸 끌기: 선택");
+    HPointerEvent up = down;
+    up.down = false;
+    box->onMouseButton(up);
+    HPointerEvent sh = down;
+    sh.shift = true; sh.position.x = textX + atlas.measureText("hello wor", 10.f) + 0.5f;
+    box->onMouseButton(sh);
+    check(sst.selBegin() == 5 && sst.selEnd() == 9 && edited >= 3, "Shift+누르기: 커서에서 선택을 늘림");
+    // T3-6: 표시 글 위젯은 문화권을 바꾸면 다시 재서 크기가 바뀜
+    htext::clearTables();
+    htext::loadPo("msgctxt \"T.Slate,Hello\"\nmsgid \"Hi\"\nmsgstr \"\xEC\x95\x88\xEB\x85\x95\xED\x95\x98\xEC\x84\xB8\xEC\x9A\x94\"\n",   // 안녕하세요
+                  "ko", htext::Layer::Engine);
+    htext::setCulture("en");
+    auto tb = HNew(STextBlock)->text(HTEXT("T.Slate", "Hello", "Hi"))->fontSize(14.f);
+    const float wEn = tb->computeDesiredSize().x;
+    htext::setCulture("ko");
+    const float wKo = tb->computeDesiredSize().x;
+    check(wKo > wEn * 2.f, "STextBlock(HText): 문화권을 바꾸면 다시 잼 (en " + std::to_string(wEn) + " → ko " + std::to_string(wKo) + ")");
+    auto tipW = HNew(STextBlock)->text("x");
+    tipW->setTooltip(HTEXT("T.Slate", "Hello", "Hi"));
+    check(tipW->tooltip.get() == "\xEC\x95\x88\xEB\x85\x95\xED\x95\x98\xEC\x84\xB8\xEC\x9A\x94", "setTooltip(HText): 지금 문화권 글");
+    htext::setCulture("en");
+    check(tipW->tooltip.get() == "Hi", "setTooltip(HText): 문화권을 따라 바뀜");
+    htext::clearTables();
+    atlas.unloadFont();
+    hvfs::reset();
+}
+
+// 글자 체계 T4(2026-11-19): 대체 글꼴 사슬 · 없는 글자 · 아틀라스 페이지.
+static void testFontFallbackAndPages() {
+    hvfs::reset();
+    hvfs::mountDirectoryAs(HARUKA_ENGINE_CONTENT_DIR, "/Engine/", 10);
+    {
+        HFontAtlas atlas;
+        atlas.setAtlasHeight(1024);
+        if (!atlas.initCpuOnly("/Engine/Fonts/Pretendard-Regular.ttf")) {
+            check(false, "대체 글꼴: Pretendard 를 읽음");
+        } else {
+            const std::string kanji = "\xE6\xBC\xA2\xE5\xAD\x97";        // 漢字
+            const std::string kana  = "\xE3\x81\x8B\xE3\x81\xAA";        // かな
+            const std::string zh    = "\xE8\xBF\x99\xE4\xB8\xAA";        // 这个(간체)
+            const size_t fb = atlas.fallbackCount();
+            std::printf("    (fallback fonts on this machine: %zu)\n", fb);
+            if (fb > 0) {
+                const HGlyphInfo gk = atlas.getGlyph(0x6F22, 16.f);   // 漢
+                const HGlyphInfo ga = atlas.getGlyph(0x304B, 16.f);   // か
+                check(gk.pixelSize.x > 4.f && ga.pixelSize.x > 4.f, "대체 글꼴: 한자 · 가나 글리프를 그림");
+                check(atlas.measureText(kanji + kana + zh, 16.f) > 16.f * 4.f, "대체 글꼴: 폭을 잼");
+                check(atlas.missingGlyphCount() == 0, "대체 글꼴: 없는 글자 없음");
+                // 폭 재기와 그리기가 같은 글꼴: advance 가 같음
+                check(atlas.glyphAdvance(0x6F22, 16.f) == gk.advance, "대체 글꼴: 폭 재기 · 그리기가 같은 글꼴");
+                check(atlas.getGlyph('A', 16.f).advance == atlas.glyphAdvance('A', 16.f), "주 글꼴 글자는 그대로");
+            } else {
+                check(true, "대체 글꼴 없는 기계(시험 일부 건너뜀)");
+            }
+        }
+        atlas.unloadFont();
+    }
+    {
+        // 대체 글꼴이 하나도 없으면: 멈추지 않고 .notdef 를 그리며 경고는 글자마다 한 번
+        HFontAtlas atlas;
+        atlas.setFallbackChain({});
+        if (atlas.initCpuOnly("/Engine/Fonts/Pretendard-Regular.ttf")) {
+            check(atlas.fallbackCount() == 0, "빈 사슬: 대체 글꼴 0");
+            const HGlyphInfo g = atlas.getGlyph(0x6F22, 16.f);
+            check(g.advance > 0.f && atlas.missingGlyphCount() == 1, "빈 사슬: 없는 글자는 자리를 차지하고 한 번 셈");
+            atlas.getGlyph(0x6F22, 20.f);
+            atlas.measureText("\xE6\xBC\xA2", 16.f);
+            check(atlas.missingGlyphCount() == 1, "같은 글자는 다시 세지 않음");
+            atlas.setFallbackChain({ "/Engine/Fonts/none.ttf", "/Engine/Fonts/Pretendard-SemiBold.ttf" });
+            check(atlas.fallbackCount() == 1, "사슬: 없는 파일은 건너뜀");
+        }
+        atlas.unloadFont();
+    }
+    {
+        // 페이지: 작은 아틀라스(2048 x 64)에 글자를 많이 넣으면 페이지를 더 엶
+        HFontAtlas atlas;
+        atlas.setAtlasHeight(64);
+        if (atlas.initCpuOnly("/Engine/Fonts/Pretendard-Regular.ttf")) {
+            int maxPage = 0;
+            bool allDrawn = true;
+            for (int c = 0xAC00; c < 0xAC00 + 300; ++c) {   // 한글 300자, 40 px
+                const HGlyphInfo g = atlas.getGlyph((uint32_t)c, 40.f);
+                maxPage = std::max(maxPage, g.page);
+                allDrawn = allDrawn && g.pixelSize.x > 0.f;
+            }
+            check(atlas.pageCount() > 1 && maxPage == atlas.pageCount() - 1, "페이지: 차면 새 페이지(" + std::to_string(atlas.pageCount()) + ")");
+            check(allDrawn && atlas.droppedGlyphs() == 0, "페이지: 넘친 글자 없이 모두 그림");
+            check(atlas.getGlyph(0xAC00, 40.f).page == 0, "페이지: 먼저 넣은 글자는 첫 페이지 그대로");
+            for (int c = 0xB000; c < 0xB000 + 2000 && atlas.droppedGlyphs() == 0; ++c) atlas.getGlyph((uint32_t)c, 40.f);
+            check(atlas.pageCount() == HFontAtlas::kMaxPages && atlas.droppedGlyphs() > 0, "페이지: 최대 수를 넘으면 그때 넘침");
+        }
+        atlas.unloadFont();
+    }
+    {
+        // T4-5: 패널 전용 렌더러와 같은 설정(기본 높이 512, /Engine 의 Pretendard)으로 한글 패널 글을 그림
+        HFontAtlas panel;
+        if (panel.initCpuOnly("/Engine/Fonts/Pretendard-Regular.ttf")) {
+            check(panel.fontPath() == "/Engine/Fonts/Pretendard-Regular.ttf", "패널 글꼴: /Engine 의 Pretendard 를 읽음");
+            const std::string title = "\xED\x95\x9C\xEA\xB8\x80 \xED\x8C\xA8\xEB\x84\x90";   // 한글 패널
+            HSlateContext pctx;
+            pctx.setRootWidget(HNew(STextBlock)->text(title)->fontSize(56.f));
+            HSlateDrawList dl;
+            const bool drew = pctx.buildDrawList({ 1024.f, 256.f }, panel, VK_NULL_HANDLE, 4096, dl);
+            int glyphs = 0;
+            for (size_t i = 0; i < title.size();) {
+                const uint32_t cp = HFontAtlas::nextCodepoint(title, i);
+                if (cp == ' ') continue;
+                if (panel.getGlyph(cp, 56.f).pixelSize.x > 8.f) ++glyphs;
+            }
+            check(drew && glyphs == 4 && panel.missingGlyphCount() == 0, "패널: 한글 네 글자를 글리프로 그림");
+        }
+        panel.unloadFont();
+    }
+    hvfs::reset();
+}
+
 int main() {
     std::printf("== HSlate input ==\n");
     testStrayReleaseDoesNotEdit();
@@ -1997,6 +2206,8 @@ int main() {
     testUtf8AndBoldFont();
     testCheckBoxAndScrollStyle();
     testTooltipAndDisabled();
+    testEditableText();
+    testFontFallbackAndPages();
 
     if (g_failed) {
         std::printf("\n%d check(s) FAILED\n", g_failed);

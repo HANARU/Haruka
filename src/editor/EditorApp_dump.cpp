@@ -13,12 +13,17 @@ static constinit HLogCategory LogEditorDump{ "Editor", ELogVerbosity::Log };
 
 void EditorApp::setOptions(const EngineOptions& options) {
     uiDumpPath_         = options.uiDumpPath;
+    cultureOverride_    = options.culture;
     uiSelect_           = options.uiSelect;
     uiOpenMenu_         = options.uiOpenMenu;
     uiBottomTab_        = options.uiBottomTab;
     uiLogCategories_    = options.uiLogCategories;
     uiOutlinerSearch_   = options.uiOutlinerSearch;
     uiRename_           = options.uiRename;
+    uiType_             = options.uiType;
+    uiCaretLeft_        = options.uiCaretLeft;
+    uiSelectLeft_       = options.uiSelectLeft;
+    uiImeCompose_       = options.uiImeCompose;
     uiOutlinerCollapse_ = options.uiOutlinerCollapse;
     uiPlay_             = options.uiPlay;
     uiLayout_           = options.uiLayout;
@@ -37,6 +42,16 @@ void EditorApp::setOptions(const EngineOptions& options) {
         }
     }
     dumpMode_           = !uiDumpPath_.empty() || !viewportDumpPath_.empty();
+}
+
+HTextEditState* EditorApp::focusedEdit() {
+    switch (currentFocus()) {
+        case EFocusTarget::Rename:    return &outlinerPanel_.renameEdit();
+        case EFocusTarget::Search:    return &outlinerPanel_.searchEdit();
+        case EFocusTarget::LogSearch: return &logPanel_.searchField().edit;
+        case EFocusTarget::Dialog:    return &dialogEdit_;
+        default:                      return nullptr;
+    }
 }
 
 void EditorApp::onRunFinished() {
@@ -132,6 +147,17 @@ void EditorApp::applyDumpState() {
                 setTextFocus(EFocusTarget::Rename);
                 break;
             }
+        }
+    }
+    // 글 칸 입력 흉내(글자 체계 T1 · T2). 숨은 창은 IME 를 켜지 않으므로 조합 글은 입력 처리기가 지우지 않습니다.
+    if (!uiType_.empty() || uiCaretLeft_ > 0 || uiSelectLeft_ > 0 || !uiImeCompose_.empty()) {
+        if (!focusedEdit()) setTextFocus(EFocusTarget::Search);
+        if (HTextEditState* st = focusedEdit()) {
+            if (!uiType_.empty()) st->insert(uiType_);
+            for (int i = 0; i < uiCaretLeft_; ++i)  st->moveLeft(false, false);
+            for (int i = 0; i < uiSelectLeft_; ++i) st->moveLeft(false, true);
+            if (!uiImeCompose_.empty()) st->setComposition(uiImeCompose_, uiImeCompose_.size());
+            outlinerPanel_.markDirty();
         }
     }
     if (uiPlay_ && playState_ == EPlayState::Editor) beginPlay();

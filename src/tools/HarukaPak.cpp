@@ -22,6 +22,7 @@
 #include "../vfs/PakWriter.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "PakGlob.hpp"
+#include "../core/HTextGather.hpp"
 
 #include <cstdio>
 #include <exception>
@@ -40,6 +41,9 @@ using hpak::anyMatch;
 using hpak::pathFromUtf8;
 using hpak::utf8Of;
 
+// gather-text(글자 체계 T3-9): 소스의 HTEXT("ns", "key", "원문") 을 모아 번역 틀(.pot)을 씁니다. 같은 키에 다른 원문이 있으면 1.
+int cmdGatherText(int argc, char** argv);
+
 int usage() {
     std::fprintf(stderr,
         "usage:\n"
@@ -47,7 +51,8 @@ int usage() {
         "  HarukaPak list <pack>\n"
         "  HarukaPak verify <pack>\n"
         "  HarukaPak extract <pack> <folder>\n"
-        "  HarukaPak shader-manifest -o <out.inc> <file.spv | folder>...\n");
+        "  HarukaPak shader-manifest -o <out.inc> <file.spv | folder>...\n"
+        "  HarukaPak gather-text -o <out.pot> <source folder>...\n");
     return 2;
 }
 
@@ -345,9 +350,41 @@ int main(int argc, char** argv) {
         if (cmd == "verify" && argc == 3) return cmdVerify(argv[2]);
         if (cmd == "extract" && argc == 4) return cmdExtract(argv[2], argv[3]);
         if (cmd == "shader-manifest") return cmdShaderManifest(argc, argv);
+        if (cmd == "gather-text") return cmdGatherText(argc, argv);
         return usage();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
         return 1;
     }
 }
+
+namespace {
+int cmdGatherText(int argc, char** argv) {
+    namespace fs = std::filesystem;
+    std::string outPath;
+    std::vector<fs::path> dirs;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "-o" && i + 1 < argc) { outPath = argv[++i]; continue; }
+        fs::path p;
+        if (!pathFromUtf8(a, p)) { std::fprintf(stderr, "error: path is not valid UTF-8\n"); return 1; }
+        std::error_code ec;
+        if (!fs::is_directory(p, ec)) { std::fprintf(stderr, "error: not a folder: %s\n", a.c_str()); return 1; }
+        dirs.push_back(p);
+    }
+    if (dirs.empty() || outPath.empty()) return usage();
+    const htext_gather::Result r = htext_gather::gatherDirs(dirs);
+    for (const std::string& c : r.conflicts) std::fprintf(stderr, "error: same key, different source: %s\n", c.c_str());
+    if (!r.conflicts.empty()) return 1;
+    fs::path out;
+    if (!pathFromUtf8(outPath, out)) { std::fprintf(stderr, "error: path is not valid UTF-8\n"); return 1; }
+    std::error_code ec;
+    if (out.has_parent_path()) fs::create_directories(out.parent_path(), ec);
+    std::ofstream f(out, std::ios::binary | std::ios::trunc);
+    const std::string pot = htext_gather::toPot(r);
+    f.write(pot.data(), (std::streamsize)pot.size());
+    if (!f) { std::fprintf(stderr, "error: cannot write %s\n", outPath.c_str()); return 1; }
+    std::printf("gather-text: %zu entries -> %s\n", r.entries.size(), outPath.c_str());
+    return 0;
+}
+} // namespace

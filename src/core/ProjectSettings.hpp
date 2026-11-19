@@ -1,5 +1,6 @@
 #pragma once
 #include "../vfs/LogicalPath.hpp"
+#include "Utf8.hpp"
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -104,6 +105,26 @@ inline std::string trim(const std::string& s) {
     if (a == std::string::npos) return {};
     const size_t b = s.find_last_not_of(" \t");
     return s.substr(a, b - a + 1);
+}
+
+// 저장 대화상자의 씬 이름(글자 체계 T1-11, 2026-11-19). 이름은 UTF-8 입니다. ASCII 는 예전 규칙(영문 · 숫자 · 공백 · - _ /), 그 밖의
+// 인쇄 가능한 글자(한글 · 한자 등)는 받습니다. 경로는 UTF-8 경로 도우미 · 매니페스트로 Windows 에서도 그대로 왕복합니다
+// (DEF-121 · 123). 앞뒤 공백을 떼고, 조합형 한글(macOS)은 완성형으로 합치고, 끝의 .hscene 은 뗍니다. 받을 수 없으면 거짓.
+inline bool normalizeSceneName(const std::string& typed, std::string& out) {
+    std::string name = utf8::composeHangul(trim(typed));
+    if (name.size() > 7 && name.compare(name.size() - 7, 7, ".hscene") == 0) name.resize(name.size() - 7);
+    if (name.empty() || !utf8::isValid(name) || name.front() == '/' || name.back() == '/' ||
+        name.find("//") != std::string::npos)
+        return false;
+    for (size_t i = 0; i < name.size();) {
+        const uint32_t cp = utf8::next(name, i);
+        const bool ok = cp < 0x80 ? ((cp >= '0' && cp <= '9') || (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z') ||
+                                     cp == ' ' || cp == '-' || cp == '_' || cp == '/')
+                                  : utf8::isPrintable(cp);
+        if (!ok) return false;
+    }
+    out = std::move(name);
+    return true;
 }
 
 // 논리 경로 규칙: assets/ 또는 /Game/ 아래의 .hscene 이어야 합니다. 씬 파일은 그 밖에 두지 않습니다.

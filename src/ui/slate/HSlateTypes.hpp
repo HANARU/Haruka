@@ -74,4 +74,5 @@ struct HGlyphInfo {
     glm::vec2 pixelSize;      // 비트맵 픽셀 크기 (gw, gh)
     float     advance;        // x 이동량 (px)
     float     size;           // 요청 폰트 크기
+    int       page = 0;       // 아틀라스 페이지(글자 체계 T4-3). 그릴 때 HFontAtlas::pageView(page) 로 텍스처를 고름
 };

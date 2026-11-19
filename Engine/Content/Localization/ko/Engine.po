@@ -1,0 +1,455 @@
+# Haruka Engine - Korean editor text (glyph system T3). Keys come from Engine.pot (HarukaPak gather-text).
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ko\n"
+
+#: src/editor/DetailsPanel.cpp:295
+msgctxt "Editor.Details,Tip.Enable"
+msgid "Enable/Disable Component"
+msgstr "컴포넌트 켜기/끄기"
+
+#: src/editor/DetailsPanel.cpp:299
+msgctxt "Editor.Details,Tip.Remove"
+msgid "Remove Component"
+msgstr "컴포넌트 제거"
+
+#: src/editor/EditorApp_scene.cpp:156
+msgctxt "Editor.Dialog,Audio.Title"
+msgid "Audio Output"
+msgstr "오디오 출력"
+
+#: src/editor/EditorApp_scene.cpp:220
+msgctxt "Editor.Dialog,Button.Cancel"
+msgid "Cancel"
+msgstr "취소"
+
+#: src/editor/EditorApp_scene.cpp:201
+msgctxt "Editor.Dialog,Button.Close"
+msgid "Close"
+msgstr "닫기"
+
+#: src/editor/EditorApp_scene.cpp:307
+msgctxt "Editor.Dialog,Button.DontSave"
+msgid "Don't Save"
+msgstr "저장 안 함"
+
+#: src/editor/EditorApp_scene.cpp:285
+msgctxt "Editor.Dialog,Button.Replace"
+msgid "Replace"
+msgstr "바꾸기"
+
+#: src/editor/EditorApp_scene.cpp:266
+msgctxt "Editor.Dialog,Button.Save"
+msgid "Save"
+msgstr "저장"
+
+#: src/editor/EditorApp_scene.cpp:214
+msgctxt "Editor.Dialog,Open.List"
+msgid "Scenes in assets/scenes:"
+msgstr "assets/scenes 의 씬:"
+
+#: src/editor/EditorApp_scene.cpp:212
+msgctxt "Editor.Dialog,Open.None"
+msgid "No .hscene files in assets/scenes."
+msgstr "assets/scenes 에 .hscene 파일이 없습니다."
+
+#: src/editor/EditorApp_scene.cpp:209
+msgctxt "Editor.Dialog,Open.Title"
+msgid "Open Scene"
+msgstr "씬 열기"
+
+#: src/editor/EditorApp_scene.cpp:284
+msgctxt "Editor.Dialog,Replace.Message"
+msgid "{0} already exists.\nReplace it?"
+msgstr "{0} 이(가) 이미 있습니다.\n바꿀까요?"
+
+#: src/editor/EditorApp_scene.cpp:283
+msgctxt "Editor.Dialog,Replace.Title"
+msgid "Replace Scene"
+msgstr "씬 바꾸기"
+
+#: src/editor/EditorApp_scene.cpp:263
+msgctxt "Editor.Dialog,SaveAs.Message"
+msgid "Name under /Game/scenes (letters in any language, digits, space, - _ and / for folders):"
+msgstr "/Game/scenes 아래 이름(모든 언어의 글자, 숫자, 공백, - _ , 폴더는 /):"
+
+#: src/editor/EditorApp_scene.cpp:262
+msgctxt "Editor.Dialog,SaveAs.Title"
+msgid "Save Scene As"
+msgstr "다른 이름으로 씬 저장"
+
+#: src/editor/EditorApp_scene.cpp:301
+msgctxt "Editor.Dialog,Unsaved.Message"
+msgid "Save changes to {0}\nbefore {1}?"
+msgstr "{1} 전에\n{0} 의 변경 내용을 저장할까요?"
+
+#: src/editor/EditorApp_scene.cpp:299
+msgctxt "Editor.Dialog,Unsaved.Title"
+msgid "Unsaved Changes"
+msgstr "저장하지 않은 변경"
+
+#: src/editor/EditorApp_scene.cpp:325
+msgctxt "Editor.Dialog,Verb.Closing"
+msgid "closing"
+msgstr "닫기"
+
+#: src/editor/EditorApp_scene.cpp:138
+msgctxt "Editor.Dialog,Verb.NewScene"
+msgid "creating a new scene"
+msgstr "새 씬 만들기"
+
+#: src/editor/EditorApp.cpp:218
+msgctxt "Editor.Dialog,Verb.OpenAnother"
+msgid "opening another scene"
+msgstr "다른 씬 열기"
+
+#: src/editor/EditorDock.cpp:78
+msgctxt "Editor.Dock,Tip.CloseTab"
+msgid "Close Tab"
+msgstr "탭 닫기"
+
+#: src/editor/EditorApp.cpp:587
+msgctxt "Editor.Menu,Actor"
+msgid "Actor"
+msgstr "액터"
+
+#: src/editor/EditorApp.cpp:588
+msgctxt "Editor.Menu,Actor.AddEmpty"
+msgid "Add Empty"
+msgstr "빈 액터 추가"
+
+#: src/editor/EditorApp.cpp:595
+msgctxt "Editor.Menu,Actor.AttachToPrev"
+msgid "Attach To Prev Selected"
+msgstr "직전 선택에 붙이기"
+
+#: src/editor/EditorApp.cpp:603
+msgctxt "Editor.Menu,Actor.Detach"
+msgid "Detach Selected"
+msgstr "선택 떼어 내기"
+
+#: src/editor/EditorApp.cpp:570
+msgctxt "Editor.Menu,Edit"
+msgid "Edit"
+msgstr "편집"
+
+#: src/editor/EditorApp.cpp:585
+msgctxt "Editor.Menu,Edit.AudioOutput"
+msgid "Audio Output..."
+msgstr "오디오 출력..."
+
+#: src/editor/EditorApp.cpp:573
+msgctxt "Editor.Menu,Edit.Copy"
+msgid "Copy"
+msgstr "복사"
+
+#: src/editor/EditorApp.cpp:576
+msgctxt "Editor.Menu,Edit.Delete"
+msgid "Delete"
+msgstr "삭제"
+
+#: src/editor/EditorApp.cpp:575
+msgctxt "Editor.Menu,Edit.Duplicate"
+msgid "Duplicate"
+msgstr "복제"
+
+#: src/editor/EditorApp.cpp:577
+msgctxt "Editor.Menu,Edit.FrameSelected"
+msgid "Frame Selected"
+msgstr "선택 항목 맞추기"
+
+#: src/editor/EditorApp.cpp:579
+msgctxt "Editor.Menu,Edit.GizmoSize"
+msgid "Gizmo Size (S/M/L)"
+msgstr "기즈모 크기 (작게/보통/크게)"
+
+#: src/editor/EditorApp.cpp:574
+msgctxt "Editor.Menu,Edit.Paste"
+msgid "Paste"
+msgstr "붙여넣기"
+
+#: src/editor/EditorApp.cpp:572
+msgctxt "Editor.Menu,Edit.Redo"
+msgid "Redo"
+msgstr "다시 실행"
+
+#: src/editor/EditorApp.cpp:571
+msgctxt "Editor.Menu,Edit.Undo"
+msgid "Undo"
+msgstr "실행 취소"
+
+#: src/editor/EditorApp.cpp:564
+msgctxt "Editor.Menu,File"
+msgid "File"
+msgstr "파일"
+
+#: src/editor/EditorApp.cpp:565
+msgctxt "Editor.Menu,File.NewScene"
+msgid "New Scene"
+msgstr "새 씬"
+
+#: src/editor/EditorApp.cpp:566
+msgctxt "Editor.Menu,File.OpenScene"
+msgid "Open Scene..."
+msgstr "씬 열기..."
+
+#: src/editor/EditorApp.cpp:567
+msgctxt "Editor.Menu,File.SaveScene"
+msgid "Save Scene"
+msgstr "씬 저장"
+
+#: src/editor/EditorApp.cpp:568
+msgctxt "Editor.Menu,File.SaveSceneAs"
+msgid "Save Scene As..."
+msgstr "다른 이름으로 씬 저장..."
+
+#: src/editor/EditorApp.cpp:618
+msgctxt "Editor.Menu,View"
+msgid "View"
+msgstr "보기"
+
+#: src/editor/EditorApp.cpp:614
+msgctxt "Editor.Menu,View.Language"
+msgid "Language"
+msgstr "언어"
+
+#: src/editor/EditorApp.cpp:609
+msgctxt "Editor.Menu,View.ResetLayout"
+msgid "Reset Layout"
+msgstr "레이아웃 초기화"
+
+#: src/editor/EditorApp.cpp:629
+msgctxt "Editor.Menu,Window"
+msgid "Window"
+msgstr "창"
+
+#: src/editor/OutlinerPanel.cpp:437
+msgctxt "Editor.Outliner,AddEmpty"
+msgid "Add Empty"
+msgstr "빈 액터 추가"
+
+#: src/editor/OutlinerPanel.cpp:26
+msgctxt "Editor.Outliner,SearchHint"
+msgid "Search..."
+msgstr "검색..."
+
+#: src/editor/OutlinerPanel.cpp:342
+msgctxt "Editor.Outliner,Tip.Collapse"
+msgid "Collapse Children"
+msgstr "자식 접기"
+
+#: src/editor/OutlinerPanel.cpp:418
+msgctxt "Editor.Outliner,Tip.Delete"
+msgid "Delete Actor"
+msgstr "액터 삭제"
+
+#: src/editor/OutlinerPanel.cpp:343
+msgctxt "Editor.Outliner,Tip.Expand"
+msgid "Expand Children"
+msgstr "자식 펼치기"
+
+#: src/editor/OutlinerPanel.cpp:379
+msgctxt "Editor.Outliner,Tip.Visibility"
+msgid "Toggle Visibility"
+msgstr "보이기 전환"
+
+#: src/editor/OutputLogPanel.cpp:119
+msgctxt "Editor.OutputLog,SearchHint"
+msgid "Search log..."
+msgstr "로그 검색..."
+
+#: src/editor/EditorApp.cpp:496
+msgctxt "Editor.Panels,ContentBrowser"
+msgid "Content Browser"
+msgstr "콘텐츠 브라우저"
+
+#: src/editor/EditorApp.cpp:513
+msgctxt "Editor.Panels,ContentDrawer"
+msgid "Content Drawer"
+msgstr "콘텐츠 서랍"
+
+#: src/editor/EditorApp.cpp:512
+msgctxt "Editor.Panels,Details"
+msgid "Details"
+msgstr "디테일"
+
+#: src/editor/EditorApp.cpp:498
+msgctxt "Editor.Panels,GpuStats"
+msgid "GPU Stats"
+msgstr "GPU 통계"
+
+#: src/editor/EditorApp.cpp:510
+msgctxt "Editor.Panels,Outliner"
+msgid "Outliner"
+msgstr "아웃라이너"
+
+#: src/editor/EditorApp.cpp:497
+msgctxt "Editor.Panels,OutputLog"
+msgid "Output Log"
+msgstr "출력 로그"
+
+#: src/editor/EditorApp.cpp:511
+msgctxt "Editor.Panels,Viewport"
+msgid "Viewport"
+msgstr "뷰포트"
+
+#: src/editor/EditorChromePanels.cpp:78
+msgctxt "Editor.Toolbar,Open"
+msgid "Open"
+msgstr "열기"
+
+#: src/editor/EditorChromePanels.cpp:78
+msgctxt "Editor.Toolbar,OpenTip"
+msgid "Open Scene (Ctrl+O)"
+msgstr "씬 열기 (Ctrl+O)"
+
+#: src/editor/EditorChromePanels.cpp:56
+msgctxt "Editor.Toolbar,Pause"
+msgid "Pause"
+msgstr "일시 정지"
+
+#: src/editor/EditorChromePanels.cpp:55
+msgctxt "Editor.Toolbar,Play"
+msgid "Play"
+msgstr "플레이"
+
+#: src/editor/EditorChromePanels.cpp:79
+msgctxt "Editor.Toolbar,Refresh"
+msgid "Refresh"
+msgstr "새로 고침"
+
+#: src/editor/EditorChromePanels.cpp:79
+msgctxt "Editor.Toolbar,RefreshTip"
+msgid "Refresh Content"
+msgstr "콘텐츠 새로 고침"
+
+#: src/editor/EditorChromePanels.cpp:58
+msgctxt "Editor.Toolbar,Resume"
+msgid "Resume"
+msgstr "계속"
+
+#: src/editor/EditorChromePanels.cpp:59
+msgctxt "Editor.Toolbar,ResumeTip"
+msgid "Resume Play"
+msgstr "플레이 계속"
+
+#: src/editor/EditorChromePanels.cpp:77
+msgctxt "Editor.Toolbar,Save"
+msgid "Save"
+msgstr "저장"
+
+#: src/editor/EditorChromePanels.cpp:77
+msgctxt "Editor.Toolbar,SaveTip"
+msgid "Save Scene (Ctrl+S)"
+msgstr "씬 저장 (Ctrl+S)"
+
+#: src/editor/EditorChromePanels.cpp:57
+msgctxt "Editor.Toolbar,Stop"
+msgid "Stop"
+msgstr "정지"
+
+#: src/editor/ViewportToolbar.cpp:203
+msgctxt "Editor.Viewport,Local"
+msgid "Local"
+msgstr "로컬"
+
+#: src/editor/ViewportToolbar.cpp:215
+msgctxt "Editor.Viewport,Snap"
+msgid "Snap"
+msgstr "스냅"
+
+#: src/editor/ViewportToolbar.cpp:262
+msgctxt "Editor.Viewport,Tip.CamSpeed"
+msgid "Cycle Camera Speed (Shift: Reverse)"
+msgstr "카메라 속도 바꾸기 (Shift: 반대로)"
+
+#: src/editor/ViewportToolbar.cpp:204
+msgctxt "Editor.Viewport,Tip.Local"
+msgid "Local Space"
+msgstr "로컬 좌표"
+
+#: src/editor/ViewportToolbar.cpp:190
+msgctxt "Editor.Viewport,Tip.Move"
+msgid "Move (W)"
+msgstr "이동 (W)"
+
+#: src/editor/ViewportToolbar.cpp:190
+msgctxt "Editor.Viewport,Tip.Rotate"
+msgid "Rotate (E)"
+msgstr "회전 (E)"
+
+#: src/editor/ViewportToolbar.cpp:190
+msgctxt "Editor.Viewport,Tip.Scale"
+msgid "Scale (R)"
+msgstr "크기 (R)"
+
+#: src/editor/ViewportToolbar.cpp:190
+msgctxt "Editor.Viewport,Tip.Select"
+msgid "Select (Q)"
+msgstr "선택 (Q)"
+
+#: src/editor/ViewportToolbar.cpp:216
+msgctxt "Editor.Viewport,Tip.Snap"
+msgid "Toggle Grid Snap"
+msgstr "그리드 스냅 전환"
+
+#: src/editor/ViewportToolbar.cpp:241
+msgctxt "Editor.Viewport,Tip.SnapStep"
+msgid "Cycle Snap Step (Shift: Reverse)"
+msgstr "스냅 간격 바꾸기 (Shift: 반대로)"
+
+#: src/editor/ViewportToolbar.cpp:209
+msgctxt "Editor.Viewport,Tip.ToggleSpace"
+msgid "Toggle World/Local Space"
+msgstr "월드/로컬 좌표 전환"
+
+#: src/editor/ViewportToolbar.cpp:202
+msgctxt "Editor.Viewport,Tip.World"
+msgid "World Space"
+msgstr "월드 좌표"
+
+#: src/editor/ViewportToolbar.cpp:187
+msgctxt "Editor.Viewport,Tool.Move"
+msgid "Move"
+msgstr "이동"
+
+#: src/editor/ViewportToolbar.cpp:188
+msgctxt "Editor.Viewport,Tool.MoveShort"
+msgid "Mov"
+msgstr "이동"
+
+#: src/editor/ViewportToolbar.cpp:187
+msgctxt "Editor.Viewport,Tool.Rotate"
+msgid "Rotate"
+msgstr "회전"
+
+#: src/editor/ViewportToolbar.cpp:188
+msgctxt "Editor.Viewport,Tool.RotateShort"
+msgid "Rot"
+msgstr "회전"
+
+#: src/editor/ViewportToolbar.cpp:187
+msgctxt "Editor.Viewport,Tool.Scale"
+msgid "Scale"
+msgstr "크기"
+
+#: src/editor/ViewportToolbar.cpp:188
+msgctxt "Editor.Viewport,Tool.ScaleShort"
+msgid "Scl"
+msgstr "크기"
+
+#: src/editor/ViewportToolbar.cpp:187
+msgctxt "Editor.Viewport,Tool.Select"
+msgid "Select"
+msgstr "선택"
+
+#: src/editor/ViewportToolbar.cpp:188
+msgctxt "Editor.Viewport,Tool.SelectShort"
+msgid "Sel"
+msgstr "선택"
+
+#: src/editor/ViewportToolbar.cpp:201
+msgctxt "Editor.Viewport,World"
+msgid "World"
+msgstr "월드"

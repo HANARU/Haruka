@@ -10,7 +10,9 @@
 
 // ── HFontAtlas ────────────────────────────────────────────────────────────────
 // stb_truetype 로 글리프를 RGBA 아틀라스에 래스터라이즈합니다. 글자는 UTF-8 로 받아 코드 포인트로 찾고(D4, 2026-11-19:
-// 한글 등), 글꼴은 보통(0) · 굵게(1) 두 벌까지 둡니다(굵게가 없으면 보통). 아틀라스는 2048 × 높이(기본 512) RGBA 텍스처.
+// 한글 등), 글꼴은 보통(0) · 굵게(1) 두 벌까지 둡니다(굵게가 없으면 보통). 아틀라스는 2048 × 높이(기본 512) RGBA 텍스처이고,
+// 차면 같은 크기의 페이지를 더 엽니다(최대 kMaxPages, 글자 체계 T4-3). 주 글꼴에 없는 글자는 대체 글꼴 사슬(시스템 CJK · 기호
+// 글꼴)에서 찾습니다(T4-1). 폭 재기 · 그리기가 같은 글꼴을 고르므로 두 값이 어긋나지 않습니다.
 class HFontAtlas {
 public:
     // beginCmd/endCmd: Renderer의 one-time command 헬퍼를 재사용
@@ -35,6 +37,13 @@ public:
     // 굵은 글꼴(면 1)을 읽습니다(D4). 없거나 못 읽으면 굵은 글자도 보통 글꼴로 그립니다. loadFont 뒤에 부릅니다.
     bool loadBoldFont(const std::string& fontPath);
     bool hasBoldFont() const { return boldInfo_ != nullptr; }
+    // 실제로 읽은 주 글꼴(요청한 글꼴이 없으면 시스템 대체 글꼴 경로).
+    const std::string& fontPath() const { return fontPath_; }
+    // 대체 글꼴 사슬을 바꿉니다(시험 · 플랫폼). 비우면 대체 글꼴 없음. 부르지 않으면 플랫폼 기본 목록(Windows malgun · YuGoth ·
+    // msyh · segoe, Android NotoSansCJK 등)입니다. 파일은 처음 필요할 때 읽습니다.
+    void   setFallbackChain(std::vector<std::string> paths);
+    size_t fallbackCount() const;   // 읽힌 대체 글꼴 수(필요하면 지금 읽음)
+    uint32_t missingGlyphCount() const { return missingCodepoints_; }
     // 아틀라스 높이(px). init · initCpuOnly 전에만 바꿉니다(에디터는 한글 때문에 크게, 게임 쪽 3D 패널은 기본).
     void setAtlasHeight(int h) { if (h >= 64 && h <= 8192) atlasH_ = h; }
     int  atlasHeight() const { return atlasH_; }
@@ -64,7 +73,10 @@ public:
     // 글자 중간을 자르지 않는 앞부분 바이트 수(maxBytes 이하).
     static size_t utf8Floor(std::string_view s, size_t maxBytes);
 
-    VkImageView atlasView() const { return atlasView_; }
+    VkImageView atlasView() const { return pageView(0); }
+    VkImageView pageView(int page) const;
+    int         pageCount() const { return (int)pages_.size(); }
+    static constexpr int kMaxPages = 8;
 
     // ── 아이콘(D3, 2026-11-19) ──────────────────────────────────────────────
     // 아이콘 공급자를 붙입니다(에디터). 아이콘은 글리프와 같은 아틀라스에 이름 · 픽셀 크기마다 한 번 래스터화합니다.
@@ -73,7 +85,7 @@ public:
     // 이름 · 크기의 아이콘 자리(uv, 픽셀 크기)를 out 에 씁니다. 공급자가 없거나 모르는 이름 · 아틀라스가 가득 차면 거짓입니다.
     bool getIcon(std::string_view name, int px, HGlyphInfo& out);
 
-    // 아틀라스에 업데이트가 생기면 true, record 전에 확인
+    // 아틀라스에 업데이트가 생기면 true, record 전에 확인(페이지 하나라도)
     bool isDirty() const { return dirty_; }
     void upload(); // 더티 패치를 GPU에 업로드
     void clearDirty() { dirty_ = false; }
@@ -90,18 +102,17 @@ private:
     CmdBeginFn       beginCmd_;
     CmdEndFn         endCmd_;
 
-    // GPU 아틀라스 텍스처
-    VkImage       atlasImage_  = VK_NULL_HANDLE;
-    VkDeviceMemory atlasMem_   = VK_NULL_HANDLE;
-    VkImageView   atlasView_   = VK_NULL_HANDLE;
-
-    // CPU 사이드 픽셀 버퍼 (RGBA)
-    std::vector<uint8_t> cpuAtlas_; // kAtlasW * kAtlasH * 4
-
-    // 아틀라스 패킹 커서 (간단한 행-기반 packing)
-    int cursorX_ = 0;
-    int cursorY_ = 0;
-    int rowH_    = 0;
+    // 아틀라스 페이지: CPU 픽셀(RGBA) · 행 기반 패킹 커서 · GPU 텍스처(처음 업로드할 때 만듦).
+    struct Page {
+        std::vector<uint8_t> cpu;   // kAtlasW * atlasH_ * 4
+        int  cursorX = 0, cursorY = 0, rowH = 0;
+        bool dirty = false;
+        bool firstUpload = true;    // UNDEFINED→TRANSFER_DST vs SHADER_READ_ONLY→TRANSFER_DST
+        VkImage        image = VK_NULL_HANDLE;
+        VkDeviceMemory mem   = VK_NULL_HANDLE;
+        VkImageView    view  = VK_NULL_HANDLE;
+    };
+    std::vector<Page> pages_;
 
     // 글리프 캐시: key = (char << 16 | size_bits)
     std::unordered_map<uint64_t, HGlyphInfo> cache_;
@@ -112,20 +123,34 @@ private:
     mutable std::unordered_map<uint64_t, float> advanceCache_;
     bool dirty_       = false;
     uint32_t droppedGlyphs_ = 0;
-    bool firstUpload_ = true;  // UNDEFINED→TRANSFER_DST vs SHADER_READ_ONLY→TRANSFER_DST
 
     // stb_truetype 데이터(면 0 = 보통, 면 1 = 굵게)
     std::vector<uint8_t> ttfData_;
+    std::string          fontPath_;
     void* fontInfo_ = nullptr; // stbtt_fontinfo (opaque)
     std::vector<uint8_t> boldData_;
     void* boldInfo_ = nullptr;
 
     const void* faceInfo(int face) const { return (face == 1 && boldInfo_) ? boldInfo_ : fontInfo_; }
+    // 대체 글꼴 사슬(T4-1). 상수 함수(폭 재기)에서도 처음 필요할 때 읽으므로 mutable 입니다.
+    struct Fallback { std::vector<uint8_t> data; void* info = nullptr; std::string path; };
+    mutable std::vector<Fallback> fallbacks_;
+    mutable bool                  fallbacksLoaded_ = false;
+    std::vector<std::string>      fallbackPaths_;
+    bool                          fallbackCustom_  = false;
+    mutable std::unordered_map<uint64_t, const void*> fontForCache_;   // (면 << 32 | 코드 포인트) → 글꼴
+    mutable uint32_t              missingCodepoints_ = 0;
+    void        loadFallbacks() const;
+    void        clearFallbacks() const;
+    // 이 글자를 그릴 글꼴: 주 글꼴(면) → 굵게면 보통 → 대체 사슬 → 없으면 주 글꼴(.notdef).
+    const void* fontFor(uint32_t cp, int face) const;
     uint64_t glyphKey(uint32_t cp, float size, int face) const;
     void     rasterizeGlyph(uint32_t cp, float size, int face, HGlyphInfo& out);
     // w × h 알파 비트맵을 아틀라스 다음 자리에 넣습니다. 자리가 없으면 거짓입니다(글리프 · 아이콘 공용).
-    bool     packAlpha(const uint8_t* alpha, int w, int h, glm::vec2& uvMin, glm::vec2& uvMax);
+    bool     packAlpha(const uint8_t* alpha, int w, int h, glm::vec2& uvMin, glm::vec2& uvMax, int& page);
     uint32_t findMemType(VkMemoryRequirements reqs, VkMemoryPropertyFlags flags);
-    void     createAtlasImage();
-    void     uploadFullAtlas();
+    void     addPage();
+    void     createPageImage(Page& page);
+    void     uploadPage(Page& page);
+    void     destroyPageImages();
 };

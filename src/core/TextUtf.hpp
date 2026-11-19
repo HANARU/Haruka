@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include "Utf8.hpp"
 
 // ── 문자열 변환 도우미 (2026-10-16) ─────────────────────────────────────────────
 // 운영체제가 UTF-16 으로 주는 문자열(WASAPI 장치 ID, OpenXR 이 알려 주는 헤드셋 소리 장치 ID)을 엔진의
@@ -62,7 +63,24 @@ inline bool equalsIgnoreCase(const std::string& a, const std::string& b) {
     return true;
 }
 
-// 에디터 UI 는 ASCII 만 그립니다. 장치 이름에서 ASCII 가 아닌 글자를 빼고 공백을 정리합니다. Windows 의 한국어
+// 표시용 이름(글자 체계 T1, 2026-11-19): 에디터가 UTF-8(한글 등)을 그리므로 올바른 글자는 남기고 제어 문자 · 깨진 바이트만
+// 빼며 공백을 정리합니다. "헤드폰(Oculus Virtual Audio Device)" 은 그대로입니다. 남는 글이 없으면 fallback.
+inline std::string displayLabel(const std::string& text, const std::string& fallback) {
+    std::string t;
+    bool space = false;
+    for (size_t i = 0; i < text.size();) {
+        const size_t   start = i;
+        const uint32_t cp    = utf8::next(text, i);
+        if (cp == ' ' || cp == '\t' || cp == 0x3000) { space = !t.empty(); continue; }
+        if (!utf8::isPrintable(cp)) continue;
+        if (cp == utf8::kInvalid && !(i - start == 1 && text[start] == '?')) continue;   // 깨진 바이트
+        if (space) { t += ' '; space = false; }
+        t.append(text, start, i - start);
+    }
+    return t.empty() ? fallback : t;
+}
+
+// 예전 규칙(ASCII 만 남김). 에디터가 ASCII 만 그리던 때의 함수로, 시험과 ASCII 가 꼭 필요한 곳을 위해 둡니다. 장치 이름에서 ASCII 가 아닌 글자를 빼고 공백을 정리합니다. Windows 의 한국어
 // 장치 이름 "헤드폰(Oculus Virtual Audio Device)" 처럼 남은 글이 괄호 하나로 감싸여 있으면 괄호도 벗깁니다.
 // 남는 글이 없으면 fallback 을 돌려줍니다.
 inline std::string asciiLabel(const std::string& utf8, const std::string& fallback) {

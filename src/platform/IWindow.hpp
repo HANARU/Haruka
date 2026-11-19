@@ -23,6 +23,11 @@ namespace HInput {
     constexpr int KEY_F = 70;
     constexpr int KEY_N = 78;
     constexpr int KEY_O = 79;
+    constexpr int KEY_X = 88;
+    constexpr int KEY_RIGHT = 262;  // GLFW_KEY_RIGHT (글자 체계 T1: 편집 칸 커서)
+    constexpr int KEY_LEFT  = 263;  // GLFW_KEY_LEFT
+    constexpr int KEY_HOME  = 268;  // GLFW_KEY_HOME
+    constexpr int KEY_END   = 269;  // GLFW_KEY_END
     constexpr int KEY_LEFT_CTRL   = 341;  // GLFW_KEY_LEFT_CONTROL
     constexpr int KEY_LEFT_SHIFT  = 340;  // GLFW_KEY_LEFT_SHIFT
     constexpr int KEY_RIGHT_CTRL  = 345;  // GLFW_KEY_RIGHT_CONTROL
@@ -100,4 +105,14 @@ public:
 
     // Cursor shape: 0=arrow, 1=hresize (↔), 2=vresize (↕)
     virtual void setCursorShape(int shape) = 0;
+
+    // ── IME(글자 체계 T2, 2026-11-19, Docs/Text_System.md) ─────────────────────────────────────
+    // 글 입력 칸에 포커스가 있을 때만 IME 를 켭니다. 꺼 두면 한글 모드에서도 W · E · R 같은 단축키가 IME 에 먹히지 않습니다
+    // (UE 도 편집 칸이 없으면 IME 문맥을 떼어 냄). 확정된 글은 지금처럼 문자 큐(drainCharQueue)로 들어옵니다.
+    virtual void setTextInputEnabled(bool /*enabled*/) {}
+    virtual bool isTextInputEnabled() const { return false; }
+    // IME 조합 중인 글(UTF-8)과 그 안의 커서(바이트). 조합 중이 아니면 거짓.
+    virtual bool getComposition(std::string& /*text*/, size_t& /*caretBytes*/) const { return false; }
+    // 조합 · 후보 창을 놓을 커서 사각형(프레임 버퍼 픽셀, x · y · 폭 · 높이).
+    virtual void setTextInputRect(float /*x*/, float /*y*/, float /*w*/, float /*h*/) {}
 };

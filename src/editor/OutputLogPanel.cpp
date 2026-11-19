@@ -1,4 +1,5 @@
 #include "OutputLogPanel.hpp"
+#include "../core/Utf8.hpp"
 #include "../core/AppPaths.hpp"
 #include "../ui/slate/widgets/SBox.hpp"
 #include "../ui/slate/widgets/SHorizontalBox.hpp"
@@ -91,9 +92,8 @@ bool OutputLogPanel::searchContains(glm::vec2 p) const {
 
 OutputLogPanel::SearchField OutputLogPanel::searchField() {
     return {
-        search_,
+        searchEdit_,
         searchFocused_,
-        searchSelAll_,
         [this](glm::vec2 p) { return searchBox_ && searchBox_->cachedGeometry().contains(p); },
         [this] { viewDirty_ = true; }
     };
@@ -116,10 +116,9 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
     searchBox_ = HNew(SSearchBox);
     searchBox_
         ->style(EditorUiKit::searchBoxStyle(u.s(1.f)))
-        ->placeholder("Search log...")
-        ->text(AttrStr([this]() -> std::string { return search_; }))
+        ->placeholder(HTEXT("Editor.OutputLog", "SearchHint", "Search log...").toString())
+        ->edit(&searchEdit_)
         ->focused([this]() -> bool { return searchFocused_; })
-        ->selectedAll([this]() -> bool { return searchSelAll_; })
         ->onClick([this] { if (onSearchClicked_) onSearchClicked_(); })
         ->fontSize(u.s(12.f));
 
@@ -313,12 +312,8 @@ bool OutputLogPanel::recordVisible(const HLogRecord& r, const std::string& needl
     if (r.category < catHidden_.size() && catHidden_[r.category]) return false;
     if (needleLower.empty()) return true;
 
-    auto icontains = [&](const std::string& hay) {
-        return std::search(hay.begin(), hay.end(), needleLower.begin(), needleLower.end(),
-                           [](char a, char b) {
-                               return std::tolower((unsigned char)a) == (unsigned char)b;
-                           }) != hay.end();
-    };
+    // ASCII 만 접는 대소문자 무시(글자 체계 T1-4). 한글 등은 그대로 비교합니다.
+    auto icontains = [&](const std::string& hay) { return utf8::containsIgnoreCase(hay, needleLower); };
     if (icontains(r.text)) return true;
     return r.category < catNames_.size() && icontains(catNames_[r.category]);
 }
@@ -375,8 +370,7 @@ void OutputLogPanel::rebuildRows() {
 void OutputLogPanel::refreshView() {
     pullRecords();
 
-    std::string needle = search_;
-    for (char& c : needle) c = (char)std::tolower((unsigned char)c);
+    const std::string needle = utf8::asciiLower(searchEdit_.text);
     auto shown      = [&](size_t i) { return recordVisible(mirror_[i], needle); };
     auto firstAfter = [&](uint64_t seq) {
         return (size_t)(std::upper_bound(mirror_.begin(), mirror_.end(), seq,

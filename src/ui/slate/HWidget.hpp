@@ -2,6 +2,7 @@
 #include "HGeometry.hpp"
 #include "HAttr.hpp"
 #include "HPaintContext.hpp"
+#include "../../core/HText.hpp"
 #include <memory>
 
 // ── HWidget (Slate의 SWidget) ─────────────────────────────────────────────────
@@ -29,6 +30,8 @@ public:
     Attr<bool>        enabled    { true };
     Attr<glm::vec2>   minSize    { glm::vec2(0.f) };
     Attr<std::string> tooltip    { std::string() };
+    // 툴팁을 표시 글로(글자 체계 T3): 띄울 때 지금 문화권으로 풉니다.
+    void setTooltip(const HText& t) { tooltip.bind([t] { return t.toString(); }); }
 
     // 포인터 아래에서 툴팁이 있는 가장 깊은 위젯을 찾습니다(enabled 무관).
     virtual std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) {

@@ -2,6 +2,9 @@
 #include "../HWidget.hpp"
 #include "../HAttr.hpp"
 #include "../HFontAtlas.hpp"
+#include "SEditableText.hpp"
+#include <algorithm>
+#include <cmath>
 #include <functional>
 #include <string>
 
@@ -9,6 +12,8 @@
 // 검색 입력 박스 위젯. 텍스트 상태는 EditorApp에서 관리하며 AttrStr로 주입.
 // focused() 람다가 true를 반환하면 커서(|)를 표시하고 강조 테두리를 그린다.
 // 실제 키 입력 라우팅은 EditorApp::tickRenameInput()에서 처리.
+// edit(상태) 를 붙이면(글자 체계 T1, 2026-11-19) 글 · 커서 · 선택 · IME 조합 글을 SEditableText 와 같게 그리고, 누르면 그 자리에
+// 커서를 놓고 끌면 선택합니다. 붙이지 않으면 예전 그림(글 뒤 '|')입니다.
 class SSearchBox : public HWidget {
 public:
     struct Style {
@@ -37,6 +42,10 @@ public:
         { isSelectedAll_ = std::move(fn); return self(); }
     std::shared_ptr<SSearchBox> onClick(std::function<void()> fn)
         { onClick_ = std::move(fn); return self(); }
+    std::shared_ptr<SSearchBox> edit(HTextEditState* st)
+        { edit_ = st; return self(); }
+    std::shared_ptr<SSearchBox> onEdited(std::function<void()> fn)
+        { onEdited_ = std::move(fn); return self(); }
     std::shared_ptr<SSearchBox> fontSize(float f)
         { fontSize_ = f; return self(); }
     // icon(false): magnifier glyph off (name fields in dialogs).
@@ -73,11 +82,16 @@ public:
             ctx.drawText(iconGeo, "o", 9.f * fs, style_.icon);
 
         // Text / placeholder
-        std::string disp  = text_.get();
         float textX       = icon_ ? iconOff + iconSz + iconOff : 6.f * fs;
         float textH       = 14.f * fs;
         float textY       = (geo.size.y - textH) * 0.5f;
         HGeometry textGeo = geo.makeChild({textX, textY}, {geo.size.x - textX - 4.f, textH});
+        textGeo_ = textGeo;
+        if (edit_) {
+            SEditableText::paintState(ctx, textGeo, edit_, foc, placeholder_, 10.f * fs, textH, editStyle(fs));
+            return;
+        }
+        std::string disp  = text_.get();
         if (disp.empty()) {
             ctx.drawText(textGeo, placeholder_, 10.f * fs, style_.placeholder);
         } else {
@@ -101,6 +115,23 @@ public:
 
     HReply onMouseButton(const HPointerEvent& e) override {
         if (e.button != 0) return HReply::Unhandled();
+        if (edit_) {
+            // 누르는 순간 포커스를 얻고 그 자리에 커서를 놓습니다. 끌기 · 떼기는 이 위젯 위에서 누른 경우만 받습니다.
+            if (e.down) {
+                armed_ = cachedGeo_.contains(e.position);
+                if (!armed_) return HReply::Unhandled();
+                const bool wasFocused = isFocused_ && isFocused_();
+                if (!wasFocused && onClick_) onClick_();
+                if (!edit_->isComposing()) {
+                    edit_->setCaret(caretAt(e.position, wasFocused), e.shift && wasFocused);
+                    if (onEdited_) onEdited_();
+                }
+                return HReply::Handled();
+            }
+            const bool was = armed_;
+            armed_ = false;
+            return was ? HReply::Handled() : HReply::Unhandled();
+        }
         // 버튼류와 같은 규약. 뷰포트에서 시작한 드래그를 검색창 위에서 놓으면 포커스를
         // 빼앗겨, 이후 타이핑이 전부 필터로 들어가고 사용자에게는 키가 죽은 것처럼 보입니다.
         if (e.down) {
@@ -117,6 +148,11 @@ public:
     }
     HReply onMouseMove(const HPointerEvent& e) override {
         hoverPos_ = e.position;
+        if (edit_ && armed_ && e.down && !edit_->isComposing()) {
+            const size_t pos = caretAt(e.position, true);
+            if (pos != edit_->caret) { edit_->setCaret(pos, true); if (onEdited_) onEdited_(); }
+            return HReply::Handled();
+        }
         if (!e.down) armed_ = false;
         return HReply::Unhandled();
     }
@@ -131,6 +167,27 @@ private:
     std::function<bool()>     isSelectedAll_;
     std::function<void()>     onClick_;
     Style                     style_;
+    HTextEditState*           edit_ = nullptr;
+    std::function<void()>     onEdited_;
+    HGeometry                 textGeo_;
+
+    SEditableText::Style editStyle(float fs) const {
+        SEditableText::Style es;
+        es.text        = style_.text;
+        es.placeholder = style_.placeholder;
+        es.selection   = style_.selection;
+        es.caret       = style_.cursor;
+        es.composition = style_.text;
+        es.caretWidth  = std::max(1.f, std::floor(fs));   // 1x 에서 1px, 배율 2 면 2px
+        return es;
+    }
+    size_t caretAt(glm::vec2 p, bool focused) const {
+        // 글 칸 위치는 그린 뒤에 알 수 있으므로, 아직 그리지 않았으면 위젯 기준으로 셈합니다.
+        const HGeometry& g = textGeo_.size.x > 0.f ? textGeo_ : cachedGeo_;
+        const float fs = fontSize_ / 10.f;
+        return SEditableText::caretAt(*edit_, HFontAtlas::metrics(), 10.f * fs, p.x - g.position.x, g.size.x,
+                                      focused, editStyle(fs).caretWidth);
+    }
     glm::vec2                 hoverPos_{ -1.f, -1.f };
 
     std::shared_ptr<SSearchBox> self() {

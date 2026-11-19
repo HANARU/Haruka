@@ -7,7 +7,12 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <imm.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#pragma comment(lib, "imm32.lib")
 #endif
+#include "../../core/Utf8.hpp"
 
 GlfwWindow::GlfwWindow(uint32_t w, uint32_t h, const std::string& t, bool hidden)
     : width(w), height(h), title(t), hidden_(hidden) {}
@@ -37,6 +42,8 @@ void GlfwWindow::init() {
     rLastMouseX = lastMouseX;
     rLastMouseY = lastMouseY;
 
+    installImeHook();
+
     cursorArrow_   = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
     cursorHResize_ = glfwCreateStandardCursor(GLFW_HRESIZE_CURSOR);
     cursorVResize_ = glfwCreateStandardCursor(GLFW_VRESIZE_CURSOR);
@@ -44,6 +51,7 @@ void GlfwWindow::init() {
 
 void GlfwWindow::cleanup() {
     if (window) {
+        removeImeHook();
         glfwDestroyWindow(window);
         window = nullptr;
     }
@@ -302,4 +310,171 @@ void GlfwWindow::keyCallback(GLFWwindow* w, int key, int /*scancode*/, int actio
     // 타이핑해도 다른 로그를 전부 밀어내므로, 기본 기록 수준(Log)에서는 남지 않고 키 이름
     // 조회도 일어나지 않습니다. 조사할 때 Input 의 기록 수준을 Verbose 로 올리십시오.
     HLOG(LogInput, Verbose) << (action == GLFW_PRESS ? "PRESS " : "RELEASE ") << keyLabel(key);
+}
+
+// ── IME (글자 체계 T2, 2026-11-19, Docs/Text_System.md) ──────────────────────────────────────────
+// GLFW 3.4 는 조합 중인 글(preedit)을 알려 주지 않으므로 Win32 창 프로시저를 감싸 WM_IME_* 를 직접 받습니다. 확정 글은
+// DefWindowProc 이 WM_IME_CHAR → WM_CHAR 로 바꿔 GLFW 문자 콜백으로 들어오므로 건드리지 않습니다. 기본 조합 창은 숨기고
+// (에디터 칸이 조합 글을 밑줄로 그림), 후보 창(한자 변환)은 칸의 커서 아래에 둡니다. 글 칸에 포커스가 없으면 IME 문맥을 떼어
+// 한글 모드에서도 W · E · R 같은 단축키가 IME 에 먹히지 않게 합니다(UE 도 같은 방식).
+#ifdef _WIN32
+namespace {
+const wchar_t* kImeProp = L"HarukaGlfwWindow";
+
+std::string wideToUtf8(const wchar_t* w, size_t n) {
+    std::string out;
+    for (size_t i = 0; i < n; ++i) {
+        uint32_t c = w[i];
+        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n && w[i + 1] >= 0xDC00 && w[i + 1] <= 0xDFFF) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (w[i + 1] - 0xDC00);
+            ++i;
+        }
+        utf8::append(out, c);
+    }
+    return out;
+}
+
+// UTF-16 단위 자리 → 같은 글의 UTF-8 바이트 자리.
+size_t utf16ToUtf8Offset(const wchar_t* w, size_t n, size_t units) {
+    size_t bytes = 0;
+    for (size_t i = 0; i < n && i < units; ++i) {
+        uint32_t c = w[i];
+        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n) { bytes += 4; ++i; continue; }
+        bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
+    }
+    return bytes;
+}
+} // namespace
+
+long long __stdcall GlfwWindow::imeWndProc(void* hwndV, unsigned int msg, unsigned long long wp, long long lp) {
+    HWND hwnd = static_cast<HWND>(hwndV);
+    auto* self = static_cast<GlfwWindow*>(GetPropW(hwnd, kImeProp));
+    if (!self || !self->prevWndProc_)
+        return DefWindowProcW(hwnd, msg, (WPARAM)wp, (LPARAM)lp);
+    const WNDPROC prev = reinterpret_cast<WNDPROC>(self->prevWndProc_);
+    switch (msg) {
+        case WM_IME_SETCONTEXT:
+            lp &= ~(long long)ISC_SHOWUICOMPOSITIONWINDOW;   // 기본 조합 창은 그리지 않음
+            break;
+        case WM_IME_STARTCOMPOSITION:
+            self->composition_.clear();
+            self->compositionCaret_ = 0;
+            self->applyImeRect();
+            return 0;   // 기본 조합 창을 열지 않음
+        case WM_IME_COMPOSITION:
+            if (HIMC himc = ImmGetContext(hwnd)) {
+                if (lp & GCS_COMPSTR) {
+                    const LONG bytes = ImmGetCompositionStringW(himc, GCS_COMPSTR, nullptr, 0);
+                    std::wstring w(bytes > 0 ? (size_t)bytes / sizeof(wchar_t) : 0, L'\0');
+                    if (bytes > 0) ImmGetCompositionStringW(himc, GCS_COMPSTR, w.data(), (DWORD)bytes);
+                    LONG cur = (LONG)w.size();
+                    if (lp & GCS_CURSORPOS) cur = ImmGetCompositionStringW(himc, GCS_CURSORPOS, nullptr, 0);
+                    self->composition_      = wideToUtf8(w.data(), w.size());
+                    self->compositionCaret_ = utf16ToUtf8Offset(w.data(), w.size(), cur < 0 ? w.size() : (size_t)cur);
+                } else if (lp & GCS_RESULTSTR) {
+                    self->composition_.clear();   // 확정만 있고 새 조합이 없음(결과는 WM_CHAR 로 들어옴)
+                    self->compositionCaret_ = 0;
+                }
+                ImmReleaseContext(hwnd, himc);
+            }
+            break;   // 확정 글(GCS_RESULTSTR)은 DefWindowProc 이 WM_IME_CHAR 로 보냄
+        case WM_IME_ENDCOMPOSITION:
+            self->composition_.clear();
+            self->compositionCaret_ = 0;
+            break;
+        default:
+            break;
+    }
+    return CallWindowProcW(prev, hwnd, msg, (WPARAM)wp, (LPARAM)lp);
+}
+#endif
+
+void GlfwWindow::installImeHook() {
+#ifdef _WIN32
+    if (!window || hidden_) return;
+    HWND hwnd = glfwGetWin32Window(window);
+    if (!hwnd) return;
+    SetPropW(hwnd, kImeProp, this);
+    prevWndProc_ = reinterpret_cast<void*>(SetWindowLongPtrW(hwnd, GWLP_WNDPROC,
+                                                             reinterpret_cast<LONG_PTR>(&GlfwWindow::imeWndProc)));
+    imeEnabled_ = true;
+    setTextInputEnabled(false);   // 시작은 글 칸 포커스 없음
+#endif
+}
+
+void GlfwWindow::removeImeHook() {
+#ifdef _WIN32
+    if (!window || !prevWndProc_) return;
+    HWND hwnd = glfwGetWin32Window(window);
+    if (!hwnd) return;
+    ImmAssociateContextEx(hwnd, nullptr, IACE_DEFAULT);
+    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(prevWndProc_));
+    RemovePropW(hwnd, kImeProp);
+    prevWndProc_ = nullptr;
+#endif
+}
+
+void GlfwWindow::setTextInputEnabled(bool enabled) {
+#ifdef _WIN32
+    if (!window || hidden_ || !prevWndProc_) return;
+    if (enabled == imeEnabled_) return;
+    HWND hwnd = glfwGetWin32Window(window);
+    if (!enabled) {
+        // 조합 중이던 글은 버립니다(포커스가 다른 곳으로 갔으므로 확정 글자가 엉뚱한 곳에 들어가지 않게).
+        if (HIMC himc = ImmGetContext(hwnd)) {
+            ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+            ImmReleaseContext(hwnd, himc);
+        }
+        ImmAssociateContextEx(hwnd, nullptr, 0);   // 문맥을 떼어 IME 를 끔
+        composition_.clear();
+        compositionCaret_ = 0;
+    } else {
+        ImmAssociateContextEx(hwnd, nullptr, IACE_DEFAULT);
+        imeRect_[0] = -1.f;   // 다음 자리 알림을 다시 보냄
+    }
+    imeEnabled_ = enabled;
+#else
+    (void)enabled;
+#endif
+}
+
+bool GlfwWindow::getComposition(std::string& text, size_t& caretBytes) const {
+    if (!imeEnabled_ || composition_.empty()) return false;
+    text       = composition_;
+    caretBytes = (std::min)(compositionCaret_, composition_.size());
+    return true;
+}
+
+void GlfwWindow::setTextInputRect(float x, float y, float w, float h) {
+    if (x == imeRect_[0] && y == imeRect_[1] && w == imeRect_[2] && h == imeRect_[3]) return;
+    imeRect_[0] = x; imeRect_[1] = y; imeRect_[2] = w; imeRect_[3] = h;
+    applyImeRect();
+}
+
+void GlfwWindow::applyImeRect() {
+#ifdef _WIN32
+    if (!window || !imeEnabled_ || imeRect_[3] <= 0.f) return;
+    HWND hwnd = glfwGetWin32Window(window);
+    HIMC himc = ImmGetContext(hwnd);
+    if (!himc) return;
+    // 렌더 타겟(프레임 버퍼) 픽셀 → 창 클라이언트 좌표. Windows 에서는 보통 같지만 배율이 다르면 비율로 바꿉니다.
+    int fw = 1, fh = 1, ww = 1, wh = 1;
+    glfwGetFramebufferSize(window, &fw, &fh);
+    glfwGetWindowSize(window, &ww, &wh);
+    const float sx = fw > 0 ? (float)ww / (float)fw : 1.f;
+    const float sy = fh > 0 ? (float)wh / (float)fh : 1.f;
+    const LONG x0 = (LONG)(imeRect_[0] * sx), y0 = (LONG)(imeRect_[1] * sy);
+    const LONG x1 = (LONG)((imeRect_[0] + imeRect_[2]) * sx), y1 = (LONG)((imeRect_[1] + imeRect_[3]) * sy);
+    COMPOSITIONFORM cf{};
+    cf.dwStyle      = CFS_POINT;
+    cf.ptCurrentPos = { x0, y0 };
+    ImmSetCompositionWindow(himc, &cf);
+    CANDIDATEFORM cand{};
+    cand.dwIndex      = 0;
+    cand.dwStyle      = CFS_EXCLUDE;   // 커서 사각형을 피해 그 아래(또는 위)에 둠
+    cand.ptCurrentPos = { x0, y1 };
+    cand.rcArea       = { x0, y0, x1, y1 };
+    ImmSetCandidateWindow(himc, &cand);
+    ImmReleaseContext(hwnd, himc);
+#endif
 }

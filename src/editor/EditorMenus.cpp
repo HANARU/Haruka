@@ -98,14 +98,26 @@ void EditorMenus::rebuildPopup() {
     const Def& md = defs_[openMenu_];
 
     const float rowH  = s(30.f);
-    const float dropW = s(200.f);            // 최소 너비 고정 → Undo/Redo 같은 짧은 항목도 반듯한 박스
+    // 최소 너비 200 → Undo/Redo 같은 짧은 항목도 반듯한 박스. 번역된 글 · 단축키가 길면 그만큼 넓힙니다(글자 체계 T3).
+    float dropW = s(200.f);
 
     // 체크 상태를 가진 항목이 하나라도 있으면 모든 행 앞에 체크 열을 둡니다(줄 맞춤).
     bool hasChecks = false;
     for (const auto& it : md.items) hasChecks = hasChecks || (bool)it.checked;
+    for (const auto& it : md.items) {
+        float w = s(18.f) * 2.f + EditorUiKit::textWidth(it.label, s(13.f)) + (hasChecks ? s(20.f) : 0.f);
+        if (!it.shortcut.empty()) w += s(24.f) + EditorUiKit::textWidth(it.shortcut, s(12.f));
+        dropW = std::max(dropW, w + s(4.f));
+    }
     auto rowContent = [&](const Item& it) -> std::shared_ptr<HWidget> {
-        auto text = HNew(STextBlock)->text(it.label)->fontSize(s(13.f))
+        std::shared_ptr<HWidget> text = HNew(STextBlock)->text(it.label)->fontSize(s(13.f))
             ->color(EditorUiKit::kTextBody)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center);
+        if (!it.shortcut.empty())
+            text = HNew(SHorizontalBox)
+                ->addSlot(text, SHorizontalBox::ESizeRule::Fill)
+                ->addSlot(HNew(STextBlock)->text(it.shortcut)->fontSize(s(12.f))->color(EditorUiKit::kTextDim)
+                              ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
+                          SHorizontalBox::ESizeRule::Auto);
         if (!hasChecks) return text;
         std::shared_ptr<HWidget> mark = ui_->spacer();
         if (it.checked) {

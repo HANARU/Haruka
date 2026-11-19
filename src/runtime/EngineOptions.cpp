@@ -1,6 +1,7 @@
 #include "EngineOptions.hpp"
 #include "../core/ProjectSettings.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -102,6 +103,24 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (valueOf(a, "--ui-rename", v)) {
             if (!v.empty()) o.uiRename = v;
             else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--culture", v)) {
+            if (!v.empty()) o.culture = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-type", v)) {
+            if (!v.empty()) o.uiType = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-ime-compose", v)) {
+            if (!v.empty()) o.uiImeCompose = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-caret-left", v)) {
+            o.uiCaretLeft = std::max(0, std::atoi(v.c_str()));
+        }
+        else if (valueOf(a, "--ui-select-left", v)) {
+            o.uiSelectLeft = std::max(0, std::atoi(v.c_str()));
         }
         else if (valueOf(a, "--ui-outliner-collapse", v)) {
             if (!v.empty()) o.uiOutlinerCollapse = v;

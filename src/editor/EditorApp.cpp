@@ -194,11 +194,11 @@ void EditorApp::initPanels() {
         [this] {
             if (modal_ && modal_->hasInput) {
                 dialogFocused_ = true;
-                dialogSelAll_  = !dialogText_.empty();
+                dialogEdit_.selectAll();
             }
         },
-        [this] { dialogFocused_ = false; dialogSelAll_ = false; },
-        [this](std::string*& buf, bool*& selAll) { buf = &dialogText_; selAll = &dialogSelAll_; },
+        [this] { dialogFocused_ = false; dialogEdit_.clearSelection(); dialogEdit_.clearComposition(); },
+        [this]() -> HTextEditState* { return &dialogEdit_; },
         [this] { triggerModalDefault(); },
         [this] { triggerModalCancel(); },
         [this] { menus_.close(); },
@@ -215,7 +215,7 @@ void EditorApp::initPanels() {
         [this] { return doc_.path(); },
         [this](const std::string& path) {
             if (hvfs::toCanonical(path) == hvfs::toCanonical(doc_.path()) || blockedDuringPlay("opening a scene")) return;
-            guardUnsaved("opening another scene", [this, path] { openScene(path); });
+            guardUnsaved(HTEXT("Editor.Dialog", "Verb.OpenAnother", "opening another scene"), [this, path] { openScene(path); });
         },
         [this](Actor* a) { selectOnly(a); },
         [this](const std::vector<Actor*>& made) { recordActorCreation(made); },
@@ -294,7 +294,7 @@ void EditorApp::tickSelectionSync(int actorCount) {
     }
 
     // 리네임 해제를 리빌드 **앞**으로 옮깁니다. 뒤에 두면 선택이 바뀌는 프레임에 새 행이
-    // 직전 액터의 renameBuffer_ 를 한 프레임 그대로 보여 줍니다.
+    // 직전 액터의 이름 칸(renameEdit_)을 한 프레임 그대로 보여 줍니다.
     if (selChanged && outlinerPanel_.isRenaming()) setTextFocus(EFocusTarget::None);
     // 접힌 부모 아래 자식을 뷰포트에서 픽하면 조상을 펼치고 그 행으로 스크롤합니다.
     if (selChanged && ctx_.selected) { outlinerPanel_.revealActor(ctx_.selected); outlinerPanel_.revealSelected(); }
@@ -361,6 +361,11 @@ void EditorApp::tick(float dt) {
         if (!viewport_.inViewport(mx, my, (float)wW, (float)wH)) scroll = 0.f;
     }
     viewport_.tickCamera(dt, scroll);
+    if (!pendingCulture_.empty()) {
+        const std::string c = std::move(pendingCulture_);
+        pendingCulture_.clear();
+        applyCulture(c, true);
+    }
     textInput_.tickInput();
     tickShortcuts();
     flushModal();
@@ -488,9 +493,9 @@ void EditorApp::buildWidgetTree() {
     bottomHost_    = HNew(BR)->background(EditorTheme::transparent);
     auto tabBar = HNew(STabBar)
         ->style(EditorUiKit::tabBarStyle(ui_.s(1.f)))
-        ->addTab("Content Browser")
-        ->addTab("Output Log")
-        ->addTab("GPU Stats")
+        ->addTab(HTEXT("Editor.Panels", "ContentBrowser", "Content Browser").toString())
+        ->addTab(HTEXT("Editor.Panels", "OutputLog", "Output Log").toString())
+        ->addTab(HTEXT("Editor.Panels", "GpuStats", "GPU Stats").toString())
         ->tabWidth(s(145.f))->height(s(EditorTheme::tabH))->fontSize(s(13.f))
         ->activeTab([this]() -> int { return bottomTab_; })
         ->onTabChanged([this](int i){ bottomTab_ = i; rebuildBottomPanel(); });
@@ -501,10 +506,11 @@ void EditorApp::buildWidgetTree() {
             ->addSlot(bottomHost_,    VR::ESizeRule::Fill));
 
     // ── Register panels (신규 위젯도 add 한 줄이면 도킹 대상 — 확장성 seam) ──────
-    panelReg_.add("Outliner", "Outliner",       outlinerPanel);
-    panelReg_.add("Viewport", "Viewport",       viewportPanel, /*closable=*/false);
-    panelReg_.add("Details",  "Details",        detailsPanel);
-    panelReg_.add("Bottom",   "Content Drawer", bottomPanel);
+    // 제목은 지금 문화권 글(글자 체계 T3). 패널 id 는 레이아웃 파일 · 코드가 쓰는 이름이라 번역하지 않습니다.
+    panelReg_.add("Outliner", HTEXT("Editor.Panels", "Outliner", "Outliner").toString(),      outlinerPanel);
+    panelReg_.add("Viewport", HTEXT("Editor.Panels", "Viewport", "Viewport").toString(),      viewportPanel, /*closable=*/false);
+    panelReg_.add("Details",  HTEXT("Editor.Panels", "Details", "Details").toString(),       detailsPanel);
+    panelReg_.add("Bottom",   HTEXT("Editor.Panels", "ContentDrawer", "Content Drawer").toString(), bottomPanel);
 
     // 저장된 레이아웃을 복원하고(등록된 패널 기준으로 검증), 없거나 손상되면 기본 배치로 폴백합니다.
     // uiScale 변경 등으로 buildWidgetTree 가 재호출될 때는 dockRoot_ 가 이미 살아 있으므로 재로딩하지
@@ -554,38 +560,39 @@ void EditorApp::buildWidgetTree() {
 // ── Menu bar (Phase 1) ───────────────────────────────────────────────────────────
 void EditorApp::buildMenus() {
     std::vector<EditorMenus::Def> defs;
-    defs.push_back({ "File", {
-        { "New Scene        Ctrl+N",       [this]{ newScene(); } },   // 카메라만 남기고 비움
-        { "Open Scene...    Ctrl+O",       [this]{ openSceneDialog(); } },
-        { "Save Scene       Ctrl+S",       [this]{ saveScene(); } },
-        { "Save Scene As... Ctrl+Shift+S", [this]{ saveSceneAs(); } },
+    // 글은 지금 문화권(글자 체계 T3), 단축키는 오른쪽 열(번역 안 함).
+    defs.push_back({ HTEXT("Editor.Menu", "File", "File").toString(), {
+        { HTEXT("Editor.Menu", "File.NewScene", "New Scene").toString(),     [this]{ newScene(); }, {}, "Ctrl+N" },   // 카메라만 남기고 비움
+        { HTEXT("Editor.Menu", "File.OpenScene", "Open Scene...").toString(),  [this]{ openSceneDialog(); }, {}, "Ctrl+O" },
+        { HTEXT("Editor.Menu", "File.SaveScene", "Save Scene").toString(),    [this]{ saveScene(); }, {}, "Ctrl+S" },
+        { HTEXT("Editor.Menu", "File.SaveSceneAs", "Save Scene As...").toString(), [this]{ saveSceneAs(); }, {}, "Ctrl+Shift+S" },
     }, 0.f });
-    defs.push_back({ "Edit", {
-        { "Undo             Ctrl+Z", [this]{ undo(); } },
-        { "Redo             Ctrl+Y", [this]{ redo(); } },
-        { "Copy             Ctrl+C", [this]{ copySelection(); } },
-        { "Paste            Ctrl+V", [this]{ pasteClipboard(); } },
-        { "Duplicate        Ctrl+D", [this]{ duplicateSelection(); } },
-        { "Delete           Del",    [this]{ deleteSelection(); } },
-        { "Frame Selected   F",      [this]{ frameSelection(); } },
+    defs.push_back({ HTEXT("Editor.Menu", "Edit", "Edit").toString(), {
+        { HTEXT("Editor.Menu", "Edit.Undo", "Undo").toString(),          [this]{ undo(); }, {}, "Ctrl+Z" },
+        { HTEXT("Editor.Menu", "Edit.Redo", "Redo").toString(),          [this]{ redo(); }, {}, "Ctrl+Y" },
+        { HTEXT("Editor.Menu", "Edit.Copy", "Copy").toString(),          [this]{ copySelection(); }, {}, "Ctrl+C" },
+        { HTEXT("Editor.Menu", "Edit.Paste", "Paste").toString(),         [this]{ pasteClipboard(); }, {}, "Ctrl+V" },
+        { HTEXT("Editor.Menu", "Edit.Duplicate", "Duplicate").toString(), [this]{ duplicateSelection(); }, {}, "Ctrl+D" },
+        { HTEXT("Editor.Menu", "Edit.Delete", "Delete").toString(),       [this]{ deleteSelection(); }, {}, "Del" },
+        { HTEXT("Editor.Menu", "Edit.FrameSelected", "Frame Selected").toString(), [this]{ frameSelection(); }, {}, "F" },
         // 기즈모 크기(카메라 거리 배율)를 작게 0.08 · 보통 0.12 · 크게 0.18 로 돌립니다. 툴바는 폭 사다리 때문에 칩을 더하지 않습니다.
-        { "Gizmo Size (S/M/L)",      [this]{
+        { HTEXT("Editor.Menu", "Edit.GizmoSize", "Gizmo Size (S/M/L)").toString(),      [this]{
             const float f = viewport_.gizmo().sizeFactor();
             const float n = f < 0.10f ? 0.12f : (f < 0.15f ? 0.18f : 0.08f);
             viewport_.gizmo().setSizeFactor(n);
             HLOG(LogEditor, Log) << "Gizmo size " << (n < 0.10f ? "small" : (n < 0.15f ? "medium" : "large"));
         } },
-        { "Audio Output...",         [this]{ openAudioOutputDialog(); } },
+        { HTEXT("Editor.Menu", "Edit.AudioOutput", "Audio Output...").toString(),         [this]{ openAudioOutputDialog(); } },
     }, 0.f });
-    defs.push_back({ "Actor", {
-        { "Add Empty", [this]{
+    defs.push_back({ HTEXT("Editor.Menu", "Actor", "Actor").toString(), {
+        { HTEXT("Editor.Menu", "Actor.AddEmpty", "Add Empty").toString(), [this]{
             if (!ctx_.world) return;
             selectOnly(ctx_.world->spawnActor(outlinerPanel_.nextActorName()));
             recordActorCreation({ ctx_.selected });
         } },
         // 부모 바꾸기는 아웃라이너에서 행을 끌어 놓는 것이 기본이고(2026-10-15), 메뉴도 남겨 둡니다. 둘 다 월드 자세를
         // 유지하고 Undo 됩니다. 부모는 "직전에 선택했던 액터", 자식은 "지금 선택한 액터"입니다.
-        { "Attach To Prev Selected", [this]{
+        { HTEXT("Editor.Menu", "Actor.AttachToPrev", "Attach To Prev Selected").toString(), [this]{
             Actor* child  = ctx_.selected;
             Actor* parent = prevSelected2_;
             if (!child || !parent || child == parent) return;
@@ -593,14 +600,22 @@ void EditorApp::buildMenus() {
                 HLOG(LogEditor, Warning) << "Cannot attach '" << child->name << "' under '" << parent->name
                                          << "' (an actor cannot go under itself or its child)";
         } },
-        { "Detach Selected", [this]{
+        { HTEXT("Editor.Menu", "Actor.Detach", "Detach Selected").toString(), [this]{
             if (!ctx_.selected || ctx_.selected == viewport_.cameraActor()) return;
             reparentUndoable(ctx_.selected, nullptr);
         } },
     }, 0.f });
-    defs.push_back({ "View", {
-        { "Reset Layout", [this]{ dock_.buildDefaultLayout(); dock_.rebuildArea(); dock_.saveLayout(); } },
-    }, 0.f });
+    std::vector<EditorMenus::Item> viewItems = {
+        { HTEXT("Editor.Menu", "View.ResetLayout", "Reset Layout").toString(), [this]{ dock_.buildDefaultLayout(); dock_.rebuildArea(); dock_.saveLayout(); } },
+    };
+    // 언어(글자 체계 T3-10). 고르면 다음 프레임에 표를 읽고 UI 를 다시 만듭니다(누른 단추가 처리 중에 사라지지 않게).
+    for (const htext::CultureInfo& c : htext::knownCultures()) {
+        const std::string code = c.code;
+        viewItems.push_back({ HTEXT("Editor.Menu", "View.Language", "Language").toString() + ": " + c.nativeName,
+                              [this, code] { pendingCulture_ = code; },
+                              [code] { return htext::culture() == code; } });
+    }
+    defs.push_back({ HTEXT("Editor.Menu", "View", "View").toString(), std::move(viewItems), 0.f });
     // 등록된 패널을 등록 순서로 보입니다(DEF-69). 열린 패널은 체크 표시가 붙고, 누르면 그 탭을
     // 앞으로 가져옵니다. 탭의 x 로 닫은 패널은 여기서 다시 엽니다.
     std::vector<EditorMenus::Item> windowItems;
@@ -611,7 +626,7 @@ void EditorApp::buildMenus() {
                                 [this, id] { dock_.showPanel(id); },
                                 [this, id] { return dock_.contains(id); } });
     }
-    defs.push_back({ "Window", std::move(windowItems), 0.f });
+    defs.push_back({ HTEXT("Editor.Menu", "Window", "Window").toString(), std::move(windowItems), 0.f });
     menus_.setDefs(std::move(defs));
 }
 

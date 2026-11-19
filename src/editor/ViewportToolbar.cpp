@@ -168,12 +168,12 @@ void ViewportToolbar::fill(SHorizontalBox& box, int lv, bool worstCase) const {
     };
     auto chip = [&](std::shared_ptr<HWidget> content,
                     std::function<bool()> active, std::function<void()> click,
-                    const char* tip = "") {
+                    const std::string& tip = std::string()) {
         auto btn = HNew(SToggleButton)->style(EditorUiKit::toggleButtonStyle(deps_.ui ? deps_.ui->s(1.f) : 1.f))
             ->padding(HPadding{s(10.f), s(5.f)})
             ->isActive(std::move(active))->onClick(std::move(click))
             ->content(std::move(content));
-        if (tip && tip[0] != '\0') btn->tooltip.set(tip);
+        if (!tip.empty()) btn->tooltip.set(tip);
         box.addSlot(btn, SHorizontalBox::ESizeRule::Auto);
     };
     auto divider = [&] {
@@ -183,10 +183,11 @@ void ViewportToolbar::fill(SHorizontalBox& box, int lv, bool worstCase) const {
     };
 
     // ── 변환 도구 ─────────────────────────────────────────────────────────────
-    static const char* kToolLong [4] = { "Select", "Move", "Rotate", "Scale" };
-    static const char* kToolShort[4] = { "Sel",    "Mov",  "Rot",    "Scl"   };
+    // 글은 지금 문화권(글자 체계 T3). 단축키 글자(Q W E R)는 툴팁 번역에 그대로 둡니다.
+    const std::string kToolLong [4] = { HTEXT("Editor.Viewport", "Tool.Select", "Select").toString(), HTEXT("Editor.Viewport", "Tool.Move", "Move").toString(), HTEXT("Editor.Viewport", "Tool.Rotate", "Rotate").toString(), HTEXT("Editor.Viewport", "Tool.Scale", "Scale").toString() };
+    const std::string kToolShort[4] = { HTEXT("Editor.Viewport", "Tool.SelectShort", "Sel").toString(), HTEXT("Editor.Viewport", "Tool.MoveShort", "Mov").toString(), HTEXT("Editor.Viewport", "Tool.RotateShort", "Rot").toString(), HTEXT("Editor.Viewport", "Tool.ScaleShort", "Scl").toString() };
     static const char* kToolIcon [4] = { "mouse-pointer-2", "move", "rotate-cw", "scaling" };
-    static const char* kToolTip  [4] = { "Select (Q)", "Move (W)", "Rotate (E)", "Scale (R)" };
+    const std::string kToolTip  [4] = { HTEXT("Editor.Viewport", "Tip.Select", "Select (Q)").toString(), HTEXT("Editor.Viewport", "Tip.Move", "Move (W)").toString(), HTEXT("Editor.Viewport", "Tip.Rotate", "Rotate (E)").toString(), HTEXT("Editor.Viewport", "Tip.Scale", "Scale (R)").toString() };
     for (int m = 0; m < 4; ++m)
         chip(withIcon(AttrStr(std::string(kToolIcon[m])), label(lv <= 0 ? kToolLong[m] : kToolShort[m])),
              [this, m] { return *deps_.gizmoMode == m; },
@@ -197,22 +198,22 @@ void ViewportToolbar::fill(SHorizontalBox& box, int lv, bool worstCase) const {
 
     // ── 좌표계 ────────────────────────────────────────────────────────────────
     if (lv <= 1) {
-        chip(withIcon(AttrStr(std::string("globe")), label("World")),
-             [this] { return *deps_.worldSpace;  }, [this] { *deps_.worldSpace = true;  }, "World Space");
-        chip(withIcon(AttrStr(std::string("box")), label("Local")),
-             [this] { return !*deps_.worldSpace; }, [this] { *deps_.worldSpace = false; }, "Local Space");
+        chip(withIcon(AttrStr(std::string("globe")), label(HTEXT("Editor.Viewport", "World", "World").toString())),
+             [this] { return *deps_.worldSpace;  }, [this] { *deps_.worldSpace = true;  }, HTEXT("Editor.Viewport", "Tip.World", "World Space").toString());
+        chip(withIcon(AttrStr(std::string("box")), label(HTEXT("Editor.Viewport", "Local", "Local").toString())),
+             [this] { return !*deps_.worldSpace; }, [this] { *deps_.worldSpace = false; }, HTEXT("Editor.Viewport", "Tip.Local", "Local Space").toString());
     } else {
         chip(withIcon(AttrStr([this] { return *deps_.worldSpace ? std::string("globe") : std::string("box"); }),
-                      dynLabel([this] { return *deps_.worldSpace ? std::string("World") : std::string("Local"); },
-                               { "World", "Local" })),
-             [] { return false; }, [this] { *deps_.worldSpace = !*deps_.worldSpace; }, "Toggle World/Local Space");
+                      dynLabel([this] { return *deps_.worldSpace ? HTEXT("Editor.Viewport", "World", "World").toString() : HTEXT("Editor.Viewport", "Local", "Local").toString(); },
+                               { HTEXT("Editor.Viewport", "World", "World").toString(), HTEXT("Editor.Viewport", "Local", "Local").toString() })),
+             [] { return false; }, [this] { *deps_.worldSpace = !*deps_.worldSpace; }, HTEXT("Editor.Viewport", "Tip.ToggleSpace", "Toggle World/Local Space").toString());
     }
 
     // ── 스냅 ──────────────────────────────────────────────────────────────────
     if (lv <= 3) {
         divider();
-        chip(withIcon(AttrStr(std::string("magnet")), label("Snap")), [this] { return deps_.snap->enabled; },
-             [this] { deps_.snap->enabled = !deps_.snap->enabled; }, "Toggle Grid Snap");
+        chip(withIcon(AttrStr(std::string("magnet")), label(HTEXT("Editor.Viewport", "Snap", "Snap").toString())), [this] { return deps_.snap->enabled; },
+             [this] { deps_.snap->enabled = !deps_.snap->enabled; }, HTEXT("Editor.Viewport", "Tip.Snap", "Toggle Grid Snap").toString());
         if (lv <= 2) {
             std::vector<std::string> candidates;
             if (worstCase) {
@@ -237,7 +238,7 @@ void ViewportToolbar::fill(SHorizontalBox& box, int lv, bool worstCase) const {
                          default: break;
                      }
                  },
-                 "Cycle Snap Step (Shift: Reverse)");
+                 HTEXT("Editor.Viewport", "Tip.SnapStep", "Cycle Snap Step (Shift: Reverse)").toString());
         }
     }
 
@@ -258,5 +259,5 @@ void ViewportToolbar::fill(SHorizontalBox& box, int lv, bool worstCase) const {
                                deps_.ctx->window->isShiftDown();
              cycleCamSpeed(back ? -1 : 1);
          },
-         "Cycle Camera Speed (Shift: Reverse)");
+         HTEXT("Editor.Viewport", "Tip.CamSpeed", "Cycle Camera Speed (Shift: Reverse)").toString());
 }

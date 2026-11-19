@@ -11,6 +11,7 @@
 #include "IGameModule.hpp"
 #include "../scene/ComponentRegistry.hpp"
 #include "../core/EngineSettings.hpp"
+#include "../core/HText.hpp"
 #include "../core/ProjectDescriptor.hpp"
 #include "../core/ProjectPaths.hpp"
 #include "../core/FileUtil.hpp"
@@ -395,6 +396,14 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     audio->setPhysics(physics);   // 소리 차폐 판정(2026-11-06, Audio_Design.md 9-4)
 
     // 앞단(에디터 또는 게임).
+    // 표시 글 문화권(글자 체계 T3): --culture 가 있으면 그 표(/Engine · /Game 의 Localization)를 읽습니다. 에디터는 없으면
+    // 자기 설정(editor_state)을 씁니다.
+    if (!options_.culture.empty()) {
+        std::vector<std::string> errs;
+        const size_t n = htext::useCulture(options_.culture, &errs);
+        for (const auto& e : errs) HLOG(LogEngine, Warning) << "Localization: " << e;
+        HLOG(LogEngine, Log) << "Culture: " << options_.culture << " (" << n << " entries)";
+    }
     frontend_->setOptions(options_);
     frontend_->init(*renderer_, world_, *assets_, *window_);
     frontend_->setAudio(audio_);   // 에디터: 저장된 소리 출력 장치를 openInitialScene 에서 적용(2026-10-16)

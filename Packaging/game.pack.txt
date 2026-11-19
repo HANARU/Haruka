@@ -13,14 +13,20 @@
 map ${PROJECT_DIR}/Content /Game
 map ${PROJECT_DIR}/Config /Config
 map ${SHADER_DIR} shaders
+# Engine content (2026-11-19, glyph system T4-4): the Pretendard fonts for UI panels and the localization
+# tables. The game mounts it as /Engine/ like the editor does.
+map ${ENGINE_CONTENT_DIR} /Engine
 
 # Derived data and leftovers. The glTF cache is rebuilt on the device under the write folder.
 # **/.* leaves out hidden files (name starts with '.'), **/.*/** everything under a hidden folder (.svn, .vs).
 exclude /Game/cache/** **/*.tmp **/.* **/.*/** Thumbs.db desktop.ini
 exclude shaders/*.d
+# The .pot is the translation template for translators; the game only reads the .po tables. Editor icons stay
+# in the editor (the game has no editor UI).
+exclude /Engine/Localization/*.pot /Engine/Editor/**
 
 # Local-only test assets on this machine (2026-11-06, also in .gitignore). Never ship them.
 exclude /Game/models/_reference/** /Game/scenes/_reference/**
 
 stored *.ogg *.mp3 *.flac *.opus *.wav *.png *.jpg *.jpeg *.ktx2 *.basis *.webp *.zip
-text *.hscene *.hprefab *.ini *.txt
+text *.hscene *.hprefab *.ini *.txt *.po *.svg

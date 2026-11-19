@@ -1,6 +1,7 @@
 #include "TextInputController.hpp"
 #include "../input/HInputSystem.hpp"
 #include "../platform/IWindow.hpp"
+#include <iterator>
 #include <vector>
 
 void TextInputController::init(Deps deps) {
@@ -32,8 +33,9 @@ void TextInputController::setFocus(EFocusTarget t) {
         if (auto* nf = SNumberField::focusedField()) nf->commitEdit();
     } else if (prev == EFocusTarget::Rename || prev == EFocusTarget::Search || prev == EFocusTarget::LogSearch) {
         auto f = getField(prev);
-        f.focused     = false;
-        f.selectedAll = false;
+        f.focused = false;
+        f.edit.clearSelection();
+        f.edit.clearComposition();
         if (f.onChanged) f.onChanged();
     } else if (prev == EFocusTarget::Dialog) {
         if (deps_.endDialogFocus) deps_.endDialogFocus();
@@ -42,14 +44,14 @@ void TextInputController::setFocus(EFocusTarget t) {
     if (t == EFocusTarget::Rename) {
         auto f = getField(t);
         if (!f.onBegin || f.onBegin()) {
-            f.focused     = true;
-            f.selectedAll = true;   // 윈도우 표준: 이름 변경 시작 시 전체 선택
+            f.focused = true;
+            f.edit.selectAll();   // 윈도우 표준: 이름 변경 시작 시 전체 선택
         }
         if (f.onChanged) f.onChanged();
     } else if (t == EFocusTarget::Search || t == EFocusTarget::LogSearch) {
         auto f = getField(t);
-        f.focused     = true;
-        f.selectedAll = !f.buffer.empty();
+        f.focused = true;
+        f.edit.selectAll();   // 키보드로 들어오면 전체 선택(마우스로 누르면 위젯이 곧바로 그 자리에 커서를 놓음)
         if (f.onChanged) f.onChanged();
     } else if (t == EFocusTarget::Dialog) {
         if (deps_.beginDialogFocus) deps_.beginDialogFocus();
@@ -69,6 +71,11 @@ void TextInputController::setFocus(EFocusTarget t) {
         prevVDown_      = w.isKeyDown(HInput::KEY_V);
         prevCDown_      = w.isKeyDown(HInput::KEY_C);
         prevADown_      = w.isKeyDown(HInput::KEY_A);
+        prevXDown_      = w.isKeyDown(HInput::KEY_X);
+        // 글 입력 칸에서만 IME 를 켭니다(T2). 숫자 칸 · 포커스 없음은 끔.
+        const bool textFocus = t == EFocusTarget::Rename || t == EFocusTarget::Search ||
+                               t == EFocusTarget::LogSearch || t == EFocusTarget::Dialog;
+        w.setTextInputEnabled(textFocus);
     }
 
     // 텍스트 입력을 시작하면 열려 있던 메뉴는 닫습니다.
@@ -100,6 +107,13 @@ bool TextInputController::focusWidgetContains(float x, float y) const {
     }
 }
 
+namespace {
+// 반복 편집 키(막기 비트 번호 = 배열 자리).
+constexpr int kRepeatKeys[] = { HInput::KEY_BACKSPACE, HInput::KEY_DELETE, HInput::KEY_LEFT,
+                                HInput::KEY_RIGHT, HInput::KEY_HOME, HInput::KEY_END };
+constexpr size_t kRepeatKeyCount = std::size(kRepeatKeys);
+}
+
 TextInputController::KeyEdges TextInputController::sampleEdges(IWindow& win) {
     // 키 엣지를 여기서 **한 번에** 계산하고 prev 상태를 조건 없이 갱신합니다. 예전에는
     // 숫자 필드 분기가 중간에서 return 해 F2·Delete 엣지가 갱신되지 않았고, 그 탓에 값을
@@ -107,33 +121,48 @@ TextInputController::KeyEdges TextInputController::sampleEdges(IWindow& win) {
     const bool ctrlHeld = win.isCtrlDown();
     const bool vNow     = win.isKeyDown(HInput::KEY_V);
     const bool cNow     = win.isKeyDown(HInput::KEY_C);
+    const bool xNow     = win.isKeyDown(HInput::KEY_X);
     const bool aNow     = win.isKeyDown(HInput::KEY_A);
     const bool f2Now    = win.isKeyDown(HInput::KEY_F2);
     const bool delNow   = win.isKeyDown(HInput::KEY_DELETE);
     const bool enNow    = win.isKeyDown(HInput::KEY_ENTER);
-    const bool bsNow    = win.isKeyDown(HInput::KEY_BACKSPACE);
-    // 백스페이스는 누르고 있으면 OS 자동 반복 간격으로 거듭 지웁니다(DEF-58).
+    // 반복 편집 키는 누르고 있으면 OS 자동 반복 간격으로 거듭 동작합니다(DEF-58, 글자 체계 T1 에서 화살표 · Home · End · Delete 로
+    // 넓힘). 포커스가 바뀔 때 눌려 있던 키는 뗄 때까지 무시합니다(편집 칸에 들어오는 순간 남은 반복이 글을 지우지 않게).
     if (const EFocusTarget f = currentFocus(); f != backspaceFocus_) {
-        backspaceFocus_   = f;
-        backspaceBlocked_ = bsNow;
+        backspaceFocus_ = f;
+        blockedKeys_    = 0;
+        for (size_t i = 0; i < kRepeatKeyCount; ++i)
+            if (win.isKeyDown(kRepeatKeys[i])) blockedKeys_ |= 1u << i;
     }
-    if (backspaceBlocked_ && !bsNow) backspaceBlocked_ = false;
-    const int bsCount = backspaceBlocked_ ? 0 : win.keyPressCount(HInput::KEY_BACKSPACE);
+    int counts[kRepeatKeyCount] = {};
+    for (size_t i = 0; i < kRepeatKeyCount; ++i) {
+        const uint32_t bit = 1u << i;
+        if ((blockedKeys_ & bit) && !win.isKeyDown(kRepeatKeys[i])) blockedKeys_ &= ~bit;
+        counts[i] = (blockedKeys_ & bit) ? 0 : win.keyPressCount(kRepeatKeys[i]);
+    }
     const bool escNow = win.isKeyDown(HInput::KEY_ESCAPE);
 
     KeyEdges k;
     k.ctrlHeld   = ctrlHeld;
+    k.shiftHeld  = win.isShiftDown();
     k.pasteEdge  = ctrlHeld && vNow && !prevVDown_;
     k.copyEdge   = ctrlHeld && cNow && !prevCDown_;
+    k.cutEdge    = ctrlHeld && xNow && !prevXDown_;
     k.selAllEdge = ctrlHeld && aNow && !prevADown_;
     k.f2Edge     = f2Now  && !prevF2Down_;
     k.delEdge    = delNow && !prevDeleteDown_;
     k.enterEdge  = enNow  && !prevEnterDown_;
     k.escEdge    = escNow && !prevEscapeDown_;
-    k.bsCount    = bsCount;
+    k.bsCount    = counts[0];
+    k.delCount   = counts[1];
+    k.leftCount  = counts[2];
+    k.rightCount = counts[3];
+    k.homeCount  = counts[4];
+    k.endCount   = counts[5];
 
     prevVDown_      = vNow;
     prevCDown_      = cNow;
+    prevXDown_      = xNow;
     prevADown_      = aNow;
     prevF2Down_     = f2Now;
     prevDeleteDown_ = delNow;
@@ -142,46 +171,69 @@ TextInputController::KeyEdges TextInputController::sampleEdges(IWindow& win) {
     return k;
 }
 
-bool TextInputController::editBuffer(IWindow& win, std::string& buf, bool& selAll, const KeyEdges& k) {
+bool TextInputController::applyEdit(HTextEditState& st, const std::vector<unsigned int>& chars, const KeyEdges& k,
+                                    IWindow* clip) {
     bool dirty = false;
-    auto clearIfSelAll = [&] {
-        if (selAll) { buf.clear(); selAll = false; dirty = true; }
-    };
+    const size_t c0 = st.caret, a0 = st.anchor;
+    for (unsigned int cp : chars)
+        if (st.insertCodepoint(cp)) dirty = true;   // 인쇄할 수 없는 글자(제어 문자)는 insertCodepoint 가 거름
 
-    if (k.selAllEdge && !buf.empty()) { selAll = true; dirty = true; }
+    if (k.selAllEdge && !st.text.empty()) st.selectAll();
+    if (k.copyEdge && clip && st.hasSelection()) clip->setClipboardText(st.selectedText());
+    if (k.cutEdge && clip && st.hasSelection()) { clip->setClipboardText(st.cut()); dirty = true; }
+    if (k.pasteEdge && clip && st.insert(clip->getClipboardText())) dirty = true;
 
+    for (int i = 0; i < k.bsCount; ++i)  if (st.backspace(k.ctrlHeld)) dirty = true;
+    for (int i = 0; i < k.delCount; ++i) if (st.del(k.ctrlHeld))       dirty = true;
+    for (int i = 0; i < k.leftCount; ++i)  st.moveLeft(k.ctrlHeld, k.shiftHeld);
+    for (int i = 0; i < k.rightCount; ++i) st.moveRight(k.ctrlHeld, k.shiftHeld);
+    if (k.homeCount) st.home(k.shiftHeld);
+    if (k.endCount)  st.end(k.shiftHeld);
+    return dirty || st.caret != c0 || st.anchor != a0;
+}
+
+bool TextInputController::editField(IWindow& win, HTextEditState& st, const KeyEdges& k) {
     std::vector<unsigned int> chars;
     win.drainCharQueue(chars);
-    for (unsigned int cp : chars) {
-        // 폰트 아틀라스가 ASCII 전용이라, 그릴 수 없는 글자는 애초에 받지 않습니다.
-        if (cp >= 32 && cp < 127) {
-            clearIfSelAll();
-            buf += (char)cp;
-            dirty = true;
-        }
+    // IME 조합 중에는 IME 가 편집 키를 먹습니다(GLFW 는 VK_PROCESSKEY 를 버림). 조합 중이거나 이번 프레임에 조합이 끝났으면
+    // 키는 적용하지 않고 확정 글자만 넣어, 같은 키가 IME 와 칸에 두 번 먹히지 않게 합니다.
+    std::string comp;
+    size_t      compCaret = 0;
+    const bool  composing = win.getComposition(comp, compCaret);
+    const bool  wasComposing = st.isComposing();
+    bool dirty = false;
+    if (composing || wasComposing) {
+        KeyEdges none;
+        dirty = applyEdit(st, chars, none, &win);
+    } else {
+        dirty = applyEdit(st, chars, k, &win);
     }
+    // IME 가 켜진 창만 조합 글을 맞춥니다. 숨은 창(덤프)은 IME 를 켜지 않아, 덤프가 흉내 낸 조합 글이 그대로 남습니다.
+    if (!win.isTextInputEnabled()) return dirty;
+    const std::string before = st.composition;
+    if (composing) st.setComposition(comp, compCaret);
+    else           st.clearComposition();
+    return dirty || st.composition != before;
+}
 
-    if (k.pasteEdge) {
-        clearIfSelAll();
-        for (char c : win.getClipboardText())
-            if (c >= 32 && c < 127) { buf += c; dirty = true; }
+void TextInputController::syncIme(IWindow& win) {
+    HTextEditState* st = nullptr;
+    switch (currentFocus()) {
+        case EFocusTarget::Rename:    if (deps_.renameField)    st = &deps_.renameField().edit;    break;
+        case EFocusTarget::Search:    if (deps_.searchField)    st = &deps_.searchField().edit;    break;
+        case EFocusTarget::LogSearch: if (deps_.logSearchField) st = &deps_.logSearchField().edit; break;
+        case EFocusTarget::Dialog:    if (deps_.dialogEdit)     st = deps_.dialogEdit();          break;
+        default: break;
     }
-    if (k.copyEdge) win.setClipboardText(buf);
-
-    for (int i = 0; i < k.bsCount && !buf.empty(); ++i) {
-        if (selAll) clearIfSelAll();
-        else        buf.pop_back();
-        dirty = true;
-    }
-    return dirty;
+    if (st && st->caretRect.w > 0.f)
+        win.setTextInputRect(st->caretRect.x, st->caretRect.y, st->caretRect.z, st->caretRect.w);
 }
 
 void TextInputController::handleModalInput(IWindow& win, EFocusTarget focus, const KeyEdges& k) {
-    if (focus == EFocusTarget::Dialog && deps_.dialogBuffer) {
-        std::string* buf = nullptr;
-        bool* selAll = nullptr;
-        deps_.dialogBuffer(buf, selAll);
-        if (buf && selAll) editBuffer(win, *buf, *selAll, k);
+    HTextEditState* st = (focus == EFocusTarget::Dialog && deps_.dialogEdit) ? deps_.dialogEdit() : nullptr;
+    if (st) {
+        editField(win, *st, k);
+        if (st->isComposing()) return;   // 조합 중 Enter · Esc 는 IME 몫
     } else {
         std::vector<unsigned int> junk;
         win.drainCharQueue(junk);
@@ -208,8 +260,8 @@ void TextInputController::handleTextFieldInput(IWindow& win, EFocusTarget focus,
     auto f = (focus == EFocusTarget::Rename) ? deps_.renameField()
            : (focus == EFocusTarget::Search) ? deps_.searchField()
                                              : deps_.logSearchField();
-    const bool dirty = editBuffer(win, f.buffer, f.selectedAll, k);
-    if (k.enterEdge) {
+    const bool dirty = editField(win, f.edit, k);
+    if (k.enterEdge && !f.edit.isComposing()) {
         if (f.onCommit) f.onCommit();
         setFocus(EFocusTarget::None);
         return;
@@ -222,6 +274,7 @@ void TextInputController::tickInput() {
     IWindow& win = **deps_.window;
     const KeyEdges k = sampleEdges(win);
     const EFocusTarget focus = currentFocus();
+    syncIme(win);
 
     if (deps_.isModalOpen && deps_.isModalOpen()) {
         handleModalInput(win, focus, k);
@@ -229,7 +282,10 @@ void TextInputController::tickInput() {
     }
 
     // Esc — 무엇을 편집하고 있든 취소하고 빠져나옵니다(숫자 필드는 값을 확정).
-    if (k.escEdge && focus != EFocusTarget::None) {
+    std::string compNow;
+    size_t      compCaretNow = 0;
+    const bool  imeComposing = win.getComposition(compNow, compCaretNow);
+    if (k.escEdge && focus != EFocusTarget::None && !imeComposing) {
         setFocus(EFocusTarget::None);
         return;
     }

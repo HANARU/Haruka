@@ -13,6 +13,10 @@ public:
     std::shared_ptr<STextBlock> text(Attr<std::string> t) {
         textAttr_ = std::move(t); return self();
     }
+    // 표시 글(글자 체계 T3). 그릴 때마다 지금 문화권으로 풉니다(결과는 HText 가 판 번호로 캐시).
+    std::shared_ptr<STextBlock> text(const HText& t) {
+        textAttr_ = Attr<std::string>(std::function<std::string()>([t] { return t.toString(); })); return self();
+    }
     std::shared_ptr<STextBlock> fontSize(float s) {
         fontSize_ = s; return self();
     }

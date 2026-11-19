@@ -4,14 +4,36 @@
 #include "HFontAtlas.hpp"
 #include "SlateLog.hpp"
 #include "../../vfs/Vfs.hpp"
+#include "../../core/Utf8.hpp"
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
 #include <algorithm>
 
+// 주 글꼴을 못 읽을 때 쓰는 시스템 글꼴(예전 그대로).
 static const char* kFontFallbacks[] = {
     "C:/Windows/Fonts/segoeui.ttf",
     "C:/Windows/Fonts/arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    nullptr
+};
+
+// 대체 글꼴 사슬(글자 체계 T4-1, 2026-11-19): 주 글꼴에 없는 글자를 차례로 찾습니다. 없는 파일은 건너뜁니다. 처음으로 주 글꼴에
+// 없는 글자를 만날 때 한 번 읽습니다(시작 시간 · 메모리를 아낌). TTC(글꼴 모음)는 첫 글꼴을 씁니다.
+static const char* kDefaultFallbackChain[] = {
+    // Windows
+    "C:/Windows/Fonts/malgun.ttf",     // 한글 · KS X 1001 한자 · 가나
+    "C:/Windows/Fonts/YuGothR.ttc",    // 일본어
+    "C:/Windows/Fonts/meiryo.ttc",
+    "C:/Windows/Fonts/msyh.ttc",       // 중국어 간체
+    "C:/Windows/Fonts/segoeui.ttf",    // 라틴 확장 · 그리스 · 키릴
+    "C:/Windows/Fonts/seguisym.ttf",   // 기호
+    "C:/Windows/Fonts/seguiemj.ttf",   // 이모지(윤곽선만, 한 색)
+    // Android(Quest)
+    "/system/fonts/NotoSansCJK-Regular.ttc",
+    "/system/fonts/DroidSansFallback.ttf",
+    "/system/fonts/Roboto-Regular.ttf",
+    // Linux
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     nullptr
 };
@@ -21,6 +43,19 @@ static const HFontAtlas* g_metricsFont = nullptr;
 
 const HFontAtlas* HFontAtlas::metrics() { return g_metricsFont; }
 
+// 글꼴 파일 바이트에서 stbtt_fontinfo 를 만듭니다(TTC 면 첫 글꼴). 실패하면 nullptr.
+static stbtt_fontinfo* makeFontInfo(const std::vector<uint8_t>& bytes) {
+    if (bytes.empty()) return nullptr;
+    const int offset = stbtt_GetFontOffsetForIndex(bytes.data(), 0);
+    if (offset < 0) return nullptr;
+    auto* fi = new stbtt_fontinfo();
+    if (!stbtt_InitFont(fi, bytes.data(), offset)) {
+        delete fi;
+        return nullptr;
+    }
+    return fi;
+}
+
 // ── 폰트 파일 ─────────────────────────────────────────────────────────────────
 bool HFontAtlas::loadFont(const std::string& fontPath) {
     unloadFont();
@@ -29,7 +64,8 @@ bool HFontAtlas::loadFont(const std::string& fontPath) {
     auto tryLoad = [&](const std::string& path) -> bool {
         std::vector<uint8_t> bytes;
         if (!hvfs::readAll(path, bytes)) return false;
-        ttfData_ = std::move(bytes);
+        ttfData_  = std::move(bytes);
+        fontPath_ = path;
         return true;
     };
 
@@ -39,9 +75,8 @@ bool HFontAtlas::loadFont(const std::string& fontPath) {
         loaded = tryLoad(kFontFallbacks[i]);
     if (!loaded) return false;
 
-    auto* fi = new stbtt_fontinfo();
-    if (!stbtt_InitFont(fi, ttfData_.data(), 0)) {
-        delete fi;
+    stbtt_fontinfo* fi = makeFontInfo(ttfData_);
+    if (!fi) {
         ttfData_.clear();
         return false;
     }
@@ -55,15 +90,82 @@ bool HFontAtlas::loadBoldFont(const std::string& fontPath) {
     boldInfo_ = nullptr;
     boldData_.clear();
     if (fontPath.empty() || !fontInfo_ || !hvfs::readAll(fontPath, boldData_)) { boldData_.clear(); return false; }
-    auto* fi = new stbtt_fontinfo();
-    if (!stbtt_InitFont(fi, boldData_.data(), 0)) {
-        delete fi;
+    stbtt_fontinfo* fi = makeFontInfo(boldData_);
+    if (!fi) {
         boldData_.clear();
         return false;
     }
     boldInfo_ = fi;
+    fontForCache_.clear();
     // 굵게가 없을 때 면 1 은 면 0 열쇠를 썼으므로 캐시에 남은 값도 면 0 값 그대로 맞습니다(비우지 않음).
     return true;
+}
+
+void HFontAtlas::setFallbackChain(std::vector<std::string> paths) {
+    clearFallbacks();
+    fallbackPaths_    = std::move(paths);
+    fallbackCustom_   = true;
+}
+
+void HFontAtlas::clearFallbacks() const {
+    for (auto& f : fallbacks_) delete static_cast<stbtt_fontinfo*>(f.info);
+    fallbacks_.clear();
+    fallbacksLoaded_ = false;
+    fontForCache_.clear();
+}
+
+void HFontAtlas::loadFallbacks() const {
+    if (fallbacksLoaded_) return;
+    fallbacksLoaded_ = true;
+    std::vector<std::string> paths = fallbackPaths_;
+    if (!fallbackCustom_)
+        for (int i = 0; kDefaultFallbackChain[i]; ++i) paths.push_back(kDefaultFallbackChain[i]);
+    for (const std::string& p : paths) {
+        Fallback f;
+        if (!hvfs::readAll(p, f.data)) continue;
+        f.info = makeFontInfo(f.data);
+        if (!f.info) continue;
+        f.path = p;
+        fallbacks_.push_back(std::move(f));
+    }
+    // 벡터가 다시 할당되면 stbtt_fontinfo 가 가리키는 바이트 주소가 바뀌므로, 다 넣은 뒤 다시 만듭니다.
+    for (auto& f : fallbacks_) {
+        delete static_cast<stbtt_fontinfo*>(f.info);
+        f.info = makeFontInfo(f.data);
+    }
+}
+
+size_t HFontAtlas::fallbackCount() const {
+    loadFallbacks();
+    return fallbacks_.size();
+}
+
+const void* HFontAtlas::fontFor(uint32_t cp, int face) const {
+    const void* primary = faceInfo(face);
+    if (!primary) return nullptr;
+    // 제어 문자 · 공백류는 주 글꼴(자리만 차지)
+    if (cp < 0x20 || cp == 0x7F) return primary;
+    const uint64_t key = (uint64_t)((face == 1 && boldInfo_) ? 1u : 0u) << 32 | cp;
+    if (auto it = fontForCache_.find(key); it != fontForCache_.end()) return it->second;
+    const void* found = nullptr;
+    if (stbtt_FindGlyphIndex(static_cast<const stbtt_fontinfo*>(primary), (int)cp)) found = primary;
+    // 굵게 면에 없으면 보통 면, 그다음 대체 글꼴 사슬
+    if (!found && primary != fontInfo_ && stbtt_FindGlyphIndex(static_cast<const stbtt_fontinfo*>(fontInfo_), (int)cp))
+        found = fontInfo_;
+    if (!found) {
+        loadFallbacks();
+        for (const auto& f : fallbacks_)
+            if (stbtt_FindGlyphIndex(static_cast<const stbtt_fontinfo*>(f.info), (int)cp)) { found = f.info; break; }
+    }
+    if (!found) {
+        // 어디에도 없으면 주 글꼴의 .notdef(네모)를 그립니다. 경고는 글자마다 한 번, 앞의 몇 개만.
+        found = primary;
+        if (missingCodepoints_++ < 8)
+            HLOG(LogUI, Warning) << "Font: no loaded font has U+" << std::hex << std::uppercase << cp << std::dec
+                                 << "; drawing the missing-glyph box";
+    }
+    fontForCache_.emplace(key, found);
+    return found;
 }
 
 void HFontAtlas::unloadFont() {
@@ -71,9 +173,12 @@ void HFontAtlas::unloadFont() {
     delete static_cast<stbtt_fontinfo*>(fontInfo_);
     fontInfo_ = nullptr;
     ttfData_.clear();
+    fontPath_.clear();
     delete static_cast<stbtt_fontinfo*>(boldInfo_);
     boldInfo_ = nullptr;
     boldData_.clear();
+    clearFallbacks();
+    missingCodepoints_ = 0;
     cache_.clear();
     iconCache_.clear();
     advanceCache_.clear();
@@ -82,13 +187,11 @@ void HFontAtlas::unloadFont() {
 // ── 초기화 ────────────────────────────────────────────────────────────────────
 bool HFontAtlas::initCpuOnly(const std::string& fontPath) {
     if (!loadFont(fontPath)) return false;
-    cursorX_ = 0;
-    cursorY_ = 0;
-    rowH_    = 0;
+    destroyPageImages();
+    pages_.clear();
+    addPage();
     dirty_   = false;
     droppedGlyphs_ = 0;
-    // CPU 아틀라스 버퍼 초기화 (RGBA, 불투명 흰색 × 투명)
-    cpuAtlas_.assign(kAtlasW * atlasH_ * 4, 0);
     return true;
 }
 
@@ -104,18 +207,41 @@ void HFontAtlas::init(VkDevice device, VkPhysicalDevice physDevice,
     if (!initCpuOnly(fontPath))
         throw std::runtime_error("[HFontAtlas] No usable font file found!");
 
-    createAtlasImage();
-    uploadFullAtlas();
-    HLOG(LogUI, Log) << "Font atlas ready: " << kAtlasW << "x" << atlasH_;
+    if (pages_[0].image == VK_NULL_HANDLE) createPageImage(pages_[0]);
+    uploadPage(pages_[0]);
+    HLOG(LogUI, Log) << "Font atlas ready: " << kAtlasW << "x" << atlasH_ << " (" << fontPath_ << ")";
+}
+
+void HFontAtlas::destroyPageImages() {
+    if (device_ == VK_NULL_HANDLE) return;
+    for (Page& p : pages_) {
+        if (p.view)  vkDestroyImageView(device_, p.view,  nullptr);
+        if (p.image) vkDestroyImage    (device_, p.image, nullptr);
+        if (p.mem)   vkFreeMemory      (device_, p.mem,   nullptr);
+        p.view  = VK_NULL_HANDLE;
+        p.image = VK_NULL_HANDLE;
+        p.mem   = VK_NULL_HANDLE;
+        p.firstUpload = true;
+    }
 }
 
 void HFontAtlas::cleanup() {
-    if (device_ != VK_NULL_HANDLE) {
-        vkDestroyImageView(device_, atlasView_,  nullptr);
-        vkDestroyImage    (device_, atlasImage_, nullptr);
-        vkFreeMemory      (device_, atlasMem_,   nullptr);
-    }
+    destroyPageImages();
+    pages_.clear();
     unloadFont();
+}
+
+void HFontAtlas::addPage() {
+    Page p;
+    p.cpu.assign((size_t)kAtlasW * (size_t)atlasH_ * 4, 0);   // RGBA, 흰색 × 알파
+    pages_.push_back(std::move(p));
+    // GPU 가 있으면 텍스처를 곧바로 만듭니다. 그리기 목록을 펼칠 때(업로드 전) 이미 이 페이지의 뷰가 필요합니다.
+    if (device_ != VK_NULL_HANDLE) createPageImage(pages_.back());
+}
+
+VkImageView HFontAtlas::pageView(int page) const {
+    if (page < 0 || page >= (int)pages_.size()) return pages_.empty() ? VK_NULL_HANDLE : pages_[0].view;
+    return pages_[page].view;
 }
 
 // ── 글리프 조회 / 래스터라이즈 ────────────────────────────────────────────────
@@ -134,7 +260,7 @@ float HFontAtlas::glyphAdvance(uint32_t cp, float size, int face) const {
     if (!fontInfo_) return 0.f;
     const uint64_t key = glyphKey(cp, size, face);
     if (auto it = advanceCache_.find(key); it != advanceCache_.end()) return it->second;
-    auto* fi = static_cast<const stbtt_fontinfo*>(faceInfo(face));
+    auto* fi = static_cast<const stbtt_fontinfo*>(fontFor(cp, face));
     int adv = 0, lsb = 0;
     stbtt_GetCodepointHMetrics(fi, (int)cp, &adv, &lsb);
     const float a = adv * stbtt_ScaleForPixelHeight(fi, size);
@@ -152,33 +278,13 @@ float HFontAtlas::measureText(std::string_view text, float size, int face) const
     return std::max(widest, x);
 }
 
+// UTF-8 읽기 · 자르기는 core/Utf8.hpp 에 있습니다(글자 체계 T1). 예전 이름은 그대로 둡니다.
 uint32_t HFontAtlas::nextCodepoint(std::string_view s, size_t& i) {
-    const unsigned char c0 = (unsigned char)s[i];
-    if (c0 < 0x80) { ++i; return c0; }
-    size_t   extra = 0;
-    uint32_t cp    = 0;
-    if      ((c0 & 0xE0) == 0xC0) { extra = 1; cp = c0 & 0x1Fu; }
-    else if ((c0 & 0xF0) == 0xE0) { extra = 2; cp = c0 & 0x0Fu; }
-    else if ((c0 & 0xF8) == 0xF0) { extra = 3; cp = c0 & 0x07u; }
-    else { ++i; return '?'; }
-    if (i + extra >= s.size()) { ++i; return '?'; }   // 글자가 끝에서 잘림
-    for (size_t k = 1; k <= extra; ++k) {
-        const unsigned char ck = (unsigned char)s[i + k];
-        if ((ck & 0xC0) != 0x80) { ++i; return '?'; }
-        cp = (cp << 6) | (ck & 0x3Fu);
-    }
-    // 너무 긴 표현 · 대리 쌍 · 범위 밖은 잘못된 글자로 봅니다.
-    static constexpr uint32_t kMin[4] = { 0, 0x80, 0x800, 0x10000 };
-    if (cp < kMin[extra] || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) { ++i; return '?'; }
-    i += extra + 1;
-    return cp;
+    return utf8::next(s, i);
 }
 
 size_t HFontAtlas::utf8Floor(std::string_view s, size_t maxBytes) {
-    if (maxBytes >= s.size()) return s.size();
-    size_t n = maxBytes;
-    while (n > 0 && ((unsigned char)s[n] & 0xC0) == 0x80) --n;   // 이어지는 바이트 앞에서 자르지 않음
-    return n;
+    return utf8::floorBoundary(s, maxBytes);
 }
 
 // ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -189,7 +295,7 @@ uint64_t HFontAtlas::glyphKey(uint32_t cp, float size, int face) const {
 }
 
 void HFontAtlas::rasterizeGlyph(uint32_t cp, float size, int face, HGlyphInfo& out) {
-    auto* fi    = static_cast<stbtt_fontinfo*>(const_cast<void*>(faceInfo(face)));
+    auto* fi    = static_cast<stbtt_fontinfo*>(const_cast<void*>(fontFor(cp, face)));
     float scale = stbtt_ScaleForPixelHeight(fi, size);
     const int c = (int)cp;
 
@@ -201,12 +307,12 @@ void HFontAtlas::rasterizeGlyph(uint32_t cp, float size, int face, HGlyphInfo& o
     std::vector<uint8_t> bmp(gw * gh, 0);
     stbtt_MakeCodepointBitmap(fi, bmp.data(), gw, gh, gw, scale, scale, c);
 
-    if (!packAlpha(bmp.data(), gw, gh, out.uvMin, out.uvMax)) {
+    if (!packAlpha(bmp.data(), gw, gh, out.uvMin, out.uvMax, out.page)) {
         // 넘친 글자도 캐시에 남지만 글자 · 크기 조합마다 새로 넘치므로, 오류는 처음 한 번만 남기고 수는 셉니다
         // (3D UI 패널처럼 큰 글자 · 여러 크기를 쓰면 같은 오류가 수백 줄 찍혔음).
         if (droppedGlyphs_++ == 0)
-            HLOG(LogUI, Error) << "Font atlas full (" << kAtlasW << "x" << atlasH_ << "): glyph U+" << std::hex << cp
-                               << std::dec << " at " << size << " px and any later new glyphs are not drawn";
+            HLOG(LogUI, Error) << "Font atlas full (" << kMaxPages << " pages of " << kAtlasW << "x" << atlasH_ << "): glyph U+"
+                               << std::hex << cp << std::dec << " at " << size << " px and any later new glyphs are not drawn";
         out = {};
         out.advance = glyphAdvance(cp, size, face);   // 그리지 못해도 자리는 측정과 같게 차지합니다
         return;
@@ -217,37 +323,50 @@ void HFontAtlas::rasterizeGlyph(uint32_t cp, float size, int face, HGlyphInfo& o
     out.advance   = glyphAdvance(cp, size, face);
 }
 
-bool HFontAtlas::packAlpha(const uint8_t* alpha, int w, int h, glm::vec2& uvMin, glm::vec2& uvMax) {
-    // 행이 꽉 찼으면 다음 행으로
-    if (cursorX_ + w + 1 > kAtlasW) {
-        cursorX_  = 0;
-        cursorY_ += rowH_ + 1;
-        rowH_     = 0;
-    }
-    if (cursorY_ + h + 1 > atlasH_) return false;
-
-    // CPU 아틀라스에 RGBA 픽셀 기록 (R=G=B=255, A=alpha)
-    for (int row = 0; row < h; ++row) {
-        for (int col = 0; col < w; ++col) {
-            const int ai = row * w + col;
-            const int pi = ((cursorY_ + row) * kAtlasW + (cursorX_ + col)) * 4;
-            cpuAtlas_[pi+0] = 255;
-            cpuAtlas_[pi+1] = 255;
-            cpuAtlas_[pi+2] = 255;
-            cpuAtlas_[pi+3] = alpha[ai];
+// 지금 페이지에 자리가 없으면 새 페이지를 엽니다(글자 체계 T4-3, 최대 kMaxPages). 예전에는 한 장이 차면 그 뒤 글자를 그리지
+// 않았습니다. 비우고 다시 채우는 방식(UE FSlateFontCache)은 같은 아틀라스를 다른 시점에 쓰는 3D 패널의 그리기 목록이 낡은 자리를
+// 가리킬 수 있어 쓰지 않습니다. 글리프마다 자기 페이지 텍스처로 그리므로 렌더러는 그대로입니다.
+bool HFontAtlas::packAlpha(const uint8_t* alpha, int w, int h, glm::vec2& uvMin, glm::vec2& uvMax, int& pageOut) {
+    if (pages_.empty() || w > kAtlasW - 1 || h > atlasH_ - 1) return false;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        Page& p = pages_.back();
+        // 행이 꽉 찼으면 다음 행으로
+        if (p.cursorX + w + 1 > kAtlasW) {
+            p.cursorX  = 0;
+            p.cursorY += p.rowH + 1;
+            p.rowH     = 0;
         }
-    }
-    uvMin = { (float)cursorX_ / kAtlasW,       (float)cursorY_ / atlasH_ };
-    uvMax = { (float)(cursorX_ + w) / kAtlasW, (float)(cursorY_ + h) / atlasH_ };
+        if (p.cursorY + h + 1 > atlasH_) {
+            if ((int)pages_.size() >= kMaxPages) return false;
+            addPage();
+            continue;
+        }
+        // CPU 아틀라스에 RGBA 픽셀 기록 (R=G=B=255, A=alpha)
+        for (int row = 0; row < h; ++row) {
+            for (int col = 0; col < w; ++col) {
+                const int ai = row * w + col;
+                const size_t pi = ((size_t)(p.cursorY + row) * kAtlasW + (size_t)(p.cursorX + col)) * 4;
+                p.cpu[pi+0] = 255;
+                p.cpu[pi+1] = 255;
+                p.cpu[pi+2] = 255;
+                p.cpu[pi+3] = alpha[ai];
+            }
+        }
+        uvMin = { (float)p.cursorX / kAtlasW,       (float)p.cursorY / atlasH_ };
+        uvMax = { (float)(p.cursorX + w) / kAtlasW, (float)(p.cursorY + h) / atlasH_ };
+        pageOut = (int)pages_.size() - 1;
 
-    cursorX_ += w + 1;
-    rowH_     = std::max(rowH_, h);
-    dirty_    = true;
-    return true;
+        p.cursorX += w + 1;
+        p.rowH     = std::max(p.rowH, h);
+        p.dirty    = true;
+        dirty_     = true;
+        return true;
+    }
+    return false;
 }
 
 bool HFontAtlas::getIcon(std::string_view name, int px, HGlyphInfo& out) {
-    if (!iconSource_ || px <= 0 || cpuAtlas_.empty()) return false;
+    if (!iconSource_ || px <= 0 || pages_.empty()) return false;
     std::string key(name);
     key += '@';
     key += std::to_string(px);
@@ -258,13 +377,13 @@ bool HFontAtlas::getIcon(std::string_view name, int px, HGlyphInfo& out) {
     HGlyphInfo info{};
     std::vector<uint8_t> alpha;
     if (iconSource_->rasterize(name, px, alpha) && alpha.size() == (size_t)px * (size_t)px) {
-        if (packAlpha(alpha.data(), px, px, info.uvMin, info.uvMax)) {
+        if (packAlpha(alpha.data(), px, px, info.uvMin, info.uvMax, info.page)) {
             info.pixelSize = { (float)px, (float)px };
             info.size      = (float)px;
             info.advance   = (float)px;
         } else if (droppedGlyphs_++ == 0) {
-            HLOG(LogUI, Error) << "Font atlas full (" << kAtlasW << "x" << atlasH_ << "): icon '" << key
-                               << "' and any later new glyphs are not drawn";
+            HLOG(LogUI, Error) << "Font atlas full (" << kMaxPages << " pages of " << kAtlasW << "x" << atlasH_ << "): icon '"
+                               << key << "' and any later new glyphs are not drawn";
         }
     }
     iconCache_.emplace(std::move(key), info);
@@ -283,7 +402,7 @@ uint32_t HFontAtlas::findMemType(VkMemoryRequirements reqs, VkMemoryPropertyFlag
     throw std::runtime_error("[HFontAtlas] No suitable memory type!");
 }
 
-void HFontAtlas::createAtlasImage() {
+void HFontAtlas::createPageImage(Page& page) {
     VkImageCreateInfo ici{};
     ici.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ici.imageType     = VK_IMAGE_TYPE_2D;
@@ -295,29 +414,30 @@ void HFontAtlas::createAtlasImage() {
     ici.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     ici.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    vkCreateImage(device_, &ici, nullptr, &atlasImage_);
+    vkCreateImage(device_, &ici, nullptr, &page.image);
 
     VkMemoryRequirements reqs;
-    vkGetImageMemoryRequirements(device_, atlasImage_, &reqs);
+    vkGetImageMemoryRequirements(device_, page.image, &reqs);
     VkMemoryAllocateInfo ai{};
     ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     ai.allocationSize  = reqs.size;
     ai.memoryTypeIndex = findMemType(reqs, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    vkAllocateMemory(device_, &ai, nullptr, &atlasMem_);
-    vkBindImageMemory(device_, atlasImage_, atlasMem_, 0);
+    vkAllocateMemory(device_, &ai, nullptr, &page.mem);
+    vkBindImageMemory(device_, page.image, page.mem, 0);
 
     VkImageViewCreateInfo vci{};
     vci.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vci.image            = atlasImage_;
+    vci.image            = page.image;
     vci.viewType         = VK_IMAGE_VIEW_TYPE_2D;
     vci.format           = VK_FORMAT_R8G8B8A8_UNORM;
     vci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCreateImageView(device_, &vci, nullptr, &atlasView_);
+    vkCreateImageView(device_, &vci, nullptr, &page.view);
+    page.firstUpload = true;
 }
 
-void HFontAtlas::uploadFullAtlas() {
-    if (device_ == VK_NULL_HANDLE || atlasImage_ == VK_NULL_HANDLE) return;
-    VkDeviceSize size = kAtlasW * atlasH_ * 4;
+void HFontAtlas::uploadPage(Page& page) {
+    if (device_ == VK_NULL_HANDLE || page.image == VK_NULL_HANDLE) return;
+    VkDeviceSize size = (VkDeviceSize)kAtlasW * (VkDeviceSize)atlasH_ * 4;
 
     // Staging buffer
     VkBuffer       stageBuf; VkDeviceMemory stageMem; void* stagePtr;
@@ -337,7 +457,7 @@ void HFontAtlas::uploadFullAtlas() {
     vkAllocateMemory(device_, &ai, nullptr, &stageMem);
     vkBindBufferMemory(device_, stageBuf, stageMem, 0);
     vkMapMemory(device_, stageMem, 0, VK_WHOLE_SIZE, 0, &stagePtr);
-    memcpy(stagePtr, cpuAtlas_.data(), size);
+    memcpy(stagePtr, page.cpu.data(), size);
     vkUnmapMemory(device_, stageMem);
 
     // One-time command: UNDEFINED → TRANSFER_DST → SHADER_READ_ONLY
@@ -352,16 +472,16 @@ void HFontAtlas::uploadFullAtlas() {
         b.srcAccessMask       = src;  b.dstAccessMask = dst;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        b.image               = atlasImage_;
+        b.image               = page.image;
         b.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         vkCmdPipelineBarrier(cmd, srcS, dstS, 0, 0,nullptr,0,nullptr,1,&b);
     };
 
-    VkImageLayout oldLayout = firstUpload_
+    VkImageLayout oldLayout = page.firstUpload
         ? VK_IMAGE_LAYOUT_UNDEFINED
         : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkAccessFlags srcAccess = firstUpload_ ? 0 : VK_ACCESS_SHADER_READ_BIT;
-    VkPipelineStageFlags srcStage = firstUpload_
+    VkAccessFlags srcAccess = page.firstUpload ? 0 : VK_ACCESS_SHADER_READ_BIT;
+    VkPipelineStageFlags srcStage = page.firstUpload
         ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
         : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 
@@ -372,7 +492,7 @@ void HFontAtlas::uploadFullAtlas() {
     VkBufferImageCopy region{};
     region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     region.imageExtent      = { (uint32_t)kAtlasW, (uint32_t)atlasH_, 1 };
-    vkCmdCopyBufferToImage(cmd, stageBuf, atlasImage_,
+    vkCmdCopyBufferToImage(cmd, stageBuf, page.image,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     barrier(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -383,11 +503,18 @@ void HFontAtlas::uploadFullAtlas() {
 
     vkDestroyBuffer(device_, stageBuf, nullptr);
     vkFreeMemory   (device_, stageMem, nullptr);
-    firstUpload_ = false;
+    page.firstUpload = false;
+    page.dirty       = false;
 }
 
 void HFontAtlas::upload() {
-    if (device_ == VK_NULL_HANDLE || atlasImage_ == VK_NULL_HANDLE) return;
-    uploadFullAtlas();
+    if (device_ == VK_NULL_HANDLE) return;
+    for (Page& p : pages_) {
+        if (!p.dirty) continue;
+        if (p.image == VK_NULL_HANDLE) createPageImage(p);
+        if (p.firstUpload && &p != pages_.data())
+            HLOG(LogUI, Log) << "Font atlas: page " << (&p - pages_.data()) + 1 << " of " << kMaxPages << " opened";
+        uploadPage(p);
+    }
     dirty_ = false;
 }

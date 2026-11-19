@@ -975,9 +975,11 @@ HSlateRenderer* Renderer::panelUi() {
     if (panelUiFailed_) return nullptr;
     auto* ui = new HSlateRenderer();
     try {
+        // 패널 글꼴은 엔진 콘텐츠의 Pretendard(한글 포함, 글자 체계 T4-4). 없으면(엔진 콘텐츠를 안 담은 실행) 예전처럼 시스템 글꼴.
         ui->init(device, physDevice, VK_FORMAT_UNDEFINED, rc_.vk.push,
                  [this]() { return rc_.beginOneTimeCmd(); },
-                 [this](VkCommandBuffer c) { rc_.endOneTimeCmd(c); });
+                 [this](VkCommandBuffer c) { rc_.endOneTimeCmd(c); },
+                 "/Engine/Fonts/Pretendard-Regular.ttf");
     } catch (const std::exception& ex) {
         HLOG(LogRenderer, Error) << "World UI panels disabled: " << ex.what();
         ui->cleanup();

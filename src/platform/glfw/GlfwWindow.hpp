@@ -48,6 +48,12 @@ public:
 
     GLFWwindow* getNativeWindow() const { return window; }
 
+    // IME(글자 체계 T2, Win32 IMM). 숨은 창은 IME 를 켜지 않습니다(덤프가 결정적이도록).
+    void setTextInputEnabled(bool enabled) override;
+    bool isTextInputEnabled() const override { return imeEnabled_; }
+    bool getComposition(std::string& text, size_t& caretBytes) const override;
+    void setTextInputRect(float x, float y, float w, float h) override;
+
 private:
     static void framebufferResizeCallback(GLFWwindow* w, int width, int height);
     static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods);
@@ -89,6 +95,19 @@ private:
     bool buttonLatch_[GLFW_MOUSE_BUTTON_LAST + 1] = {};
     // 직전 pollEvents 이후 들어온 누름과 OS 자동 반복(GLFW_REPEAT)의 횟수입니다(DEF-58).
     uint8_t keyPresses_[GLFW_KEY_LAST + 1]        = {};
+
+    // IME 상태(T2). Win32 창 프로시저를 감싸 WM_IME_* 를 받습니다(GLFW 3.4 에는 조합 글 API 가 없음).
+    bool        imeEnabled_     = false;
+    std::string composition_;          // UTF-8
+    size_t      compositionCaret_ = 0; // composition_ 안의 바이트
+    float       imeRect_[4]     = { -1.f, -1.f, -1.f, -1.f };
+    void*       prevWndProc_    = nullptr;
+    void        installImeHook();
+    void        removeImeHook();
+    void        applyImeRect();
+#ifdef _WIN32
+    static long long __stdcall imeWndProc(void* hwnd, unsigned int msg, unsigned long long wp, long long lp);
+#endif
 
     GLFWcursor* cursorArrow_   = nullptr;
     GLFWcursor* cursorHResize_ = nullptr;

@@ -311,10 +311,15 @@ private:
     void saveSceneAs(std::function<void()> then = {});    // then: 저장에 성공하면 이어서 할 일
     bool writeSceneTo(const std::string& logicalPath);
     // 저장하지 않은 변경이 있으면 저장 · 버리기 · 취소를 묻고, 취소가 아니면 action 을 합니다.
-    void guardUnsaved(const std::string& verb, std::function<void()> action);
+    void guardUnsaved(const HText& verb, std::function<void()> action);
     bool blockedDuringPlay(const char* what) const;
     void loadEditorState();
     void saveEditorState() const;
+    // 문화권(글자 체계 T3): 표를 읽고(htext::useCulture) UI 를 다시 만듭니다. save 면 에디터 상태에 남깁니다.
+    void applyCulture(const std::string& culture, bool save);
+    std::string culture_;            // 에디터 상태의 문화권(비면 en)
+    std::string cultureOverride_;    // --culture(저장하지 않음)
+    std::string pendingCulture_;     // 메뉴에서 고른 문화권(다음 프레임에 적용)
 
     // 소리 출력 장치(2026-10-16). audioOutput_ 이 비면 시스템 기본 장치입니다.
     AudioSystem* audio_            = nullptr;
@@ -337,7 +342,7 @@ private:
     struct ModalSpec {
         std::string              title;
         std::string              message;
-        bool                     hasInput = false;   // 이름 입력 칸(dialogText_)
+        bool                     hasInput = false;   // 이름 입력 칸(dialogEdit_)
         std::string              inputPlaceholder;
         std::vector<std::string> list;               // 고를 항목(누르면 onPick, 대화상자는 닫힘)
         std::function<void(const std::string&)> onPick;
@@ -349,9 +354,8 @@ private:
     std::shared_ptr<SSearchBox> dialogBox_;
     std::function<void()>      modalPending_;     // 프레임 끝에 실행할 버튼 · 항목 동작
     bool                       modalDirty_   = false;
-    std::string                dialogText_;
+    HTextEditState             dialogEdit_;   // 대화상자 이름 칸(글자 체계 T1). 글은 dialogEdit_.text
     bool                       dialogFocused_ = false;
-    bool                       dialogSelAll_  = false;
     bool modalOpen() const { return (bool)modal_; }
     void openModal(ModalSpec spec);
     void triggerModal(std::function<void()> action);   // 대화상자를 닫고 action 을 프레임 끝에
@@ -375,6 +379,11 @@ private:
     bool        uiLogCategories_ = false;
     std::string uiOutlinerSearch_;
     std::string uiRename_;
+    std::string uiType_;          // 글자 체계 T1 · T2 덤프
+    int         uiCaretLeft_  = 0;
+    int         uiSelectLeft_ = 0;
+    std::string uiImeCompose_;
+    HTextEditState* focusedEdit();   // 포커스된 글 칸의 편집 상태(없으면 nullptr)
     std::string uiOutlinerCollapse_;
     bool        uiPlay_ = false;
     std::string uiLayout_;

@@ -75,7 +75,7 @@ std::shared_ptr<HWidget> EditorDock::buildNodeWidget(DockNode* node) {
                     ->pressedColor(EditorTheme::ctlPressed)
                     ->padding(HPadding{s(4.f), 0.f})
                     ->content(deps_.ui->icon("x", 10.f, EditorUiKit::kTextDim, "x", 11.f));
-                closeBtn->tooltip.set("Close Tab");
+                closeBtn->setTooltip(HTEXT("Editor.Dock", "Tip.CloseTab", "Close Tab"));
                 tabContent = HNew(HR)
                     ->addSlot(tabContent, HR::ESizeRule::Auto)
                     ->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(6.f))
