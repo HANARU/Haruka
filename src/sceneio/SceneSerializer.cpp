@@ -270,7 +270,7 @@ std::string SceneSerializer::writeScene(const World& world, const Actor* skip) {
             if (it != indexOf.end()) parentIdx[i] = it->second;
         }
     }
-    return "# Haruka Scene v4\n" + writeActorSet(set, parentIdx);
+    return std::string(kSceneHeader) + "\n" + writeActorSet(set, parentIdx);
 }
 
 std::string SceneSerializer::writeActorSet(const std::vector<const Actor*>& actors,

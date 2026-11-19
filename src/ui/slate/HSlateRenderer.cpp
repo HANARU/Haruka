@@ -7,6 +7,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 // ── 헬퍼 ──────────────────────────────────────────────────────────────────────
@@ -236,8 +237,10 @@ void HSlateRenderer::createPipeline() {
     panelPipeline_ = buildPipeline(panelRenderPass_, true);
 }
 
-// 에디터 오버레이(premultipliedTarget = false)와 패널(true)은 색 블렌딩이 같고 알파만 다릅니다. 에디터는 예전 그대로
-// 마지막에 그린 알파를 남기고, 패널은 알파를 "over" 로 덧쌓아(투명으로 지운 대상 위) 색이 알파를 곱한 값이 됩니다.
+// 에디터 오버레이(premultipliedTarget = false)와 패널(true)은 색 블렌딩이 같고 알파만 다릅니다.
+// 에디터 스왑체인은 불투명 대상이므로 그림자·둥근 모서리 반투명 픽셀이 스왑체인 알파를 깎아 캡처(PNG)나
+// 합성기에서 투명 구멍이 나지 않게 대상 알파를 보존합니다(ZERO + ONE). 패널은 투명으로 지운 오프스크린
+// 대상 위라 알파를 "over" 로 덧쌓습니다(ONE + ONE_MINUS_SRC_ALPHA).
 VkPipeline HSlateRenderer::buildPipeline(VkRenderPass renderPass, bool premultipliedTarget) {
     // Shaders
     VkShaderModule vertMod = loadSpv("shaders/ui.vert.spv");
@@ -253,22 +256,26 @@ VkPipeline HSlateRenderer::buildPipeline(VkRenderPass renderPass, bool premultip
     stages[1].module = fragMod;
     stages[1].pName  = "main";
 
-    // Vertex input: UIVertex { vec2 pos, vec2 uv, vec4 color }
+    // Vertex input: UIVertex { vec2 pos, vec2 uv, vec4 color, vec2 localPos, vec2 halfSize, vec4 params, vec4 borderColor }
     VkVertexInputBindingDescription vbind{};
     vbind.binding   = 0;
     vbind.stride    = sizeof(UIVertex);
     vbind.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    VkVertexInputAttributeDescription attrs[3]{};
-    attrs[0] = { 0, 0, VK_FORMAT_R32G32_SFLOAT,       offsetof(UIVertex, pos)   };
-    attrs[1] = { 1, 0, VK_FORMAT_R32G32_SFLOAT,       offsetof(UIVertex, uv)    };
-    attrs[2] = { 2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(UIVertex, color) };
+    VkVertexInputAttributeDescription attrs[7]{};
+    attrs[0] = { 0, 0, VK_FORMAT_R32G32_SFLOAT,       offsetof(UIVertex, pos)         };
+    attrs[1] = { 1, 0, VK_FORMAT_R32G32_SFLOAT,       offsetof(UIVertex, uv)          };
+    attrs[2] = { 2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(UIVertex, color)       };
+    attrs[3] = { 3, 0, VK_FORMAT_R32G32_SFLOAT,       offsetof(UIVertex, localPos)    };
+    attrs[4] = { 4, 0, VK_FORMAT_R32G32_SFLOAT,       offsetof(UIVertex, halfSize)    };
+    attrs[5] = { 5, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(UIVertex, params)      };
+    attrs[6] = { 6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(UIVertex, borderColor) };
 
     VkPipelineVertexInputStateCreateInfo visci{};
     visci.sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     visci.vertexBindingDescriptionCount   = 1;
     visci.pVertexBindingDescriptions      = &vbind;
-    visci.vertexAttributeDescriptionCount = 3;
+    visci.vertexAttributeDescriptionCount = 7;
     visci.pVertexAttributeDescriptions    = attrs;
 
     VkPipelineInputAssemblyStateCreateInfo iasci{};
@@ -300,9 +307,10 @@ VkPipeline HSlateRenderer::buildPipeline(VkRenderPass renderPass, bool premultip
     blendAtt.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     blendAtt.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     blendAtt.colorBlendOp        = VK_BLEND_OP_ADD;
-    blendAtt.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    blendAtt.dstAlphaBlendFactor = premultipliedTarget ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+    blendAtt.srcAlphaBlendFactor = premultipliedTarget ? VK_BLEND_FACTOR_ONE
                                                        : VK_BLEND_FACTOR_ZERO;
+    blendAtt.dstAlphaBlendFactor = premultipliedTarget ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+                                                       : VK_BLEND_FACTOR_ONE;
     blendAtt.alphaBlendOp        = VK_BLEND_OP_ADD;
     blendAtt.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                    VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -519,13 +527,31 @@ static bool buildDrawListFromElements(const std::vector<HDrawElement>& elements,
     std::vector<HDrawElement> flat;
     flat.reserve(elements.size() * 4);
     for (const auto& e : elements) {
+        if (e.type == HDrawElement::Type::Icon) {
+            // 아이콘은 아틀라스 자리 하나짜리 텍스처 사각형입니다(D3). 아틀라스가 가득 차 자리가 없으면 그리지 않습니다.
+            HGlyphInfo g{};
+            if (!fonts.getIcon(e.text, (int)e.fontSize, g)) continue;
+            HDrawElement icon{};
+            icon.type    = HDrawElement::Type::Texture;
+            icon.texture = fonts.atlasView();
+            icon.color   = e.color;
+            icon.layer   = e.layer;
+            icon.clip    = e.clip;
+            icon.clipped = e.clipped;
+            icon.rect    = e.rect;
+            icon.uvRect  = { g.uvMin.x, g.uvMin.y, g.uvMax.x, g.uvMax.y };
+            flat.push_back(icon);
+            continue;
+        }
         if (e.type != HDrawElement::Type::Text) {
             flat.push_back(e);
             continue;
         }
         float penX  = e.rect.x;
         float baseY = e.rect.y + e.fontSize; // approximate baseline
-        for (char c : e.text) {
+        // 글자는 UTF-8 코드 포인트로 읽습니다(D4, 한글 등).
+        for (size_t ci = 0; ci < e.text.size();) {
+            const uint32_t c = HFontAtlas::nextCodepoint(e.text, ci);
             // 개행. 없으면 여러 줄 문자열이 한 줄로 이어붙어 그려집니다
             // (뷰포트 통계 오버레이 4줄이 실제로 그랬습니다).
             if (c == '\n') {
@@ -533,7 +559,7 @@ static bool buildDrawListFromElements(const std::vector<HDrawElement>& elements,
                 baseY += e.fontSize * 1.2f;
                 continue;
             }
-            auto g = fonts.getGlyph(c, e.fontSize);
+            auto g = fonts.getGlyph(c, e.fontSize, e.fontFace);
             if (g.pixelSize.x < 1.f || g.pixelSize.y < 1.f) {
                 penX += g.advance;
                 continue; // space or empty glyph
@@ -569,16 +595,31 @@ static bool buildDrawListFromElements(const std::vector<HDrawElement>& elements,
     };
 
     for (const auto& e : flat) {
-        VkImageView tex    = (e.texture != VK_NULL_HANDLE) ? e.texture : whiteView;
-        glm::vec4   uvRect = e.uvRect;
-        if (e.type == HDrawElement::Type::Rect) {
+        const bool  isShadow = (e.type == HDrawElement::Type::Shadow);
+        VkImageView tex      = (e.texture != VK_NULL_HANDLE) ? e.texture : whiteView;
+        glm::vec4   uvRect   = e.uvRect;
+        if (e.type == HDrawElement::Type::Rect || isShadow) {
             tex    = whiteView;
             uvRect = { 0.f, 0.f, 1.f, 1.f };
         }
+        const glm::vec2 halfSize{ e.rect.z * 0.5f, e.rect.w * 0.5f };
+        const float     pad = isShadow ? (std::ceil(std::max(0.f, e.shadowBlur) * 1.5f) + 2.f) : 0.f;
+        glm::vec4 rect{
+            e.rect.x - pad,
+            e.rect.y - pad,
+            e.rect.z + 2.f * pad,
+            e.rect.w + 2.f * pad
+        };
+        glm::vec4 localRect{
+            -halfSize.x - pad,
+            -halfSize.y - pad,
+             halfSize.x + pad,
+             halfSize.y + pad
+        };
         // 클립은 사각형을 CPU 에서 잘라 적용합니다. 요소가 모두 축 정렬 사각형이라 정확하고,
         // 시저처럼 클립이 바뀔 때마다 배치를 끊지 않아도 됩니다(DEF-56).
-        glm::vec4 rect = e.rect;
-        if (e.clipped && !HClipQuad(rect, uvRect, e.clip)) continue;
+        // localRect 도 같이 잘라 둥근 모서리 · 그림자가 클립 경계에서 찌그러지지 않게 합니다.
+        if (e.clipped && !HClipQuad(rect, uvRect, localRect, e.clip)) continue;
 
         if (tex != curTex) {
             flushBatch();
@@ -589,12 +630,13 @@ static bool buildDrawListFromElements(const std::vector<HDrawElement>& elements,
             out.overflowed = true;
             break;
         }
-        float x = rect.x, y = rect.y, w = rect.z, h = rect.w;
-        float u0 = uvRect.x, v0 = uvRect.y, u1 = uvRect.z, v1 = uvRect.w;
-        out.vertices.push_back({ { x,     y     }, { u0, v0 }, e.color });
-        out.vertices.push_back({ { x + w, y     }, { u1, v0 }, e.color });
-        out.vertices.push_back({ { x + w, y + h }, { u1, v1 }, e.color });
-        out.vertices.push_back({ { x,     y + h }, { u0, v1 }, e.color });
+        const float x = rect.x, y = rect.y, w = rect.z, h = rect.w;
+        const float u0 = uvRect.x, v0 = uvRect.y, u1 = uvRect.z, v1 = uvRect.w;
+        const glm::vec4 params{ e.cornerRadius, e.borderWidth, e.shadowBlur, isShadow ? 1.f : 0.f };
+        out.vertices.push_back({ { x,     y     }, { u0, v0 }, e.color, { localRect.x, localRect.y }, halfSize, params, e.borderColor });
+        out.vertices.push_back({ { x + w, y     }, { u1, v0 }, e.color, { localRect.z, localRect.y }, halfSize, params, e.borderColor });
+        out.vertices.push_back({ { x + w, y + h }, { u1, v1 }, e.color, { localRect.z, localRect.w }, halfSize, params, e.borderColor });
+        out.vertices.push_back({ { x,     y + h }, { u0, v1 }, e.color, { localRect.x, localRect.w }, halfSize, params, e.borderColor });
         vertCount += 4;
     }
     flushBatch();
@@ -614,6 +656,45 @@ bool HSlateContext::collectElements(glm::vec2 size, HFontAtlas* fonts, std::vect
 
     HPaintContext ctx(fonts);
     root_->paint(ctx, fullGeo);
+
+    // 툴팁은 모든 위젯 위(맨 위 레이어)에 그립니다.
+    if (isTooltipVisible()) {
+        if (auto target = hoverTooltipTarget_.lock()) {
+            const std::string tip = target->tooltip.get();
+            if (!tip.empty()) {
+                int maxLayer = 0;
+                for (const auto& el : ctx.elements)
+                    if (el.layer > maxLayer) maxLayer = el.layer;
+
+                const float fsz  = tooltipStyle_.fontSize;
+                const float tw   = fonts ? fonts->measureText(tip, fsz, 0) : (float)tip.size() * fsz * 0.6f;
+                const float th   = fsz * 1.2f;
+                const float bw   = tw + tooltipStyle_.padX * 2.f;
+                const float bh   = th + tooltipStyle_.padY * 2.f;
+
+                float tx = pointerPos_.x + tooltipStyle_.offset.x;
+                float ty = pointerPos_.y + tooltipStyle_.offset.y;
+                if (tx + bw > size.x) tx = std::max(0.f, pointerPos_.x - bw - 4.f);
+                if (ty + bh > size.y) ty = std::max(0.f, pointerPos_.y - bh - 4.f);
+                tx = std::clamp(tx, 0.f, std::max(0.f, size.x - bw));
+                ty = std::clamp(ty, 0.f, std::max(0.f, size.y - bh));
+
+                const HGeometry tipGeo{ { std::floor(tx), std::floor(ty) }, { std::ceil(bw), std::ceil(bh) }, 1.f };
+                const HGeometry txtGeo = tipGeo.makeChild({ tooltipStyle_.padX, tooltipStyle_.padY }, { tw, th });
+
+                ctx.pushLayer(maxLayer + 10);
+                if (tooltipStyle_.shadowBlur > 0.f && tooltipStyle_.shadowColor.a > 0.f) {
+                    ctx.drawShadow(tipGeo, tooltipStyle_.cornerRadius,
+                                   tooltipStyle_.shadowOffset, tooltipStyle_.shadowBlur,
+                                   tooltipStyle_.shadowColor);
+                }
+                ctx.drawRoundedRect(tipGeo, tooltipStyle_.bg, tooltipStyle_.cornerRadius,
+                                    tooltipStyle_.border, tooltipStyle_.borderWidth);
+                ctx.drawText(txtGeo, tip, fsz, tooltipStyle_.textColor, 0);
+                ctx.popLayer(maxLayer + 10);
+            }
+        }
+    }
 
     std::stable_sort(ctx.elements.begin(), ctx.elements.end(),
         [](const HDrawElement& a, const HDrawElement& b) {
@@ -647,6 +728,8 @@ bool HSlateRenderer::dumpElements(glm::vec2 size, const std::string& path) {
     for (const HDrawElement& e : elements) {
         const char* kind = e.type == HDrawElement::Type::Rect    ? "Rect"
                          : e.type == HDrawElement::Type::Texture ? "Texture"
+                         : e.type == HDrawElement::Type::Shadow  ? "Shadow"
+                         : e.type == HDrawElement::Type::Icon    ? "Icon"
                                                                  : "Text";
         int n = std::snprintf(buf, sizeof(buf),
             "%s rect=(%.2f,%.2f,%.2f,%.2f) color=(%.3f,%.3f,%.3f,%.3f) layer=%d",
@@ -658,12 +741,27 @@ bool HSlateRenderer::dumpElements(glm::vec2 size, const std::string& path) {
                               e.clip.x, e.clip.y, e.clip.z, e.clip.w);
             if (n > 0) f.write(buf, n);
         }
+        if (e.cornerRadius > 0.f) {
+            n = std::snprintf(buf, sizeof(buf), " radius=%.2f", e.cornerRadius);
+            if (n > 0) f.write(buf, n);
+        }
+        if (e.borderWidth > 0.f) {
+            n = std::snprintf(buf, sizeof(buf), " border=(%.2f,%.3f,%.3f,%.3f,%.3f)",
+                              e.borderWidth, e.borderColor.r, e.borderColor.g, e.borderColor.b, e.borderColor.a);
+            if (n > 0) f.write(buf, n);
+        }
+        if (e.shadowBlur > 0.f) {
+            n = std::snprintf(buf, sizeof(buf), " blur=%.2f", e.shadowBlur);
+            if (n > 0) f.write(buf, n);
+        }
         if (e.type == HDrawElement::Type::Texture) {
             n = std::snprintf(buf, sizeof(buf), " tex uv=(%.3f,%.3f,%.3f,%.3f)",
                               e.uvRect.x, e.uvRect.y, e.uvRect.z, e.uvRect.w);
             if (n > 0) f.write(buf, n);
+        } else if (e.type == HDrawElement::Type::Icon) {
+            f << " icon=\"" << e.text << '"';
         } else if (e.type == HDrawElement::Type::Text) {
-            n = std::snprintf(buf, sizeof(buf), " size=%.2f text=\"", e.fontSize);
+            n = std::snprintf(buf, sizeof(buf), "%s size=%.2f text=\"", e.fontFace ? " bold" : "", e.fontSize);
             if (n > 0) f.write(buf, n);
             for (unsigned char c : e.text) {
                 if (c == '\\') f << "\\\\";
@@ -816,6 +914,32 @@ void HSlateContext::arrange(glm::vec2 size) {
     root_->onArrangeChildren(fullGeo);
 }
 
+// ── tickTooltip ───────────────────────────────────────────────────────────────
+void HSlateContext::tickTooltip(float dt) {
+    if (!root_ || !root_->isVisible() || !pointerValid_) {
+        hoverTooltipTarget_.reset();
+        hoverElapsed_      = 0.f;
+        tooltipSuppressed_ = false;
+        return;
+    }
+    auto target = root_->findTooltipWidget(pointerPos_);
+    auto prev   = hoverTooltipTarget_.lock();
+    if (target != prev) {
+        hoverTooltipTarget_ = target;
+        hoverElapsed_       = 0.f;
+        tooltipSuppressed_  = false;
+    }
+    if (target && !tooltipSuppressed_) {
+        hoverElapsed_ += std::max(0.f, dt);
+    }
+}
+
+bool HSlateContext::isTooltipVisible() const {
+    if (tooltipSuppressed_ || hoverElapsed_ < tooltipStyle_.delaySec) return false;
+    auto target = hoverTooltipTarget_.lock();
+    return target && target->isVisible() && !target->tooltip.get().empty();
+}
+
 // ── handlePointerEvent ─────────────────────────────────────────────────────────
 HReply HSlateContext::handlePointerEvent(HPointerEvent e) {
     if (!root_ || !root_->isVisible()) return HReply::Unhandled();
@@ -825,6 +949,21 @@ HReply HSlateContext::handlePointerEvent(HPointerEvent e) {
     const bool isWheel  = (e.wheelDelta != 0.f);
     const bool isButton = !isWheel && e.button >= 0;
     const bool isMove   = !isWheel && e.button < 0;
+
+    pointerPos_   = e.position;
+    pointerValid_ = true;
+    if ((isButton && e.down) || isWheel) {
+        hoverElapsed_      = 0.f;
+        tooltipSuppressed_ = true;
+    } else if (isMove) {
+        auto target = root_->findTooltipWidget(pointerPos_);
+        auto prev   = hoverTooltipTarget_.lock();
+        if (target != prev) {
+            hoverTooltipTarget_ = target;
+            hoverElapsed_       = 0.f;
+            tooltipSuppressed_  = false;
+        }
+    }
 
     if (captureActive_) {
         if (auto cap = captured_.lock()) {

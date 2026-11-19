@@ -4,6 +4,7 @@
 #include "../core/Transform.hpp"
 #include "EditorContext.hpp"
 #include "EditorUiKit.hpp"
+#include "EditorIcons.hpp"
 #include "EditorDock.hpp"
 #include "EditorMenus.hpp"
 #include "EditorChromePanels.hpp"
@@ -51,7 +52,7 @@ public:
     // Base panel dimensions at 1080p reference (scaled at runtime by uiScale_)
     static constexpr float kOutlinerW = 290.f;
     static constexpr float kDetailsW  = 330.f;
-    static constexpr float kToolbarH  =  50.f;
+    static constexpr float kToolbarH  = EditorTheme::toolbarH;
     static constexpr float kBottomH   = 260.f;
 
     enum class EPlayState { Editor, Playing, Paused };
@@ -122,6 +123,7 @@ private:
     OutputLogPanel      logPanel_;
 
     EditorContext  ctx_;
+    EditorIcons    icons_;            // 글꼴 아틀라스가 가리키므로 slateRenderer_ 보다 먼저 선언(나중에 사라짐, D3)
     HSlateRenderer slateRenderer_;
     HCommandStack  cmdStack_;
     HotReloader    hotReloader_;
@@ -158,8 +160,8 @@ private:
     PanelRegistry             panelReg_;              // id → {제목, 위젯}
 
     // ── 상단 메뉴 바 (Phase 1) ────────────────────────────────────────────────
-    static constexpr float kMenuBarH   = 26.f;
-    static constexpr float kStatusBarH = 24.f;
+    static constexpr float kMenuBarH   = EditorTheme::menuBarH;
+    static constexpr float kStatusBarH = EditorTheme::rowH;
     void buildMenus();
     bool bottomDirty_    = false;   // 하단 패널(콘텐츠 브라우저) 지연 리빌드
     void flushChromeRebuilds();
@@ -380,18 +382,21 @@ private:
     std::string uiGizmoMode_;
     bool        uiLocalSpace_ = false;
     std::string uiPick_;
+    std::string uiHover_;
+    bool        uiHoverActive_ = false;
+    glm::vec2   uiHoverPos_{ 0.f, 0.f };
     std::vector<LineVertex> lastEditorLines_;
     std::vector<LineVertex> lastGizmoTris_;
     void applyDumpState();
 
-    // UE5-style dark theme
-    static constexpr glm::vec4 kBgPanel   { 0.105f, 0.105f, 0.11f,  1.f };
-    static constexpr glm::vec4 kBgHeader  { 0.078f, 0.078f, 0.082f, 1.f };
-    static constexpr glm::vec4 kBgToolbar { 0.12f,  0.12f,  0.13f,  1.f };
-    static constexpr glm::vec4 kBorder    { 0.055f, 0.055f, 0.060f, 1.f };
-    static constexpr glm::vec4 kTextHdr   { 0.85f,  0.85f,  0.87f,  1.f };
-    static constexpr glm::vec4 kTextBody  { 0.88f,  0.88f,  0.90f,  1.f };
-    static constexpr glm::vec4 kTextDim   { 0.42f,  0.42f,  0.45f,  1.f };
-    static constexpr glm::vec4 kSelected  { 0.071f, 0.467f, 0.792f, 0.50f };
-    static constexpr glm::vec4 kAccent    { 0.071f, 0.467f, 0.792f, 1.f };
+    // 에디터 색 토큰(EditorTheme 정본 별칭)
+    static constexpr glm::vec4 kBgPanel   = EditorTheme::bgPanel;
+    static constexpr glm::vec4 kBgHeader  = EditorTheme::bgHeader;
+    static constexpr glm::vec4 kBgToolbar = EditorTheme::bgWindow;
+    static constexpr glm::vec4 kBorder    = EditorTheme::lineDivider;
+    static constexpr glm::vec4 kTextHdr   = EditorTheme::textPrimary;
+    static constexpr glm::vec4 kTextBody  = EditorTheme::textPrimary;
+    static constexpr glm::vec4 kTextDim   = EditorTheme::textSecondary;
+    static constexpr glm::vec4 kSelected  = EditorTheme::selectRow;
+    static constexpr glm::vec4 kAccent    = EditorTheme::accent;
 };

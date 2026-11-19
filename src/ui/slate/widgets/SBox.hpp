@@ -54,6 +54,14 @@ public:
         child_->paint(ctx, child_->cachedGeometry());
     }
 
+    std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) override {
+        if (!isVisible()) return nullptr;
+        if (child_)
+            if (auto w = child_->findTooltipWidget(pos)) return w;
+        if (!cachedGeo_.contains(pos)) return nullptr;
+        return tooltip.get().empty() ? nullptr : shared_from_this();
+    }
+
     HReply onMouseButton(const HPointerEvent& e) override {
         if (!cachedGeo_.contains(e.position)) return HReply::Unhandled();
         return child_ ? child_->onMouseButton(e) : HReply::Unhandled();

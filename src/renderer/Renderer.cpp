@@ -927,8 +927,11 @@ void Renderer::savePipelineCache() {
     const uint64_t h = hpak::hash64(data.data(), data.size());
     if (h == pipelineCacheSavedHash_) return;
     const std::vector<uint8_t> file = hpcache::wrap(data.data(), data.size());
+    const std::filesystem::path dst = happ::inWriteRoot(kPipelineCacheFile);
+    std::error_code ec;
+    std::filesystem::create_directories(dst.parent_path(), ec);
     std::string err;
-    if (hfile::writeAtomicBinary(happ::inWriteRoot(kPipelineCacheFile), file.data(), file.size(), &err))
+    if (hfile::writeAtomicBinary(dst, file.data(), file.size(), &err))
         pipelineCacheSavedHash_ = h;
     else
         HLOG(LogRenderer, Warning) << "Pipeline cache not saved: " << err;

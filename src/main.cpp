@@ -2,6 +2,14 @@
 #include "runtime/EngineOptions.hpp"
 #include "core/HLog.hpp"
 #include "core/AppPaths.hpp"
+#include "core/ProjectDescriptor.hpp"
+
+#ifndef HARUKA_PROJECT_COMPANY
+#define HARUKA_PROJECT_COMPANY "Haruka"
+#endif
+#ifndef HARUKA_PROJECT_NAME
+#define HARUKA_PROJECT_NAME ""
+#endif
 
 #include <filesystem>
 #include <stdexcept>
@@ -84,9 +92,30 @@ int main(int argc, char** argv) {
     std::unique_ptr<IEngineFrontend> frontend = createEngineFrontend();
     std::vector<std::string> unknownArgs;
     const EngineOptions options = hopt::parse(std::vector<std::string>(argv + (argc > 0 ? 1 : 0), argv + argc), unknownArgs);
-    const bool writeRootOk = !options.writeRoot.empty()
-        ? happ::setWriteRoot(options.writeRoot)
-        : happ::initWriteRoot(frontend->policy().userDataFolder);
+    bool writeRootOk = false;
+    if (!options.writeRoot.empty()) {
+        writeRootOk = happ::setWriteRoot(options.writeRoot);
+    } else if (frontend->policy().userDataFolder) {
+        std::string company = HARUKA_PROJECT_COMPANY;
+        std::string name    = HARUKA_PROJECT_NAME;
+        if (!options.projectDir.empty()) {
+            const std::filesystem::path projFile = project_descriptor::findInDirectory(options.projectDir);
+            ProjectDescriptor desc;
+            std::vector<std::string> warnings, errors;
+            if (!projFile.empty() && project_descriptor::loadFromFile(projFile, desc, warnings, errors)) {
+                company = desc.company;
+                name    = desc.name;
+            }
+        }
+        writeRootOk = happ::initWriteRoot(true, company, name);
+    } else {
+        const std::string& projDir = !options.projectDir.empty() ? options.projectDir : frontend->policy().projectDir;
+        std::error_code ec;
+        if (!projDir.empty() && std::filesystem::is_directory(projDir, ec))
+            writeRootOk = happ::setWriteRoot(std::filesystem::path(projDir) / "Saved");
+        else
+            writeRootOk = happ::initWriteRoot(false);
+    }
 
     // 표준 출력 핸들이 없어 파일로 돌렸는지입니다(창 없는 실행 --headless 와는 다른 뜻).
     const bool stdioRedirected = redirectStdioIfHeadless();   // setvbuf 보다 먼저. 새 스트림에 적용되어야 한다.

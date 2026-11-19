@@ -37,9 +37,6 @@ add_library(haruka_app_glue OBJECT ${HARUKA_APP_GLUE_DIR}/android_native_app_glu
 target_include_directories(haruka_app_glue PUBLIC ${HARUKA_APP_GLUE_DIR})
 target_compile_options(haruka_app_glue PRIVATE -Wno-unused-parameter)
 
-add_library(HarukaGame SHARED src/AndroidMain.cpp ${GAME_SOURCES} $<TARGET_OBJECTS:haruka_app_glue>)
-target_link_libraries(HarukaGame PRIVATE HarukaRuntime)
-
 # Jolt 의 기본 LTO 는 NDK 링커의 --fatal-warnings 와 겹치면 막힐 수 있어 끕니다(첫 실행 우선).
 if(TARGET Jolt)
     set_target_properties(Jolt PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)

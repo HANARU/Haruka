@@ -8,15 +8,29 @@ class SButton : public HWidget {
 public:
     using ClickFn = std::function<void()>;
 
+    struct Style {
+        glm::vec4 normal          { 0.25f, 0.25f, 0.28f, 1.f };
+        glm::vec4 hovered         { 0.35f, 0.35f, 0.40f, 1.f };
+        glm::vec4 pressed         { 0.15f, 0.15f, 0.18f, 1.f };
+        float     cornerRadius    = 0.f;
+        glm::vec4 disabledContent { 0.45f, 0.45f, 0.50f, 1.f };
+    };
+
     std::shared_ptr<SButton> content(std::shared_ptr<HWidget> w) {
         child_ = std::move(w); return self();
     }
     std::shared_ptr<SButton> onClick(ClickFn fn) {
         onClick_ = std::move(fn); return self();
     }
-    std::shared_ptr<SButton> normalColor  (glm::vec4 c) { normal_   = c; return self(); }
-    std::shared_ptr<SButton> hoveredColor (glm::vec4 c) { hovered_  = c; return self(); }
-    std::shared_ptr<SButton> pressedColor (glm::vec4 c) { pressed_  = c; return self(); }
+    std::shared_ptr<SButton> style(const Style& s) {
+        normal_ = s.normal; hovered_ = s.hovered; pressed_ = s.pressed;
+        cornerRadius_ = s.cornerRadius; disabledContent_ = s.disabledContent;
+        return self();
+    }
+    std::shared_ptr<SButton> normalColor  (glm::vec4 c) { normal_       = c; return self(); }
+    std::shared_ptr<SButton> hoveredColor (glm::vec4 c) { hovered_      = c; return self(); }
+    std::shared_ptr<SButton> pressedColor (glm::vec4 c) { pressed_      = c; return self(); }
+    std::shared_ptr<SButton> cornerRadius (float     r) { cornerRadius_ = r; return self(); }
     std::shared_ptr<SButton> padding      (HPadding  p) { padding_  = p; return self(); }
     std::shared_ptr<SButton> hAlign       (EHAlign   a) { hAlign_   = a; return self(); }
     std::shared_ptr<SButton> vAlign       (EVAlign   a) { vAlign_   = a; return self(); }
@@ -41,12 +55,28 @@ public:
 
     void paint(HPaintContext& ctx, const HGeometry& geo) override {
         if (!isVisible()) return;
+        const bool en = enabled.get();
         glm::vec4 bg = normal_;
-        if (isPressed_ && pressed_.a > 0.f)      bg = pressed_;
-        else if (isHovered_ && hovered_.a > 0.f) bg = hovered_;
-        if (bg.a > 0.f) ctx.drawRect(geo, bg);
-        if (child_ && child_->isVisible())
+        if (en) {
+            if (isPressed_ && pressed_.a > 0.f)      bg = pressed_;
+            else if (isHovered_ && hovered_.a > 0.f) bg = hovered_;
+        }
+        if (bg.a > 0.f) {
+            if (cornerRadius_ > 0.f) ctx.drawRoundedRect(geo, bg, cornerRadius_);
+            else                     ctx.drawRect(geo, bg);
+        }
+        if (child_ && child_->isVisible()) {
+            if (!en) ctx.pushDisabledColor(disabledContent_);
             child_->paint(ctx, child_->cachedGeometry());
+            if (!en) ctx.popDisabledColor();
+        }
+    }
+
+    std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) override {
+        if (!isVisible() || !cachedGeo_.contains(pos)) return nullptr;
+        if (child_)
+            if (auto w = child_->findTooltipWidget(pos)) return w;
+        return tooltip.get().empty() ? nullptr : shared_from_this();
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
@@ -69,19 +99,21 @@ public:
         return HReply::Unhandled();
     }
     HReply onMouseMove(const HPointerEvent& e) override {
-        isHovered_ = cachedGeo_.contains(e.position);
+        isHovered_ = enabled.get() && cachedGeo_.contains(e.position);
         // 좌버튼이 이미 떨어진 뒤라면 눌림 상태를 정리합니다. 버튼 위에서 눌러 밖에서
         // 떼면 이 위젯은 마우스-업을 영영 받지 못해, 없으면 눌린 색으로 굳습니다.
-        if (!e.down) { armed_ = false; isPressed_ = false; }
+        if (!e.down || !enabled.get()) { armed_ = false; isPressed_ = false; }
         return HReply::Unhandled();
     }
 
 private:
     std::shared_ptr<HWidget> child_;
     ClickFn  onClick_;
-    glm::vec4 normal_  { 0.25f, 0.25f, 0.28f, 1.f };
-    glm::vec4 hovered_ { 0.35f, 0.35f, 0.40f, 1.f };
-    glm::vec4 pressed_ { 0.15f, 0.15f, 0.18f, 1.f };
+    glm::vec4 normal_          { 0.25f, 0.25f, 0.28f, 1.f };
+    glm::vec4 hovered_         { 0.35f, 0.35f, 0.40f, 1.f };
+    glm::vec4 pressed_         { 0.15f, 0.15f, 0.18f, 1.f };
+    glm::vec4 disabledContent_ { 0.45f, 0.45f, 0.50f, 1.f };
+    float     cornerRadius_ = 0.f;
     HPadding  padding_ { 8.f, 4.f };
     EHAlign   hAlign_  = EHAlign::Center;
     EVAlign   vAlign_  = EVAlign::Center;

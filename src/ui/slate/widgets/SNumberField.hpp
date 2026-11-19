@@ -23,6 +23,23 @@ public:
     using SetterFn  = std::function<void(float)>;
     using CallbackFn = std::function<void()>;
 
+    struct Style {
+        glm::vec4 bgEditing     { 0.10f, 0.22f, 0.40f, 1.f };
+        glm::vec4 bgDragging    { 0.15f, 0.35f, 0.65f, 1.f };
+        glm::vec4 bgHovered     { 0.30f, 0.30f, 0.34f, 1.f };
+        glm::vec4 bgNormal      { 0.18f, 0.18f, 0.20f, 1.f };
+        glm::vec4 borderFocused { 0.07f, 0.47f, 0.79f, 1.f };
+        glm::vec4 selection     { 0.20f, 0.45f, 0.85f, 1.f };
+        glm::vec4 textEditing   { 1.f,   1.f,   1.f,   1.f };
+        glm::vec4 text          { 0.88f, 0.88f, 0.88f, 1.f };
+        glm::vec4 dragHint      { 0.55f, 0.65f, 0.80f, 1.f };
+        glm::vec4 labelDefault  { 0.85f, 0.85f, 0.85f, 1.f };
+        glm::vec4 borderNormal  { 0.f,   0.f,   0.f,   0.f };
+        glm::vec4 borderHovered { 0.f,   0.f,   0.f,   0.f };
+        float     borderWidth   = 0.f;
+        float     cornerRadius  = 0.f;
+    };
+
     static constexpr float kDeadzonePx = 3.f;    // 클릭과 끌기를 가르는 거리
     static constexpr float kShiftMul   = 10.f;   // UE 식: Shift 는 빠르게
     static constexpr float kCtrlMul    = 0.1f;   //        Ctrl 은 정밀하게
@@ -57,7 +74,8 @@ public:
     std::shared_ptr<SNumberField> step(float s)           { step_       = s;             return self(); }
     std::shared_ptr<SNumberField> unit(ENumberUnit u)     { unit_       = u;             return self(); }
     std::shared_ptr<SNumberField> label(std::string l)    { label_      = std::move(l);  return self(); }
-    std::shared_ptr<SNumberField> labelColor(glm::vec4 c) { labelColor_ = c;             return self(); }
+    std::shared_ptr<SNumberField> labelColor(glm::vec4 c) { labelColor_ = c; hasLabelColor_ = true; return self(); }
+    std::shared_ptr<SNumberField> style(const Style& s)   { style_      = s;             return self(); }
     std::shared_ptr<SNumberField> fontSize(float f)       { fontSize_   = f;             return self(); }
     std::shared_ptr<SNumberField> onDragBegin(CallbackFn fn) { beginFn_ = std::move(fn); return self(); }
     std::shared_ptr<SNumberField> onDragEnd  (CallbackFn fn) { endFn_   = std::move(fn); return self(); }
@@ -110,13 +128,21 @@ public:
     void paint(HPaintContext& ctx, const HGeometry& geo) override {
         if (!isVisible()) return;
 
-        glm::vec4 bg = editing_    ? glm::vec4{0.10f, 0.22f, 0.40f, 1.f}
-                     : isDragging_ ? glm::vec4{0.15f, 0.35f, 0.65f, 1.f}
-                     : isHovered_  ? glm::vec4{0.30f, 0.30f, 0.34f, 1.f}
-                                   : glm::vec4{0.18f, 0.18f, 0.20f, 1.f};
-        ctx.drawRect(geo, bg);
-        if (editing_)
-            ctx.drawBorder(geo, {0.07f, 0.47f, 0.79f, 1.f}, 1.f);
+        glm::vec4 bg = editing_    ? style_.bgEditing
+                     : isDragging_ ? style_.bgDragging
+                     : isHovered_  ? style_.bgHovered
+                                   : style_.bgNormal;
+        glm::vec4 borderCol = editing_                       ? style_.borderFocused
+                            : (isHovered_ || isDragging_)    ? style_.borderHovered
+                                                             : style_.borderNormal;
+        float     bw = editing_ ? std::max(1.f, style_.borderWidth) : style_.borderWidth;
+        if (style_.cornerRadius > 0.f) {
+            ctx.drawRoundedRect(geo, bg, style_.cornerRadius, borderCol, (borderCol.a > 0.f) ? bw : 0.f);
+        } else {
+            ctx.drawRect(geo, bg);
+            if (bw > 0.f && borderCol.a > 0.f)
+                ctx.drawBorder(geo, borderCol, bw);
+        }
 
         // 라벨 폭은 실측 — "FovY"처럼 긴 라벨이 값과 겹치지 않도록
         float labelW = 0.f;
@@ -128,7 +154,7 @@ public:
             lg.position = { geo.position.x + 4.f, geo.position.y };
             lg.size     = { labelW, geo.size.y };
             lg.scale    = geo.scale;
-            ctx.drawText(lg, label_, fontSize_, labelColor_);
+            ctx.drawText(lg, label_, fontSize_, hasLabelColor_ ? labelColor_ : style_.labelDefault);
         }
 
         // Value text (편집 중에는 입력 버퍼 + 커서)
@@ -142,14 +168,14 @@ public:
                 float tw = ctx.fonts() ? ctx.fonts()->measureText(editBuf_, fontSize_) : 0.f;
                 HGeometry sg = vg;
                 sg.size.x = std::min(tw + 2.f, vg.size.x);
-                ctx.drawRect(sg, {0.20f, 0.45f, 0.85f, 1.f});
-                ctx.drawText(vg, editBuf_, fontSize_, {1.f, 1.f, 1.f, 1.f});
+                ctx.drawRect(sg, style_.selection);
+                ctx.drawText(vg, editBuf_, fontSize_, style_.textEditing);
             } else {
-                ctx.drawText(vg, editBuf_ + "|", fontSize_, {1.f, 1.f, 1.f, 1.f});
+                ctx.drawText(vg, editBuf_ + "|", fontSize_, style_.textEditing);
             }
         } else {
             ctx.drawText(vg, formatTrimmed(getter_ ? getter_() : 0.f, displayDecimals()),
-                         fontSize_, {0.88f, 0.88f, 0.88f, 1.f});
+                         fontSize_, style_.text);
         }
 
         // 호버 시 드래그 어포던스 (◀ ▶ — 좌우 드래그로 값 변경)
@@ -159,7 +185,7 @@ public:
             hg.position = { geo.position.x + geo.size.x - hintW - 5.f, geo.position.y };
             hg.size     = { hintW, geo.size.y };
             hg.scale    = geo.scale;
-            ctx.drawText(hg, "< >", fontSize_, {0.55f, 0.65f, 0.80f, 1.f});
+            ctx.drawText(hg, "< >", fontSize_, style_.dragHint);
         }
     }
 
@@ -238,7 +264,9 @@ private:
     ENumberUnit unit_       = ENumberUnit::Scalar;
     float       fontSize_   = 10.f;
     std::string label_;
-    glm::vec4   labelColor_ = {0.85f, 0.85f, 0.85f, 1.f};
+    glm::vec4   labelColor_    = {0.85f, 0.85f, 0.85f, 1.f};
+    bool        hasLabelColor_ = false;
+    Style       style_;
 
     CallbackFn  beginFn_;
     CallbackFn  endFn_;

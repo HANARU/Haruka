@@ -1,4 +1,5 @@
 #include "EditorViewportController.hpp"
+#include "EditorTheme.hpp"
 #include "../components/LightComponent.hpp"
 #include "../components/XrComponents.hpp"
 #include "../core/DebugDraw.hpp"
@@ -73,7 +74,7 @@ void EditorViewportController::cleanup(World* world) {
 }
 
 std::shared_ptr<SBorder> EditorViewportController::buildViewportWidget() {
-    viewportWidget_ = HNew(SBorder)->background({0.f, 0.f, 0.f, 0.f});
+    viewportWidget_ = HNew(SBorder)->background(EditorTheme::transparent);
     return viewportWidget_;
 }
 

@@ -1,4 +1,5 @@
 #include "Vfs.hpp"
+#include "LogicalPath.hpp"
 #include "PakFormat.hpp"
 #include "PakReader.hpp"
 #include "PathUtf8.hpp"
@@ -23,7 +24,8 @@ struct Mount {
     std::string                       name;
     // 낱개 폴더
     fs::path                          root;
-    std::string                       prefixKey;      // 찾기 키 기준 접두어("assets/"), 비면 모두
+    std::string                       prefixKey;      // 찾기 키 기준 접두어("/game/", "shaders/" 등), 비면 모두
+    bool                              stripPrefix = false;   // 참이면 찾을 때 prefixKey 를 떼고 root 아래에서 찾음
     // 묶음
     std::unique_ptr<hpak::PakReader>  pak;
 };
@@ -61,25 +63,45 @@ struct Hit {
 // 예전에는 std::string 으로 fs::path 를 만들어, 올바르지 않은 경로가 std::system_error 를 던졌습니다.
 Hit lookupLocked(const Table& t, std::string_view path) {
     Hit hit;
+    const std::string canonical = toCanonical(path);
     fs::path direct;
-    if (!hpak::pathFromUtf8(path, direct)) return hit;
-    if (direct.is_absolute()) {
+    if (!hpak::pathFromUtf8(canonical, direct)) return hit;
+    // POSIX(Android)에서는 "/Game/..." 도 is_absolute() 가 참이므로, 가상 논리 경로 판정을 먼저 봅니다.
+    if (isDiskAbsolutePath(canonical, direct)) {
         std::error_code ec;
         if (fs::is_regular_file(direct, ec)) hit.diskFile = std::move(direct);
         return hit;
     }
     std::string norm;
-    if (!hpak::normalizePath(path, norm)) return hit;
+    if (!hpak::normalizePath(canonical, norm)) return hit;
     const std::string key = hpak::foldKey(norm);
-    fs::path rel;
-    if (!hpak::pathFromUtf8(norm, rel)) return hit;
     for (const auto& m : t.mounts) {
         if (m->pak) {
             const int i = m->pak->find(norm);
             if (i >= 0) { hit.pak = m->pak.get(); hit.index = i; return hit; }
             continue;
         }
-        if (!m->prefixKey.empty() && key.compare(0, m->prefixKey.size(), m->prefixKey) != 0) continue;
+        fs::path rel;
+        if (m->stripPrefix) {
+            if (!m->prefixKey.empty() && key.compare(0, m->prefixKey.size(), m->prefixKey) != 0) continue;
+            const std::string_view sub(norm.data() + m->prefixKey.size(), norm.size() - m->prefixKey.size());
+            if (sub.empty() || !hpak::pathFromUtf8(sub, rel)) continue;
+        } else if (isGamePath(norm)) {
+            if (!m->prefixKey.empty() && m->prefixKey != "assets/") continue;
+            const std::string legacy = "assets/" + std::string(gameRelative(norm));
+            if (!hpak::pathFromUtf8(legacy, rel)) continue;
+        } else if (isConfigPath(norm)) {
+            if (!m->prefixKey.empty() && m->prefixKey != "assets/") continue;
+            const std::string legacy = "assets/" + std::string(configRelative(norm));
+            if (!hpak::pathFromUtf8(legacy, rel)) continue;
+        } else if (isEnginePath(norm)) {
+            // 엔진 콘텐츠는 /Engine/ 으로 마운트한 폴더에서만 찾습니다. 접두어 없는 마운트에 그대로 붙이면 "/Engine/..." 이
+            // 절대 경로로 붙어 드라이브 루트를 찾게 됩니다.
+            continue;
+        } else {
+            if (!m->prefixKey.empty() && key.compare(0, m->prefixKey.size(), m->prefixKey) != 0) continue;
+            if (!hpak::pathFromUtf8(norm, rel)) continue;
+        }
         std::error_code ec;
         const fs::path p = m->root / rel;
         if (fs::is_regular_file(p, ec)) { hit.diskFile = p; return hit; }
@@ -134,6 +156,18 @@ void mountDirectory(const fs::path& root, const std::string& prefix, int priorit
     m->root      = root;
     m->prefixKey = hpak::foldKey(prefix);
     m->name      = hpak::utf8Of(root) + (prefix.empty() ? "" : " (" + prefix + ")");
+    addMount(std::move(m));
+}
+
+void mountDirectoryAs(const fs::path& root, const std::string& virtualPrefix, int priority) {
+    std::string p = virtualPrefix;
+    if (!p.empty() && p.back() != '/') p.push_back('/');
+    auto m = std::make_unique<Mount>();
+    m->priority    = priority;
+    m->root        = root;
+    m->prefixKey   = hpak::foldKey(p);
+    m->stripPrefix = true;
+    m->name        = hpak::utf8Of(root) + (p.empty() ? "" : " -> " + p);
     addMount(std::move(m));
 }
 

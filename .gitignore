@@ -23,16 +23,19 @@
 /Config/editor_state.txt
 
 # ── Scenes ──
-# 에디터는 씬을 프로젝트 폴더의 assets/scenes 아래(하위 폴더 포함)에 저장하고, 그 씬들은 저장소에 둡니다(2026-10-15).
+# 에디터는 씬을 프로젝트 폴더의 Content/scenes 아래(하위 폴더 포함)에 저장하고, 그 씬들은 저장소에 둡니다(2026-10-15).
 # 그 밖의 .hscene(예전 에디터가 실행 폴더에 남기던 scene.hscene 등)은 무시합니다.
 *.hscene
-!/assets/scenes/**/*.hscene
+!/Projects/Samples/Content/scenes/**/*.hscene
 
 # ── 로컬 전용 에셋(2026-11-06) ──
 # 이 기계에서만 쓰는 시험용 에셋과 씬은 저장소와 배포 묶음(Packaging/game.pack.txt 의
-# exclude)에 넣지 않습니다. 위의 씬 예외(!/assets/scenes/**)보다 뒤에 두어야 폴더째 빠집니다.
-/assets/models/_reference/
-/assets/scenes/_reference/
+# exclude)에 넣지 않습니다. 위의 씬 예외(!/Projects/Samples/Content/scenes/**)보다 뒤에 두어야 폴더째 빠집니다.
+/Projects/Samples/Content/models/_reference/
+/Projects/Samples/Content/scenes/_reference/
+
+# ── 프로젝트별 로컬 실행 상태 · 로그 · 캐시 (P3b, 2026-11-19) ──
+Projects/*/Saved/
 
 # ── Session handoff (transient working notes, paste-in convention) ──
 /SESSION_HANDOFF.md

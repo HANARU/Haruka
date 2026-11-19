@@ -77,7 +77,9 @@ void GlfwSwapchain::create() {
     ci.imageColorSpace  = fmt.colorSpace;
     ci.imageExtent      = ext;
     ci.imageArrayLayers = 1;
-    ci.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    supportsTransferSrc_ = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+    ci.imageUsage        = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                           (supportsTransferSrc_ ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0u);
 
     uint32_t qfi[] = { graphicsFamily_, presentFamily_ };
     if (graphicsFamily_ != presentFamily_) {

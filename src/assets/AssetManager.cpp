@@ -1,5 +1,6 @@
 #include "AssetManager.hpp"
 #include "AssetLog.hpp"
+#include "../vfs/LogicalPath.hpp"
 #include "../geometry/PrimitiveLog.hpp"
 #include "GltfLoader.hpp"
 #include "GassetCache.hpp"
@@ -24,12 +25,12 @@ static std::shared_ptr<const CollisionMesh> makeCollisionMesh(const std::vector<
 }
 
 std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
-    auto it = cache.find(path);
+    const std::string key = hvfs::toCanonical(path);
+    auto it = cache.find(key);
     if (it != cache.end()) return it->second;
 
-    // 원본은 논리 경로 그대로 가상 파일 시스템으로 엽니다(에디터는 프로젝트 폴더, 게임은 묶음 파일, 2026-10-24). 캐시 키도
-    // 논리 경로라 실행 형태 · 기기와 상관없이 같습니다. 이 맵의 키와 컴포넌트 · 씬에 남는 값도 논리 경로입니다.
-    const std::string& src = path;
+    // 원본은 정식 논리 경로(/Game/...)로 가상 파일 시스템에서 열고, 캐시 표 열쇠도 정식 경로로 통일합니다.
+    const std::string& src = key;
     std::vector<MeshSourceData> meshes;
     try {
         if (GassetCache::isValid(src)) {
@@ -119,7 +120,7 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
                                 << cut << "); cutout is not supported yet, drawn opaque with an opaque shadow";
     }
 
-    cache[path] = pairs;
+    cache[key] = pairs;
     return pairs;
 }
 

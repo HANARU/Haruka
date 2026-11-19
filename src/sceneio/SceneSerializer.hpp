@@ -26,6 +26,8 @@ class AssetManager;
 // 옛 파일을 읽으려고 계속 받는다(아래 ActorData 의 v3 필드). 쓰기는 v4 만 한다.
 class SceneSerializer {
 public:
+    static constexpr const char* kSceneHeader = "# Haruka Scene v5";
+
     // 파싱된 액터 필드를 스폰 전까지 담아두는 중간 표현
     struct ActorData {
         std::string name;

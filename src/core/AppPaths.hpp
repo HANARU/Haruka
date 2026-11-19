@@ -1,6 +1,7 @@
 #pragma once
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // ── 실행 폴더와 쓰기 위치 (2026-10-19) ────────────────────────────────────────────
@@ -10,7 +11,7 @@
 //
 // 실행 중에 쓰는 파일(설정 · 로그 · 캐시)은 쓰기 루트 아래에 둡니다(2026-10-19 사용자 결정).
 //   에디터(HarukaEngine)    실행 폴더. 점검 도구와 배치 파일이 이 자리를 씁니다(예전과 같음).
-//   게임(HarukaGame)        Windows %LOCALAPPDATA%\Haruka\<실행 파일 이름>. Program Files 에 설치해도 쓸 수 있고 사용자마다
+//   게임(HarukaGame)        Windows %LOCALAPPDATA%\<company>\<name>. Program Files 에 설치해도 쓸 수 있고 사용자마다
 //                           따로입니다(UE 의 Saved, Unity 의 LocalLow 와 같은 자리). Android 는 외부 앱 폴더(Android 단계).
 namespace happ {
 
@@ -21,7 +22,7 @@ const std::string& exeStem();
 
 // 쓰기 루트를 정합니다. main() 이 로그를 열기 전에 한 번 부릅니다. 사용자 폴더를 쓰기로 했는데 그 폴더를 얻거나
 // 만들지 못하면 실행 폴더로 내려가고 false 를 돌려줍니다(호출자가 로그로 알림).
-bool initWriteRoot(bool userDataFolder);
+bool initWriteRoot(bool userDataFolder, std::string_view company = {}, std::string_view appName = {});
 // 실행 옵션(--write-root)으로 쓰기 루트를 강제로 지정합니다(덤프/시험 격리용, S6-0).
 bool setWriteRoot(const std::filesystem::path& dir);
 // 쓰기 루트. initWriteRoot 전에는 실행 폴더입니다.

@@ -234,10 +234,11 @@ void Renderer::detachSyntheticEyes() {
     synthAllocs_.clear();
 }
 
-bool Renderer::captureXrEye(uint32_t image, uint32_t layer, std::vector<uint8_t>& rgba, VkExtent2D& extent) {
-    if (image >= synthImages_.size() || layer >= kMaxViews || !xrActive_) return false;
+bool Renderer::readbackImageToRgba(VkImage image, uint32_t layer, VkExtent2D extent, VkFormat format,
+                                     VkImageLayout currentLayout, VkAccessFlags srcAccess, VkPipelineStageFlags srcStage,
+                                     std::vector<uint8_t>& rgba) {
+    if (image == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) return false;
     vkDeviceWaitIdle(device);
-    extent = xrEyeExtent_;
     const VkDeviceSize bytes = (VkDeviceSize)extent.width * extent.height * 4;
 
     VkBufferCreateInfo bi{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -255,33 +256,33 @@ bool Renderer::captureXrEye(uint32_t image, uint32_t layer, std::vector<uint8_t>
         return false;
     }
 
-    // 개발용 읽기라 1.0 배리어를 그대로 씁니다(어느 장치에서도 유효). 톤매핑 패스가 남긴 COLOR_ATTACHMENT_OPTIMAL 에서
-    // 복사용으로 바꿨다가 되돌리고, 복사 결과가 호스트에 보이도록 HOST 단계까지 묶습니다.
+    // 개발용 읽기라 1.0 배리어를 그대로 씁니다(어느 장치에서도 유효). 복사용으로 바꿨다가 원래 레이아웃으로 되돌리고,
+    // 복사 결과가 호스트에 보이도록 HOST 단계까지 묶습니다.
     const VkCommandBuffer cmd = beginOneTimeCmd();
     VkImageMemoryBarrier ib{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
     ib.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    ib.image               = synthImages_[image];
+    ib.image               = image;
     ib.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, layer, 1 };
-    ib.oldLayout           = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ib.oldLayout           = currentLayout;
     ib.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    ib.srcAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    ib.srcAccessMask       = srcAccess;
     ib.dstAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-                         0, nullptr, 0, nullptr, 1, &ib);
+    vkCmdPipelineBarrier(cmd, srcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &ib);
+
     VkBufferImageCopy region{};
     region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1 };
     region.imageExtent      = { extent.width, extent.height, 1 };
-    vkCmdCopyImageToBuffer(cmd, synthImages_[image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buf, 1, &region);
+    vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buf, 1, &region);
+
     ib.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    ib.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ib.newLayout     = currentLayout;
     ib.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    ib.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    ib.dstAccessMask = srcAccess;
     VkMemoryBarrier hostRead{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
     hostRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     hostRead.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_HOST_BIT, 0,
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, srcStage | VK_PIPELINE_STAGE_HOST_BIT, 0,
                          1, &hostRead, 0, nullptr, 1, &ib);
     endOneTimeCmd(cmd);
 
@@ -290,10 +291,26 @@ bool Renderer::captureXrEye(uint32_t image, uint32_t layer, std::vector<uint8_t>
     vkDestroyBuffer(device, buf, nullptr);
     allocator.freeB(alloc);
 
-    // BGRA 포맷(창이 있을 때의 스왑체인 포맷)이면 RGBA 로 바꿉니다.
-    const VkFormat f = xrFormat_;
-    if (f == VK_FORMAT_B8G8R8A8_SRGB || f == VK_FORMAT_B8G8R8A8_UNORM)
+    // BGRA 포맷(창이 있을 때의 스왑체인 포맷)이면 RGBA 로 바꿉니다. sRGB 바이트는 그대로 둡니다.
+    if (format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_B8G8R8A8_UNORM)
         for (size_t i = 0; i + 3 < rgba.size(); i += 4) std::swap(rgba[i], rgba[i + 2]);
+    return true;
+}
+
+bool Renderer::captureXrEye(uint32_t image, uint32_t layer, std::vector<uint8_t>& rgba, VkExtent2D& extent) {
+    if (image >= synthImages_.size() || layer >= kMaxViews || !xrActive_) return false;
+    extent = xrEyeExtent_;
+    return readbackImageToRgba(synthImages_[image], layer, extent, xrFormat_,
+                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                               VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, rgba);
+}
+
+bool Renderer::captureSwapchain(std::vector<uint8_t>& rgba, VkExtent2D& extent, bool& unsupported) {
+    unsupported = lastSwapUnsupported_;
+    if (lastSwapUnsupported_ || !lastSwapCaptured_) return false;
+    rgba   = lastSwapRgba_;
+    extent = lastSwapExtent_;
     return true;
 }
 

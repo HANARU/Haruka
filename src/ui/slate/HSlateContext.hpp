@@ -6,7 +6,15 @@
 #include <memory>
 #include <cstdint>
 
-struct UIVertex { glm::vec2 pos, uv; glm::vec4 color; };
+struct UIVertex {
+    glm::vec2 pos;
+    glm::vec2 uv;
+    glm::vec4 color;
+    glm::vec2 localPos    = {0,0};
+    glm::vec2 halfSize    = {0,0};
+    glm::vec4 params      = {0,0,0,0};  // radius, borderWidth, shadowBlur, isShadow
+    glm::vec4 borderColor = {0,0,0,0};
+};
 struct HDrawElement;
 
 struct HSlateDrawList {
@@ -48,18 +56,42 @@ inline uint64_t drawListHash(const HSlateDrawList& dl) {
 // Vulkan 함수를 호출하지 않습니다. 구현은 HSlateRenderer.cpp 에 있습니다.
 class HSlateContext {
 public:
+    struct TooltipStyle {
+        glm::vec4 bg           { 0.09f, 0.09f, 0.11f, 1.f };
+        glm::vec4 border       { 0.25f, 0.25f, 0.29f, 1.f };
+        glm::vec4 textColor    { 0.90f, 0.90f, 0.92f, 1.f };
+        float     fontSize     = 12.f;
+        float     cornerRadius = 4.f;
+        float     borderWidth  = 1.f;
+        float     padX         = 8.f;
+        float     padY         = 5.f;
+        glm::vec2 offset       { 12.f, 16.f };
+        glm::vec2 shadowOffset { 0.f, 2.f };
+        float     shadowBlur   = 6.f;
+        glm::vec4 shadowColor  { 0.f, 0.f, 0.f, 0.40f };
+        float     delaySec     = 0.5f;
+    };
+
     // 루트를 갈아 끼우면 이전 트리의 위젯은 곧 파괴됩니다(uiScale 변경 → buildWidgetTree
     // 경로). 누르는 도중이었다면 캡처는 주인 없는 상태로 남겨, 그 누름의 뗌이 새 트리의
     // 엉뚱한 위젯에 가지 않게 합니다.
     void setRootWidget(std::shared_ptr<HWidget> root) {
         root_ = std::move(root);
         captured_.reset();
+        hoverTooltipTarget_.reset();
+        hoverElapsed_      = 0.f;
+        tooltipSuppressed_ = false;
     }
 
     const std::shared_ptr<HWidget>& rootWidget() const { return root_; }
 
+    void setTooltipStyle(const TooltipStyle& s) { tooltipStyle_ = s; }
+    const TooltipStyle& tooltipStyle() const { return tooltipStyle_; }
+
     void   arrange(glm::vec2 size);
     HReply handlePointerEvent(HPointerEvent e);
+    void   tickTooltip(float dt);
+    bool   isTooltipVisible() const;
     bool   buildDrawList(glm::vec2 size, HFontAtlas& fonts,
                          VkImageView whiteView, uint32_t maxVerts,
                          HSlateDrawList& out);
@@ -72,6 +104,13 @@ private:
     // 아직 끝나지 않았다"는 뜻이라, 위젯이 사라져도 그 누름의 뗌까지는 참으로 남습니다.
     std::weak_ptr<HWidget>   captured_;
     bool                     captureActive_ = false;
+
+    TooltipStyle             tooltipStyle_;
+    glm::vec2                pointerPos_{ -10000.f, -10000.f };
+    bool                     pointerValid_      = false;
+    std::weak_ptr<HWidget>   hoverTooltipTarget_;
+    float                    hoverElapsed_      = 0.f;
+    bool                     tooltipSuppressed_ = false;
 
     void releaseCapture() { captured_.reset(); captureActive_ = false; }
 };

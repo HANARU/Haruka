@@ -64,7 +64,7 @@ namespace happ {
 const fs::path& exeDir() { return state().exeDir; }
 const std::string& exeStem() { return state().exeStem; }
 
-bool initWriteRoot(bool userDataFolder) {
+bool initWriteRoot(bool userDataFolder, std::string_view company, std::string_view appName) {
     State& s = state();
     if (s.platformDirs) return true;   // Android 진입점이 이미 정함
     s.writeRoot.clear();
@@ -72,7 +72,9 @@ bool initWriteRoot(bool userDataFolder) {
 #ifdef _WIN32
     const fs::path base = localAppData();
     if (base.empty()) return false;
-    const fs::path root = base / "Haruka" / s.exeStem;
+    const fs::path compDir = company.empty() ? fs::path("Haruka") : fs::path(std::string(company));
+    const fs::path appDir  = appName.empty() ? fs::path(s.exeStem) : fs::path(std::string(appName));
+    const fs::path root = base / compDir / appDir;
     std::error_code ec;
     fs::create_directories(root, ec);
     if (ec || !fs::is_directory(root, ec)) return false;

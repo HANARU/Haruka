@@ -51,7 +51,7 @@ private:
     static constexpr float kTimeW = 52.f;
     static constexpr float kCatW  = 84.f;
 
-    struct ViewRow { std::string time, category, text; glm::vec4 color{ 1.f }; };
+    struct ViewRow { std::string time, category, text; glm::vec4 color = EditorTheme::textPrimary; };
 
     const EditorUiKit*    ui_       = nullptr;
     HLogCategory*         logCat_   = nullptr;

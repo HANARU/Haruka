@@ -1,4 +1,5 @@
 #pragma once
+#include "../EditorTheme.hpp"
 #include "../../ui/slate/HWidget.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -11,8 +12,8 @@ class SDockOverlay : public HWidget {
 public:
     bool      active = false;
     HGeometry rect;                                   // 프레임버퍼 픽셀
-    glm::vec4 fill   { 0.10f, 0.45f, 0.85f, 0.30f };
-    glm::vec4 border { 0.25f, 0.60f, 1.00f, 0.90f };
+    glm::vec4 fill   = EditorTheme::dockFill;
+    glm::vec4 border = EditorTheme::dockBorder;
 
     glm::vec2 computeDesiredSize() override { return { 0.f, 0.f }; }
 

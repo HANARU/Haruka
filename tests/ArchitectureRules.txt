@@ -11,7 +11,7 @@ module math:
 module vfs:
 
 # ── 기반: 로그 · 파일 · 경로 · 텍스트 · 설정 파일 · 계측 · 디버그 선 · 모듈 인터페이스 ──
-module core:      math
+module core:      math, vfs
 module memory:    core
 module platform:  core
 module input:     core, math, platform

@@ -15,15 +15,26 @@
 // 막대 자리를 비우고 그만큼 좁게 배치해, 막대가 내용의 오른쪽 끝(삭제 x 등)을 덮지 않게 합니다.
 class SScrollBox : public HWidget {
 public:
+    struct Style {
+        glm::vec4 track      { 1.f, 1.f, 1.f, 0.04f };
+        glm::vec4 thumb      { 1.f, 1.f, 1.f, 0.22f };
+        glm::vec4 thumbHover { 1.f, 1.f, 1.f, 0.22f };
+        float     barWidth     = 4.f;
+        float     cornerRadius = 0.f;
+    };
+
     std::shared_ptr<SScrollBox> content(std::shared_ptr<HWidget> w) {
         child_ = std::move(w); return self();
+    }
+    std::shared_ptr<SScrollBox> style(const Style& s) {
+        style_ = s; return self();
     }
     // 휠 한 칸에 움직일 거리(px)입니다. 터치패드의 작은 휠 값은 그 비율만큼 움직입니다.
     std::shared_ptr<SScrollBox> wheelStep(float px) {
         step_ = px; return self();
     }
     std::shared_ptr<SScrollBox> barWidth(float px) {
-        barW_ = px; return self();
+        style_.barWidth = px; return self();
     }
 
     float scrollOffset()    const { return offset_; }
@@ -43,7 +54,7 @@ public:
         offset_    = std::clamp(offset_, 0.f, maxOffset_);
         // 글자가 픽셀 경계에 놓이도록 정수 픽셀로 밉니다(소수 위치는 글리프가 번집니다).
         const float shift  = std::floor(offset_ + 0.5f);
-        const float gutter = (maxOffset_ > 0.f) ? std::min(barW_ + 4.f, allotted.size.x) : 0.f;
+        const float gutter = (maxOffset_ > 0.f) ? std::min(style_.barWidth + 4.f, allotted.size.x) : 0.f;
         child_->onArrangeChildren(allotted.makeChild(
             { 0.f, -shift }, { allotted.size.x - gutter, std::max(contentH, allotted.size.y) }));
     }
@@ -56,14 +67,22 @@ public:
             ctx.popClip();
         }
         if (maxOffset_ > 0.f && geo.size.y > 0.f) {
-            // 위치 표시 막대. 보이는 비율만큼의 길이를 스크롤 위치에 맞춰 둡니다.
-            const float viewH  = geo.size.y;
-            const float thumbH = std::max(viewH * viewH / (viewH + maxOffset_), std::min(viewH, 20.f));
-            const float thumbY = (viewH - thumbH) * (offset_ / maxOffset_);
-            const float x      = geo.size.x - barW_ - 2.f;
-            ctx.drawRect(geo.makeChild({ x, 0.f },    { barW_, viewH }),  { 1.f, 1.f, 1.f, 0.04f });
-            ctx.drawRect(geo.makeChild({ x, thumbY }, { barW_, thumbH }), { 1.f, 1.f, 1.f, 0.22f });
+            const float x = geo.size.x - style_.barWidth - 2.f;
+            auto drawBar = [&](const HGeometry& r, glm::vec4 c) {
+                if (c.a <= 0.f) return;
+                if (style_.cornerRadius > 0.f) ctx.drawRoundedRect(r, c, style_.cornerRadius);
+                else                           ctx.drawRect(r, c);
+            };
+            drawBar(geo.makeChild({ x, 0.f }, { style_.barWidth, geo.size.y }), style_.track);
+            drawBar(thumbGeo(geo), thumbHovered_ ? style_.thumbHover : style_.thumb);
         }
+    }
+
+    std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) override {
+        if (!isVisible() || !cachedGeo_.contains(pos)) return nullptr;
+        if (child_)
+            if (auto w = child_->findTooltipWidget(pos)) return w;
+        return tooltip.get().empty() ? nullptr : shared_from_this();
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
@@ -71,6 +90,8 @@ public:
         return child_->onMouseButton(e);
     }
     HReply onMouseMove(const HPointerEvent& e) override {
+        thumbHovered_ = (maxOffset_ > 0.f && cachedGeo_.size.y > 0.f) &&
+                        thumbGeo(cachedGeo_).contains(e.position);
         if (!child_) return HReply::Unhandled();
         // 영역 밖의 이동은 "바깥" 으로 알립니다. 위로 밀려 잘린 행이 그 자리(패널 머리 등)에서
         // 호버를 켜지 않게 합니다.
@@ -87,11 +108,20 @@ public:
     }
 
 private:
+    HGeometry thumbGeo(const HGeometry& geo) const {
+        const float viewH  = geo.size.y;
+        const float thumbH = std::max(viewH * viewH / (viewH + maxOffset_), std::min(viewH, 20.f));
+        const float thumbY = (viewH - thumbH) * (offset_ / maxOffset_);
+        const float x      = geo.size.x - style_.barWidth - 2.f;
+        return geo.makeChild({ x, thumbY }, { style_.barWidth, thumbH });
+    }
+
     std::shared_ptr<HWidget> child_;
-    float offset_    = 0.f;
-    float maxOffset_ = 0.f;
-    float step_      = 48.f;
-    float barW_      = 4.f;
+    Style style_;
+    float offset_       = 0.f;
+    float maxOffset_    = 0.f;
+    float step_         = 48.f;
+    bool  thumbHovered_ = false;
 
     std::shared_ptr<SScrollBox> self() {
         return std::static_pointer_cast<SScrollBox>(shared_from_this());

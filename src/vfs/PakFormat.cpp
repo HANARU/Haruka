@@ -1,4 +1,5 @@
 #include "PakFormat.hpp"
+#include "LogicalPath.hpp"
 
 // xxHash 는 헤더 하나로 씁니다(BSD-2). 이 번역 단위 안에만 넣어 다른 곳이 xxHash 를 모르게 합니다.
 #define XXH_INLINE_ALL
@@ -19,7 +20,8 @@ bool normalizePath(std::string_view in, std::string& out, std::string* why) {
     while (s.size() >= 2 && s[0] == '.' && s[1] == '/') s.erase(0, 2);
     if (s.empty())                 return fail("empty path");
     if (s.size() > kMaxPathBytes)  return fail("path longer than 1024 bytes");
-    if (s.front() == '/')          return fail("absolute path");
+    const bool virtualGame = hvfs::isVirtualLogicalPath(s);
+    if (s.front() == '/' && !virtualGame) return fail("absolute path");
     if (s.back() == '/')           return fail("path ends with '/'");
     for (unsigned char c : s) {
         if (c < 0x20 || c == 0x7F) return fail("control character in path");
@@ -29,7 +31,7 @@ bool normalizePath(std::string_view in, std::string& out, std::string* why) {
         default: break;
         }
     }
-    size_t start = 0;
+    size_t start = virtualGame ? 1 : 0;
     while (start <= s.size()) {
         size_t end = s.find('/', start);
         if (end == std::string::npos) end = s.size();

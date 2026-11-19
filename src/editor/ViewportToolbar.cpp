@@ -1,5 +1,7 @@
 #include "ViewportToolbar.hpp"
 #include "../platform/IWindow.hpp"
+#include "../ui/slate/HFontAtlas.hpp"
+#include "../ui/slate/widgets/SIcon.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -51,7 +53,7 @@ void ViewportToolbar::init(Deps deps) {
 std::shared_ptr<SBorder> ViewportToolbar::build() {
     box_ = HNew(SHorizontalBox);
     bar_ = HNew(SBorder)
-        ->background({0.08f, 0.09f, 0.11f, 0.82f})
+        ->background(EditorTheme::viewportBarBg)
         ->borderColor(EditorUiKit::kBorder)->borderThickness(1.f)
         ->padding(HPadding{ s(6.f), s(4.f) })
         ->content(box_);
@@ -154,13 +156,25 @@ void ViewportToolbar::fill(SHorizontalBox& box, int lv, bool worstCase) const {
         }
         return label(widest);
     };
+    // 글자 앞 아이콘(D3, 14px). 아이콘이 없으면(아이콘 파일 없음) 글자만 둡니다. 폭 계산(worstCase)도 같은 위젯을 써서 맞습니다.
+    auto withIcon = [&](AttrStr icon, std::shared_ptr<HWidget> content) -> std::shared_ptr<HWidget> {
+        if (!deps_.ui || !deps_.ui->fonts || !deps_.ui->fonts->hasIcon(icon.get())) return content;
+        auto row = HNew(SHorizontalBox);
+        row->addSlot(HNew(SIcon)->icon(std::move(icon))->size(s(14.f))->color(EditorUiKit::kTextDim),
+                     SHorizontalBox::ESizeRule::Auto, 0.f, {}, EVAlign::Center);
+        row->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(5.f));
+        row->addSlot(std::move(content), SHorizontalBox::ESizeRule::Auto, 0.f, {}, EVAlign::Center);
+        return row;
+    };
     auto chip = [&](std::shared_ptr<HWidget> content,
-                    std::function<bool()> active, std::function<void()> click) {
-        box.addSlot(
-            HNew(SToggleButton)->padding(HPadding{s(10.f), s(5.f)})
-                ->isActive(std::move(active))->onClick(std::move(click))
-                ->content(std::move(content)),
-            SHorizontalBox::ESizeRule::Auto);
+                    std::function<bool()> active, std::function<void()> click,
+                    const char* tip = "") {
+        auto btn = HNew(SToggleButton)->style(EditorUiKit::toggleButtonStyle(deps_.ui ? deps_.ui->s(1.f) : 1.f))
+            ->padding(HPadding{s(10.f), s(5.f)})
+            ->isActive(std::move(active))->onClick(std::move(click))
+            ->content(std::move(content));
+        if (tip && tip[0] != '\0') btn->tooltip.set(tip);
+        box.addSlot(btn, SHorizontalBox::ESizeRule::Auto);
     };
     auto divider = [&] {
         box.addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f));
@@ -171,28 +185,34 @@ void ViewportToolbar::fill(SHorizontalBox& box, int lv, bool worstCase) const {
     // ── 변환 도구 ─────────────────────────────────────────────────────────────
     static const char* kToolLong [4] = { "Select", "Move", "Rotate", "Scale" };
     static const char* kToolShort[4] = { "Sel",    "Mov",  "Rot",    "Scl"   };
+    static const char* kToolIcon [4] = { "mouse-pointer-2", "move", "rotate-cw", "scaling" };
+    static const char* kToolTip  [4] = { "Select (Q)", "Move (W)", "Rotate (E)", "Scale (R)" };
     for (int m = 0; m < 4; ++m)
-        chip(label(lv <= 0 ? kToolLong[m] : kToolShort[m]),
+        chip(withIcon(AttrStr(std::string(kToolIcon[m])), label(lv <= 0 ? kToolLong[m] : kToolShort[m])),
              [this, m] { return *deps_.gizmoMode == m; },
-             [this, m] { *deps_.gizmoMode = m; });
+             [this, m] { *deps_.gizmoMode = m; },
+             kToolTip[m]);
 
     divider();
 
     // ── 좌표계 ────────────────────────────────────────────────────────────────
     if (lv <= 1) {
-        chip(label("World"), [this] { return *deps_.worldSpace;  }, [this] { *deps_.worldSpace = true;  });
-        chip(label("Local"), [this] { return !*deps_.worldSpace; }, [this] { *deps_.worldSpace = false; });
+        chip(withIcon(AttrStr(std::string("globe")), label("World")),
+             [this] { return *deps_.worldSpace;  }, [this] { *deps_.worldSpace = true;  }, "World Space");
+        chip(withIcon(AttrStr(std::string("box")), label("Local")),
+             [this] { return !*deps_.worldSpace; }, [this] { *deps_.worldSpace = false; }, "Local Space");
     } else {
-        chip(dynLabel([this] { return *deps_.worldSpace ? std::string("World") : std::string("Local"); },
-                      { "World", "Local" }),
-             [] { return false; }, [this] { *deps_.worldSpace = !*deps_.worldSpace; });
+        chip(withIcon(AttrStr([this] { return *deps_.worldSpace ? std::string("globe") : std::string("box"); }),
+                      dynLabel([this] { return *deps_.worldSpace ? std::string("World") : std::string("Local"); },
+                               { "World", "Local" })),
+             [] { return false; }, [this] { *deps_.worldSpace = !*deps_.worldSpace; }, "Toggle World/Local Space");
     }
 
     // ── 스냅 ──────────────────────────────────────────────────────────────────
     if (lv <= 3) {
         divider();
-        chip(label("Snap"), [this] { return deps_.snap->enabled; },
-             [this] { deps_.snap->enabled = !deps_.snap->enabled; });
+        chip(withIcon(AttrStr(std::string("magnet")), label("Snap")), [this] { return deps_.snap->enabled; },
+             [this] { deps_.snap->enabled = !deps_.snap->enabled; }, "Toggle Grid Snap");
         if (lv <= 2) {
             std::vector<std::string> candidates;
             if (worstCase) {
@@ -216,7 +236,8 @@ void ViewportToolbar::fill(SHorizontalBox& box, int lv, bool worstCase) const {
                          case 3: deps_.snap->scale     = cycleFrom(kSnapScale,  deps_.snap->scale,     dir); break;
                          default: break;
                      }
-                 });
+                 },
+                 "Cycle Snap Step (Shift: Reverse)");
         }
     }
 
@@ -229,11 +250,13 @@ void ViewportToolbar::fill(SHorizontalBox& box, int lv, bool worstCase) const {
         camCandidates.push_back(camSpeedLabel(*deps_.camSpeed, camPrefix));
         for (float v : kCamSpeeds) camCandidates.push_back(camSpeedLabel(v, camPrefix));
     }
-    chip(dynLabel([this, camPrefix] { return camSpeedLabel(*deps_.camSpeed, camPrefix); }, camCandidates),
+    chip(withIcon(AttrStr(std::string("camera")),
+                  dynLabel([this, camPrefix] { return camSpeedLabel(*deps_.camSpeed, camPrefix); }, camCandidates)),
          [this] { return *deps_.camSpeed != 5.f; },
          [this] {
              const bool back = deps_.ctx->window &&
                                deps_.ctx->window->isShiftDown();
              cycleCamSpeed(back ? -1 : 1);
-         });
+         },
+         "Cycle Camera Speed (Shift: Reverse)");
 }

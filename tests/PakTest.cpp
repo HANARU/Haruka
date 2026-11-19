@@ -5,7 +5,10 @@
 // 여러 묶음 · 낱개 폴더의 우선순위가 마운트 순서와 상관없이 같은지를 숫자로 확인합니다.
 // 실행: build/Release/HarukaPakTest.exe
 
+#include "../src/core/ProjectPaths.hpp"
+#include "../src/core/ProjectSettings.hpp"
 #include "../src/tools/PakGlob.hpp"
+#include "../src/vfs/LogicalPath.hpp"
 #include "../src/vfs/PakFormat.hpp"
 #include "../src/vfs/PakReader.hpp"
 #include "../src/vfs/PakWriter.hpp"
@@ -498,11 +501,11 @@ int main() {
         }
         check(!excludes.empty(), "Packaging/game.pack.txt 의 exclude 줄을 읽음");
         auto out = [&](const char* path) { return hpak::anyMatch(excludes, path); };
-        check(out("assets/.svn/entries") && out("assets/models/.vs/x/y.bin"), "숨김 폴더 아래 파일은 빠짐");
-        check(out("assets/.gitkeep") && out("assets/cache/0123.gasset") && out("assets/scenes/a.hscene.tmp") &&
-              out("assets/textures/Thumbs.db") && out("assets/DESKTOP.INI"), "숨김 파일 · 캐시 · 임시 파일 · 탐색기 파일은 빠짐");
-        check(!out("assets/project.ini") && !out("assets/a.b/c.txt") && !out("assets/models/model.glb") &&
-              !out("shaders/pbr.frag.spv"), "일반 파일과 이름에 점이 든 폴더는 남음");
+        check(out("/Game/.svn/entries") && out("/Game/models/.vs/x/y.bin"), "숨김 폴더 아래 파일은 빠짐");
+        check(out("/Game/.gitkeep") && out("/Game/cache/0123.gasset") && out("/Game/scenes/a.hscene.tmp") &&
+              out("/Game/textures/Thumbs.db") && out("/Game/DESKTOP.INI"), "숨김 파일 · 캐시 · 임시 파일 · 탐색기 파일은 빠짐");
+        check(!out("/Game/project.ini") && !out("/Game/a.b/c.txt") && !out("/Game/models/model.glb") &&
+              !out("shaders/pbr.frag.spv") && !out("/Config/project.ini"), "일반 파일과 이름에 점이 든 폴더는 남음");
     }
 
     // ── 14. --loose 는 모든 묶음보다 위 (DEF-126) ────────────────────────────────────
@@ -581,6 +584,92 @@ int main() {
         check(d.size() == 1 && d[0].find(hpak::utf8Of(dir / "game.hpak")) != std::string::npos,
               "마운트 이름은 묶음의 전체 경로(어느 폴더의 묶음인지 로그로 보임)");
         hvfs::reset();
+    }
+
+    // ── 17. /Game/ 논리 경로 (P1) ──────────────────────────────────────────────────
+    std::printf("\n== 17. /Game/ 논리 경로 ==\n");
+    {
+        // 변환 규칙
+        check(hvfs::toCanonical("assets/models/a.glb") == "/Game/models/a.glb", "assets/ → /Game/");
+        check(hvfs::toCanonical("Assets/Models/A.glb") == "/Game/Models/A.glb", "대소문자 무시 접두사 + 나머지 보존");
+        check(hvfs::toCanonical("/Game/models/a.glb") == "/Game/models/a.glb", "/Game/ 그대로");
+        check(hvfs::toCanonical("/game/models/a.glb") == "/Game/models/a.glb", "/game/ → /Game/");
+        check(hvfs::toCanonical("assets/cache/foo.gasset") == "assets/cache/foo.gasset", "assets/cache/ 그대로");
+        check(hvfs::toCanonical("assets/cache") == "assets/cache", "assets/cache 그대로");
+        check(hvfs::toCanonical("shaders/pbr.frag.spv") == "shaders/pbr.frag.spv", "shaders/ 그대로");
+        check(hvfs::toCanonical("C:/tmp/test.txt") == "C:/tmp/test.txt", "Windows 절대 경로 그대로");
+        check(hvfs::toCanonical("/tmp/test.txt") == "/tmp/test.txt", "POSIX 절대 경로 그대로");
+        check(hvfs::isGamePath("/Game/a") && !hvfs::isGamePath("assets/a") && !hvfs::isGamePath("/Engine/a"),
+              "isGamePath 판정");
+        check(hvfs::gameRelative("/Game/scenes/S.hscene") == "scenes/S.hscene" && hvfs::gameRelative("shaders/a").empty(),
+              "gameRelative 추출");
+
+        // POSIX 식 절대 경로로 새지 않음 (Windows 에서도 직접 판정)
+        check(hvfs::isVirtualLogicalPath("/Game/x") &&
+              !hvfs::isDiskAbsolutePath("/Game/x", fs::path("/Game/x")),
+              "/Game/x 는 디스크 절대 경로로 새지 않음");
+        std::string norm, why;
+        check(hpak::normalizePath("/Game/models/a.glb", norm, &why) && norm == "/Game/models/a.glb",
+              "normalizePath 가 /Game/ 허용");
+        check(!hpak::normalizePath("/etc/passwd", norm, &why) && why == "absolute path",
+              "normalizePath 가 일반 / 절대 경로는 거부");
+        check(!hpak::normalizePath("/Game/../secret", norm, &why),
+              "normalizePath 가 /Game/../ 거부");
+
+        // /Game/ 가상 마운트로 낱개 파일 + 옛 assets/ 경로 양쪽 읽기
+        const fs::path gdir = tmp / "game_mount";
+        writeFile(gdir / "content" / "models" / "box.txt", bytesOf("loose-box"));
+        hvfs::reset();
+        hvfs::mountDirectoryAs(gdir / "content", "/Game/", 10);
+        std::string text;
+        check(hvfs::readText("/Game/models/box.txt", text) && text == "loose-box", "/Game/ 마운트로 낱개 읽기");
+        check(hvfs::readText("assets/models/box.txt", text) && text == "loose-box", "옛 assets/ 경로로 같은 파일 읽기");
+        check(hvfs::readText("ASSETS/Models/BOX.TXT", text) && text == "loose-box", "대소문자 무시 읽기");
+
+        // assets/ 목차 묶음을 /Game/ 으로 찾기 + 우선순위 유지
+        Bytes pk;
+        std::vector<hpak::PakInput> in;
+        in.push_back(input("assets/models/box.txt", bytesOf("pak-box")));
+        in.push_back(input("assets/scenes/Main.hscene", bytesOf("pak-scene")));
+        build(in, pk, err);
+        auto openMem = [&]() {
+            auto r = std::make_unique<hpak::PakReader>();
+            check(r->open(hpak::memorySource(pk), err), "시험 준비: 메모리 묶음 열기");
+            return r;
+        };
+
+        hvfs::reset();
+        check(hvfs::mountPack(openMem(), "mem.hpak", 20), "묶음 마운트");
+        check(hvfs::readText("/Game/scenes/Main.hscene", text) && text == "pak-scene",
+              "assets/ 목차 묶음을 /Game/ 로 읽기");
+
+        // 낱개(10) < 묶음(20)
+        hvfs::mountDirectoryAs(gdir / "content", "/Game/", 10);
+        check(hvfs::readText("/Game/models/box.txt", text) && text == "pak-box",
+              "우선순위 유지: 묶음(20) > /Game/ 낱개(10)");
+
+        // /Game/ 낱개(30) > 묶음(20)
+        hvfs::mountDirectoryAs(gdir / "content", "/Game/", 30);
+        check(hvfs::readText("/Game/models/box.txt", text) && text == "loose-box",
+              "우선순위 유지: /Game/ 낱개(30) > 묶음(20)");
+        hvfs::reset();
+
+        // hproj::resolve · isSceneLogicalPath 양쪽 형식 지원
+        const fs::path savedRoot = hproj::root();
+        hproj::setRoot("E:/FakeProj");
+        check(hproj::resolve("assets/models/a.glb") == "E:/FakeProj/Content/models/a.glb", "hproj::resolve assets/");
+        check(hproj::resolve("/Game/models/a.glb") == "E:/FakeProj/Content/models/a.glb", "hproj::resolve /Game/");
+        check(hvfs::toCanonical("assets/project.ini") == "/Config/project.ini", "assets/project.ini → /Config/project.ini");
+        check(hvfs::isVirtualLogicalPath("/Config/project.ini") &&
+              !hvfs::isDiskAbsolutePath("/Config/project.ini", fs::path("/Config/project.ini")),
+              "/Config/project.ini 는 디스크 절대 경로로 새지 않음");
+        check(hproj::resolve("assets/cache/a.gasset") == "assets/cache/a.gasset", "hproj::resolve 캐시 유지");
+        hproj::setRoot(savedRoot);
+
+        check(project_settings::isSceneLogicalPath("assets/scenes/A.hscene"), "isSceneLogicalPath assets/");
+        check(project_settings::isSceneLogicalPath("/Game/scenes/A.hscene"), "isSceneLogicalPath /Game/");
+        check(!project_settings::isSceneLogicalPath("/Game/.hscene"), "isSceneLogicalPath 이름 없음 거부");
+        check(!project_settings::isSceneLogicalPath("/Game/../A.hscene"), "isSceneLogicalPath .. 거부");
     }
 
     fs::remove_all(tmp, ec);

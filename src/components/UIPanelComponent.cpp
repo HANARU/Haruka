@@ -18,38 +18,6 @@
 // std::map 은 노드가 옮겨지지 않아 이름의 c_str() 이 등록 뒤로 그대로입니다(디테일 패널 열거 칸이 그 포인터를 씀).
 static std::map<std::string, UIPanelComponent::ContentFactory>& contentRegistry() {
     static std::map<std::string, UIPanelComponent::ContentFactory> reg;
-    if (reg.empty()) {
-        // 엔진 기본 내용: 패널이 보이는지 · 글자가 읽히는지 · 색이 에디터 UI 와 같은지 보는 시험용 화면입니다.
-        // 배경은 불투명이라 패널 화소의 후처리 가중치가 정확히 0 입니다(가장자리만 MSAA 로 섞임).
-        // 크기 · 여백은 1,250 px/m 기준 픽셀에 배율 s 를 곱합니다(해상도를 바꿔도 배치는 미터 기준으로 같음).
-        // 제목은 패널 값 title 로 바꿀 수 있고, 버튼은 동작 "demo.button" 을 냅니다(게임 API 예시).
-        reg["Demo"] = [](UIPanelComponent& panel, float s) {
-            auto title = std::make_shared<STextBlock>();
-            title->text(panel.paramAttr("title", "Haruka UI Panel"))->fontSize(56.f * s)->color(glm::vec4(1.f));
-            auto sub = std::make_shared<STextBlock>();
-            sub->text("World-space HSlate panel (3D UI P1)\n1250 px/m, mipmapped, not tone mapped")
-               ->fontSize(30.f * s)->color(glm::vec4(0.75f, 0.8f, 0.9f, 1.f));
-            auto label = std::make_shared<STextBlock>();
-            label->text("Button")->fontSize(32.f * s)->color(glm::vec4(1.f));
-            auto button = std::make_shared<SButton>();
-            button->content(label)->padding(HPadding(28.f * s, 12.f * s))
-                  ->onClick(panel.actionCallback("demo.button"))
-                  ->normalColor (glm::vec4(0.20f, 0.36f, 0.70f, 1.f))
-                  ->hoveredColor(glm::vec4(0.26f, 0.45f, 0.85f, 1.f))
-                  ->pressedColor(glm::vec4(0.14f, 0.26f, 0.52f, 1.f));
-            auto column = std::make_shared<SVerticalBox>();
-            column->addSlot(title)
-                  ->addSlot(sub,    SVerticalBox::ESizeRule::Auto, 0.f, HPadding(0.f, 20.f * s, 0.f, 0.f))
-                  ->addSlot(button, SVerticalBox::ESizeRule::Auto, 0.f, HPadding(0.f, 40.f * s, 0.f, 0.f), EHAlign::Left);
-            auto root = std::make_shared<SBorder>();
-            root->background(glm::vec4(0.07f, 0.08f, 0.11f, 1.f))
-                ->borderColor(glm::vec4(0.35f, 0.55f, 0.95f, 1.f))
-                ->borderThickness(4.f * s)
-                ->padding(HPadding(48.f * s))
-                ->content(column);
-            return std::shared_ptr<HWidget>(root);
-        };
-    }
     return reg;
 }
 

@@ -54,7 +54,7 @@ void OutputLogPanel::flushRebuilds(bool tabActive) {
 }
 
 std::shared_ptr<SBorder> OutputLogPanel::resetPopupHost() {
-    popupHost_  = HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f });
+    popupHost_  = HNew(SBorder)->background(EditorTheme::transparent);
     popupOpen_  = false;
     popupPanel_.reset();
     return popupHost_;
@@ -110,11 +110,12 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
     using HR = SHorizontalBox;
     using VR = SVerticalBox;
     const EditorUiKit& u = *ui_;
-    const glm::vec4 btnN{ 0.16f, 0.16f, 0.19f, 1.f };
-    const glm::vec4 btnH{ 0.26f, 0.26f, 0.31f, 1.f };
+    const glm::vec4 btnN = EditorTheme::ctlNormal;
+    const glm::vec4 btnH = EditorTheme::ctlHover;
 
     searchBox_ = HNew(SSearchBox);
     searchBox_
+        ->style(EditorUiKit::searchBoxStyle(u.s(1.f)))
         ->placeholder("Search log...")
         ->text(AttrStr([this]() -> std::string { return search_; }))
         ->focused([this]() -> bool { return searchFocused_; })
@@ -128,15 +129,16 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
     auto verbToggle = [&](const char* label, ELogVerbosity v) {
         const int vi = (int)v;
         glm::vec4 textCol = (v == ELogVerbosity::Log) ? EditorUiKit::kTextBody : EditorUiKit::logColor(v);
-        if (v == ELogVerbosity::Verbose) textCol = { 0.55f, 0.55f, 0.60f, 1.f };
+        if (v == ELogVerbosity::Verbose) textCol = EditorTheme::textDisabled;
         return HNew(SToggleButton)
+            ->style(EditorUiKit::toggleButtonStyle(u.s(1.f)))
             ->isActive([this, vi] { return showVerb_[vi]; })
             ->onClick([this, vi] {
                 showVerb_[vi] = !showVerb_[vi];
                 viewDirty_    = true;
                 saveFilter();
             })
-            ->normalColor(btnN)->hoveredColor(btnH)->activeColor({ 0.20f, 0.22f, 0.27f, 1.f })
+            ->normalColor(btnN)->hoveredColor(btnH)->activeColor(EditorTheme::bgHeader)
             ->padding(HPadding{ u.s(7.f), u.s(2.f) })
             ->content(HNew(STextBlock)->text(label)->fontSize(u.s(11.f))->color(textCol)
                 ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
@@ -144,7 +146,8 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
     auto counter = [&](bool errors) {
         const ELogVerbosity v = errors ? ELogVerbosity::Error : ELogVerbosity::Warning;
         return HNew(SButton)
-            ->normalColor({ 0.f, 0.f, 0.f, 0.f })->hoveredColor(btnH)->pressedColor(btnN)
+            ->style(EditorUiKit::buttonStyle(u.s(1.f)))
+            ->normalColor(EditorTheme::transparent)->hoveredColor(btnH)->pressedColor(btnN)
             ->padding(HPadding{ u.s(5.f), u.s(2.f) })
             ->onClick([this, v] {
                 for (bool& on : showVerb_) on = false;
@@ -156,7 +159,7 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
                 ->text(AttrStr([this, errors]() -> std::string { return errors ? errText_ : warnText_; }))
                 ->fontSize(u.s(11.f))
                 ->color(Attr<glm::vec4>([this, errors, v] {
-                    return (errors ? hasErr_ : hasWarn_) ? EditorUiKit::logColor(v) : EditorUiKit::kTextDim;
+                    return (errors ? hasErr_ : hasWarn_) ? EditorUiKit::logColor(v) : EditorTheme::textDisabled;
                 })));
     };
     const HPadding vpad{ 0.f, u.s(3.f) };
@@ -187,8 +190,9 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
 
     rowsBox_ = HNew(SVerticalBox);
     auto jumpButton = HNew(SButton)
-        ->normalColor({ 0.10f, 0.30f, 0.50f, 1.f })->hoveredColor(EditorUiKit::kAccent)
-        ->pressedColor({ 0.06f, 0.22f, 0.38f, 1.f })
+        ->style(EditorUiKit::buttonStyle(u.s(1.f)))
+        ->normalColor(EditorTheme::selectRow)->hoveredColor(EditorUiKit::kAccent)
+        ->pressedColor(EditorTheme::accentPressed)
         ->padding(HPadding{ u.s(8.f), u.s(2.f) })
         ->onClick([this] {
             anchorSeq_ = 0;
@@ -208,7 +212,7 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
 
     bottomContent.addSlot(HNew(SBorder)->background(EditorUiKit::kBgHeader)->content(filterRow),
                           VR::ESizeRule::Fixed, u.s(28.f));
-    bottomContent.addSlot(HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f })
+    bottomContent.addSlot(HNew(SBorder)->background(EditorTheme::transparent)
                               ->padding(HPadding{ u.s(4.f), u.s(2.f) })->content(rowsArea)
                               ->onWheel([this](float d) {
                                   scrollReq_ += (d > 0.f) ? 3 : -3;
@@ -341,7 +345,7 @@ void OutputLogPanel::rebuildRows() {
                               ->text(AttrStr([this, i]() -> std::string {
                                   return i < (int)viewRows_.size() ? viewRows_[i].time : std::string();
                               }))
-                              ->fontSize(u.s(11.f))->color({ 0.36f, 0.36f, 0.40f, 1.f })
+                              ->fontSize(u.s(11.f))->color(EditorTheme::textDisabled)
                               ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
                           HR::ESizeRule::Fixed, u.s(kTimeW))
                 ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(8.f))
@@ -349,7 +353,7 @@ void OutputLogPanel::rebuildRows() {
                               ->text(AttrStr([this, i]() -> std::string {
                                   return i < (int)viewRows_.size() ? viewRows_[i].category : std::string();
                               }))
-                              ->fontSize(u.s(11.f))->color({ 0.50f, 0.58f, 0.70f, 1.f })
+                              ->fontSize(u.s(11.f))->color(EditorTheme::logCategory)
                               ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
                           HR::ESizeRule::Fixed, u.s(kCatW))
                 ->addSlot(HNew(STextBlock)
@@ -358,7 +362,7 @@ void OutputLogPanel::rebuildRows() {
                               }))
                               ->fontSize(u.s(12.f))
                               ->color(Attr<glm::vec4>([this, i] {
-                                  return i < (int)viewRows_.size() ? viewRows_[i].color : glm::vec4(1.f);
+                                  return i < (int)viewRows_.size() ? viewRows_[i].color : EditorTheme::textPrimary;
                               }))
                               ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
                           HR::ESizeRule::Fill),
@@ -460,13 +464,14 @@ void OutputLogPanel::addPopupCategoryRow(SVerticalBox& list, HLogCategoryState* 
     list.addSlot(HNew(HR)
         ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(8.f))
         ->addSlot(HNew(SToggleButton)
+                      ->style(EditorUiKit::toggleButtonStyle(u.s(1.f)))
                       ->isActive([this, idx] { return !(idx < catHidden_.size() && catHidden_[idx]); })
                       ->onClick([this, idx] {
                           if (idx >= catHidden_.size()) return;
                           setCategoryHidden(idx, !catHidden_[idx]);
                           saveFilter();
                       })
-                      ->normalColor(btnN)->hoveredColor(btnH)->activeColor({ 0.20f, 0.22f, 0.27f, 1.f })
+                      ->normalColor(btnN)->hoveredColor(btnH)->activeColor(EditorTheme::selectRow)
                       ->padding(HPadding{ u.s(6.f), u.s(1.f) })
                       ->content(HNew(STextBlock)
                           ->text(AttrStr([this, idx]() -> std::string {
@@ -488,7 +493,8 @@ void OutputLogPanel::addPopupCategoryRow(SVerticalBox& list, HLogCategoryState* 
                   HR::ESizeRule::Fixed, u.s(50.f))
         ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(12.f))
         ->addSlot(HNew(SButton)
-                      ->normalColor(btnN)->hoveredColor(btnH)->pressedColor({ 0.12f, 0.12f, 0.15f, 1.f })
+                      ->style(EditorUiKit::buttonStyle(u.s(1.f)))
+                      ->normalColor(btnN)->hoveredColor(btnH)->pressedColor(EditorTheme::ctlPressed)
                       ->padding(HPadding{ u.s(6.f), u.s(1.f) })->hAlign(EHAlign::Left)
                       ->onClick([this, st] {
                           const uint8_t next = (uint8_t)((st->level.load(std::memory_order_relaxed) + 1) % 5);
@@ -500,7 +506,7 @@ void OutputLogPanel::addPopupCategoryRow(SVerticalBox& list, HLogCategoryState* 
                           ->fontSize(u.s(11.f))
                           ->color(Attr<glm::vec4>([st] {
                               return st->currentLevel() != st->defaultLevel
-                                  ? glm::vec4{ 0.45f, 0.72f, 1.00f, 1.f } : EditorUiKit::kTextBody;
+                                  ? EditorTheme::accentHover : EditorUiKit::kTextBody;
                           }))
                           ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
                   HR::ESizeRule::Fixed, u.s(80.f), vpad)
@@ -512,8 +518,8 @@ std::shared_ptr<SVerticalBox> OutputLogPanel::buildPopupList(const std::vector<H
     using HR = SHorizontalBox;
     using VR = SVerticalBox;
     const EditorUiKit& u = *ui_;
-    const glm::vec4 btnN{ 0.16f, 0.16f, 0.19f, 1.f };
-    const glm::vec4 btnH{ 0.26f, 0.26f, 0.31f, 1.f };
+    const glm::vec4 btnN = EditorTheme::ctlNormal;
+    const glm::vec4 btnH = EditorTheme::ctlHover;
     const float rowH = u.s(22.f);
 
     auto colText = [&](const char* label, EHAlign ha) {
@@ -601,14 +607,17 @@ void OutputLogPanel::rebuildPopup() {
 
     auto panel = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
         HNew(SBorder)
-            ->background({ 0.055f, 0.055f, 0.07f, 1.f })
-            ->borderColor({ 0.34f, 0.34f, 0.40f, 1.f })->borderThickness(1.f)
+            ->background(EditorTheme::bgPopup)
+            ->borderColor(EditorTheme::borderPopup)->borderThickness(EditorTheme::borderThin)
+            ->cornerRadius(u.s(EditorTheme::radiusPopup))
+            ->shadow({ 0.f, u.s(EditorTheme::shadowOffset.y) }, u.s(EditorTheme::shadowBlur), EditorTheme::shadowColor)
             ->padding(HPadding{ 0.f, u.s(4.f) })
             ->content(buildPopupList(cats)));
     auto absorber = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
         HNew(SBorder)->onWheel([](float) { return true; })->content(
-            HNew(SButton)->normalColor({ 0.f, 0.f, 0.f, 0.f })->hoveredColor({ 0.f, 0.f, 0.f, 0.f })
-                ->pressedColor({ 0.f, 0.f, 0.f, 0.f })->content(u.spacer())));
+            HNew(SButton)
+                ->normalColor(EditorTheme::transparent)->hoveredColor(EditorTheme::transparent)
+                ->pressedColor(EditorTheme::transparent)->content(u.spacer())));
 
     positionPopupPanel(panel, absorber, panelW, panelH);
 }

@@ -50,6 +50,7 @@ struct EngineOptions {
     uint32_t    windowW      = 1600;     // --window-size=WxH : 창 크기(기본 1600x900)
     uint32_t    windowH      = 900;
     std::string writeRoot;               // --write-root=<dir> : Config · Logs · Cache 쓰기 루트 격리
+    std::string projectDir;              // --project=<dir> : 프로젝트 폴더(.hproject · Content/ · Config/) 지정
     std::string uiDumpPath;              // --ui-dump=<path> : 마지막 프레임 에디터 HSlate 요소 덤프(에디터 전용)
     std::string uiSelect;                // --ui-select=<name[,name...]> : 첫 프레임 뒤 액터 선택(에디터 전용)
     std::string uiOpenMenu;              // --ui-open-menu=<name> : 첫 프레임 뒤 상단 메뉴 열기(에디터 전용)
@@ -64,6 +65,7 @@ struct EngineOptions {
     std::string uiGizmoMode;             // --ui-gizmo-mode=select|move|rotate|scale : 기즈모 모드(에디터 전용)
     bool        uiLocalSpace    = false; // --ui-local-space : 기즈모 로컬 좌표계(에디터 전용)
     std::string uiPick;                  // --ui-pick=<x>,<y> : 첫 프레임 뒤 창 좌표 픽(에디터 전용)
+    std::string uiHover;                 // --ui-hover=<x>,<y> : 숨은 창 포인터 호버 · 툴팁 덤프(에디터 전용)
 
     // ── 플랫폼 진입점이 정하는 것 (명령줄 아님, 2026-10-31 패키징 3단계) ────────────────────────────
     PlatformContext platform;            // Android: android_app · JavaVM · 액티비티

@@ -26,6 +26,16 @@ void EditorApp::setOptions(const EngineOptions& options) {
     uiGizmoMode_        = options.uiGizmoMode;
     uiLocalSpace_       = options.uiLocalSpace;
     uiPick_             = options.uiPick;
+    uiHover_            = options.uiHover;
+    uiHoverActive_      = false;
+    if (!uiHover_.empty()) {
+        const size_t comma = uiHover_.find(',');
+        if (comma != std::string::npos) {
+            uiHoverPos_.x  = std::strtof(uiHover_.substr(0, comma).c_str(), nullptr);
+            uiHoverPos_.y  = std::strtof(uiHover_.substr(comma + 1).c_str(), nullptr);
+            uiHoverActive_ = true;
+        }
+    }
     dumpMode_           = !uiDumpPath_.empty() || !viewportDumpPath_.empty();
 }
 
@@ -141,5 +151,16 @@ void EditorApp::applyDumpState() {
             ctx_.window->getWindowSize(wW, wH);
             viewport_.pickActor(px, py, (float)wW, (float)wH);
         }
+    }
+    if (uiHoverActive_ && ctx_.window) {
+        int fw = 1600, fh = 900;
+        ctx_.window->getFramebufferSize(fw, fh);
+        slateRenderer_.arrange({ (float)fw, (float)fh });
+        HPointerEvent he;
+        he.position = uiHoverPos_;
+        he.button   = -1;
+        he.down     = false;
+        slateRenderer_.handlePointerEvent(he);
+        slateRenderer_.context().tickTooltip(1.0f);
     }
 }

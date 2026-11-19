@@ -1,4 +1,5 @@
 #include "SkinnedMeshComponent.hpp"
+#include "../vfs/LogicalPath.hpp"
 #include "LightChannels.hpp"
 #include "../assets/AssetManager.hpp"
 #include "../geometry/MeshSource.hpp"
@@ -105,7 +106,7 @@ void SkinnedMeshComponent::writeFields(ComponentFieldWriter& w) const {
     w.b("transparent", transparent);
     hchan::write(w, lightChannels);
     if (!modelPath.empty()) {
-        w.s("model",     modelPath);
+        w.s("model",     hvfs::toCanonical(modelPath));
         w.i("meshIndex", meshIndex);
     }
 }

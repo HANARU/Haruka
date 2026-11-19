@@ -299,3 +299,53 @@ Play · 도크 배치(`--ui-layout`) · 기즈모 모드(`--ui-gizmo-mode` · `-
 
 확인(S6g 뒤): 시험 28 · 검사 2,003, 경고 0(Release · Debug), 아키텍처 시험 허용 0, UI · 뷰포트 덤프 38장면 같음 · 검증 0, 기준 PNG 7장 그대로,
 사용자 Config 그대로, Android 빌드 통과. `src/editor` 의 150줄 넘는 함수는 S6 이전부터 있던 `EditorGizmo::handleDrag`(약 190줄) 하나입니다.
+
+## 14. 엔진 · 프로젝트 분리 (4단계, 2026-11-19 결정)
+
+방향(사용자 제안 · 결정, 2026-11-19): 언리얼처럼 엔진은 한 벌, 프로젝트는 엔진을 **참조**하고 자기 콘텐츠 · 설정 · 게임 코드만 갖습니다
+(엔진을 복사하지 않음). 비교한 엔진: Unreal(`.uproject` · Base → Default → Saved 설정 · `/Game/` 마운트 · 에디터 DLL / 출시 정적),
+Unity(`Assets/` · `ProjectSettings/` · `Library/` 캐시), Godot(`project.godot` · `res://` · `user://` · 기능 태그 설정), O3DE(`project.json` ·
+등록된 엔진을 프로젝트 CMake 가 찾음 · gem 은 개발 공유 / 출시 정적).
+
+결정:
+
+| # | 항목 | 결정 |
+|---|---|---|
+| D1 | 프로젝트 콘텐츠 논리 경로 | UE 식 `/Game/...`(엔진 콘텐츠는 `/Engine/...` 예약). 씬 형식 v5, 옛 `assets/...` 는 읽을 때 `/Game/...` 로 바꿔 받음 |
+| D2 | 예제 · 시험 콘텐츠 | 저장소 안 `Projects/Samples/`. 쇼케이스 게임은 저장소 밖 같은 형식 |
+| D3 | 게임 코드 | 프로젝트별 정적 링크 실행 파일(에디터 · 게임). DLL · 핫 리로드는 하지 않음. 다시 볼 조건: 게임 코드 증분 빌드가 자주 30초를 넘을 때 |
+| D4 | 에디터 상태 · 배치 · 캐시 · 로그 | 프로젝트 `Saved/`(git 제외) |
+| D5 | 저장소 배치 | 저장소 루트 = 엔진(`src/` 를 옮기지 않음) |
+
+지금 상태(조사, 2026-11-19): 게임 코드 경계 `IGameModule` 은 있으나 `DefaultGameModule` 이 엔진 라이브러리에 들어 있고, 에디터는 소스 폴더를
+프로젝트로 컴파일합니다. 코드의 `"assets/"` 17줄 · `"shaders/"` 24줄 · 시험 약 70줄, 엔진 소유 에셋 파일 0(아이콘 · 기즈모는 코드, 글꼴은
+시스템), 엔진 코드 안의 게임 내용 1곳(UIPanel `"Demo"`), 패키징 이름(`HarukaGame` zip · `com.haruka.game` · 쓰기 루트 회사 폴더) 고정.
+
+목표 배치:
+
+```
+<저장소>/                 엔진: src/ · shaders/ · tests/ · cmake/ · Packaging/(틀) · Docs/
+  Projects/Samples/
+    Samples.hproject      이름 · 회사 · 패키지 id · 시작 씬 · 엔진 최소 버전
+    Content/              /Game/ 으로 마운트(지금 assets/ 의 씬 · 모델 · 소리 · 프리팹)
+    Config/               project.ini · engine.ini 기본값
+    Source/               게임 모듈(DefaultGameModule, UIPanel Demo 콘텐츠)
+    Saved/                에디터 상태 · 배치 · 캐시 · 로그(git 제외)
+```
+
+| 단계 | 내용 | 상태 |
+|---|---|---|
+| P1 | `/Game/` 논리 경로 도입: vfs 가상 접두사 마운트, 옛 `assets/` 를 한 곳에서 `/Game/` 으로 바꿔 읽기, 묶음 파일 · `hproj::resolve` 양쪽 받기. 쓰는 쪽은 그대로 | 끝남(2026-11-19, `src/vfs/LogicalPath.hpp`) |
+| P2 | 쓰는 쪽을 `/Game/` 으로: 씬 v5 · 프리팹 v4, 저장소 씬 · 프리팹 변환, 코드 · 시험 · 묶음 설정의 경로 | 끝남(2026-11-19, 씬 7 · 프리팹 2 변환, 머리줄 · 참조 줄만) |
+| P3 | `.hproject` · `--project`, `Projects/Samples/` 로 이동(`Content/` · `Config/` · `Source/`), `haruka_add_project`, `Saved/` | 끝남(2026-11-19, P3a 이동 16파일 rename · `/Config/` 마운트, P3b `Saved/` · `IGameModule::onRegister` · UIPanel Demo 를 게임 모듈로) |
+| P4 | 패키징 이름을 `.hproject` 에서, 저장소 밖 프로젝트 확인, 새 프로젝트 만들기 | 끝남(2026-11-19, `src/tools/new_project.py`, 하위 프로젝트 옵션 `HARUKA_BUILD_SAMPLES` · `HARUKA_BUILD_TESTS` · `HARUKA_PACKAGE_GAME`) |
+
+지킬 것: 단계마다 기준 PNG 7장 · UI 덤프가 그대로여야 합니다. `/Game/...` 는 Android(POSIX)에서 절대 경로로 보이므로, vfs 는 마운트 접두사를
+절대 경로 판정보다 먼저 봅니다.
+
+확인(P4 뒤): 시험 28 · 검사 2,043, 경고 0(Release · Debug), 허용 0, 기준 PNG 7장 · LodProbe 두 장 · UI 덤프 38장면 그대로(P3a 의 로그 수 +2 줄
+제외), Android 빌드 통과(만든 매니페스트 `package="com.haruka.game"`). 게임 쓰기 루트는 `%LOCALAPPDATA%\<company>\<name>`(Samples:
+`Haruka\Samples`, 예전 `Haruka\HarukaGame`), 배포 zip `Samples-<버전>-win64`. 저장소 밖 시험 프로젝트(`new_project.py` 로 만듦)를
+엔진을 하위 프로젝트로 빌드해 에디터(쓰기 루트 = 그 프로젝트 `Saved/`)와 게임(묶음)이 검증 0으로 돌았습니다. 남은 것: 옛
+`Packaging/android/AndroidManifest.xml`(틀 `.in` 으로 대체, 지울지 결정), 루트 `assets/` 의 빈 폴더 · 옛 캐시, 바깥 프로젝트의 Steam Audio 찾기
+(시험은 `-DHARUKA_STEAM_AUDIO=OFF`).

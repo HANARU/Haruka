@@ -462,3 +462,26 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
 미룬 항목 전체(14건)는 2026-09-17 에 결함 정본으로 옮겼습니다:
 [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 의 DEF-56 ~ DEF-69. 종합 오류 검출 작업에서
 일괄 처리합니다. 2026-10-02 에 디테일 패널 클릭 결함 DEF-73 ~ DEF-75 를 같은 묶음에 더했습니다.
+
+## 8. 시각 디자인 (5단계 D0 ~ D5, 2026-11-19)
+
+사용자 평가 "프로토타입 같다"(11-19)에서 시작했습니다. 방향은 어두운 중립 회색 + 파랑 강조(UE 5 에 가까움), 아이콘은 Lucide,
+글꼴은 Pretendard 하나(사용자 결정, 11-19)입니다.
+
+| 단계 | 내용 | 확인 |
+|---|---|---|
+| D0 | 창(숨은 창 포함) 스왑체인 캡처: `--capture` 가 합성 눈이 없으면 마지막 프레임을 present 직전에 복사해 PNG 로 씀(스왑체인에 `TRANSFER_SRC`, 지원 안 하면 건너뜀). 점검 스크립트 `uishot.sh`(git 밖) 8장면 | 같은 실행 두 번 · Debug = Release 해시 |
+| D1 | 색 토큰 `src/editor/EditorTheme.hpp`: 역할 이름, 값은 sRGB 16진수 → 선형(UI 는 `B8G8R8A8_SRGB` 스왑체인에 선형 값으로 그림). 예전 숫자들은 sRGB 처럼 골랐지만 선형으로 해석되어 화면이 중간 회색으로 떴음. 공용 위젯은 `Style` 구조체를 받고 기본값은 예전 숫자 그대로(게임 3D UI 패널 불변) | 기준 PNG 7장 그대로, 색을 뺀 UI 덤프 38장면 같음 |
+| D2 | UI 도형: 둥근 사각형 SDF · 테두리 · 그림자(가우스 근사). `UIVertex` 에 사각형 안 좌표 · 반크기 · 반경 · 테두리. 반경 · 테두리 0 은 셰이더가 예전 식 그대로(비트 동일) | 기준 7장 그대로, 바뀐 덤프 줄은 1px 테두리 합침 · 그림자뿐 |
+| D3 | 아이콘: 엔진 콘텐츠 `Engine/Content`(논리 경로 `/Engine/`, 에디터가 `HARUKA_ENGINE_CONTENT_DIR` 로 마운트, 없으면 실행 폴더의 `Engine/Content`). Lucide SVG 27개(ISC, `Engine/Content/Editor/Icons/LICENSE.txt`)를 nanosvg(zlib, 커밋 고정)로 4배 래스터화 · 줄여 글꼴 아틀라스에 글리프처럼 넣음(`HIconSource` → `HFontAtlas::getIcon`, 그리기 요소 `Icon`, 위젯 `SIcon`). 아이콘이 없으면 예전 글자 | 기준 7장 · vp 38장면 그대로, 바깥 프로젝트에서도 27개 읽음 |
+| D4 | 글꼴: Pretendard 보통 · SemiBold(OFL 1.1, `Engine/Content/Fonts/`, 판 1.3.9 TTF). 글꼴 아틀라스가 UTF-8 을 코드 포인트로 읽고(한글 등), 면 0 = 보통 · 1 = 굵게(`HDrawElement::fontFace`, `STextBlock::bold()`, `SCollapseSection::Style::titleBold`). 에디터 아틀라스 2048 × 1024. 패널 제목 · 섹션 머리 · 디테일 제목은 굵게. 글꼴이 없으면 시스템 글꼴 | 기준 7장 · vp 38장면 그대로, 한글 액터 이름 표시 확인 |
+| D5a | 크기 토큰(`EditorTheme`: 여백 2 · 4 · 8 · 12 · 16 · 24, 행 24, 툴바 36, 메뉴 바 26, 탭 28), 스크롤바 `SScrollBox::Style`(에디터: 둥근 손잡이 폭 6), 체크박스 `SCheckBox`(디테일 참 · 거짓, 컴포넌트 켜기, Lucide `check`) | 기준 7장 · vp 38장면 그대로, 클릭 선택 3장면 같은 물체 |
+| D5b | 툴팁(`HWidget` 툴팁 글, `HSlateContext` 가 0.5초 머무름 뒤 맨 위 레이어에 그림), 덤프 옵션 `--ui-hover=x,y`(장면 3개 추가, 41장면), 비활성 모양(Play 아닐 때 Pause · Stop, Play 중 Save · Open) | 기준 7장 · vp 38장면 그대로, 기존 장면 차이는 비활성 색뿐 |
+
+- 아이콘과 nanosvg 는 에디터 실행 파일에만 들어가고 게임 묶음에는 들어가지 않습니다(게임 고지 목록에 없음).
+- 아이콘 이름은 Lucide 파일 이름 그대로입니다(`EditorIcons::names()`). 새 아이콘은 Lucide 에서 SVG 를 받아 `Engine/Content/Editor/Icons/` 에 넣고
+  목록에 더합니다.
+- 공용 위젯의 아이콘(`SCollapseSection` 화살표 · `SSearchBox` 돋보기)은 `Style` 의 아이콘 이름이 있을 때만 쓰고, 기본은 예전 글자입니다.
+- 게임 쪽 3D UI 패널의 글꼴은 아직 시스템 글꼴입니다(기준 PNG `panel` · `panelR` 이 바뀌는 일이라 따로 정함). Android · Quest 에서도 같은 글꼴을
+  쓰려면 게임 묶음에 `/Engine/Fonts` 를 넣고 패널 아틀라스가 그것을 읽게 합니다.
+- 한글 입력(IME)은 아직 없습니다. 표시만 됩니다(이름 바꾸기 칸은 ASCII 입력).

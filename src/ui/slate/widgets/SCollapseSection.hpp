@@ -8,6 +8,18 @@
 // computeDesiredSize()가 매 프레임 재계산되므로 부모 VBox 레이아웃이 자동 갱신됨.
 class SCollapseSection : public HWidget {
 public:
+    struct Style {
+        glm::vec4 headerHovered { 0.13f, 0.13f, 0.15f, 1.f };
+        glm::vec4 headerNormal  { 0.09f, 0.09f, 0.10f, 1.f };
+        glm::vec4 divider       { 0.06f, 0.06f, 0.07f, 1.f };
+        glm::vec4 arrow         { 0.55f, 0.55f, 0.60f, 1.f };
+        glm::vec4 title         { 0.82f, 0.82f, 0.85f, 1.f };
+        // 펼침 화살표 아이콘 이름(D3). 비어 있거나 아이콘 공급자가 없으면 글자 "v" · ">" 를 그립니다(기본, 게임 쪽 그대로).
+        const char* iconExpanded  = nullptr;
+        const char* iconCollapsed = nullptr;
+        bool        titleBold     = false;   // 제목을 굵은 글꼴로(D4)
+    };
+
     std::shared_ptr<SCollapseSection> title(std::string t)
         { title_ = std::move(t); return self(); }
     std::shared_ptr<SCollapseSection> body(std::shared_ptr<HWidget> w)
@@ -18,6 +30,8 @@ public:
         { headerH_ = h; return self(); }
     std::shared_ptr<SCollapseSection> fontSize(float f)
         { fontSize_ = f; return self(); }
+    std::shared_ptr<SCollapseSection> style(const Style& s)
+        { style_ = s; return self(); }
     // 헤더 클릭으로 펼침이 바뀔 때 새 상태를 알립니다. 섹션은 리빌드마다 새로 만들어지므로,
     // 상태를 기억하려면 소유자가 이 콜백으로 받아 두었다가 expanded() 로 되돌려 줘야 합니다.
     std::shared_ptr<SCollapseSection> onToggle(std::function<void(bool)> fn)
@@ -44,29 +58,37 @@ public:
         if (!isVisible()) return;
 
         HGeometry hdrGeo = geo.makeChild({0.f, 0.f}, {geo.size.x, headerH_});
-        glm::vec4 hdrBg = isHovered_ ? glm::vec4{0.13f, 0.13f, 0.15f, 1.f}
-                                      : glm::vec4{0.09f, 0.09f, 0.10f, 1.f};
+        glm::vec4 hdrBg = isHovered_ ? style_.headerHovered : style_.headerNormal;
         ctx.drawRect(hdrGeo, hdrBg);
 
         // Bottom divider on header
         ctx.drawRect(geo.makeChild({0.f, headerH_ - 1.f}, {geo.size.x, 1.f}),
-                     glm::vec4{0.06f, 0.06f, 0.07f, 1.f});
+                     style_.divider);
 
         // Arrow glyph
         float fs       = fontSize_ / 10.f;
         float arrSize  = 10.f * fs;
         float arrW     = 12.f * fs;
         HGeometry arrowGeo = hdrGeo.makeChild({5.f, (headerH_ - arrSize) * 0.5f}, {arrW, arrSize});
-        ctx.drawText(arrowGeo, expanded_ ? "v" : ">", fontSize_, {0.55f, 0.55f, 0.60f, 1.f});
+        const char* arrowIcon = expanded_ ? style_.iconExpanded : style_.iconCollapsed;
+        if (!arrowIcon || !ctx.drawIcon(arrowGeo, arrowIcon, style_.arrow))
+            ctx.drawText(arrowGeo, expanded_ ? "v" : ">", fontSize_, style_.arrow);
 
         // Title
         float titH = 11.f * fs;
         HGeometry titleGeo = hdrGeo.makeChild({5.f + arrW + 3.f, (headerH_ - titH) * 0.5f},
                                               {geo.size.x - (8.f + arrW + 3.f), titH});
-        ctx.drawText(titleGeo, title_, fontSize_, {0.82f, 0.82f, 0.85f, 1.f});
+        ctx.drawText(titleGeo, title_, fontSize_, style_.title, style_.titleBold ? 1 : 0);
 
         if (expanded_ && body_)
             body_->paint(ctx, body_->cachedGeometry());
+    }
+
+    std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) override {
+        if (!isVisible() || !cachedGeo_.contains(pos)) return nullptr;
+        if (expanded_ && body_)
+            if (auto w = body_->findTooltipWidget(pos)) return w;
+        return tooltip.get().empty() ? nullptr : shared_from_this();
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
@@ -110,6 +132,7 @@ private:
     float fontSize_  = 10.f;
     bool  isHovered_ = false;
     bool  hdrArmed_  = false;   // 헤더 위에서 눌렸는가
+    Style style_;
     std::function<void(bool)> onToggle_;
 
     std::shared_ptr<SCollapseSection> self() {

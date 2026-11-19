@@ -147,6 +147,10 @@ public:
     uint32_t syntheticImageCount() const { return (uint32_t)synthImages_.size(); }
     // 합성 눈 이미지 하나의 눈 층을 RGBA8 로 읽어 옵니다(장치가 쉬기를 기다림). 실제 XR 이미지는 읽을 수 없습니다.
     bool     captureXrEye(uint32_t image, uint32_t layer, std::vector<uint8_t>& rgba, VkExtent2D& extent);
+    // 마지막으로 그린 데스크톱 스왑체인 이미지를 RGBA8(sRGB 바이트 그대로)로 읽어 옵니다.
+    // 창을 닫기 전 마지막 프레임의 present 직전에 복사해 둔 결과를 돌려줍니다.
+    void     setCaptureNextSwapchain(bool on) { captureNextSwapchain_ = on; }
+    bool     captureSwapchain(std::vector<uint8_t>& rgba, VkExtent2D& extent, bool& unsupported);
 
     // Hot-reload shaders
     void reloadPipelines();
@@ -261,8 +265,14 @@ private:
 
     // ── Swapchain (platform-abstracted) ──────────────────────────────────────
     std::unique_ptr<ISwapchain> swapchain_;
-    bool lastFrameDesktop_   = false;
-    bool nothingToDrawLogged_ = false;   // 창도 XR 대상도 없음(한 번만 알림)
+    bool     lastFrameDesktop_           = false;
+    bool     captureNextSwapchain_       = false;
+    bool     lastSwapCaptured_           = false;
+    bool     lastSwapUnsupported_        = false;
+    bool     swapCaptureUnsupportedLogged_ = false;
+    VkExtent2D           lastSwapExtent_ = {};
+    std::vector<uint8_t> lastSwapRgba_;
+    bool     nothingToDrawLogged_        = false;   // 창도 XR 대상도 없음(한 번만 알림)
 
     // ── 합성 눈 (--synthetic-eyes) ────────────────────────────────────────────
     std::vector<VkImage>          synthImages_;
@@ -390,7 +400,7 @@ private:
     FrameResources frames_;
 
     // ── Pipeline cache + timestamp ────────────────────────────────────────────
-    static constexpr const char* kPipelineCacheFile = "pipeline_cache.bin";   // 쓰기 루트 기준
+    static constexpr const char* kPipelineCacheFile = "Cache/pipeline_cache.bin";   // 쓰기 루트 기준
     VkPipelineCache pipelineCache_   = VK_NULL_HANDLE;
     // 파이프라인을 새로 만들었음(처음 · 핫 리로드 · XR 출력 연결). 다음 프레임 끝에서 캐시를 저장합니다(DEF-153).
     bool            pipelineCacheDirty_     = true;
@@ -461,6 +471,9 @@ private:
 
     // Resize
     void cleanupSwapChain();
+    bool readbackImageToRgba(VkImage image, uint32_t layer, VkExtent2D extent, VkFormat format,
+                             VkImageLayout currentLayout, VkAccessFlags srcAccess, VkPipelineStageFlags srcStage,
+                             std::vector<uint8_t>& rgba);
     void recreateSwapChain();
     // 스왑체인은 그대로 두고 renderExtent 의존 씬 타깃(HDR·깊이·AO·Bloom)만
     // 재생성합니다. setViewportRect 가 뷰포트 변경을 감지했을 때 호출합니다.

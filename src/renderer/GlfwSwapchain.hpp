@@ -35,6 +35,7 @@ public:
     const std::vector<VkImageView>& imageViews() const override { return imageViews_; }
     VkFormat   format() const override { return format_; }
     VkExtent2D extent() const override { return extent_; }
+    bool       supportsTransferSrc() const override { return supportsTransferSrc_; }
 
 private:
     IWindow*         window_;
@@ -51,6 +52,7 @@ private:
     VkExtent2D               extent_     = {};
     bool                     dirty_      = false;
     bool                     preferNonBlocking_ = false;
+    bool                     supportsTransferSrc_ = false;
 
     VkSurfaceFormatKHR chooseFormat(const std::vector<VkSurfaceFormatKHR>&) const;
     VkPresentModeKHR   choosePresentMode(const std::vector<VkPresentModeKHR>&) const;

@@ -1,4 +1,5 @@
 #include "OutlinerPanel.hpp"
+#include "../ui/slate/widgets/SIcon.hpp"
 #include "EditorCommands.hpp"
 #include "../components/LightComponent.hpp"
 #include "../input/HInputSystem.hpp"
@@ -20,6 +21,7 @@ std::shared_ptr<HWidget> OutlinerPanel::build() {
     list_      = HNew(VR);
     searchBox_ = HNew(SSearchBox);
     auto outlinerSearch = searchBox_
+        ->style(EditorUiKit::searchBoxStyle(s(1.f)))
         ->placeholder("Search...")
         ->text(AttrStr([this]() -> std::string { return search_; }))
         ->focused([this]() -> bool { return searchFocused_; })
@@ -30,12 +32,12 @@ std::shared_ptr<HWidget> OutlinerPanel::build() {
     return HNew(BR)
         ->background(EditorUiKit::kBgPanel)
         ->content(HNew(VR)
-            ->addSlot(HNew(BR)->background({0,0,0,0})->padding(HPadding{s(4.f), s(3.f)})
+            ->addSlot(HNew(BR)->background(EditorTheme::transparent)->padding(HPadding{s(4.f), s(3.f)})
                 ->content(outlinerSearch), VR::ESizeRule::Fixed, s(34.f))
             // 목록은 보이는 행만 위젯으로 만드는 창 기반 가상 스크롤이라, 스크롤 상자 대신
             // 휠로 시작 행을 옮기고 다시 만듭니다(DEF-57). 좌버튼을 누른 동안에는 굴려도 움직이지
             // 않습니다. 그동안은 목록 리빌드가 보류되어(DEF-83) 뗄 때 한꺼번에 튀기 때문입니다.
-            ->addSlot(HNew(BR)->background({0,0,0,0})->content(list_)
+            ->addSlot(HNew(BR)->background(EditorTheme::transparent)->content(list_)
                 ->onWheel([this](float d) {
                     if (deps_.ctx->window && deps_.ctx->window->isMouseButtonDown(HInput::MOUSE_BUTTON_LEFT))
                         return true;
@@ -299,24 +301,33 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
 
     std::shared_ptr<HWidget> nameWidget =
         HNew(STextBlock)->text(shown)->fontSize(s(14.f))
-            ->color(sel ? glm::vec4{1.f, 1.f, 1.f, 1.f}
-                        : (r.dimPath || r.dimOff) ? EditorUiKit::kTextDim : EditorUiKit::kTextBody)
+            ->color(sel ? EditorTheme::textOnAccent
+                        : (r.dimPath || r.dimOff) ? EditorTheme::textDisabled : EditorUiKit::kTextBody)
             ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center);
     if (renAll)   // Ctrl+A 전체 선택 하이라이트
-        nameWidget = HNew(SBorder)->background({0.20f, 0.45f, 0.85f, 1.f})
+        nameWidget = HNew(SBorder)->background(EditorTheme::accent)
                          ->content(nameWidget);
 
     const char* arrowGlyph = (!r.hasKids || filtering) ? "" : (r.expanded ? "v" : ">");
     auto smallBtn = [&] {
-        return HNew(SToggleButton)->padding(HPadding{0.f, 0.f})
+        return HNew(SToggleButton)->style(EditorUiKit::toggleButtonStyle(s(1.f)))
+                 ->padding(HPadding{0.f, 0.f})
                  ->isActive([] { return false; })          // 강제 파란 액센트 바 회피
-                 ->normalColor({0.f, 0.f, 0.f, 0.f})
-                 ->hoveredColor({0.25f, 0.25f, 0.30f, 1.f});
+                 ->normalColor(EditorTheme::transparent)
+                 ->hoveredColor(EditorTheme::ctlHover);
     };
 
+    // 펼침 · 눈 · 삭제는 아이콘(D3)이고, 아이콘 파일이 없으면 예전 글자(v · > · O · o · - · x)입니다.
+    const bool icons = deps_.ui->fonts && deps_.ui->fonts->hasIcon("eye");
+    std::shared_ptr<HWidget> arrowContent;
+    if (icons && *arrowGlyph)
+        arrowContent = HNew(SIcon)->icon(std::string(r.expanded ? "chevron-down" : "chevron-right"))
+                           ->size(s(14.f))->color(EditorUiKit::kTextDim);
+    else
+        arrowContent = HNew(STextBlock)->text(arrowGlyph)->fontSize(s(12.f))->color(EditorUiKit::kTextDim)
+                           ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center);
     auto arrowBtn = smallBtn()
-        ->content(HNew(STextBlock)->text(arrowGlyph)->fontSize(s(12.f))->color(EditorUiKit::kTextDim)
-                    ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center))
+        ->content(arrowContent)
         ->onClick((r.hasKids && !filtering)
             ? std::function<void()>([this, id] {
                   if (collapsed_.count(id)) collapsed_.erase(id);
@@ -324,17 +335,35 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
                   dirty_ = true;   // 콜백 안에서 리빌드하면 자기 파괴가 됩니다
               })
             : std::function<void()>(selectRow));
+    if (r.hasKids && !filtering)
+        arrowBtn->tooltip.set(r.expanded ? "Collapse Children" : "Expand Children");
 
-    auto eyeBtn = smallBtn()
-        ->content(HNew(STextBlock)
+    std::shared_ptr<HWidget> eyeContent;
+    if (icons) {
+        // 켜짐 = eye, 꺼짐 = eye-off(흐림), 자신은 켜졌지만 부모가 꺼짐 = eye(흐림).
+        eyeContent = HNew(SIcon)
+            ->icon(AttrStr([this, id]() -> std::string {
+                Actor* t = deps_.ctx->world ? deps_.ctx->world->findById(id) : nullptr;
+                return (t && t->activeSelf()) ? "eye" : "eye-off";
+            }))
+            ->size(s(14.f))
+            ->color(Attr<glm::vec4>([this, id]() -> glm::vec4 {
+                Actor* t = deps_.ctx->world ? deps_.ctx->world->findById(id) : nullptr;
+                return (t && t->activeInHierarchy()) ? EditorUiKit::kTextDim : EditorTheme::textDisabled;
+            }));
+    } else {
+        eyeContent = HNew(STextBlock)
             ->text(AttrStr([this, id]() -> std::string {
                 Actor* t = deps_.ctx->world ? deps_.ctx->world->findById(id) : nullptr;
                 if (!t) return "-";
                 if (!t->activeSelf())          return "-";
                 return t->activeInHierarchy() ? "O" : "o";
             }))
-            ->fontSize(s(12.f))->color(r.dimOff ? EditorUiKit::kTextDim : EditorUiKit::kTextBody)
-            ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center))
+            ->fontSize(s(12.f))->color(r.dimOff ? EditorTheme::textDisabled : EditorUiKit::kTextBody)
+            ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center);
+    }
+    auto eyeBtn = smallBtn()
+        ->content(eyeContent)
         ->onClick([this, id] {
             Actor* t = deps_.ctx->world ? deps_.ctx->world->findById(id) : nullptr;
             if (!t || (deps_.isEditorCam && deps_.isEditorCam(t))) return;
@@ -343,16 +372,19 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
             deps_.cmdStack->push(std::make_unique<SetActiveCmd>(*deps_.ctx->world, t, before, !before));
             dirty_ = true;
         });
+    eyeBtn->tooltip.set("Toggle Visibility");
 
     auto row = HNew(SHorizontalBox)
         ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f) + indent)
         ->addSlot(arrowBtn, SHorizontalBox::ESizeRule::Fixed, s(kArrowW))
         ->addSlot(
             HNew(SButton)
-                ->normalColor ({0.f, 0.f, 0.f, 0.f})
-                ->hoveredColor(sel ? EditorUiKit::kSelected : glm::vec4{0.25f, 0.25f, 0.30f, 1.f})
-                ->pressedColor({0.15f, 0.30f, 0.55f, 1.f})
-                ->padding({s(8.f), s(6.f)})
+                ->style(EditorUiKit::buttonStyle())
+                ->cornerRadius(0.f)
+                ->normalColor (EditorTheme::transparent)
+                ->hoveredColor(sel ? EditorTheme::selectRowHover : EditorTheme::ctlHover)
+                ->pressedColor(EditorTheme::accentPressed)
+                ->padding({s(EditorTheme::space8), s(EditorTheme::space2)})
                 ->hAlign(EHAlign::Fill)
                 ->onClick(selectRow)
                 ->content(nameWidget),
@@ -363,27 +395,27 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
             smallBtn()
                 ->content(HNew(STextBlock)
                     ->text(deps_.ui->ellipsizeText(typeStr, typeW - s(6.f), s(11.f)))
-                    ->fontSize(s(11.f))->color(r.dimOff ? EditorUiKit::kTextDim : typeCol)
+                    ->fontSize(s(11.f))->color(r.dimOff ? EditorTheme::textDisabled : typeCol)
                     ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center))
                 ->onClick(selectRow),
             SHorizontalBox::ESizeRule::Fixed, typeW);
 
+    auto delBtn = deps_.ui->iconButton("x", 12.f, EditorTheme::error, "", 12.f, EditorTheme::error, {5.f, 3.f},
+                                       EditorTheme::transparent, EditorTheme::errorHover,
+                                       [this, id] {
+                                           Actor* t = deps_.ctx->world ? deps_.ctx->world->findById(id) : nullptr;
+                                           if (!t || (deps_.isEditorCam && deps_.isEditorCam(t))) return;
+                                           if (deps_.ctx->selected == t) {
+                                               renaming_ = false;
+                                               if (deps_.onCancelGizmo) deps_.onCancelGizmo();
+                                           }
+                                           if (deps_.onDeleteActor) deps_.onDeleteActor(t);
+                                       }, "x");
+    delBtn->tooltip.set("Delete Actor");
     row->addSlot(eyeBtn, SHorizontalBox::ESizeRule::Fixed, s(kEyeW))
-       ->addSlot(
-           deps_.ui->textButton("x", 12.f, {0.9f, 0.4f, 0.4f, 1.f}, {5.f, 3.f},
-                                {0.f, 0.f, 0.f, 0.f}, {0.40f, 0.12f, 0.12f, 1.f},
-                                [this, id] {
-                                    Actor* t = deps_.ctx->world ? deps_.ctx->world->findById(id) : nullptr;
-                                    if (!t || (deps_.isEditorCam && deps_.isEditorCam(t))) return;
-                                    if (deps_.ctx->selected == t) {
-                                        renaming_ = false;
-                                        if (deps_.onCancelGizmo) deps_.onCancelGizmo();
-                                    }
-                                    if (deps_.onDeleteActor) deps_.onDeleteActor(t);
-                                }),
-           SHorizontalBox::ESizeRule::Fixed, s(kDelW));
+       ->addSlot(delBtn, SHorizontalBox::ESizeRule::Fixed, s(kDelW));
 
-    auto rowBorder = HNew(SBorder)->background(sel ? EditorUiKit::kSelected : glm::vec4{0.f, 0.f, 0.f, 0.f})
+    auto rowBorder = HNew(SBorder)->background(sel ? EditorUiKit::kSelected : EditorTheme::transparent)
         ->content(row);
     rowHits_.push_back({ id, rowBorder });
     list_->addSlot(rowBorder, SVerticalBox::ESizeRule::Fixed, s(kRowH));
@@ -396,16 +428,16 @@ void OutlinerPanel::rebuild() {
 
     // + Add Empty Actor button
     list_->addSlot(
-        HNew(SBorder)->background({0,0,0,0})->padding({s(6.f), s(4.f)})
+        HNew(SBorder)->background(EditorTheme::transparent)->padding({s(6.f), s(4.f)})
             ->content(
-                deps_.ui->textButton("+ Add Empty", 13.f, EditorUiKit::kAccent, {6.f, 4.f},
-                                     {0.18f, 0.18f, 0.22f, 1.f}, {0.28f, 0.28f, 0.35f, 1.f},
+                deps_.ui->iconButton("plus", 14.f, EditorTheme::accentHover, "Add Empty", 13.f, EditorTheme::accentHover,
+                                     {6.f, 4.f}, EditorTheme::ctlNormal, EditorTheme::ctlHover,
                                      [this]{
                                          std::string nm = nextActorName();
                                          Actor* a = deps_.ctx->world->spawnActor(nm);
                                          if (deps_.onSelectOnly) deps_.onSelectOnly(a);
                                          if (deps_.onRecordCreation) deps_.onRecordCreation({ deps_.ctx->selected });
-                                     })),
+                                     }, "+")),
         SVerticalBox::ESizeRule::Fixed, s(kHeaderH));
 
     // Case-insensitive search filter

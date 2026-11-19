@@ -1,4 +1,5 @@
 #pragma once
+#include "../vfs/LogicalPath.hpp"
 #include <filesystem>
 #include <string>
 
@@ -23,13 +24,14 @@ inline std::filesystem::path& rootStorage() {
 inline void setRoot(const std::filesystem::path& root) { rootStorage() = root; }
 inline const std::filesystem::path& root()             { return rootStorage(); }
 
-// 논리 경로를 실제로 열 경로로 바꿉니다. "assets/" 밖(임시 파일 · 절대 경로 등)과 캐시는 그대로 둡니다.
+// 논리 경로를 실제로 열 경로로 바꿉니다. "assets/" 와 "/Game/" 둘 다 <프로젝트>/Content/... 로 바꾸며,
+// 그 밖(임시 파일 · 절대 경로 등)과 캐시(assets/cache)는 그대로 둡니다.
 inline std::string resolve(const std::string& logical) {
+    const std::string canon = hvfs::toCanonical(logical);
+    if (!hvfs::isGamePath(canon)) return logical;
     const std::filesystem::path& r = rootStorage();
     if (r.empty()) return logical;
-    if (logical.rfind("assets/", 0) != 0) return logical;
-    if (logical.rfind("assets/cache/", 0) == 0 || logical == "assets/cache") return logical;
-    return (r / logical).generic_string();
+    return (r / "Content" / hvfs::gameRelative(canon)).generic_string();
 }
 
 } // namespace hproj

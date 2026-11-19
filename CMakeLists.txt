@@ -3,6 +3,10 @@ cmake_minimum_required(VERSION 3.21)
 # 동적 런타임과 충돌합니다(LNK4098).
 project(HarukaEngine VERSION 0.1.0 LANGUAGES C CXX)
 
+option(HARUKA_BUILD_SAMPLES "Build the bundled Samples project" ${PROJECT_IS_TOP_LEVEL})
+option(HARUKA_BUILD_TESTS   "Build Haruka unit tests"           ${PROJECT_IS_TOP_LEVEL})
+option(HARUKA_PACKAGE_GAME  "Enable CPack Windows ZIP packaging for Samples" ${PROJECT_IS_TOP_LEVEL})
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -120,6 +124,19 @@ set(MESHOPT_BUILD_TOOLS    OFF CACHE BOOL "" FORCE)
 set(MESHOPT_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(meshoptimizer)
 
+# ── nanosvg (에디터 아이콘 SVG 래스터화, D3 2026-11-19) ─────────────────────────
+# zlib 라이선스, 헤더 두 개(nanosvg.h · nanosvgrast.h)만 씁니다. 판이 없는 저장소라 커밋으로 고정하고, 저장소의 CMake 는
+# 쓰지 않습니다(SOURCE_SUBDIR 에 CMakeLists.txt 가 없으면 받기만 함). 구현은 src/editor/EditorIcons.cpp 한 곳에서 켭니다.
+FetchContent_Declare(
+    nanosvg
+    GIT_REPOSITORY https://github.com/memononen/nanosvg.git
+    GIT_TAG        239e102ec2c691f2902e20ace2ed36ee4a35cfe6
+    SOURCE_SUBDIR  _haruka_sources_only
+)
+FetchContent_MakeAvailable(nanosvg)
+add_library(haruka_nanosvg INTERFACE)
+target_include_directories(haruka_nanosvg SYSTEM INTERFACE ${nanosvg_SOURCE_DIR}/src)
+
 # ── 셰이더 컴파일 (glslc → SPIR-V) ───────────────────────────────────────────
 find_program(GLSLC glslc
     HINTS
@@ -136,7 +153,11 @@ set(SHADER_DEP_DIR  ${CMAKE_CURRENT_BINARY_DIR}/shader_deps)
 # 실행 파일 옆 shaders/ (핫 리로드 감시 폴더). 셰이더 명령이 바뀐 .spv 를 바로 복사하므로
 # Shaders 타깃만 빌드해도 실행 중인 에디터가 다시 읽습니다. 에디터와 게임 실행 파일은 같은 폴더에 생기며,
 # Android 에도 있는 게임 대상으로 그 폴더를 가리킵니다(2026-10-19).
-set(SHADER_RUN_DIR  $<TARGET_FILE_DIR:HarukaGame>/shaders)
+if(HARUKA_BUILD_SAMPLES)
+    set(SHADER_RUN_DIR  $<TARGET_FILE_DIR:HarukaGame>/shaders)
+else()
+    set(SHADER_RUN_DIR "")
+endif()
 file(MAKE_DIRECTORY ${SHADER_BIN_DIR} ${SHADER_DEP_DIR})
 
 # 셰이더 목록은 직접 적습니다. 목록에 없는 셰이더 파일은 컴파일되지 않으므로 구성 단계에서 경고합니다.
@@ -187,15 +208,25 @@ foreach(SHADER ${GLSL_SHADERS})
     set(IN  ${SHADER_SRC_DIR}/${SHADER})
     set(OUT ${SHADER_BIN_DIR}/${SHADER}.spv)
     set(DEP ${SHADER_DEP_DIR}/${SHADER}.d)
-    add_custom_command(
-        OUTPUT  ${OUT}
-        COMMAND ${GLSLC} --target-env=vulkan1.0 -MD -MF ${DEP} ${IN} -I ${SHADER_SRC_DIR}/include -o ${OUT}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_RUN_DIR}
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OUT} ${SHADER_RUN_DIR}/${SHADER}.spv
-        DEPENDS ${IN}
-        DEPFILE ${DEP}
-        COMMENT "glslc -> ${SHADER}.spv"
-    )
+    if(SHADER_RUN_DIR)
+        add_custom_command(
+            OUTPUT  ${OUT}
+            COMMAND ${GLSLC} --target-env=vulkan1.0 -MD -MF ${DEP} ${IN} -I ${SHADER_SRC_DIR}/include -o ${OUT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_RUN_DIR}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OUT} ${SHADER_RUN_DIR}/${SHADER}.spv
+            DEPENDS ${IN}
+            DEPFILE ${DEP}
+            COMMENT "glslc -> ${SHADER}.spv"
+        )
+    else()
+        add_custom_command(
+            OUTPUT  ${OUT}
+            COMMAND ${GLSLC} --target-env=vulkan1.0 -MD -MF ${DEP} ${IN} -I ${SHADER_SRC_DIR}/include -o ${OUT}
+            DEPENDS ${IN}
+            DEPFILE ${DEP}
+            COMMENT "glslc -> ${SHADER}.spv"
+        )
+    endif()
     list(APPEND SPIRV_OUTPUTS ${OUT})
 endforeach()
 
@@ -263,10 +294,12 @@ add_custom_command(
 add_custom_target(Shaders DEPENDS ${SPIRV_OUTPUTS} ${SHADER_MANIFEST_INC})
 
 # ── 에셋 디렉토리 ─────────────────────────────────────────────────────────────
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets/models)
+if(HARUKA_BUILD_SAMPLES)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Projects/Samples/Content/models)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Projects/Samples/Content/prefabs)
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/Projects/Samples/Content/audio)
+endif()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets/cache)
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets/prefabs)
-file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets/audio)
 
 # ── 엔진 런타임 라이브러리와 실행 파일 (2026-10-19, 런타임 분리 DEF-12) ──────────
 # 에디터를 뺀 엔진 전부를 HarukaRuntime 정적 라이브러리로 한 번만 빌드하고, 실행 파일 둘이 각각 링크합니다.
@@ -337,13 +370,15 @@ set(RUNTIME_SOURCES
     src/ui/slate/HPaintContext.cpp
     src/ui/slate/HFontAtlas.cpp
     src/ui/slate/HSlateRenderer.cpp
-    src/game/DefaultGameModule.cpp
+# 게임 소스는 프로젝트(Projects/Samples/Source/SamplesGameModule.cpp 등)로 옮겼고(P3b),
+# HarukaRuntime 은 게임 코드를 포함하지 않습니다.
     src/input/HInputSystem.cpp
 )
 set(EDITOR_SOURCES
     src/editor/EditorApp.cpp
     src/editor/EditorApp_dump.cpp
     src/editor/EditorUiKit.cpp
+    src/editor/EditorIcons.cpp
     src/editor/EditorViewportController.cpp
     src/editor/dock/DockTree.cpp
     src/editor/EditorDock.cpp
@@ -368,10 +403,11 @@ set(GAME_SOURCES
     src/game/GameFrontend.cpp
 )
 
-# 엔진 대상(라이브러리 · 실행 파일)이 함께 쓰는 컴파일 설정.
+# 엔진 대상(라이브러리 · 실행 파일)이 함께 쓰는 컴파일 설정. 위의 add_compile_options(/wd4100 …)는 이 폴더 범위라, 엔진을
+# 하위 프로젝트로 쓰는 바깥 프로젝트의 실행 파일(haruka_add_project)에는 닿지 않으므로 여기에도 적습니다(D3, 2026-11-19).
 function(haruka_target_defaults tgt)
     if(MSVC)
-        target_compile_options(${tgt} PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        target_compile_options(${tgt} PRIVATE /W4 /utf-8 /wd4865 /wd4100 /Wv:18)
     else()
         target_compile_options(${tgt} PRIVATE -Wall -Wextra)
     endif()
@@ -441,15 +477,6 @@ else()
         enable_language(RC)
         list(APPEND EXE_RESOURCES res/Haruka.rc res/Haruka.manifest)
     endif()
-
-    add_executable(HarukaEngine src/main.cpp ${EDITOR_SOURCES} ${EXE_RESOURCES})
-    target_link_libraries(HarukaEngine PRIVATE HarukaRuntime)
-    # 에디터가 프로젝트 폴더의 assets/ 를 직접 읽고 쓰도록 소스 트리 경로를 넣습니다(src/core/ProjectPaths.hpp,
-    # editor/EditorFrontend.cpp). 게임 실행 파일에는 넣지 않습니다. 실행 폴더의 assets/ 복사는 이 경로가 없을 때를 위해 둡니다.
-    target_compile_definitions(HarukaEngine PRIVATE HARUKA_EDITOR HARUKA_PROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-
-    add_executable(HarukaGame src/main.cpp ${GAME_SOURCES} ${EXE_RESOURCES})
-    target_link_libraries(HarukaGame PRIVATE HarukaRuntime)
 endif()
 
 # ── GLM 설정 ──────────────────────────────────────────────────────────────────
@@ -471,70 +498,8 @@ if(NOT ANDROID)
 endif()
 haruka_target_defaults(HarukaRuntime)
 
-if(ANDROID)
-    set(HARUKA_EXECUTABLES HarukaGame)
-else()
-    set(HARUKA_EXECUTABLES HarukaEngine HarukaGame)
-endif()
-foreach(EXE ${HARUKA_EXECUTABLES})
-    add_dependencies(${EXE} Shaders)
-    haruka_target_defaults(${EXE})
-endforeach()
-
-if(MSVC)
-    # /SUBSYSTEM:CONSOLE 이 콘솔 창을 띄우던 원인이다. WINDOWS 서브시스템으로 두되
-    # 진입점을 mainCRTStartup 으로 지정하면 WinMain 을 새로 쓰지 않고 int main() 을
-    # 그대로 쓰면서 창만 사라진다.
-    # 콘솔이 없으면 stdout 이 갈 곳도 없어지므로 main.cpp 가 파일로 우회시킨다.
-    # 디버깅 중 콘솔이 필요하면 -DHARUKA_CONSOLE=ON 으로 구성하면 된다.
+if(NOT ANDROID)
     option(HARUKA_CONSOLE "Open a console window alongside the engine" OFF)
-    foreach(EXE ${HARUKA_EXECUTABLES})
-        if(HARUKA_CONSOLE)
-            set_target_properties(${EXE} PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
-        else()
-            set_target_properties(${EXE} PROPERTIES
-                LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
-        endif()
-    endforeach()
-endif()
-
-# 셰이더 바이너리와 에셋을 실행 파일 옆으로 복사합니다. 두 실행 파일은 같은 폴더에 생기므로 복사는 RuntimeFiles 대상 하나가
-# 맡고, 두 실행 파일이 그 대상에 기댑니다(어느 쪽만 빌드해도 폴더가 채워짐). 예전처럼 실행 파일마다 POST_BUILD 로 복사하면
-# 병렬 빌드에서 두 복사가 같은 파일을 동시에 써서 빌드가 실패했습니다(2026-10-24).
-# Android 는 낱개 파일을 기기에 올리지 않고 묶음만 쓰므로 복사하지 않습니다(2026-11-01, DEF-149). 예전에는 build/android 에
-# 쓰이지 않는 셰이더 · 에셋 복사본이 생겼습니다.
-if(NOT ANDROID)
-    add_custom_target(RuntimeFiles ALL
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${SHADER_BIN_DIR} $<TARGET_FILE_DIR:HarukaGame>/shaders
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/assets $<TARGET_FILE_DIR:HarukaGame>/assets
-        COMMENT "Copying SPIR-V shaders and assets to the output dir"
-    )
-    add_dependencies(RuntimeFiles Shaders)
-    foreach(EXE ${HARUKA_EXECUTABLES})
-        add_dependencies(${EXE} RuntimeFiles)
-    endforeach()
-    # Steam Audio(HRTF)는 엔진이 실행 폴더에서 엽니다. 오디오 시험도 같은 폴더에 생기므로 함께 기댑니다(아래).
-    if(HARUKA_STEAM_AUDIO_FOUND)
-        add_custom_target(SteamAudioRuntime ALL
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HARUKA_STEAM_AUDIO_LIBRARY} $<TARGET_FILE_DIR:HarukaGame>
-            COMMENT "Copying the Steam Audio library to the output dir"
-        )
-        foreach(EXE ${HARUKA_EXECUTABLES})
-            add_dependencies(${EXE} SteamAudioRuntime)
-        endforeach()
-    endif()
-endif()
-
-# ── 묶음 도구와 게임 묶음 (2026-10-24) ─────────────────────────────────────────
-# HarukaPak 은 개발 PC 에서 도는 명령줄 도구입니다(Android 에는 만들지 않음). GamePack 이 Packaging/game.pack.txt 목록대로
-# 에셋과 셰이더를 <빌드 폴더>/pack/game.hpak 으로 묶습니다. 같은 입력이면 같은 바이트가 나옵니다(텍스트 에셋은 LF 로 바꿔 넣음).
-# 개발 중 실행 폴더(build/Release)의 HarukaGame 은 묶음 없이 낱개 파일을 읽고, 배포 ZIP 에는 묶음만 들어갑니다.
-# Android 구성도 자기 셰이더로 묶음을 만듭니다(2026-11-01, DEF-149, 도구는 위 "묶음 도구와 셰이더 목록"). 예전에는 Android 빌드가
-# 묶음을 만들지 않아 데스크톱 트리의 묶음을 따로 올렸고, 셰이더를 바꾼 뒤 데스크톱을 다시 빌드하지 않으면 새 .so 가 옛 셰이더를
-# 받았습니다. HarukaGame 이 GamePack 에 기대므로 "--target HarukaGame" 만 빌드해도 묶음이 새로 만들어집니다.
-if(NOT ANDROID)
-    # 도구와 시험 실행 파일에도 엔진과 같은 UTF-8 코드 페이지 매니페스트를 넣습니다(DEF-121). 없으면 목록 파일 · 명령줄 · 임시
-    # 폴더의 경로가 CP949 로 해석되는데, 가상 파일 시스템은 경로를 UTF-8 로 읽으므로 사용자 이름이 한글인 PC 에서 어긋납니다.
     set(UTF8_MANIFEST)
     if(WIN32)
         set(UTF8_MANIFEST res/Haruka.manifest)
@@ -547,20 +512,26 @@ if(NOT ANDROID)
     endif()
 endif()
 
-file(GLOB_RECURSE GAME_PACK_ASSETS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/*)
-list(FILTER GAME_PACK_ASSETS EXCLUDE REGEX "/assets/cache/")
-add_custom_command(
-    OUTPUT  ${GAME_PACK}
-    COMMAND ${HARUKA_PAK_TOOL} build ${CMAKE_CURRENT_SOURCE_DIR}/Packaging/game.pack.txt -o ${GAME_PACK}
-            -D SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR} -D SHADER_DIR=${SHADER_BIN_DIR}
-    DEPENDS ${HARUKA_PAK_DEPENDS} ${SPIRV_OUTPUTS} ${GAME_PACK_ASSETS} ${CMAKE_CURRENT_SOURCE_DIR}/Packaging/game.pack.txt
-    COMMENT "HarukaPak -> game.hpak"
-    VERBATIM
-)
-add_custom_target(GamePack ALL DEPENDS ${GAME_PACK})
-add_dependencies(GamePack Shaders)
-if(ANDROID)
-    add_dependencies(HarukaGame GamePack)
+# ── 프로젝트 등록 (P3b: haruka_add_project / P4: 하위 프로젝트 지원) ──────────
+set(HARUKA_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "")
+list(TRANSFORM EDITOR_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/" OUTPUT_VARIABLE _haruka_editor_sources)
+list(TRANSFORM GAME_SOURCES   PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/" OUTPUT_VARIABLE _haruka_game_sources)
+set(_haruka_exe_resources)
+foreach(_res ${EXE_RESOURCES})
+    list(APPEND _haruka_exe_resources "${CMAKE_CURRENT_SOURCE_DIR}/${_res}")
+endforeach()
+set(HARUKA_EDITOR_SOURCES      "${_haruka_editor_sources}"      CACHE INTERNAL "")
+set(HARUKA_GAME_SOURCES        "${_haruka_game_sources}"        CACHE INTERNAL "")
+set(HARUKA_EXE_RESOURCES       "${_haruka_exe_resources}"       CACHE INTERNAL "")
+set(HARUKA_SHADER_BIN_DIR      "${SHADER_BIN_DIR}"              CACHE INTERNAL "")
+set(HARUKA_SPIRV_OUTPUTS       "${SPIRV_OUTPUTS}"               CACHE INTERNAL "")
+set(HARUKA_PAK_TOOL            "${HARUKA_PAK_TOOL}"             CACHE INTERNAL "")
+set(HARUKA_PAK_DEPENDS         "${HARUKA_PAK_DEPENDS}"          CACHE INTERNAL "")
+set(HARUKA_STEAM_AUDIO_FOUND   "${HARUKA_STEAM_AUDIO_FOUND}"    CACHE INTERNAL "")
+set(HARUKA_STEAM_AUDIO_LIBRARY "${HARUKA_STEAM_AUDIO_LIBRARY}"  CACHE INTERNAL "")
+include(cmake/HarukaProject.cmake)
+if(HARUKA_BUILD_SAMPLES)
+    add_subdirectory(Projects/Samples)
 endif()
 
 # ── 서드파티 라이선스 고지 (2026-10-24) ─────────────────────────────────────────
@@ -672,7 +643,7 @@ endif()
 # Config/engine.ini 를 두면 패키지 기본값으로 읽습니다(없으면 엔진 기본값).
 # 규칙은 모두 Game 구성 요소로 둡니다. 외부 라이브러리(GLFW · Jolt · OpenXR 등)가 자기 헤더 · 라이브러리 설치 규칙을
 # 갖고 있어, 구성 요소를 가리지 않으면 그것까지 ZIP 에 들어갑니다(처음 시험에서 include/ · lib/ 300여 개가 들어감).
-if(WIN32 AND NOT ANDROID)
+if(WIN32 AND NOT ANDROID AND HARUKA_BUILD_SAMPLES AND HARUKA_PACKAGE_GAME)
     install(TARGETS HarukaGame RUNTIME DESTINATION . COMPONENT Game)
     install(FILES ${GAME_PACK} ${THIRD_PARTY_NOTICES} DESTINATION . COMPONENT Game)
     if(HARUKA_STEAM_AUDIO_FOUND)
@@ -689,10 +660,14 @@ if(WIN32 AND NOT ANDROID)
     endif()
     include(InstallRequiredSystemLibraries)
 
+    get_property(_haruka_pkg_name GLOBAL PROPERTY HARUKA_PACKAGING_NAME)
+    if(NOT _haruka_pkg_name)
+        set(_haruka_pkg_name HarukaGame)
+    endif()
     set(CPACK_INSTALL_CMAKE_PROJECTS "${CMAKE_CURRENT_BINARY_DIR};${PROJECT_NAME};Game;/")
     set(CPACK_GENERATOR ZIP)
-    set(CPACK_PACKAGE_NAME HarukaGame)
-    set(CPACK_PACKAGE_FILE_NAME "HarukaGame-${PROJECT_VERSION}-win64")
+    set(CPACK_PACKAGE_NAME "${_haruka_pkg_name}")
+    set(CPACK_PACKAGE_FILE_NAME "${_haruka_pkg_name}-${PROJECT_VERSION}-win64")
     set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
     include(CPack)
 endif()
@@ -700,7 +675,7 @@ endif()
 # ── 지오메트리 규약 테스트 ────────────────────────────────────────────────────
 # Vulkan 도 디바이스도 창도 필요 없습니다. 생성과 업로드를 분리해 둔 덕분이며,
 # 탄젠트 handedness 나 와인딩 같은 결함은 실행이 아니라 검산으로만 잡힙니다.
-if(NOT ANDROID)
+if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_executable(HarukaGeometryTest
         tests/GeometryTest.cpp
         src/geometry/PrimitiveDesc.cpp
@@ -1023,7 +998,7 @@ if(NOT ANDROID)
     target_link_libraries(HarukaAudioTest PRIVATE glm::glm HarukaVfs Jolt)
     target_include_directories(HarukaAudioTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${miniaudio_SOURCE_DIR})
     target_compile_definitions(HarukaAudioTest PRIVATE
-        HARUKA_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+        HARUKA_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Projects/Samples/Content")
     # HRTF 절(17절)은 Steam Audio 로 빌드했으면 실제 라이브러리도 확인합니다(실행 폴더의 phonon.dll).
     if(HARUKA_STEAM_AUDIO_FOUND)
         target_compile_definitions(HarukaAudioTest PRIVATE HARUKA_EXPECT_STEAM_AUDIO=1)
@@ -1048,9 +1023,12 @@ if(NOT ANDROID)
         src/components/UIPanelPointer.cpp
         src/scene/Component.cpp
         src/scene/Actor.cpp
+        # 에디터 아이콘(D3): SVG 읽기 · 래스터화
+        src/editor/EditorIcons.cpp
     )
     # 셰이더 · 글꼴을 가상 파일 시스템으로 읽습니다(2026-10-24).
-    target_link_libraries(HarukaSlateTest PRIVATE Vulkan::Vulkan glm::glm HarukaVfs)
+    target_link_libraries(HarukaSlateTest PRIVATE Vulkan::Vulkan glm::glm HarukaVfs haruka_nanosvg)
+    target_compile_definitions(HarukaSlateTest PRIVATE HARUKA_ENGINE_CONTENT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Engine/Content")
     target_include_directories(HarukaSlateTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR} ${Vulkan_INCLUDE_DIRS})
     if(MSVC)

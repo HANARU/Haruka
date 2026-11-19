@@ -1,4 +1,5 @@
 #include "PakReader.hpp"
+#include "LogicalPath.hpp"
 #include "PathUtf8.hpp"
 
 #include "lz4.h"
@@ -205,8 +206,24 @@ bool PakReader::open(std::unique_ptr<ReadSource> source, std::string& err) {
 int PakReader::find(std::string_view logical) const {
     std::string norm;
     if (!normalizePath(logical, norm)) return -1;
-    const auto it = index_.find(foldKey(norm));
-    return it == index_.end() ? -1 : it->second;
+    if (const auto it = index_.find(foldKey(norm)); it != index_.end())
+        return it->second;
+    if (hvfs::isGamePath(norm)) {
+        const std::string legacy = "assets/" + foldKey(hvfs::gameRelative(norm));
+        if (const auto it = index_.find(legacy); it != index_.end())
+            return it->second;
+    } else if (hvfs::isConfigPath(norm)) {
+        const std::string legacy = "assets/" + foldKey(hvfs::configRelative(norm));
+        if (const auto it = index_.find(legacy); it != index_.end())
+            return it->second;
+    } else {
+        const std::string canon = hvfs::toCanonical(norm);
+        if (canon != norm) {
+            if (const auto it = index_.find(foldKey(canon)); it != index_.end())
+                return it->second;
+        }
+    }
+    return -1;
 }
 
 std::string_view PakReader::path(int index) const {

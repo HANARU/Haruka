@@ -14,7 +14,7 @@ Reading the pack from inside the APK comes later (aapt2 -A <dir> -0 hpak).
 usage: python -I package_apk.py [--build <android build dir>] [--out <apk>]
 Tools come from ANDROID_HOME (build-tools 36.0.0, platforms/android-34, ndk 30.0.16248370) and JAVA_HOME.
 """
-import argparse, os, shutil, subprocess, sys, tempfile, zipfile
+import argparse, os, shutil, subprocess, sys, tempfile, xml.etree.ElementTree as ET, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -42,6 +42,20 @@ def find_file(root, name):
     return None
 
 
+def read_manifest_info(manifest_path):
+    """Return (package_id, lib_name) from AndroidManifest.xml."""
+    tree = ET.parse(manifest_path)
+    root = tree.getroot()
+    pkg_id = root.attrib.get("package", "com.haruka.game")
+    lib_name = "HarukaGame"
+    android_ns = "{http://schemas.android.com/apk/res/android}"
+    for meta in root.findall(".//meta-data"):
+        if meta.attrib.get(android_ns + "name") == "android.app.lib_name":
+            lib_name = meta.attrib.get(android_ns + "value", lib_name)
+            break
+    return pkg_id, lib_name
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--build", default=os.path.join(REPO, "build", "android"))
@@ -64,10 +78,16 @@ def main():
         if not os.path.exists(p):
             sys.exit(f"error: missing {p}")
 
-    libs = {name: find_file(args.build, name) for name in ("libHarukaGame.so", "libopenxr_loader.so")}
+    manifest = os.path.join(args.build, "AndroidManifest.xml")
+    if not os.path.isfile(manifest):
+        manifest = os.path.join(HERE, "AndroidManifest.xml")
+    pkg_id, lib_name = read_manifest_info(manifest)
+    game_so = f"lib{lib_name}.so"
+
+    libs = {name: find_file(args.build, name) for name in (game_so, "libopenxr_loader.so")}
     for name, path in libs.items():
         if not path:
-            sys.exit(f"error: {name} not found under {args.build} (build the HarukaGame target first)")
+            sys.exit(f"error: {name} not found under {args.build} (build the {lib_name} target first)")
     # Steam Audio (HRTF, 2026-11-06): CMake extracts the release library into the build folder. The engine opens it at run
     # time and falls back to stereo panning without it, so a build configured with HARUKA_STEAM_AUDIO=OFF still packages.
     phonon = find_file(args.build, "libphonon.so")
@@ -91,7 +111,7 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         base = os.path.join(tmp, "base.apk")
-        run([aapt2, "link", "-o", base, "--manifest", os.path.join(HERE, "AndroidManifest.xml"), "-I", android_jar,
+        run([aapt2, "link", "-o", base, "--manifest", manifest, "-I", android_jar,
              "--debug-mode"])
 
         # Copy every entry with its own compression (resources.arsc must stay stored), then add the stripped .so files
@@ -114,10 +134,10 @@ def main():
     run([zipalign, "-c", "-P", "16", "4", out])
     run([java, "-jar", apksigner_jar, "verify", out])
     print(f"APK: {out} ({os.path.getsize(out) // 1024} KB)")
-    pack = os.path.join(args.build, "pack", "game.hpak")
-    if os.path.isfile(pack):
+    pack = find_file(os.path.join(args.build, "pack"), "game.hpak")
+    if pack and os.path.isfile(pack):
         print(f"Pack: {pack} ({os.path.getsize(pack) // 1024} KB); push it after the first launch with")
-        print(f"  adb push {pack} /sdcard/Android/data/com.haruka.game/files/game.hpak")
+        print(f"  adb push {pack} /sdcard/Android/data/{pkg_id}/files/game.hpak")
     else:
         print(f"warning: {pack} not found; build the HarukaGame target (it builds the pack too)")
 

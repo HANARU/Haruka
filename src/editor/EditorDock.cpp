@@ -9,7 +9,7 @@ void EditorDock::init(Deps deps) {
 }
 
 std::shared_ptr<SBorder> EditorDock::buildHost() {
-    host_ = HNew(SBorder)->background({0.f, 0.f, 0.f, 0.f});
+    host_ = HNew(SBorder)->background(EditorTheme::transparent);
     return host_;
 }
 
@@ -57,7 +57,7 @@ std::shared_ptr<HWidget> EditorDock::buildNodeWidget(DockNode* node) {
 
     if (node->isLeaf()) {
         auto tabRow = HNew(HR);
-        auto tabRowArea = HNew(BR)->background(EditorUiKit::kBgHeader)
+        auto tabRowArea = HNew(BR)->background(EditorTheme::bgWindow)
             ->borderColor(EditorUiKit::kBorder)->borderThickness(1.f)
             ->clipChildren(true)->content(tabRow);
         for (int i = 0; i < (int)node->panelIds.size(); ++i) {
@@ -70,19 +70,21 @@ std::shared_ptr<HWidget> EditorDock::buildNodeWidget(DockNode* node) {
             const bool closable = def && def->closable;
             if (closable) {
                 closeBtn = HNew(SButton)
-                    ->normalColor({0.f, 0.f, 0.f, 0.f})->hoveredColor({0.30f, 0.30f, 0.34f, 1.f})
-                    ->pressedColor({0.f, 0.f, 0.f, 0.f})
+                    ->style(EditorUiKit::buttonStyle(s(1.f)))
+                    ->normalColor(EditorTheme::transparent)->hoveredColor(EditorTheme::ctlHover)
+                    ->pressedColor(EditorTheme::ctlPressed)
                     ->padding(HPadding{s(4.f), 0.f})
-                    ->content(HNew(STextBlock)->text("x")->fontSize(s(11.f))->color(EditorUiKit::kTextDim)
-                        ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
+                    ->content(deps_.ui->icon("x", 10.f, EditorUiKit::kTextDim, "x", 11.f));
+                closeBtn->tooltip.set("Close Tab");
                 tabContent = HNew(HR)
                     ->addSlot(tabContent, HR::ESizeRule::Auto)
                     ->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(6.f))
                     ->addSlot(closeBtn,   HR::ESizeRule::Auto);
             }
             auto tab = HNew(BR)
-                ->background(active ? EditorUiKit::kBgPanel : EditorUiKit::kBgHeader)
+                ->background(active ? EditorUiKit::kBgPanel : EditorTheme::bgWindow)
                 ->borderColor(EditorUiKit::kBorder)->borderThickness(1.f)
+                ->cornerRadius(s(EditorTheme::radiusControl))
                 ->padding(closable ? HPadding{s(12.f), s(6.f), s(4.f), s(6.f)} : HPadding{s(12.f), s(6.f)})
                 ->content(tabContent);
             tabRow->addSlot(tab, HR::ESizeRule::Auto);

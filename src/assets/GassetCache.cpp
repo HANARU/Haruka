@@ -1,5 +1,6 @@
 #include "GassetCache.hpp"
 #include "AssetLog.hpp"
+#include "../vfs/LogicalPath.hpp"
 #include "Skin.hpp"
 #include <glm/gtc/type_ptr.hpp>
 #include "../vfs/PakFormat.hpp"
@@ -49,8 +50,9 @@ const std::string& GassetCache::directory() { return cacheDirStorage(); }
 // 상관없이 같은 값이라, 나중에 캐시를 미리 만들어 묶음에 넣을 수 있습니다. 예전에는 실제 경로의 std::hash 라 실행마다
 // 달라질 수 있었고 에디터(절대 경로)와 게임의 키가 달랐습니다. 논리 경로가 아닌 경로(절대 경로)는 그 문자열을 씁니다.
 std::string GassetCache::cachePath(const std::string& srcPath) {
+    const std::string canon = hvfs::toCanonical(srcPath);
     std::string norm;
-    const std::string key = hpak::normalizePath(srcPath, norm) ? hpak::foldKey(norm) : srcPath;
+    const std::string key = hpak::normalizePath(canon, norm) ? hpak::foldKey(norm) : canon;
     uint64_t h = 1469598103934665603ull;
     for (unsigned char c : key) { h ^= c; h *= 1099511628211ull; }
     std::ostringstream oss;

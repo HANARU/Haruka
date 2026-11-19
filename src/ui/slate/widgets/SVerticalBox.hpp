@@ -117,6 +117,14 @@ public:
         }
         return HReply::Unhandled();
     }
+    std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) override {
+        if (!isVisible()) return nullptr;
+        for (auto& s : slots_)
+            if (auto w = s.widget->findTooltipWidget(pos)) return w;
+        if (!cachedGeo_.contains(pos)) return nullptr;
+        return tooltip.get().empty() ? nullptr : shared_from_this();
+    }
+
     HReply onMouseMove(const HPointerEvent& e) override {
         // Dispatch to ALL children so each can clear its own hover state
         HReply ret = HReply::Unhandled();

@@ -11,6 +11,7 @@
 #include "IGameModule.hpp"
 #include "../scene/ComponentRegistry.hpp"
 #include "../core/EngineSettings.hpp"
+#include "../core/ProjectDescriptor.hpp"
 #include "../core/ProjectPaths.hpp"
 #include "../core/FileUtil.hpp"
 #include "../core/AppPaths.hpp"
@@ -147,30 +148,69 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     registerCoreComponents();
     registerXrComponents();   // 플레이어 리그 · 추적 자세 · 이동 · 잡기(2026-10-15)
 
-    // 에셋 루트(2026-10-15). 에디터는 프로젝트 폴더의 assets/ 를 직접 읽고 씁니다(ProjectPaths.hpp). 그 경로는 에디터 앞단만
-    // 알려 주고(2026-10-19), 그 아래 assets/ 가 없으면(다른 PC 로 옮긴 실행 파일 등) 실행 폴더의 복사본을 씁니다.
+    // 프로젝트 루트(2026-10-15, P3a 2026-11-19). --project=<폴더> 또는 에디터 기본값(HARUKA_PROJECT_DIR)을 씁니다.
+    // 프로젝트 폴더가 있으면 *.hproject 를 읽어 검증하고(없으면 오류로 멈춤), <프로젝트>/Content 를 /Game/ 으로,
+    // <프로젝트>/Config 를 /Config/ 으로 마운트합니다.
     bool projectFolder = false;
-    if (!policy_.projectDir.empty()) {
+    const bool explicitProject = !options.projectDir.empty();
+    const std::string& rawProjectDir = explicitProject ? options.projectDir : policy_.projectDir;
+    if (!rawProjectDir.empty()) {
         std::error_code ec;
-        const std::filesystem::path project = policy_.projectDir;
-        if (std::filesystem::is_directory(project / "assets", ec)) { hproj::setRoot(project); projectFolder = true; }
+        const std::filesystem::path project = rawProjectDir;
+        if (explicitProject || std::filesystem::is_directory(project, ec)) {
+            const std::filesystem::path projFile = project_descriptor::findInDirectory(project);
+            if (projFile.empty()) {
+                HLOG(LogEngine, Error) << "Project folder has no .hproject file: " << project.generic_string();
+                throw std::runtime_error("Missing .hproject in project folder");
+            }
+            ProjectDescriptor desc;
+            std::vector<std::string> warnings, errors;
+            if (!project_descriptor::loadFromFile(projFile, desc, warnings, errors)) {
+                for (const auto& w : warnings) HLOG(LogEngine, Warning) << projFile.generic_string() << ": " << w;
+                for (const auto& e : errors)   HLOG(LogEngine, Error)   << projFile.generic_string() << ": " << e;
+                throw std::runtime_error("Invalid .hproject file");
+            }
+            for (const auto& w : warnings) HLOG(LogEngine, Warning) << projFile.generic_string() << ": " << w;
+            HLOG(LogEngine, Log) << "Project: " << desc.name << " (company '" << desc.company
+                                 << "', packageId '" << desc.packageId << "', engineVersion '" << desc.engineVersion << "')";
+            if (!std::filesystem::is_directory(project / "Content", ec)) {
+                HLOG(LogEngine, Error) << "Project folder has no Content directory: " << project.generic_string();
+                throw std::runtime_error("Missing Content directory in project folder");
+            }
+            hproj::setRoot(project);
+            projectFolder = true;
+        }
     }
     if (projectFolder) {
-        HLOG(LogEngine, Log) << "Asset root: project folder " << hproj::root().generic_string() << "/assets";
+        HLOG(LogEngine, Log) << "Asset root: project folder " << hproj::root().generic_string() << "/Content";
     } else {
-        // 실행 폴더의 assets/ 를 작업 폴더가 아니라 실행 파일 기준으로 찾습니다(2026-10-19). 예전에는 작업 폴더 기준이라
-        // 바로가기나 다른 폴더에서 실행하면 씬 · 모델을 찾지 못했습니다.
+        // 실행 폴더의 낱개/묶음 파일을 작업 폴더가 아니라 실행 파일 기준으로 찾습니다(2026-10-19).
         hproj::setRoot(happ::exeDir());
-        HLOG(LogEngine, Log) << "Asset root: assets/ next to the executable (" << happ::exeDir().generic_string() << ")";
+        HLOG(LogEngine, Log) << "Asset root: next to the executable (" << happ::exeDir().generic_string() << ")";
     }
-    // 엔진이 읽는 패키지 파일(셰이더 · 에셋)은 가상 파일 시스템으로 찾습니다(2026-10-24, vfs/Vfs.hpp). 실행 폴더의 낱개
-    // 파일이 바닥이고, 에디터는 프로젝트 폴더의 assets/ 를, 게임 실행 파일은 실행 폴더의 묶음 파일(game.hpak 등)을 그 위에
-    // 올립니다. --loose 를 주면 낱개 파일이 묶음보다 위입니다(개발 중 묶음을 다시 만들지 않고 에셋을 바꿔 보기).
-    // 프로젝트 폴더를 쓰는 에디터는 실행 폴더에서 shaders/ 만 찾습니다(DEF-124). 빌드의 에셋 복사는 지운 파일을 남기므로,
-    // 실행 폴더 전체를 바닥에 두면 프로젝트에서 지우거나 이름을 바꾼 모델 · 소리를 옛 복사본으로 아무 표시 없이 읽었습니다.
+    // 엔진이 읽는 패키지 파일(셰이더 · 에셋)은 가상 파일 시스템으로 찾습니다(2026-10-24, vfs/Vfs.hpp).
     hvfs::reset();
     hvfs::mountDirectory(happ::exeDir(), projectFolder ? "shaders/" : "", 0);
-    if (projectFolder) hvfs::mountDirectory(hproj::root(), "assets/", 10);
+    if (projectFolder) {
+        hvfs::mountDirectoryAs(hproj::root() / "Content", "/Game/",   10);
+        hvfs::mountDirectoryAs(hproj::root() / "Config",  "/Config/", 10);
+    } else {
+        std::error_code ec;
+        if (std::filesystem::is_directory(happ::exeDir() / "Content", ec))
+            hvfs::mountDirectoryAs(happ::exeDir() / "Content", "/Game/",   0);
+        if (std::filesystem::is_directory(happ::exeDir() / "Config", ec))
+            hvfs::mountDirectoryAs(happ::exeDir() / "Config",  "/Config/", 0);
+    }
+    // 엔진 콘텐츠(/Engine/, D3 2026-11-19): 앞단이 준 폴더(에디터 = <엔진>/Engine/Content), 없으면 실행 폴더의 Engine/Content.
+    {
+        std::error_code ec;
+        std::filesystem::path engineContent;
+        if (!policy_.engineContentDir.empty() && std::filesystem::is_directory(policy_.engineContentDir, ec))
+            engineContent = policy_.engineContentDir;
+        else if (std::filesystem::is_directory(happ::exeDir() / "Engine" / "Content", ec))
+            engineContent = happ::exeDir() / "Engine" / "Content";
+        if (!engineContent.empty()) hvfs::mountDirectoryAs(engineContent, "/Engine/", 10);   // 마운트 목록 로그에 나옴
+    }
     bool anyPack    = false;   // 게임 묶음을 하나라도 마운트함(셰이더 확인의 안내 문구가 이것을 봄)
     bool packFailed = false;   // 묶음 파일이 있었지만 마운트하지 못함
     if (policy_.mountGamePacks) {
@@ -199,7 +239,14 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // --loose 는 묶음을 마운트하는 게임 실행 파일에만 뜻이 있습니다(DEF-126). 에디터에 주면 실행 폴더의 에셋 복사본이 프로젝트
     // 폴더를 가리므로 무시합니다. 우선순위는 패치 번호가 커도 모든 묶음보다 위입니다.
     if (options.loose) {
-        if (policy_.mountGamePacks) hvfs::mountDirectory(happ::exeDir(), "", hvfs::kLoosePriority);
+        if (policy_.mountGamePacks) {
+            hvfs::mountDirectory(happ::exeDir(), "", hvfs::kLoosePriority);
+            std::error_code ec;
+            if (std::filesystem::is_directory(happ::exeDir() / "Content", ec))
+                hvfs::mountDirectoryAs(happ::exeDir() / "Content", "/Game/",   hvfs::kLoosePriority);
+            if (std::filesystem::is_directory(happ::exeDir() / "Config", ec))
+                hvfs::mountDirectoryAs(happ::exeDir() / "Config",  "/Config/", hvfs::kLoosePriority);
+        }
         else HLOG(LogEngine, Warning) << "--loose is for the game executable; ignored";
     }
     for (const auto& m : hvfs::describe()) HLOG(LogEngine, Log) << "Mounted " << m;
@@ -367,6 +414,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_, *renderer_,
                                   ComponentRegistry::get() });
     game_ = createGameModule();   // 링크한 게임 모듈(runtime/IGameModule.hpp)
+    game_->onRegister();          // 씬 열기 전에 UIPanel 내용 · 게임 타입 등록
     game_->onStart(*ctx_);
 
     // 처음 열 씬은 앞단이 정합니다. 에디터는 마지막으로 연 씬(없으면 프로젝트 시작 씬), 게임 실행 파일은 프로젝트 시작
@@ -639,6 +687,9 @@ void Engine::renderFrame(FrameState& f) {
             ++drawnFrames_;
         }
     } else {
+        const bool wantCapture = !options_.capturePath.empty() &&
+                                 (options_.frames <= 0 || drawnFrames_ + 1 >= options_.frames);
+        renderer.setCaptureNextSwapchain(wantCapture);
         renderer.drawFrame(sceneInput_);
         if (renderer.lastFrameDesktop()) ++drawnFrames_;
     }
@@ -691,13 +742,34 @@ int Engine::finishRun() {
     if (!options_.capturePath.empty()) {
         std::vector<uint8_t> rgba;
         VkExtent2D           ext{};
-        if (!synthetic_ || lastSynthetic_ == UINT32_MAX) {
-            captureNote = "capture skipped (needs --synthetic-eyes and at least one drawn frame)";
-            blank       = true;
-        } else if (!renderer_->captureXrEye(lastSynthetic_, options_.captureEye, rgba, ext)) {
-            captureNote = "capture failed";
-            blank       = true;
+        bool captured    = false;
+        bool unsupported = false;
+        if (synthetic_) {
+            if (lastSynthetic_ == UINT32_MAX) {
+                captureNote = "capture skipped (needs at least one drawn synthetic frame)";
+                blank       = true;
+            } else if (!renderer_->captureXrEye(lastSynthetic_, options_.captureEye, rgba, ext)) {
+                captureNote = "capture failed";
+                blank       = true;
+            } else {
+                captured = true;
+            }
         } else {
+            if (drawnFrames_ == 0) {
+                captureNote = "capture skipped (no drawn frames)";
+                blank       = true;
+            } else if (!renderer_->captureSwapchain(rgba, ext, unsupported)) {
+                if (unsupported) {
+                    captureNote = "capture skipped (swapchain does not support TRANSFER_SRC)";
+                } else {
+                    captureNote = "capture failed";
+                    blank       = true;
+                }
+            } else {
+                captured = true;
+            }
+        }
+        if (captured) {
             blank = hopt::looksBlank(rgba);
             std::filesystem::path out;
             if (!hpak::pathFromUtf8(options_.capturePath, out)) out = std::filesystem::path(options_.capturePath);
@@ -710,8 +782,8 @@ int Engine::finishRun() {
             const bool ok = f.is_open() &&
                             stbi_write_png_to_func(sink, &f, (int)ext.width, (int)ext.height, 4, rgba.data(),
                                                    (int)ext.width * 4) != 0 && f.good();
-            captureNote = (ok ? "capture " : "capture not written: ") + options_.capturePath +
-                          (options_.captureEye ? " (right eye, " : " (") +
+            const char* eyeNote = synthetic_ && options_.captureEye ? " (right eye, " : " (";
+            captureNote = (ok ? "capture " : "capture not written: ") + options_.capturePath + eyeNote +
                           std::to_string(ext.width) + "x" + std::to_string(ext.height) + (blank ? ", blank" : "") + ")";
             if (!ok) blank = true;
         }

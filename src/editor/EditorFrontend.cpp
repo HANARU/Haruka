@@ -9,6 +9,9 @@ IEngineFrontend::Policy EditorApp::policy() const {
 #ifdef HARUKA_PROJECT_DIR
     p.projectDir = HARUKA_PROJECT_DIR;
 #endif
+#ifdef HARUKA_ENGINE_CONTENT_DIR
+    p.engineContentDir = HARUKA_ENGINE_CONTENT_DIR;
+#endif
     // 나머지는 기본값입니다: VR 은 --xr 로만 준비하고 Play 동안만 헤드셋에 그림(2026-10-15), 헤드셋을 벗어도 Play 는 계속,
     // 런타임이 세션을 끝내면 데스크톱으로 계속하고 다음 Play 에서 다시 엶, 설정 · 로그는 실행 폴더.
     return p;

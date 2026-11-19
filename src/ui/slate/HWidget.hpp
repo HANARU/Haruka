@@ -28,6 +28,13 @@ public:
     Attr<EVisibility> visibility { EVisibility::Visible };
     Attr<bool>        enabled    { true };
     Attr<glm::vec2>   minSize    { glm::vec2(0.f) };
+    Attr<std::string> tooltip    { std::string() };
+
+    // 포인터 아래에서 툴팁이 있는 가장 깊은 위젯을 찾습니다(enabled 무관).
+    virtual std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) {
+        if (!isVisible() || !cachedGeo_.contains(pos)) return nullptr;
+        return tooltip.get().empty() ? nullptr : shared_from_this();
+    }
 
     // 마지막으로 배치된 Geometry (hit testing용)
     const HGeometry& cachedGeometry() const { return cachedGeo_; }

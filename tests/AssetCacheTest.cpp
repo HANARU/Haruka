@@ -152,6 +152,8 @@ int main() {
     const std::string name = fs::path(GassetCache::cachePath(src)).filename().string();
     check(name.size() == 16 + 7 && name.compare(16, 7, ".gasset") == 0, "파일 이름은 16자리 16진수 + .gasset");
     check(GassetCache::cachePath(src) != GassetCache::cachePath("models/other.glb"), "다른 경로는 다른 캐시 파일");
+    check(GassetCache::cachePath("assets/models/model.glb") == GassetCache::cachePath("/Game/models/model.glb"),
+          "assets/ 와 /Game/ 은 같은 .gasset 캐시 경로");
 
     // 원본이 묶음 안이면 목차의 크기 · 내용 해시로 판정합니다(파일을 읽지 않음). 같은 원본에서 만든 캐시는 낱개에서
     // 만들었든 묶음에서 만들었든 그대로 씁니다.
@@ -176,8 +178,9 @@ int main() {
     hproj::setRoot({});
     check(hproj::resolve("assets/models/a.glb") == "assets/models/a.glb", "루트가 없으면 그대로(실행 폴더 기준)");
     hproj::setRoot("P:/proj");
-    check(hproj::resolve("assets/models/a.glb") == "P:/proj/assets/models/a.glb", "루트가 있으면 assets/ 를 프로젝트 폴더로");
-    check(hproj::resolve("assets/prefabs") == "P:/proj/assets/prefabs", "폴더 경로도 바꿈(프리팹 저장 · 목록)");
+    check(hproj::resolve("assets/models/a.glb") == "P:/proj/Content/models/a.glb", "루트가 있으면 assets/ 를 프로젝트 Content 로");
+    check(hproj::resolve("/Game/models/a.glb") == "P:/proj/Content/models/a.glb", "루트가 있으면 /Game/ 을 프로젝트 Content 로");
+    check(hproj::resolve("/Game/prefabs") == "P:/proj/Content/prefabs", "폴더 경로도 바꿈(프리팹 저장 · 목록)");
     check(hproj::resolve("assets/cache/0123.gasset") == "assets/cache/0123.gasset", "assets/cache 는 바꾸지 않음");
     check(hproj::resolve("C:/tmp/x.wav") == "C:/tmp/x.wav", "assets/ 밖 경로는 그대로");
     check(hproj::resolve("assetsX/y") == "assetsX/y", "assets/ 로 시작하지 않으면 그대로");

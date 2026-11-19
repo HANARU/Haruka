@@ -39,9 +39,12 @@ inline bool isValidName(const std::string& name, std::string* why = nullptr) {
     return true;
 }
 
-// 텍스트 앞의 UTF-8 BOM 을 떼고, v3 머리 줄("# Haruka Prefab v3")이 있는지 봅니다. 머리 줄 앞의 빈 줄 · 다른 주석은
-// 건너뜁니다. 예전에는 첫 바이트부터 머리 줄이어야 해서, BOM 이나 앞의 빈 줄 · 주석이 있으면 v1 경로로 빠져
-// "Prefab missing NAME" 오류만 남았습니다(DEF-142).
+inline constexpr std::string_view kPrefabHeaderV4 = "# Haruka Prefab v4";
+inline constexpr std::string_view kPrefabHeaderV3 = "# Haruka Prefab v3";
+
+// 텍스트 앞의 UTF-8 BOM 을 떼고, 액터 블록 형식 머리 줄("# Haruka Prefab v4" 또는 v3)이 있는지 봅니다.
+// 머리 줄 앞의 빈 줄 · 다른 주석은 건너뜁니다. 예전에는 첫 바이트부터 머리 줄이어야 해서, BOM 이나 앞의 빈 줄 · 주석이
+// 있으면 v1 경로로 빠져 "Prefab missing NAME" 오류만 남았습니다(DEF-142).
 inline bool stripBomAndDetectV3(std::string& text) {
     if (text.size() >= 3 && (unsigned char)text[0] == 0xEF && (unsigned char)text[1] == 0xBB && (unsigned char)text[2] == 0xBF)
         text.erase(0, 3);
@@ -53,7 +56,8 @@ inline bool stripBomAndDetectV3(std::string& text) {
         while (b < e && (text[b] == ' ' || text[b] == '\t')) ++b;
         while (e > b && (text[e - 1] == '\r' || text[e - 1] == ' ' || text[e - 1] == '\t')) --e;
         if (b < e) {
-            if (text.compare(b, 18, "# Haruka Prefab v3") == 0) return true;
+            const std::string_view line(text.data() + b, e - b);
+            if (line == kPrefabHeaderV4 || line == kPrefabHeaderV3) return true;
             if (text[b] != '#') return false;   // 액터 줄(v1 · v2 의 NAME: 등)이 먼저 나옴
         }
         pos = eol + 1;

@@ -8,6 +8,8 @@
 // 실행: build/Release/HarukaSceneTest.exe
 
 #include "../src/sceneio/ComponentSerializer.hpp"
+#include "../src/sceneio/PrefabRules.hpp"
+#include "../src/sceneio/SceneSerializer.hpp"
 #include "../src/sceneio/TransformText.hpp"
 #include "../src/components/CameraComponent.hpp"
 #include "../src/components/LightComponent.hpp"
@@ -537,6 +539,14 @@ int main() {
         check(def.transform().rotation() == glm::quat(1.f, 0.f, 0.f, 0.f) &&
               near3(dl->emitDirection(), { 0.f, 0.f, -1.f }),
               "(e) 결정 3: 기본 생성한 라이트를 항등 회전 액터에 붙이면 회전 불변 · 발광 방향 (0, 0, -1)");
+    }
+
+    // ── 7. 씬 v5 · 프리팹 v4 머리 줄 상수 (P2) ─────────────────────────────────
+    std::printf("\n== 7. 씬 v5 · 프리팹 v4 형식 상수 ==\n");
+    {
+        check(std::string_view(SceneSerializer::kSceneHeader) == "# Haruka Scene v5", "SceneSerializer::kSceneHeader == v5");
+        check(hprefab::kPrefabHeaderV4 == "# Haruka Prefab v4", "kPrefabHeaderV4 == v4");
+        check(hprefab::kPrefabHeaderV3 == "# Haruka Prefab v3", "kPrefabHeaderV3 == v3 (호환 유지)");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

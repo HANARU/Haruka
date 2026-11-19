@@ -123,6 +123,10 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (!v.empty()) o.uiPick = v;
             else unknown.push_back(a);
         }
+        else if (valueOf(a, "--ui-hover", v)) {
+            if (!v.empty()) o.uiHover = v;
+            else unknown.push_back(a);
+        }
         else if (valueOf(a, "--synthetic-eyes", v)) {
             if (parseSize(v, o.syntheticEyeW, o.syntheticEyeH)) o.syntheticEyes = true;
             else unknown.push_back(a);
@@ -154,6 +158,10 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         }
         else if (valueOf(a, "--scene", v)) {
             if (project_settings::isSceneLogicalPath(v)) o.scenePath = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--project", v)) {
+            if (!v.empty()) o.projectDir = v;
             else unknown.push_back(a);
         }
         else unknown.push_back(a);

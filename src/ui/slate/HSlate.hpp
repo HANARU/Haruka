@@ -15,6 +15,7 @@
 #include "widgets/STextBlock.hpp"
 #include "widgets/SImage.hpp"
 #include "widgets/SButton.hpp"
+#include "widgets/SCheckBox.hpp"
 #include "widgets/SNumberField.hpp"
 #include "widgets/SToggleButton.hpp"
 #include "widgets/SCollapseSection.hpp"

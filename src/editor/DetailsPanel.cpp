@@ -11,9 +11,17 @@
 
 namespace {
 
-constexpr glm::vec4 kRed  { 0.9f, 0.3f, 0.3f, 1.f };
-constexpr glm::vec4 kGreen{ 0.3f, 0.9f, 0.3f, 1.f };
-constexpr glm::vec4 kBlue { 0.3f, 0.6f, 1.0f, 1.f };
+constexpr glm::vec4 kRed   = EditorTheme::axisX;
+constexpr glm::vec4 kGreen = EditorTheme::axisY;
+constexpr glm::vec4 kBlue  = EditorTheme::axisZ;
+
+glm::vec4 themePropColor(glm::vec4 c) {
+    if (c == PropColor::Red)     return EditorTheme::axisX;
+    if (c == PropColor::Green)   return EditorTheme::axisY;
+    if (c == PropColor::Blue)    return EditorTheme::axisZ;
+    if (c == PropColor::Neutral) return EditorTheme::textSecondary;
+    return c;
+}
 
 glm::vec3 quatToEulerDeg(const glm::quat& q) {
     return glm::degrees(glm::vec3(glm::pitch(q), glm::yaw(q), glm::roll(q)));
@@ -40,7 +48,7 @@ std::shared_ptr<HWidget> DetailsPanel::build() {
     // 컴포넌트가 많으면 패널보다 길어지므로 스크롤 상자에 담습니다(DEF-56·57). 예전에는 넘친
     // 칸이 아래 패널 위에 그려졌고, 그 칸은 눌리지도 않았습니다.
     list_   = HNew(SVerticalBox);
-    scroll_ = HNew(SScrollBox)->wheelStep(s(48.f))->barWidth(s(4.f))->content(list_);
+    scroll_ = HNew(SScrollBox)->style(EditorUiKit::scrollBoxStyle(s(1.f)))->wheelStep(s(48.f))->content(list_);
     return HNew(SBorder)->background(EditorUiKit::kBgPanel)->content(scroll_);
 }
 
@@ -76,15 +84,16 @@ void DetailsPanel::addNumRow(const char* lbl, glm::vec4 lc,
                              std::function<void()> eFn) {
     list_->addSlot(
         HNew(SHorizontalBox)
-            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(12.f))
+            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space12))
             ->addSlot(
                 HNew(SNumberField)
+                    ->style(EditorUiKit::numberFieldStyle(s(1.f)))
                     ->label(lbl)->labelColor(lc)->fontSize(s(12.f))
                     ->get(std::move(getter))->set(std::move(setter))->step(step)->unit(unit)
                     ->onDragBegin(std::move(bFn))->onDragEnd(std::move(eFn)),
                 SHorizontalBox::ESizeRule::Fill)
-            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(8.f)),
-        SVerticalBox::ESizeRule::Fixed, s(26.f));
+            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space8)),
+        SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
 }
 
 void DetailsPanel::addEnumRow(const char* lbl,
@@ -95,43 +104,41 @@ void DetailsPanel::addEnumRow(const char* lbl,
     const char* cur = (idx >= 0 && idx < (int)opts.size()) ? opts[idx] : "?";
     list_->addSlot(
         HNew(SHorizontalBox)
-            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(12.f))
+            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space12))
             ->addSlot(
                 HNew(STextBlock)->text(lbl)->fontSize(s(12.f))->color(EditorUiKit::kTextBody)
                     ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
                 SHorizontalBox::ESizeRule::Fill)
             ->addSlot(
                 deps_.ui->textButton(cur, 12.f, EditorUiKit::kTextBody, {5.f, 2.f},
-                                     {0.22f, 0.22f, 0.28f, 1.f}, {0.35f, 0.35f, 0.40f, 1.f},
+                                     EditorTheme::ctlNormal, EditorTheme::ctlHover,
                                      [this, opts, getI, setI]{
                                          setI((getI() + 1) % (int)opts.size());
                                          dirty_ = true;
                                      }),
                 SHorizontalBox::ESizeRule::Fixed, s(88.f))
-            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(8.f)),
-        SVerticalBox::ESizeRule::Fixed, s(26.f));
+            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space8)),
+        SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
 }
 
 void DetailsPanel::addBoolRow(const char* lbl,
                               std::function<bool()>    getB,
                               std::function<void(bool)> setB) {
-    bool v = getB();
     list_->addSlot(
         HNew(SHorizontalBox)
-            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(12.f))
+            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space12))
             ->addSlot(
                 HNew(STextBlock)->text(lbl)->fontSize(s(12.f))->color(EditorUiKit::kTextBody)
                     ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
                 SHorizontalBox::ESizeRule::Fill)
             ->addSlot(
-                deps_.ui->textButton(v ? "Yes" : "No", 12.f, EditorUiKit::kTextBody, {5.f, 2.f},
-                                     v ? glm::vec4{0.18f,0.50f,0.22f,1.f}
-                                       : glm::vec4{0.38f,0.18f,0.18f,1.f},
-                                     {0.35f, 0.35f, 0.40f, 1.f},
-                                     [this, getB, setB]{ setB(!getB()); dirty_ = true; }),
-                SHorizontalBox::ESizeRule::Fixed, s(44.f))
-            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(8.f)),
-        SVerticalBox::ESizeRule::Fixed, s(26.f));
+                HNew(SCheckBox)
+                    ->style(EditorUiKit::checkBoxStyle(s(1.f)))
+                    ->checked(getB)
+                    ->onClick([this, getB, setB]{ setB(!getB()); dirty_ = true; }),
+                SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space16))
+            ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space8)),
+        SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
 }
 
 void DetailsPanel::rebuild() {
@@ -143,13 +150,13 @@ void DetailsPanel::rebuild() {
     actor_ = deps_.ctx->selected;
 
     list_->addSlot(
-        HNew(SBorder)->background({0,0,0,0})->padding({s(8.f), s(8.f)})
+        HNew(SBorder)->background(EditorTheme::transparent)->padding({s(8.f), s(8.f)})
             ->content(HNew(STextBlock)
                 ->text(AttrStr([this]() -> std::string {
                     return deps_.ctx->selected ? deps_.ctx->selected->name : "(No Selection)";
                 }))
-                ->fontSize(s(16.f))->color(deps_.ctx->selected ? EditorUiKit::kTextBody : EditorUiKit::kTextDim)
-                ->hAlign(EHAlign::Left)),
+                ->fontSize(s(16.f))->color(deps_.ctx->selected ? EditorUiKit::kTextBody : EditorTheme::textDisabled)
+                ->bold()->hAlign(EHAlign::Left)),
         SVerticalBox::ESizeRule::Fixed, s(46.f));
 
     if (!deps_.ctx->selected) return;
@@ -159,11 +166,11 @@ void DetailsPanel::rebuild() {
     // 나머지 성분은 액터마다 그대로입니다. 한 번의 편집은 한 번의 Undo 입니다.
     if (deps_.ctx->selection.size() > 1)
         list_->addSlot(
-            HNew(SBorder)->background({0.07f, 0.20f, 0.33f, 1.f})->padding({s(8.f), s(3.f)})
+            HNew(SBorder)->background(EditorTheme::selectRow)->padding({s(EditorTheme::space8), s(EditorTheme::space2)})
                 ->content(HNew(STextBlock)
                     ->text(std::to_string(deps_.ctx->selection.size()) + " actors selected (edits apply to all)")
                     ->fontSize(s(12.f))->color(EditorUiKit::kTextBody)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
-            SVerticalBox::ESizeRule::Fixed, s(24.f));
+            SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
 
     list_->addSlot(HNew(SBorder)->background(EditorUiKit::kBorder), SVerticalBox::ESizeRule::Fixed, 1.f);
 
@@ -204,17 +211,18 @@ void DetailsPanel::buildTransformSection(Actor& sel) {
                         float step, ENumberUnit unit) {
         txBody->addSlot(
             HNew(SHorizontalBox)
-                ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(12.f))
+                ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space12))
                 ->addSlot(HNew(SNumberField)
+                    ->style(EditorUiKit::numberFieldStyle(s(1.f)))
                     ->label(lbl)->labelColor(lc)->fontSize(s(12.f))
                     ->get(std::move(getter))->set(std::move(setter))->step(step)->unit(unit)
                     ->onDragBegin(txBegin)->onDragEnd(txEnd),
                     SHorizontalBox::ESizeRule::Fill)
-                ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(8.f)),
-            SVerticalBox::ESizeRule::Fixed, s(26.f));
+                ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space8)),
+            SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     };
 
-    txBody->addSlot(deps_.ui->sectionHeader("LOCATION"), SVerticalBox::ESizeRule::Fixed, s(22.f));
+    txBody->addSlot(deps_.ui->sectionHeader("LOCATION", EditorUiKit::kTextDim), SVerticalBox::ESizeRule::Fixed, s(22.f));
     // 성분별 세터는 값을 읽어 한 성분만 바꾸고 세터로 되돌려 넣습니다(필드 직접 쓰기 불가).
     auto posSetter = [selPtr, others](int axis) {
         return [selPtr, others, axis](float v) {
@@ -227,7 +235,7 @@ void DetailsPanel::buildTransformSection(Actor& sel) {
     addTxRow("Z", kBlue,  [selPtr]{ return selPtr->transform().position().z; }, posSetter(2), 0.01f, ENumberUnit::Offset);
     txBody->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
 
-    txBody->addSlot(deps_.ui->sectionHeader("ROTATION"), SVerticalBox::ESizeRule::Fixed, s(22.f));
+    txBody->addSlot(deps_.ui->sectionHeader("ROTATION", EditorUiKit::kTextDim), SVerticalBox::ESizeRule::Fixed, s(22.f));
     // 다른 액터는 자기 오일러 각에서 그 성분만 바꿉니다.
     auto setEuler = [this, selPtr, others](int axis, float v) {
         (*deps_.cachedEuler)[axis] = v;
@@ -243,7 +251,7 @@ void DetailsPanel::buildTransformSection(Actor& sel) {
     addTxRow("Z", kBlue,  [this]{ return deps_.cachedEuler->z; }, [setEuler](float v){ setEuler(2, v); }, 0.5f, ENumberUnit::Angle);
     txBody->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
 
-    txBody->addSlot(deps_.ui->sectionHeader("SCALE"), SVerticalBox::ESizeRule::Fixed, s(22.f));
+    txBody->addSlot(deps_.ui->sectionHeader("SCALE", EditorUiKit::kTextDim), SVerticalBox::ESizeRule::Fixed, s(22.f));
     auto sclSetter = [selPtr, others](int axis) {
         return [selPtr, others, axis](float v) {
             for (Actor* a : others) { glm::vec3 s2 = a->transform().scale(); s2[axis] = v; a->setLocalScale(s2); }
@@ -257,9 +265,10 @@ void DetailsPanel::buildTransformSection(Actor& sel) {
     // 섹션은 리빌드마다 새로 만들어지므로 접힘 상태를 에디터가 기억합니다. 예전에는
     // expanded(true) 고정이라, 접어 두어도 선택을 바꾸면 다시 펼쳐졌습니다(DEF-90).
     list_->addSlot(
-        HNew(SCollapseSection)->title("TRANSFORM")->body(txBody)->expanded(txExpanded_)
+        HNew(SCollapseSection)->style(EditorUiKit::collapseSectionStyle())
+            ->title("TRANSFORM")->body(txBody)->expanded(txExpanded_)
             ->onToggle([this](bool open) { txExpanded_ = open; })
-            ->headerHeight(s(28.f))->fontSize(s(13.f)),
+            ->headerHeight(s(EditorTheme::headerH))->fontSize(s(13.f)),
         SVerticalBox::ESizeRule::Auto);
 }
 
@@ -274,34 +283,33 @@ void DetailsPanel::buildComponentHeader(Actor& sel, Component& comp) {
         deps_.cmdStack->push(std::move(cmd));
     };
 
-    bool en = comp.isEnabled();
+    auto enBox = HNew(SCheckBox)
+        ->style(EditorUiKit::checkBoxStyle(s(1.f)))
+        ->checked([compPtr]{ return compPtr->isEnabled(); })
+        ->onClick([this, selPtr, compPtr]{
+            const bool before = compPtr->isEnabled();
+            compPtr->setEnabled(!before);
+            deps_.cmdStack->push(std::make_unique<ComponentEnabledCmd>(*deps_.ctx->world, selPtr, compPtr, before, !before));
+            dirty_ = true;
+        });
+    enBox->tooltip.set("Enable/Disable Component");
+    auto rmBtn = deps_.ui->iconButton("trash-2", 14.f, EditorTheme::error, "", 12.f, EditorTheme::error, {5.f, 2.f},
+                                      EditorTheme::errorBg, EditorTheme::errorHover,
+                                      removeFn ? removeFn : std::function<void()>([]{}), "x");
+    rmBtn->tooltip.set("Remove Component");
+
     list_->addSlot(
-        HNew(SBorder)->background(EditorUiKit::kBgHeader)->padding({s(4.f), s(3.f)})
+        HNew(SBorder)->background(EditorUiKit::kBgHeader)->padding({s(EditorTheme::space4), s(EditorTheme::space2)})
             ->content(
                 HNew(SHorizontalBox)
                     ->addSlot(
                         HNew(STextBlock)->text(comp.typeName())->fontSize(s(12.f))
                             ->color(EditorUiKit::kTextHdr)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
                         SHorizontalBox::ESizeRule::Fill)
-                    ->addSlot(
-                        deps_.ui->textButton(en ? "On" : "Off", 12.f, EditorUiKit::kTextBody, {5.f, 2.f},
-                                             en ? glm::vec4{0.18f,0.50f,0.22f,1.f}
-                                                : glm::vec4{0.38f,0.18f,0.18f,1.f},
-                                             {0.35f, 0.35f, 0.40f, 1.f},
-                                             [this, selPtr, compPtr]{
-                                                 const bool before = compPtr->isEnabled();
-                                                 compPtr->setEnabled(!before);
-                                                 deps_.cmdStack->push(std::make_unique<ComponentEnabledCmd>(*deps_.ctx->world, selPtr, compPtr, before, !before));
-                                                 dirty_ = true;
-                                             }),
-                        SHorizontalBox::ESizeRule::Fixed, s(42.f))
-                    ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(4.f))
-                    ->addSlot(
-                        deps_.ui->textButton("x", 12.f, {0.9f,0.4f,0.4f,1.f}, {5.f, 2.f},
-                                             {0.28f, 0.12f, 0.12f, 1.f}, {0.44f, 0.16f, 0.16f, 1.f},
-                                             removeFn ? removeFn : std::function<void()>([]{})),
-                        SHorizontalBox::ESizeRule::Fixed, s(26.f))),
-        SVerticalBox::ESizeRule::Fixed, s(28.f));
+                    ->addSlot(enBox, SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space16))
+                    ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space4))
+                    ->addSlot(rmBtn, SHorizontalBox::ESizeRule::Fixed, s(26.f))),
+        SVerticalBox::ESizeRule::Fixed, s(EditorTheme::headerH));
 }
 
 void DetailsPanel::buildComponentProp(Actor& /*sel*/, Component& /*comp*/, const PropDesc& pd,
@@ -314,7 +322,7 @@ void DetailsPanel::buildComponentProp(Actor& /*sel*/, Component& /*comp*/, const
     const std::string lbl = pd.label ? pd.label : "";
 
     if (pd.kind == PropDesc::Float)
-        addNumRow(pd.label, pd.color,
+        addNumRow(pd.label, themePropColor(pd.color),
             [pd]{ return pd.getF(); },
             [pd, lbl, toPeers](float v){
                 pd.setF(v);
@@ -391,7 +399,7 @@ void DetailsPanel::buildComponentsSection(Actor& sel) {
         std::string info = comp->readOnlyInfo();
         if (!info.empty())
             list_->addSlot(
-                HNew(SBorder)->background({0,0,0,0})->padding({s(16.f), s(1.f)})
+                HNew(SBorder)->background(EditorTheme::transparent)->padding({s(16.f), s(1.f)})
                     ->content(HNew(STextBlock)->text(info)->fontSize(s(12.f))
                         ->color(EditorUiKit::kTextDim)->hAlign(EHAlign::Left)),
                 SVerticalBox::ESizeRule::Fixed, s(18.f));
@@ -400,9 +408,9 @@ void DetailsPanel::buildComponentsSection(Actor& sel) {
 
 void DetailsPanel::buildAddComponentSection(Actor& sel) {
     Actor* selPtr = &sel;
-    list_->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(8.f));
+    list_->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(EditorTheme::space8));
     list_->addSlot(deps_.ui->sectionHeader("ADD COMPONENT", EditorUiKit::kTextHdr, 13.f),
-                   SVerticalBox::ESizeRule::Fixed, s(26.f));
+                   SVerticalBox::ESizeRule::Fixed, s(EditorTheme::headerH));
 
     // 버튼은 패널 폭에 맞춰 여러 줄로 나눕니다(DEF-109). 예전에는 한 줄에 늘어놓아, 기본 창 크기에서 컴포넌트가
     // 없는 액터는 + Audio 가 잘리고 + RigidBody 는 보이지 않아 누를 수 없었습니다. 폭은 직전 배치의 디테일 스크롤
@@ -414,7 +422,7 @@ void DetailsPanel::buildAddComponentSection(Actor& sel) {
     std::shared_ptr<SHorizontalBox> addRow;
     float addX = 0.f;
     auto flushAddRow = [&] {
-        if (addRow) list_->addSlot(addRow, SVerticalBox::ESizeRule::Fixed, s(34.f));
+        if (addRow) list_->addSlot(addRow, SVerticalBox::ESizeRule::Fixed, s(EditorTheme::tabH));
         addRow.reset();
     };
     auto addCompBtn = [&](const std::string& label, std::function<void()> fn) {
@@ -426,8 +434,8 @@ void DetailsPanel::buildAddComponentSection(Actor& sel) {
             addX = addLeft;
         }
         addRow->addSlot(
-            deps_.ui->textButton(label, 12.f, EditorUiKit::kAccent, {7.f, 4.f},
-                                 {0.14f, 0.14f, 0.18f, 1.f}, {0.26f, 0.26f, 0.32f, 1.f}, std::move(fn)),
+            deps_.ui->textButton(label, 12.f, EditorTheme::accentHover, {7.f, 3.f},
+                                 EditorTheme::ctlNormal, EditorTheme::ctlHover, std::move(fn)),
             SHorizontalBox::ESizeRule::Auto);
         addRow->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, addGap);
         addX += w + addGap;
@@ -453,12 +461,12 @@ void DetailsPanel::buildAddComponentSection(Actor& sel) {
 
 void DetailsPanel::buildSavePrefabRow(Actor& sel) {
     Actor* selPtr = &sel;
-    list_->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
+    list_->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(EditorTheme::space4));
     list_->addSlot(
-        HNew(SBorder)->background({0,0,0,0})->padding({s(8.f), s(2.f)})
+        HNew(SBorder)->background(EditorTheme::transparent)->padding({s(EditorTheme::space8), 0.f})
             ->content(
-                deps_.ui->textButton("Save as Prefab", 12.f, EditorUiKit::kTextDim, {7.f, 4.f},
-                                     {0.14f, 0.14f, 0.18f, 1.f}, {0.26f, 0.26f, 0.32f, 1.f},
+                deps_.ui->textButton("Save as Prefab", 12.f, EditorUiKit::kTextDim, {7.f, 3.f},
+                                     EditorTheme::ctlNormal, EditorTheme::ctlHover,
                                      [this, selPtr]{
                                          // 액터 이름이 파일 이름이 됩니다. 폴더 구분자 · 금지 글자 · '..' 이 있으면 저장하지 않습니다(DEF-140).
                                          std::string why;
@@ -472,5 +480,5 @@ void DetailsPanel::buildSavePrefabRow(Actor& sel) {
                                          PrefabManager::save(selPtr, p);
                                          if (deps_.onPrefabSaved) deps_.onPrefabSaved();
                                      })),
-        SVerticalBox::ESizeRule::Fixed, s(32.f));
+        SVerticalBox::ESizeRule::Fixed, s(EditorTheme::tabH));
 }

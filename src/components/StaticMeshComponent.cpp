@@ -1,4 +1,5 @@
 #include "StaticMeshComponent.hpp"
+#include "../vfs/LogicalPath.hpp"
 #include "LightChannels.hpp"
 #include "../renderer/MeshHandle.hpp"
 #include "../assets/AssetManager.hpp"
@@ -90,7 +91,7 @@ void StaticMeshComponent::writeFields(ComponentFieldWriter& w) const {
         w.s("prim",         primitive->toKey());
         w.s("primMaterial", primitiveMaterial.toText());
     } else if (!modelPath.empty()) {
-        w.s("model",     modelPath);
+        w.s("model",     hvfs::toCanonical(modelPath));
         w.i("meshIndex", meshIndex);
     }
 }

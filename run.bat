@@ -22,7 +22,7 @@ goto collect_args
 :args_done
 set EXE_DIR=%ROOT%build\%CONFIG%
 set EXE=%EXE_DIR%\HarukaEngine.exe
-set LOGS_DIR=%ROOT%Logs
+set LOGS_DIR=%ROOT%Projects\Samples\Saved\Logs
 set LOG=%LOGS_DIR%\latest.txt
 
 if not exist "%EXE%" (

@@ -10,7 +10,6 @@
 #include <algorithm>
 
 static const char* kFontFallbacks[] = {
-    "assets/fonts/default.ttf",
     "C:/Windows/Fonts/segoeui.ttf",
     "C:/Windows/Fonts/arial.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -51,12 +50,32 @@ bool HFontAtlas::loadFont(const std::string& fontPath) {
     return true;
 }
 
+bool HFontAtlas::loadBoldFont(const std::string& fontPath) {
+    delete static_cast<stbtt_fontinfo*>(boldInfo_);
+    boldInfo_ = nullptr;
+    boldData_.clear();
+    if (fontPath.empty() || !fontInfo_ || !hvfs::readAll(fontPath, boldData_)) { boldData_.clear(); return false; }
+    auto* fi = new stbtt_fontinfo();
+    if (!stbtt_InitFont(fi, boldData_.data(), 0)) {
+        delete fi;
+        boldData_.clear();
+        return false;
+    }
+    boldInfo_ = fi;
+    // 굵게가 없을 때 면 1 은 면 0 열쇠를 썼으므로 캐시에 남은 값도 면 0 값 그대로 맞습니다(비우지 않음).
+    return true;
+}
+
 void HFontAtlas::unloadFont() {
     if (g_metricsFont == this) g_metricsFont = nullptr;
     delete static_cast<stbtt_fontinfo*>(fontInfo_);
     fontInfo_ = nullptr;
     ttfData_.clear();
+    delete static_cast<stbtt_fontinfo*>(boldInfo_);
+    boldInfo_ = nullptr;
+    boldData_.clear();
     cache_.clear();
+    iconCache_.clear();
     advanceCache_.clear();
 }
 
@@ -69,7 +88,7 @@ bool HFontAtlas::initCpuOnly(const std::string& fontPath) {
     dirty_   = false;
     droppedGlyphs_ = 0;
     // CPU 아틀라스 버퍼 초기화 (RGBA, 불투명 흰색 × 투명)
-    cpuAtlas_.assign(kAtlasW * kAtlasH * 4, 0);
+    cpuAtlas_.assign(kAtlasW * atlasH_ * 4, 0);
     return true;
 }
 
@@ -87,7 +106,7 @@ void HFontAtlas::init(VkDevice device, VkPhysicalDevice physDevice,
 
     createAtlasImage();
     uploadFullAtlas();
-    HLOG(LogUI, Log) << "Font atlas ready: " << kAtlasW << "x" << kAtlasH;
+    HLOG(LogUI, Log) << "Font atlas ready: " << kAtlasW << "x" << atlasH_;
 }
 
 void HFontAtlas::cleanup() {
@@ -100,97 +119,157 @@ void HFontAtlas::cleanup() {
 }
 
 // ── 글리프 조회 / 래스터라이즈 ────────────────────────────────────────────────
-HGlyphInfo HFontAtlas::getGlyph(char c, float size) {
-    uint64_t key = glyphKey(c, size);
+HGlyphInfo HFontAtlas::getGlyph(uint32_t cp, float size, int face) {
+    uint64_t key = glyphKey(cp, size, face);
     auto it = cache_.find(key);
     if (it != cache_.end()) return it->second;
 
     HGlyphInfo info;
-    rasterizeGlyph(c, size, info);
+    rasterizeGlyph(cp, size, face, info);
     cache_[key] = info;
     return info;
 }
 
-float HFontAtlas::glyphAdvance(char c, float size) const {
+float HFontAtlas::glyphAdvance(uint32_t cp, float size, int face) const {
     if (!fontInfo_) return 0.f;
-    const uint64_t key = glyphKey(c, size);
+    const uint64_t key = glyphKey(cp, size, face);
     if (auto it = advanceCache_.find(key); it != advanceCache_.end()) return it->second;
-    auto* fi = static_cast<const stbtt_fontinfo*>(fontInfo_);
+    auto* fi = static_cast<const stbtt_fontinfo*>(faceInfo(face));
     int adv = 0, lsb = 0;
-    stbtt_GetCodepointHMetrics(fi, c, &adv, &lsb);
+    stbtt_GetCodepointHMetrics(fi, (int)cp, &adv, &lsb);
     const float a = adv * stbtt_ScaleForPixelHeight(fi, size);
     advanceCache_.emplace(key, a);
     return a;
 }
 
-float HFontAtlas::measureText(std::string_view text, float size) const {
+float HFontAtlas::measureText(std::string_view text, float size, int face) const {
     float x = 0.f, widest = 0.f;
-    for (char c : text) {
-        if (c == '\n') { widest = std::max(widest, x); x = 0.f; continue; }
-        x += glyphAdvance(c, size);
+    for (size_t i = 0; i < text.size();) {
+        const uint32_t cp = nextCodepoint(text, i);
+        if (cp == '\n') { widest = std::max(widest, x); x = 0.f; continue; }
+        x += glyphAdvance(cp, size, face);
     }
     return std::max(widest, x);
 }
 
-// ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
-uint64_t HFontAtlas::glyphKey(char c, float size) const {
-    uint32_t sizeBits = static_cast<uint32_t>(size * 10.f);
-    return (static_cast<uint64_t>(static_cast<uint8_t>(c)) << 32) | sizeBits;
+uint32_t HFontAtlas::nextCodepoint(std::string_view s, size_t& i) {
+    const unsigned char c0 = (unsigned char)s[i];
+    if (c0 < 0x80) { ++i; return c0; }
+    size_t   extra = 0;
+    uint32_t cp    = 0;
+    if      ((c0 & 0xE0) == 0xC0) { extra = 1; cp = c0 & 0x1Fu; }
+    else if ((c0 & 0xF0) == 0xE0) { extra = 2; cp = c0 & 0x0Fu; }
+    else if ((c0 & 0xF8) == 0xF0) { extra = 3; cp = c0 & 0x07u; }
+    else { ++i; return '?'; }
+    if (i + extra >= s.size()) { ++i; return '?'; }   // 글자가 끝에서 잘림
+    for (size_t k = 1; k <= extra; ++k) {
+        const unsigned char ck = (unsigned char)s[i + k];
+        if ((ck & 0xC0) != 0x80) { ++i; return '?'; }
+        cp = (cp << 6) | (ck & 0x3Fu);
+    }
+    // 너무 긴 표현 · 대리 쌍 · 범위 밖은 잘못된 글자로 봅니다.
+    static constexpr uint32_t kMin[4] = { 0, 0x80, 0x800, 0x10000 };
+    if (cp < kMin[extra] || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) { ++i; return '?'; }
+    i += extra + 1;
+    return cp;
 }
 
-void HFontAtlas::rasterizeGlyph(char c, float size, HGlyphInfo& out) {
-    auto* fi    = static_cast<stbtt_fontinfo*>(fontInfo_);
+size_t HFontAtlas::utf8Floor(std::string_view s, size_t maxBytes) {
+    if (maxBytes >= s.size()) return s.size();
+    size_t n = maxBytes;
+    while (n > 0 && ((unsigned char)s[n] & 0xC0) == 0x80) --n;   // 이어지는 바이트 앞에서 자르지 않음
+    return n;
+}
+
+// ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
+uint64_t HFontAtlas::glyphKey(uint32_t cp, float size, int face) const {
+    const uint32_t sizeBits = static_cast<uint32_t>(size * 10.f);
+    const uint64_t f        = (face == 1 && boldInfo_) ? 1u : 0u;   // 굵게가 없으면 보통과 같은 열쇠
+    return (f << 56) | (static_cast<uint64_t>(cp & 0x1FFFFFu) << 32) | sizeBits;
+}
+
+void HFontAtlas::rasterizeGlyph(uint32_t cp, float size, int face, HGlyphInfo& out) {
+    auto* fi    = static_cast<stbtt_fontinfo*>(const_cast<void*>(faceInfo(face)));
     float scale = stbtt_ScaleForPixelHeight(fi, size);
+    const int c = (int)cp;
 
     int x0, y0, x1, y1;
     stbtt_GetCodepointBitmapBox(fi, c, scale, scale, &x0, &y0, &x1, &y1);
     int gw = x1 - x0, gh = y1 - y0;
 
-    // 행이 꽉 찼으면 다음 행으로
-    if (cursorX_ + gw + 1 > kAtlasW) {
-        cursorX_  = 0;
-        cursorY_ += rowH_ + 1;
-        rowH_     = 0;
-    }
-    if (cursorY_ + gh + 1 > kAtlasH) {
-        // 넘친 글자도 캐시에 남지만 글자 · 크기 조합마다 새로 넘치므로, 오류는 처음 한 번만 남기고 수는 셉니다
-        // (3D UI 패널처럼 큰 글자 · 여러 크기를 쓰면 같은 오류가 수백 줄 찍혔음).
-        if (droppedGlyphs_++ == 0)
-            HLOG(LogUI, Error) << "Font atlas full (" << kAtlasW << "x" << kAtlasH << "): glyph '" << c << "' at "
-                               << size << " px and any later new glyphs are not drawn";
-        out = {};
-        out.advance = glyphAdvance(c, size);   // 그리지 못해도 자리는 측정과 같게 차지합니다
-        return;
-    }
-
     // 알파 비트맵 래스터라이즈
     std::vector<uint8_t> bmp(gw * gh, 0);
     stbtt_MakeCodepointBitmap(fi, bmp.data(), gw, gh, gw, scale, scale, c);
 
-    // CPU 아틀라스에 RGBA 픽셀 기록 (R=G=B=255, A=glyph alpha)
-    for (int row = 0; row < gh; ++row) {
-        for (int col = 0; col < gw; ++col) {
-            int ai = row * gw + col;
-            int pi = ((cursorY_ + row) * kAtlasW + (cursorX_ + col)) * 4;
-            cpuAtlas_[pi+0] = 255;
-            cpuAtlas_[pi+1] = 255;
-            cpuAtlas_[pi+2] = 255;
-            cpuAtlas_[pi+3] = bmp[ai];
-        }
+    if (!packAlpha(bmp.data(), gw, gh, out.uvMin, out.uvMax)) {
+        // 넘친 글자도 캐시에 남지만 글자 · 크기 조합마다 새로 넘치므로, 오류는 처음 한 번만 남기고 수는 셉니다
+        // (3D UI 패널처럼 큰 글자 · 여러 크기를 쓰면 같은 오류가 수백 줄 찍혔음).
+        if (droppedGlyphs_++ == 0)
+            HLOG(LogUI, Error) << "Font atlas full (" << kAtlasW << "x" << atlasH_ << "): glyph U+" << std::hex << cp
+                               << std::dec << " at " << size << " px and any later new glyphs are not drawn";
+        out = {};
+        out.advance = glyphAdvance(cp, size, face);   // 그리지 못해도 자리는 측정과 같게 차지합니다
+        return;
     }
-
-    // UV 좌표
-    out.uvMin     = { (float)cursorX_ / kAtlasW,        (float)cursorY_ / kAtlasH };
-    out.uvMax     = { (float)(cursorX_+gw) / kAtlasW,   (float)(cursorY_+gh) / kAtlasH };
     out.bearing   = { (float)x0, (float)(-y0) };
     out.pixelSize = { (float)gw, (float)gh };
     out.size      = size;
+    out.advance   = glyphAdvance(cp, size, face);
+}
 
-    out.advance = glyphAdvance(c, size);
+bool HFontAtlas::packAlpha(const uint8_t* alpha, int w, int h, glm::vec2& uvMin, glm::vec2& uvMax) {
+    // 행이 꽉 찼으면 다음 행으로
+    if (cursorX_ + w + 1 > kAtlasW) {
+        cursorX_  = 0;
+        cursorY_ += rowH_ + 1;
+        rowH_     = 0;
+    }
+    if (cursorY_ + h + 1 > atlasH_) return false;
 
-    cursorX_ += gw + 1;
-    rowH_     = std::max(rowH_, gh);
+    // CPU 아틀라스에 RGBA 픽셀 기록 (R=G=B=255, A=alpha)
+    for (int row = 0; row < h; ++row) {
+        for (int col = 0; col < w; ++col) {
+            const int ai = row * w + col;
+            const int pi = ((cursorY_ + row) * kAtlasW + (cursorX_ + col)) * 4;
+            cpuAtlas_[pi+0] = 255;
+            cpuAtlas_[pi+1] = 255;
+            cpuAtlas_[pi+2] = 255;
+            cpuAtlas_[pi+3] = alpha[ai];
+        }
+    }
+    uvMin = { (float)cursorX_ / kAtlasW,       (float)cursorY_ / atlasH_ };
+    uvMax = { (float)(cursorX_ + w) / kAtlasW, (float)(cursorY_ + h) / atlasH_ };
+
+    cursorX_ += w + 1;
+    rowH_     = std::max(rowH_, h);
     dirty_    = true;
+    return true;
+}
+
+bool HFontAtlas::getIcon(std::string_view name, int px, HGlyphInfo& out) {
+    if (!iconSource_ || px <= 0 || cpuAtlas_.empty()) return false;
+    std::string key(name);
+    key += '@';
+    key += std::to_string(px);
+    if (auto it = iconCache_.find(key); it != iconCache_.end()) {
+        out = it->second;
+        return out.pixelSize.x > 0.f;
+    }
+    HGlyphInfo info{};
+    std::vector<uint8_t> alpha;
+    if (iconSource_->rasterize(name, px, alpha) && alpha.size() == (size_t)px * (size_t)px) {
+        if (packAlpha(alpha.data(), px, px, info.uvMin, info.uvMax)) {
+            info.pixelSize = { (float)px, (float)px };
+            info.size      = (float)px;
+            info.advance   = (float)px;
+        } else if (droppedGlyphs_++ == 0) {
+            HLOG(LogUI, Error) << "Font atlas full (" << kAtlasW << "x" << atlasH_ << "): icon '" << key
+                               << "' and any later new glyphs are not drawn";
+        }
+    }
+    iconCache_.emplace(std::move(key), info);
+    out = info;
+    return out.pixelSize.x > 0.f;
 }
 
 // ── GPU 아틀라스 텍스처 생성 ──────────────────────────────────────────────────
@@ -209,7 +288,7 @@ void HFontAtlas::createAtlasImage() {
     ici.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ici.imageType     = VK_IMAGE_TYPE_2D;
     ici.format        = VK_FORMAT_R8G8B8A8_UNORM;
-    ici.extent        = { kAtlasW, kAtlasH, 1 };
+    ici.extent        = { (uint32_t)kAtlasW, (uint32_t)atlasH_, 1 };
     ici.mipLevels     = 1; ici.arrayLayers = 1;
     ici.samples       = VK_SAMPLE_COUNT_1_BIT;
     ici.tiling        = VK_IMAGE_TILING_OPTIMAL;
@@ -238,7 +317,7 @@ void HFontAtlas::createAtlasImage() {
 
 void HFontAtlas::uploadFullAtlas() {
     if (device_ == VK_NULL_HANDLE || atlasImage_ == VK_NULL_HANDLE) return;
-    VkDeviceSize size = kAtlasW * kAtlasH * 4;
+    VkDeviceSize size = kAtlasW * atlasH_ * 4;
 
     // Staging buffer
     VkBuffer       stageBuf; VkDeviceMemory stageMem; void* stagePtr;
@@ -292,7 +371,7 @@ void HFontAtlas::uploadFullAtlas() {
 
     VkBufferImageCopy region{};
     region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    region.imageExtent      = { kAtlasW, kAtlasH, 1 };
+    region.imageExtent      = { (uint32_t)kAtlasW, (uint32_t)atlasH_, 1 };
     vkCmdCopyBufferToImage(cmd, stageBuf, atlasImage_,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 

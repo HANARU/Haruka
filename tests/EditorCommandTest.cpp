@@ -6,6 +6,7 @@
 // 중심으로 돌아야 하며, 복사한 글은 다른 프로그램의 글과 구별되어야 합니다.
 // 실행: build/Release/HarukaEditCmdTest.exe
 #include "../src/editor/EditorCommands.hpp"
+#include "../src/editor/EditorTheme.hpp"
 #include "../src/editor/EditTools.hpp"
 #include "../src/sceneio/PrefabRules.hpp"
 #include "../src/scene/World.hpp"
@@ -27,6 +28,10 @@ void check(bool cond, const std::string& what) {
 }
 
 bool near(const glm::vec3& a, const glm::vec3& b, float eps = 1e-4f) { return glm::length(a - b) < eps; }
+bool near4(const glm::vec4& a, const glm::vec4& b, float eps = 1e-3f) {
+    return std::abs(a.r - b.r) < eps && std::abs(a.g - b.g) < eps &&
+           std::abs(a.b - b.b) < eps && std::abs(a.a - b.a) < eps;
+}
 bool nearQ(const glm::quat& a, const glm::quat& b, float eps = 1e-4f) { return std::abs(std::abs(glm::dot(a, b)) - 1.f) < eps; }
 
 // 숫자 · 토글 · 열거 속성과 직렬화 값을 가진 시험용 컴포넌트
@@ -419,8 +424,10 @@ int main() {
               "장치 이름은 거부, 장치 이름으로 시작하는 긴 이름은 됨");
         check(!hprefab::isValidName("\xED\x95\x9C") && !hprefab::isValidName(std::string(101, 'a')), "ASCII 밖 글자 · 100자 초과 거부");
 
+        std::string t0 = "# Haruka Prefab v4\nACTOR:A\n";
+        check(hprefab::stripBomAndDetectV3(t0) && t0 == "# Haruka Prefab v4\nACTOR:A\n", "머리 줄로 시작하면 v4");
         std::string t1 = "# Haruka Prefab v3\nACTOR:A\n";
-        check(hprefab::stripBomAndDetectV3(t1) && t1 == "# Haruka Prefab v3\nACTOR:A\n", "머리 줄로 시작하면 v3");
+        check(hprefab::stripBomAndDetectV3(t1) && t1 == "# Haruka Prefab v3\nACTOR:A\n", "옛 v3 머리 줄도 계속 받음");
         std::string t2 = "\xEF\xBB\xBF# Haruka Prefab v3\r\nACTOR:A\r\n";
         check(hprefab::stripBomAndDetectV3(t2) && t2.rfind("# Haruka", 0) == 0, "BOM 을 떼고 v3 로 판별");
         std::string t3 = "\n  \r\n# hand-written note\n# Haruka Prefab v3\nACTOR:A\n";
@@ -450,6 +457,37 @@ int main() {
         check(hprefab::discardOrphans(w, { nullptr, A, B }) == 1 && !w.findById(idA) && !w.findById(idB) && w.findById(keep->id),
               "루트가 실패하면 꺼낸 액터를 모두 지움");
         check(hprefab::discardOrphans(w, { w.findById(idR), w.findById(idC) }) == 0 && w.findById(idR), "실패가 없으면 아무것도 지우지 않음");
+    }
+
+    std::printf("\n== 9. 에디터 색 토큰 (EditorTheme sRGB -> 선형) ==\n");
+    {
+        static_assert(EditorTheme::bgPanel.x > 0.012f && EditorTheme::bgPanel.x < 0.014f,
+                      "EditorTheme tokens must be constexpr");
+        check(near4(EditorTheme::srgb(0x000000), { 0.f, 0.f, 0.f, 1.f }, 1e-6f), "sRGB #000000 -> 0");
+        check(near4(EditorTheme::srgb(0xFFFFFF), { 1.f, 1.f, 1.f, 1.f }, 1e-5f), "sRGB #FFFFFF -> 1");
+        check(near4(EditorTheme::srgb(0x010203), { (1.f / 255.f) / 12.92f, (2.f / 255.f) / 12.92f, (3.f / 255.f) / 12.92f, 1.f }, 1e-6f),
+              "sRGB 선형 구간 (<= 0.04045)");
+
+        check(near4(EditorTheme::bgWindow,      { 0.0075f, 0.0075f, 0.0080f, 1.f }), "bgWindow (#151516)");
+        check(near4(EditorTheme::bgPanel,       { 0.0130f, 0.0130f, 0.0137f, 1.f }), "bgPanel (#1E1E1F)");
+        check(near4(EditorTheme::bgHeader,      { 0.0194f, 0.0194f, 0.0212f, 1.f }), "bgHeader (#262628)");
+        check(near4(EditorTheme::bgInput,       { 0.0056f, 0.0056f, 0.0060f, 1.f }), "bgInput (#111112)");
+        check(near4(EditorTheme::ctlNormal,     { 0.0242f, 0.0242f, 0.0273f, 1.f }), "ctlNormal (#2B2B2E)");
+        check(near4(EditorTheme::ctlHover,      { 0.0395f, 0.0395f, 0.0452f, 1.f }), "ctlHover (#38383C)");
+        check(near4(EditorTheme::ctlPressed,    { 0.0595f, 0.0595f, 0.0685f, 1.f }), "ctlPressed (#45454A)");
+        check(near4(EditorTheme::lineDivider,   { 0.0296f, 0.0296f, 0.0331f, 1.f }), "lineDivider (#303033)");
+        check(near4(EditorTheme::textPrimary,   { 0.7605f, 0.7605f, 0.7758f, 1.f }), "textPrimary (#E2E2E4)");
+        check(near4(EditorTheme::textSecondary, { 0.3663f, 0.3663f, 0.3916f, 1.f }), "textSecondary (#A3A3A8)");
+        check(near4(EditorTheme::textDisabled,  { 0.1441f, 0.1441f, 0.1620f, 1.f }), "textDisabled (#6A6A70)");
+        check(near4(EditorTheme::accent,        { 0.0262f, 0.1470f, 0.6724f, 1.f }), "accent (#2D6BD6)");
+        check(near4(EditorTheme::accentHover,   { 0.0685f, 0.2307f, 0.8070f, 1.f }), "accentHover (#4A84E8)");
+        check(near4(EditorTheme::selectRow,     { 0.0176f, 0.0612f, 0.1559f, 1.f }), "selectRow (#24466E)");
+        check(near4(EditorTheme::ok,            { 0.0497f, 0.3712f, 0.1248f, 1.f }), "ok (#3FA463)");
+        check(near4(EditorTheme::warn,          { 0.7454f, 0.4508f, 0.0685f, 1.f }), "warn (#E0B34A)");
+        check(near4(EditorTheme::error,         { 0.7454f, 0.0844f, 0.1022f, 1.f }), "error (#E0525A)");
+        check(near4(EditorTheme::axisX,         { 0.7454f, 0.0844f, 0.1022f, 1.f }), "axisX (#E0525A)");
+        check(near4(EditorTheme::axisY,         { 0.1500f, 0.5210f, 0.1022f, 1.f }), "axisY (#6CBF5A)");
+        check(near4(EditorTheme::axisZ,         { 0.0742f, 0.2664f, 0.8714f, 1.f }), "axisZ (#4D8DF0)");
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

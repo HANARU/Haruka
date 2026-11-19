@@ -1,4 +1,5 @@
 #include "ContentBrowserPanel.hpp"
+#include "../vfs/LogicalPath.hpp"
 #include "EditorCommands.hpp"
 #include "../assets/AssetManager.hpp"
 #include "../audio/AudioComponent.hpp"
@@ -14,7 +15,9 @@ namespace fs = std::filesystem;
 
 namespace {
 
-constexpr const char* kScenesDir = "assets/scenes";
+constexpr const char* kScenesDir = "/Game/scenes";
+constexpr const char* kModelsDir = "/Game/models";
+constexpr const char* kAudioDir  = "/Game/audio";
 
 // 콘텐츠 브라우저에서 소리 파일을 지정(2026-10-15). setFile 이 이전 소리를 놓아 주므로 값 문자열을 다시 읽는
 // 일반 경로(readField) 대신 이것으로 되돌립니다. 액터는 ID 로 찾습니다(EditorCommands.hpp 머리말).
@@ -39,13 +42,13 @@ void ContentBrowserPanel::init(Deps deps) {
 void ContentBrowserPanel::scanAll() {
     modelFiles_.clear();
     try {
-        // 프로젝트 폴더를 훑지만, 컴포넌트와 씬에는 논리 경로(assets/models/...)를 남깁니다(hproj).
-        const fs::path dir = hproj::resolve("assets/models");
+        // 프로젝트 폴더를 훑지만, 컴포넌트와 씬에는 논리 경로(/Game/models/...)를 남깁니다(hproj).
+        const fs::path dir = hproj::resolve(kModelsDir);
         if (fs::exists(dir)) {
             for (auto& e : fs::recursive_directory_iterator(dir)) {
                 auto ext = e.path().extension();
                 if (ext == ".glb" || ext == ".gltf")
-                    modelFiles_.push_back("assets/models/" + e.path().lexically_relative(dir).generic_string());
+                    modelFiles_.push_back(std::string(kModelsDir) + "/" + e.path().lexically_relative(dir).generic_string());
             }
             std::sort(modelFiles_.begin(), modelFiles_.end());
         }
@@ -53,7 +56,7 @@ void ContentBrowserPanel::scanAll() {
 
     audioFiles_.clear();
     try {
-        const fs::path dir = hproj::resolve("assets/audio");
+        const fs::path dir = hproj::resolve(kAudioDir);
         if (fs::exists(dir)) {
             for (auto& e : fs::directory_iterator(dir)) {
                 auto ext = e.path().extension().string();
@@ -94,10 +97,10 @@ void ContentBrowserPanel::buildTab(SVerticalBox& content) const {
 
     if (sceneFiles_.empty() && modelFiles_.empty() && audioFiles_.empty() && prefabFiles_.empty()) {
         content.addSlot(
-            HNew(SBorder)->background({0,0,0,0})->padding({s(12.f), s(8.f)})
+            HNew(SBorder)->background(EditorTheme::transparent)->padding({s(EditorTheme::space12), s(EditorTheme::space2)})
                 ->content(HNew(STextBlock)->text("No assets found")
                     ->fontSize(s(12.f))->color(EditorUiKit::kTextDim)->hAlign(EHAlign::Left)),
-            SVerticalBox::ESizeRule::Fixed, s(30.f));
+            SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     }
 }
 
@@ -108,26 +111,28 @@ void ContentBrowserPanel::buildScenesSection(SVerticalBox& content) const {
     content.addSlot(
         deps_.ui->sectionHeader("SCENES", EditorUiKit::kTextDim),
         SVerticalBox::ESizeRule::Fixed, s(22.f));
-    const std::string curPath = deps_.currentScenePath ? deps_.currentScenePath() : std::string{};
+    const std::string curPath = deps_.currentScenePath ? hvfs::toCanonical(deps_.currentScenePath()) : std::string{};
     for (const auto& path : sceneFiles_) {
-        const std::string display = path.substr(std::string("assets/scenes/").size());
-        const bool current = (path == curPath);
+        const std::string display = path.substr(std::string(kScenesDir).size() + 1);
+        const bool current = (hvfs::toCanonical(path) == curPath);
         content.addSlot(
             HNew(SButton)
-                ->normalColor (current ? glm::vec4{0.07f, 0.20f, 0.33f, 1.f} : glm::vec4{0.f, 0.f, 0.f, 0.f})
-                ->hoveredColor({0.20f, 0.20f, 0.25f, 1.f})
-                ->pressedColor({0.07f, 0.33f, 0.58f, 1.f})
-                ->padding({s(8.f), s(3.f)})
+                ->style(EditorUiKit::buttonStyle())
+                ->cornerRadius(0.f)
+                ->normalColor (current ? EditorTheme::selectRow : EditorTheme::transparent)
+                ->hoveredColor(current ? EditorTheme::selectRowHover : EditorTheme::ctlHover)
+                ->pressedColor(EditorTheme::accentPressed)
+                ->padding({s(EditorTheme::space8), s(EditorTheme::space2)})
                 ->hAlign(EHAlign::Fill)
                 ->onClick([this, path]{
                     if (deps_.onOpenScene) deps_.onOpenScene(path);
                 })
                 ->content(HNew(SHorizontalBox)
-                    ->addSlot(HNew(STextBlock)->text("[S]")->fontSize(s(12.f))->color({0.55f, 0.75f, 1.f, 1.f})
+                    ->addSlot(HNew(STextBlock)->text("[S]")->fontSize(s(12.f))->color(EditorTheme::badgeScene)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fixed, s(30.f))
                     ->addSlot(HNew(STextBlock)->text(display)->fontSize(s(13.f))->color(EditorUiKit::kTextBody)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)),
-            SVerticalBox::ESizeRule::Fixed, s(28.f));
+            SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     }
     content.addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
 }
@@ -141,10 +146,12 @@ void ContentBrowserPanel::buildModelsSection(SVerticalBox& content) const {
         std::string display = fs::path(path).stem().string();
         content.addSlot(
             HNew(SButton)
-                ->normalColor ({0.f, 0.f, 0.f, 0.f})
-                ->hoveredColor({0.20f, 0.20f, 0.25f, 1.f})
-                ->pressedColor({0.07f, 0.33f, 0.58f, 1.f})
-                ->padding({s(8.f), s(3.f)})
+                ->style(EditorUiKit::buttonStyle())
+                ->cornerRadius(0.f)
+                ->normalColor (EditorTheme::transparent)
+                ->hoveredColor(EditorTheme::ctlHover)
+                ->pressedColor(EditorTheme::accentPressed)
+                ->padding({s(EditorTheme::space8), s(EditorTheme::space2)})
                 ->hAlign(EHAlign::Fill)   // 기본 Center 면 항목이 가운데로 몰립니다(DEF-87)
                 ->onClick([this, path, display]{
                     try {
@@ -175,11 +182,11 @@ void ContentBrowserPanel::buildModelsSection(SVerticalBox& content) const {
                     }
                 })
                 ->content(HNew(SHorizontalBox)
-                    ->addSlot(HNew(STextBlock)->text("[M]")->fontSize(s(12.f))->color(EditorUiKit::kAccent)
+                    ->addSlot(HNew(STextBlock)->text("[M]")->fontSize(s(12.f))->color(EditorTheme::badgeModel)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fixed, s(30.f))
                     ->addSlot(HNew(STextBlock)->text(display)->fontSize(s(13.f))->color(EditorUiKit::kTextBody)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)),
-            SVerticalBox::ESizeRule::Fixed, s(28.f));
+            SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     }
 }
 
@@ -190,13 +197,15 @@ void ContentBrowserPanel::buildAudioSection(SVerticalBox& content) const {
         deps_.ui->sectionHeader("AUDIO", EditorUiKit::kTextDim),
         SVerticalBox::ESizeRule::Fixed, s(22.f));
     for (const auto& stem : audioFiles_) {
-        std::string fullPath = "assets/audio/" + stem;
+        std::string fullPath = std::string(kAudioDir) + "/" + stem;
         content.addSlot(
             HNew(SButton)
-                ->normalColor ({0.f, 0.f, 0.f, 0.f})
-                ->hoveredColor({0.20f, 0.20f, 0.25f, 1.f})
-                ->pressedColor({0.07f, 0.33f, 0.58f, 1.f})
-                ->padding({s(8.f), s(3.f)})
+                ->style(EditorUiKit::buttonStyle())
+                ->cornerRadius(0.f)
+                ->normalColor (EditorTheme::transparent)
+                ->hoveredColor(EditorTheme::ctlHover)
+                ->pressedColor(EditorTheme::accentPressed)
+                ->padding({s(EditorTheme::space8), s(EditorTheme::space2)})
                 ->hAlign(EHAlign::Fill)   // 기본 Center 면 항목이 가운데로 몰립니다(DEF-87)
                 ->onClick([this, stem, fullPath]{
                     // 선택한 액터에 지정합니다. 오디오 컴포넌트가 없으면 붙입니다. 예전에는
@@ -226,11 +235,11 @@ void ContentBrowserPanel::buildAudioSection(SVerticalBox& content) const {
                 })
                 ->content(HNew(SHorizontalBox)
                     ->addSlot(HNew(STextBlock)->text("[A]")->fontSize(s(12.f))
-                        ->color({0.9f, 0.8f, 0.3f, 1.f})
+                        ->color(EditorTheme::badgeAudio)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fixed, s(30.f))
                     ->addSlot(HNew(STextBlock)->text(stem)->fontSize(s(13.f))->color(EditorUiKit::kTextBody)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)),
-            SVerticalBox::ESizeRule::Fixed, s(28.f));
+            SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     }
 }
 
@@ -244,10 +253,12 @@ void ContentBrowserPanel::buildPrefabsSection(SVerticalBox& content) const {
         std::string path = std::string(PrefabManager::kDir) + "/" + stem + PrefabManager::kExt;
         content.addSlot(
             HNew(SButton)
-                ->normalColor ({0.f, 0.f, 0.f, 0.f})
-                ->hoveredColor({0.20f, 0.20f, 0.25f, 1.f})
-                ->pressedColor({0.07f, 0.33f, 0.58f, 1.f})
-                ->padding({s(8.f), s(3.f)})
+                ->style(EditorUiKit::buttonStyle())
+                ->cornerRadius(0.f)
+                ->normalColor (EditorTheme::transparent)
+                ->hoveredColor(EditorTheme::ctlHover)
+                ->pressedColor(EditorTheme::accentPressed)
+                ->padding({s(EditorTheme::space8), s(EditorTheme::space2)})
                 ->hAlign(EHAlign::Fill)   // 기본 Center 면 항목이 가운데로 몰립니다(DEF-87)
                 ->onClick([this, path]{
                     if (!deps_.ctx->world || !deps_.ctx->assets) return;
@@ -258,10 +269,10 @@ void ContentBrowserPanel::buildPrefabsSection(SVerticalBox& content) const {
                     }
                 })
                 ->content(HNew(SHorizontalBox)
-                    ->addSlot(HNew(STextBlock)->text("[P]")->fontSize(s(12.f))->color({0.7f, 0.9f, 0.5f, 1.f})
+                    ->addSlot(HNew(STextBlock)->text("[P]")->fontSize(s(12.f))->color(EditorTheme::badgePrefab)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fixed, s(30.f))
                     ->addSlot(HNew(STextBlock)->text(stem)->fontSize(s(13.f))->color(EditorUiKit::kTextBody)
                         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center), SHorizontalBox::ESizeRule::Fill)),
-            SVerticalBox::ESizeRule::Fixed, s(28.f));
+            SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     }
 }

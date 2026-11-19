@@ -12,8 +12,8 @@ std::shared_ptr<SBorder> EditorToolbar::build() {
     box_ = HNew(SHorizontalBox);
     auto bar = HNew(SBorder)
         ->background(EditorUiKit::kBgToolbar)
-        ->borderColor(EditorUiKit::kBorder)->borderThickness(1.f)
-        ->padding(HPadding{ 4.f, 0.f })
+        ->borderColor(EditorUiKit::kBorder)->borderThickness(EditorTheme::borderThin)
+        ->padding(HPadding{ EditorTheme::space4, 0.f })
         ->content(box_);
     rebuild();
     return bar;
@@ -36,34 +36,43 @@ void EditorToolbar::rebuild() {
     const bool paused  = deps_.isPaused  && deps_.isPaused();
     const bool inGame  = playing || paused;
 
-    auto playBtn = [&](const char* label, glm::vec4 norm, glm::vec4 hov, std::function<void()> fn) {
-        box_->addSlot(deps_.ui->textButton(label, 13.f, EditorUiKit::kTextBody, {12.f, 6.f}, norm, hov, std::move(fn)),
-                      HR::ESizeRule::Auto);
-        box_->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(2.f));
+    // Play · Pause · Stop 은 아이콘만(20px, D3). 아이콘 파일이 없으면 예전 글자를 그립니다.
+    auto playBtn = [&](const char* icon, glm::vec4 iconColor, const char* label, glm::vec4 norm, glm::vec4 hov,
+                       bool en, const char* tip, std::function<void()> fn) {
+        auto b = deps_.ui->iconButton(icon, 20.f, iconColor, "", 13.f, EditorUiKit::kTextBody, {EditorTheme::space12, 6.f},
+                                      norm, hov, std::move(fn), label);
+        b->enabled.set(en);
+        b->tooltip.set(tip);
+        box_->addSlot(b, HR::ESizeRule::Auto);
+        box_->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(EditorTheme::space2));
     };
 
-    glm::vec4 playNorm  = playing ? glm::vec4{0.10f, 0.50f, 0.20f, 1.f} : glm::vec4{0.20f, 0.20f, 0.22f, 1.f};
-    glm::vec4 pauseNorm = paused  ? glm::vec4{0.68f, 0.50f, 0.08f, 1.f} : glm::vec4{0.20f, 0.20f, 0.22f, 1.f};
-    glm::vec4 stopNorm  = inGame  ? glm::vec4{0.50f, 0.10f, 0.10f, 1.f} : glm::vec4{0.14f, 0.14f, 0.16f, 1.f};
+    glm::vec4 playNorm  = playing ? EditorTheme::okBg   : EditorTheme::ctlNormal;
+    glm::vec4 pauseNorm = paused  ? EditorTheme::warnBg : EditorTheme::ctlNormal;
+    glm::vec4 stopNorm  = inGame  ? EditorTheme::errorBg : EditorTheme::ctlNormal;
 
-    playBtn(paused ? "Resume" : "Play", playNorm, {0.18f, 0.62f, 0.30f, 1.f}, deps_.onPlay);
-    playBtn("Pause", pauseNorm, {0.78f, 0.60f, 0.10f, 1.f}, deps_.onPause);
-    playBtn("Stop",  stopNorm,  {0.65f, 0.15f, 0.15f, 1.f}, deps_.onStop);
+    playBtn("play",   EditorTheme::ok,    paused ? "Resume" : "Play", playNorm, EditorTheme::okHover,
+            true, paused ? "Resume Play" : "Play", deps_.onPlay);
+    playBtn("pause",  EditorTheme::warn,  "Pause", pauseNorm, EditorTheme::warnHover,
+            inGame, "Pause", deps_.onPause);
+    playBtn("square", EditorTheme::error, "Stop",  stopNorm,  EditorTheme::errorHover,
+            inGame, "Stop", deps_.onStop);
 
     box_->addSlot(HNew(SBorder)->background(EditorUiKit::kBorder), HR::ESizeRule::Fixed, 1.f);
     box_->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(4.f));
 
     // ── Scene buttons ──────────────────────────────────────────────────────────
-    auto sceneBtn = [&](const char* label, std::function<void()> cb) {
-        box_->addSlot(
-            deps_.ui->textButton(label, 13.f, EditorUiKit::kTextBody, {10.f, 6.f},
-                                 {0.20f, 0.20f, 0.22f, 1.f}, {0.30f, 0.30f, 0.35f, 1.f}, std::move(cb)),
-            HR::ESizeRule::Auto);
+    auto sceneBtn = [&](const char* icon, const char* label, bool en, const char* tip, std::function<void()> cb) {
+        auto b = deps_.ui->iconButton(icon, 16.f, EditorUiKit::kTextDim, label, 13.f, EditorUiKit::kTextBody, {10.f, 6.f},
+                                      EditorTheme::ctlNormal, EditorTheme::ctlHover, std::move(cb));
+        b->enabled.set(en);
+        b->tooltip.set(tip);
+        box_->addSlot(b, HR::ESizeRule::Auto);
         box_->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(2.f));
     };
-    sceneBtn("Save",    deps_.onSave);
-    sceneBtn("Open",    deps_.onOpen);
-    sceneBtn("Refresh", deps_.onRefresh);
+    sceneBtn("save",        "Save",    !inGame, "Save Scene (Ctrl+S)", deps_.onSave);
+    sceneBtn("folder-open", "Open",    !inGame, "Open Scene (Ctrl+O)", deps_.onOpen);
+    sceneBtn("refresh-cw",  "Refresh", true,    "Refresh Content",     deps_.onRefresh);
 
     box_->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fill);
 
@@ -117,7 +126,7 @@ std::shared_ptr<SBorder> StatusBarPanel::build() {
                   HR::ESizeRule::Auto)
         ->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(8.f));
 
-    return HNew(SBorder)->background(EditorUiKit::kBgHeader)
+    return HNew(SBorder)->background(EditorTheme::bgWindow)
         ->borderColor(EditorUiKit::kBorder)->borderThickness(1.f)
         ->content(box_);
 }

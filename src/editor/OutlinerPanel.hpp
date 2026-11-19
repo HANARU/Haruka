@@ -86,14 +86,14 @@ public:
     TextInputField renameField();
 
 private:
-    static constexpr float kRowH      = 30.f;
-    static constexpr float kIndent    = 12.f;
+    static constexpr float kRowH      = EditorTheme::rowH;
+    static constexpr float kIndent    = EditorTheme::space12;
     static constexpr float kArrowW    = 16.f;
     static constexpr float kTypeW     = 74.f;
     static constexpr float kEyeW      = 20.f;
     static constexpr float kDelW      = 26.f;
     static constexpr float kMinLabelW = 56.f;
-    static constexpr float kHeaderH   = 34.f;   // "+ Add Empty" 줄
+    static constexpr float kHeaderH   = EditorTheme::panelHeaderH;   // "+ Add Empty" 줄
     static constexpr float kFooterH   = 20.f;   // 액터 개수 줄
 
     struct RowHit { uint64_t id = 0; std::shared_ptr<HWidget> widget; };

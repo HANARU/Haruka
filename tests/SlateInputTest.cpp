@@ -22,6 +22,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include "../src/scene/ComponentFields.hpp"
+#include "../src/editor/EditorIcons.hpp"
+#include "../src/ui/slate/widgets/SIcon.hpp"
+#include "../src/vfs/Vfs.hpp"
+#include "../src/vfs/LogicalPath.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -705,6 +709,20 @@ void testClip() {
     const bool kept = HClipQuad(rect, uv, { 50.f, -10.f, 100.f, 100.f });
     check(kept && rect == glm::vec4{ 50.f, 0.f, 50.f, 20.f } && uv == glm::vec4{ 0.5f, 0.f, 1.f, 1.f },
           "잘린 사각형은 UV 도 같은 비율로 줄어듦 (글리프가 찌그러지지 않음)");
+    // 둥근 사각형 클리핑: 잘리지 않은 반대쪽 모서리의 localPos 가 찌그러지지 않고 유지되어야 함
+    glm::vec4 rRect{ 0.f, 0.f, 100.f, 20.f }, rUv{ 0.f, 0.f, 1.f, 1.f };
+    glm::vec4 rLocal{ -50.f, -10.f, 50.f, 10.f };
+    const bool rKept = HClipQuad(rRect, rUv, rLocal, { 50.f, -10.f, 100.f, 100.f });
+    check(rKept && rRect == glm::vec4{ 50.f, 0.f, 50.f, 20.f }
+          && rLocal == glm::vec4{ 0.f, -10.f, 50.f, 10.f },
+          "잘린 둥근 사각형도 localPos 가 클립 비율만큼만 줄어 둥근 모서리가 찌그러지지 않음");
+    // 그림자 확장 사각형 클리핑: pad 포함 quad 를 잘라도 중심 기준 localPos 좌표가 보존됨
+    glm::vec4 sRect{ -16.f, -16.f, 128.f, 64.f }, sUv{ 0.f, 0.f, 1.f, 1.f };
+    glm::vec4 sLocal{ -64.f, -32.f, 64.f, 32.f };
+    const bool sKept = HClipQuad(sRect, sUv, sLocal, { 0.f, 0.f, 80.f, 48.f });
+    check(sKept && sRect == glm::vec4{ 0.f, 0.f, 80.f, 48.f }
+          && sLocal == glm::vec4{ -48.f, -16.f, 32.f, 32.f },
+          "잘린 그림자 확장 사각형도 localPos 가 유지되어 블러 형태가 깨지지 않음");
     glm::vec4 out{ 200.f, 0.f, 10.f, 10.f }, uv2{ 0.f, 0.f, 1.f, 1.f };
     check(!HClipQuad(out, uv2, { 0.f, 0.f, 100.f, 100.f }), "영역 밖 사각형은 버림");
 
@@ -879,10 +897,35 @@ void testDrawListFixed() {
             HSlateDrawList dl;
             const bool ok = ui.buildDrawList({ 400.f, 300.f }, kWhite, dl);
             const uint64_t h = hashDrawList(dl, kWhite, ui.fontAtlas().atlasView());
-            constexpr uint64_t kExpectedHash = 0xdd11fcb176aa175bULL;
+            // 기본 UIVertex{pos,uv,color} 영역만 따로 해시해도 D1 기준(0xdd11fcb176aa175b)과 같아야 함
+            uint64_t hBase = 14695981039346656037ULL;
+            auto mixBase = [&](const void* data, size_t n) {
+                const auto* p = static_cast<const uint8_t*>(data);
+                for (size_t i = 0; i < n; ++i) { hBase ^= p[i]; hBase *= 1099511628211ULL; }
+            };
+            const uint64_t vc = dl.vertices.size();
+            mixBase(&vc, sizeof(vc));
+            for (const auto& v : dl.vertices) {
+                struct BaseVtx { glm::vec2 pos, uv; glm::vec4 color; } b{ v.pos, v.uv, v.color };
+                mixBase(&b, sizeof(b));
+            }
+            const uint64_t bc = dl.batches.size();
+            mixBase(&bc, sizeof(bc));
+            for (const auto& b : dl.batches) {
+                uint8_t tag = 2;
+                if (b.texture == kWhite) tag = 0;
+                else if (ui.fontAtlas().atlasView() != VK_NULL_HANDLE && b.texture == ui.fontAtlas().atlasView()) tag = 1;
+                mixBase(&tag, sizeof(tag));
+                mixBase(&b.firstQuad, sizeof(b.firstQuad));
+                mixBase(&b.quadCount, sizeof(b.quadCount));
+            }
+            const uint8_t ov = dl.overflowed ? 1 : 0;
+            mixBase(&ov, sizeof(ov));
+            constexpr uint64_t kExpectedBaseHash = 0xdd11fcb176aa175bULL;
+            constexpr uint64_t kExpectedHash     = 0x4f444091dd5d8b8bULL;
             check(ok && !dl.overflowed && dl.vertices.size() == 128 && dl.batches.size() == 3 &&
-                  h == kExpectedHash,
-                  "복합 트리 그리기 목록 고정 (verts=128, batches=3, hash=0xdd11fcb176aa175b)");
+                  hBase == kExpectedBaseHash && h == kExpectedHash,
+                  "복합 트리 그리기 목록 고정 (verts=128, batches=3, base=0xdd11fcb176aa175b, full=0x4f444091dd5d8b8b)");
         }
     }
 
@@ -1046,19 +1089,28 @@ void testUIPanelComponent() {
               "localBounds = (+-0.4, +-0.25, +-0.005)");
     }
 
-    // (e) 내용: Demo 는 그릴 것이 있고, 처음 만들 때 더러움 표시. 모르는 이름은 안내 화면으로 바뀜
+    // (e) 내용 등록 API: 엔진 기본 등록은 비어 있고, 게임이 등록한 내용만 열거 · 생성됨. 모르는 이름은 안내 화면
     {
+        check(P::contentNames().empty(), "엔진 기본 UIPanel 내용 등록소는 비어 있음(P3b)");
+        P::registerContent("Demo", [](P& panel, float s) {
+            auto root = std::make_shared<SBorder>();
+            root->background(glm::vec4(0.07f, 0.08f, 0.11f, 1.f))
+                ->content(std::make_shared<STextBlock>()
+                              ->text(panel.paramAttr("title", "Haruka UI Panel"))
+                              ->fontSize(32.f * s));
+            return std::shared_ptr<HWidget>(root);
+        });
         P p;
         const VkImageView kWhite = reinterpret_cast<VkImageView>(uintptr_t(0x1111));
         HSlateRenderer ui;
         const bool hasFont = ui.fontAtlas().initCpuOnly();
         HSlateContext& ctx = p.slate();
         const auto demoRoot = ctx.rootWidget();
-        check(demoRoot != nullptr && p.takeDirty() && !p.takeDirty(), "Demo 트리를 만들고 한 번만 더러움");
+        check(demoRoot != nullptr && p.takeDirty() && !p.takeDirty(), "등록한 Demo 트리를 만들고 한 번만 더러움");
         if (hasFont) {
             HSlateDrawList dl;
             const bool ok = ctx.buildDrawList({ 1000.f, 625.f }, ui.fontAtlas(), kWhite, HSlateRenderer::maxVerts(), dl);
-            check(ok && !dl.overflowed && dl.vertices.size() > 40, "Demo 그리기 목록에 배경 · 글자가 있음");
+            check(ok && !dl.overflowed && dl.vertices.size() > 6, "Demo 그리기 목록에 배경 · 글자가 있음");
         }
         p.content = "NoSuchPanel";
         p.slate();
@@ -1500,6 +1552,413 @@ void testPanelFollow() {
 
 } // namespace
 
+static void testRoundedAndShadowPaint() {
+    HGeometry geo;
+    geo.position = { 100.f, 200.f };
+    geo.size     = { 160.f, 40.f };
+
+    HPaintContext ctx(nullptr);
+    ctx.drawRect(geo, { 0.2f, 0.3f, 0.4f, 1.f });
+    ctx.drawRoundedRect(geo, { 0.1f, 0.1f, 0.1f, 1.f }, 6.f, { 0.5f, 0.6f, 0.7f, 1.f }, 1.f);
+    ctx.drawShadow(geo, 6.f, { 0.f, 4.f }, 12.f, { 0.f, 0.f, 0.f, 0.5f });
+
+    check(ctx.elements.size() == 3, "drawRect/drawRoundedRect/drawShadow 3개 요소 생성");
+    check(ctx.elements[0].type == HDrawElement::Type::Rect
+          && ctx.elements[0].cornerRadius == 0.f
+          && ctx.elements[0].borderWidth == 0.f
+          && ctx.elements[0].shadowBlur == 0.f,
+          "기본 drawRect 는 radius=0, border=0, shadowBlur=0");
+    check(ctx.elements[1].type == HDrawElement::Type::Rect
+          && ctx.elements[1].cornerRadius == 6.f
+          && ctx.elements[1].borderWidth == 1.f
+          && ctx.elements[1].borderColor == glm::vec4{ 0.5f, 0.6f, 0.7f, 1.f }
+          && ctx.elements[1].shadowBlur == 0.f,
+          "drawRoundedRect 는 반경과 테두리 정보를 기록");
+    check(ctx.elements[2].type == HDrawElement::Type::Shadow
+          && ctx.elements[2].rect == glm::vec4{ 100.f, 204.f, 160.f, 40.f }
+          && ctx.elements[2].cornerRadius == 6.f
+          && ctx.elements[2].shadowBlur == 12.f
+          && ctx.elements[2].color == glm::vec4{ 0.f, 0.f, 0.f, 0.5f },
+          "drawShadow 는 오프셋이 반영된 rect 와 블러·반경 기록");
+
+    // SBorder: 기본은 사각형 경로, cornerRadius + shadow 지정 시 그림자 먼저 + 둥근 사각형
+    auto plainBorder = HNew(SBorder)->background({ 1.f, 1.f, 1.f, 1.f });
+    plainBorder->onArrangeChildren(geo);
+    HPaintContext cPlain(nullptr);
+    plainBorder->paint(cPlain, geo);
+    check(cPlain.elements.size() == 1 && cPlain.elements[0].cornerRadius == 0.f && cPlain.elements[0].shadowBlur == 0.f,
+          "기본 SBorder 는 둥근 모서리 · 그림자 없이 기존 사각형 유지");
+
+    auto popupBorder = HNew(SBorder)
+        ->background({ 0.1f, 0.1f, 0.12f, 1.f })
+        ->borderColor({ 0.3f, 0.3f, 0.35f, 1.f })->borderThickness(1.f)
+        ->cornerRadius(6.f)
+        ->shadow({ 0.f, 4.f }, 12.f, { 0.f, 0.f, 0.f, 0.5f });
+    popupBorder->onArrangeChildren(geo);
+    HPaintContext cPopup(nullptr);
+    popupBorder->paint(cPopup, geo);
+    check(cPopup.elements.size() == 2
+          && cPopup.elements[0].type == HDrawElement::Type::Shadow
+          && cPopup.elements[1].type == HDrawElement::Type::Rect
+          && cPopup.elements[1].cornerRadius == 6.f
+          && cPopup.elements[1].borderWidth == 1.f,
+          "둥근/그림자 SBorder 는 Shadow 를 먼저 그리고 둥근 사각형을 그림");
+
+    // 위젯 Style 기본값 보존(게임 UI 무변경 보장)
+    check(SButton::Style{}.cornerRadius == 0.f,      "SButton::Style 기본 cornerRadius 는 0");
+    check(SToggleButton::Style{}.cornerRadius == 0.f,"SToggleButton::Style 기본 cornerRadius 는 0");
+    check(STabBar::Style{}.tabCornerRadius == 0.f,   "STabBar::Style 기본 tabCornerRadius 는 0");
+    check(SSearchBox::Style{}.cornerRadius == 0.f && SSearchBox::Style{}.borderWidth == 1.f,
+          "SSearchBox::Style 기본값 보존");
+    check(SNumberField::Style{}.cornerRadius == 0.f && SNumberField::Style{}.borderWidth == 0.f,
+          "SNumberField::Style 기본값 보존");
+}
+
+// D3(2026-11-19): 에디터 아이콘. /Engine/ 마운트 · 모든 아이콘 읽기 · 배율별 래스터화 · 아틀라스 자리 · 그리기 요소 · 글자로 돌아가기.
+static void testEditorIcons() {
+    hvfs::reset();
+    hvfs::mountDirectoryAs(HARUKA_ENGINE_CONTENT_DIR, "/Engine/", 10);
+    hvfs::mountDirectory(HARUKA_ENGINE_CONTENT_DIR, "", 0);   // 접두어 없는 마운트가 /Engine/ 을 가로채지 않는지 보려고 붙임
+    check(hvfs::exists("/Engine/Editor/Icons/play.svg"), "/Engine/ 논리 경로로 엔진 콘텐츠 파일을 찾음");
+    check(hvfs::exists("/engine/Editor/Icons/play.svg"), "/Engine/ 접두어는 대소문자를 가리지 않음");
+    check(!hvfs::exists("/Engine/Editor/Icons/nope.svg"), "없는 엔진 파일은 없음");
+    check(!hvfs::exists("/Engine/../Editor/Icons/play.svg"), "/Engine/ 아래 '..' 은 거절");
+    check(hvfs::toCanonical("/engine/Editor/x.svg") == "/Engine/Editor/x.svg", "/Engine/ 정식 표기로 바꿈");
+    check(hvfs::isVirtualLogicalPath("/Engine/a") && !hvfs::isVirtualLogicalPath("/Enginex/a"),
+          "/Engine/ 은 가상 논리 경로(절대 경로로 보지 않음)");
+
+    EditorIcons icons;
+    check(icons.load(), "에디터 아이콘을 /Engine/Editor/Icons 에서 읽음");
+    check(icons.count() == EditorIcons::names().size(), "쓰는 아이콘 이름이 모두 읽힘 (" +
+          std::to_string(icons.count()) + "/" + std::to_string(EditorIcons::names().size()) + ")");
+    bool allDrawn = true, sizesOk = true;
+    std::string empty;
+    for (const char* n : EditorIcons::names()) {
+        for (int px : { 16, 24, 32 }) {   // 16px 아이콘의 배율 1 · 1.5 · 2
+            std::vector<uint8_t> a;
+            if (!icons.rasterize(n, px, a) || a.size() != (size_t)px * px) { sizesOk = false; continue; }
+            size_t covered = 0;
+            for (uint8_t v : a) covered += v > 0;
+            if (covered == 0 || covered * 10 > a.size() * 9) { allDrawn = false; empty += std::string(n) + "@" + std::to_string(px) + " "; }
+        }
+    }
+    check(sizesOk, "아이콘 래스터 크기 = px x px (16 · 24 · 32)");
+    check(allDrawn, "모든 아이콘이 비지 않고 꽉 차지도 않게 그려짐 (선 아이콘) " + empty);
+    std::vector<uint8_t> none;
+    check(!icons.has("no-such-icon") && !icons.rasterize("no-such-icon", 16, none), "모르는 이름은 없음");
+    check(!icons.addSvg("broken", "<svg"), "깨진 SVG 는 등록하지 않음");
+
+    HFontAtlas atlas;
+    if (atlas.initCpuOnly()) {
+        HGlyphInfo g{};
+        check(!atlas.getIcon("play", 16, g), "아이콘 공급자가 없으면 아이콘 없음");
+        atlas.setIconSource(&icons);
+        check(atlas.hasIcon("play") && !atlas.hasIcon("no-such-icon"), "공급자를 붙이면 이름으로 찾음");
+        HGlyphInfo a{}, b{}, c{};
+        check(atlas.getIcon("play", 16, a) && a.pixelSize == glm::vec2(16.f, 16.f) && a.uvMax.x > a.uvMin.x,
+              "아이콘이 아틀라스 자리(16 x 16)를 받음");
+        check(atlas.getIcon("play", 16, b) && b.uvMin == a.uvMin && b.uvMax == a.uvMax, "같은 이름 · 크기는 캐시에서 같은 자리");
+        check(atlas.getIcon("play", 32, c) && c.uvMin != a.uvMin && c.pixelSize.x == 32.f, "크기가 다르면 다른 자리");
+
+        HPaintContext ctx(&atlas);
+        HGeometry geo;
+        geo.position = { 10.3f, 20.6f };
+        geo.size     = { 30.f, 20.f };
+        check(ctx.drawIcon(geo, "play", { 1.f, 0.f, 0.f, 1.f }) && ctx.elements.size() == 1 &&
+              ctx.elements[0].type == HDrawElement::Type::Icon && ctx.elements[0].text == "play" &&
+              ctx.elements[0].rect.z == 20.f && ctx.elements[0].rect.x == std::round(ctx.elements[0].rect.x),
+              "drawIcon: 짧은 변 크기의 정수 위치 아이콘 요소");
+        check(!ctx.drawIcon(geo, "no-such-icon", { 1.f, 1.f, 1.f, 1.f }) && ctx.elements.size() == 1,
+              "모르는 아이콘은 요소를 만들지 않고 거짓(호출한 쪽이 글자로 그림)");
+
+        // SIcon: 아이콘이 있으면 정사각 칸에 아이콘, 없으면 대신할 글자
+        auto withIcon = HNew(SIcon)->icon(std::string("eye"))->size(16.f)->fallback("O", 12.f);
+        auto noIcon   = HNew(SIcon)->icon(std::string("no-such-icon"))->size(16.f)->fallback("Play", 13.f);
+        check(withIcon->computeDesiredSize() == glm::vec2(16.f, 16.f), "SIcon: 아이콘이 있으면 size x size");
+        check(noIcon->computeDesiredSize().x > 16.f, "SIcon: 아이콘이 없으면 대신할 글자 폭");
+        HPaintContext ctx2(&atlas);
+        HGeometry box; box.position = { 0.f, 0.f }; box.size = { 40.f, 20.f };
+        withIcon->paint(ctx2, box);
+        noIcon->paint(ctx2, box);
+        check(ctx2.elements.size() == 2 && ctx2.elements[0].type == HDrawElement::Type::Icon &&
+              ctx2.elements[1].type == HDrawElement::Type::Text && ctx2.elements[1].text == "Play",
+              "SIcon: 아이콘 요소 · 글자 요소");
+        atlas.setIconSource(nullptr);
+        atlas.unloadFont();
+    }
+    hvfs::reset();
+}
+
+// D4(2026-11-19): UTF-8 글자 · 한글 · 굵은 글꼴(Pretendard, /Engine/Fonts).
+static void testUtf8AndBoldFont() {
+    // UTF-8 읽기
+    {
+        const std::string s = "A\xED\x95\x9C\xEA\xB8\x80!";   // "A한글!"
+        size_t i = 0;
+        const uint32_t a = HFontAtlas::nextCodepoint(s, i);
+        const uint32_t h = HFontAtlas::nextCodepoint(s, i);
+        const uint32_t g = HFontAtlas::nextCodepoint(s, i);
+        const uint32_t e = HFontAtlas::nextCodepoint(s, i);
+        check(a == 'A' && h == 0xD55C && g == 0xAE00 && e == '!' && i == s.size(), "UTF-8: A 한 글 ! 를 코드 포인트로 읽음");
+        const std::string bad = "\xFF" "a" "\xE2\x82";   // 잘못된 바이트, 끝에서 잘린 글자
+        size_t j = 0;
+        const uint32_t b0 = HFontAtlas::nextCodepoint(bad, j);
+        const uint32_t b1 = HFontAtlas::nextCodepoint(bad, j);
+        const uint32_t b2 = HFontAtlas::nextCodepoint(bad, j);
+        check(b0 == '?' && b1 == 'a' && b2 == '?' && j < bad.size(), "UTF-8: 깨진 바이트는 '?' 하나씩, 멈추지 않음");
+        const std::string over = "\xC0\xAF";   // 너무 긴 표현의 '/'
+        size_t k = 0;
+        check(HFontAtlas::nextCodepoint(over, k) == '?', "UTF-8: 너무 긴 표현은 거절");
+        check(HFontAtlas::utf8Floor(s, 2) == 1 && HFontAtlas::utf8Floor(s, 4) == 4 && HFontAtlas::utf8Floor(s, 99) == s.size(),
+              "UTF-8: 자를 때 글자 중간을 피함");
+    }
+
+    hvfs::reset();
+    hvfs::mountDirectoryAs(HARUKA_ENGINE_CONTENT_DIR, "/Engine/", 10);
+    HFontAtlas atlas;
+    atlas.setAtlasHeight(1024);
+    check(atlas.atlasHeight() == 1024, "아틀라스 높이를 init 전에 바꿈");
+    if (!atlas.initCpuOnly("/Engine/Fonts/Pretendard-Regular.ttf")) {
+        check(false, "Pretendard 보통 글꼴을 /Engine/Fonts 에서 읽음");
+        hvfs::reset();
+        return;
+    }
+    check(!atlas.hasBoldFont(), "굵은 글꼴은 따로 읽기 전에는 없음");
+    const float boldBefore = atlas.measureText("TRANSFORM", 13.f, 1);
+    check(boldBefore == atlas.measureText("TRANSFORM", 13.f, 0), "굵은 글꼴이 없으면 굵게도 보통 폭");
+    check(atlas.loadBoldFont("/Engine/Fonts/Pretendard-SemiBold.ttf") && atlas.hasBoldFont(), "Pretendard 굵은 글꼴을 읽음");
+    check(!atlas.loadBoldFont("/Engine/Fonts/none.ttf") && !atlas.hasBoldFont(), "없는 굵은 글꼴은 거짓, 보통으로 돌아감");
+    atlas.loadBoldFont("/Engine/Fonts/Pretendard-SemiBold.ttf");
+    check(atlas.measureText("TRANSFORM", 13.f, 1) > atlas.measureText("TRANSFORM", 13.f, 0), "굵은 글자가 보통보다 넓음");
+
+    const std::string han = "\xEC\x94\xAC \xEC\x97\xB4\xEA\xB8\xB0";   // "씬 열기"
+    const float hanW = atlas.measureText(han, 13.f);
+    check(hanW > 13.f * 2.f && hanW < 13.f * 6.f, "한글 폭을 잼 (씬 열기, " + std::to_string(hanW) + " px)");
+    const HGlyphInfo gh = atlas.getGlyph(0xD55C, 13.f);   // 한
+    check(gh.pixelSize.x > 4.f && gh.pixelSize.y > 4.f, "한글 글리프가 아틀라스에 그려짐");
+    const HGlyphInfo gb = atlas.getGlyph('A', 13.f, 1);
+    const HGlyphInfo gr = atlas.getGlyph('A', 13.f, 0);
+    check(gb.uvMin != gr.uvMin, "굵은 글자 · 보통 글자는 다른 아틀라스 자리");
+
+    HPaintContext ctx(&atlas);
+    HGeometry g; g.position = { 0.f, 0.f }; g.size = { 100.f, 20.f };
+    ctx.drawText(g, "Bold", 13.f, { 1.f, 1.f, 1.f, 1.f }, 1);
+    ctx.drawText(g, "Body", 13.f, { 1.f, 1.f, 1.f, 1.f });
+    check(ctx.elements.size() == 2 && ctx.elements[0].fontFace == 1 && ctx.elements[1].fontFace == 0,
+          "drawText: 굵게 · 보통 면을 요소에 남김");
+    auto tb = HNew(STextBlock)->text("TRANSFORM")->fontSize(13.f);
+    const float plainW = tb->computeDesiredSize().x;
+    tb->bold();
+    check(tb->computeDesiredSize().x > plainW, "STextBlock::bold: 굵게 바꾸면 다시 재서 더 넓음");
+    atlas.unloadFont();
+    hvfs::reset();
+}
+
+void testCheckBoxAndScrollStyle() {
+    std::printf("testCheckBoxAndScrollStyle\n");
+    bool state = false;
+    SCheckBox::Style st;
+    st.uncheckedBg     = { 0.01f, 0.01f, 0.01f, 1.f };
+    st.uncheckedBorder = { 0.10f, 0.10f, 0.10f, 1.f };
+    st.checkedBg       = { 0.02f, 0.15f, 0.67f, 1.f };
+    st.hoverBorder     = { 0.07f, 0.23f, 0.81f, 1.f };
+    st.checkColor      = { 1.f, 1.f, 1.f, 1.f };
+    st.boxSize         = 16.f;
+    st.cornerRadius    = 3.f;
+    st.borderWidth     = 1.f;
+    st.checkIcon       = "check";
+
+    auto cb = HNew(SCheckBox)->style(st)
+        ->checked([&]{ return state; })
+        ->onClick([&]{ state = !state; });
+    check(cb->computeDesiredSize() == glm::vec2(16.f, 16.f), "SCheckBox: 기본 크기 16x16");
+
+    HGeometry box; box.position = { 10.f, 20.f }; box.size = { 16.f, 24.f };
+    cb->onArrangeChildren(box);
+
+    // 바깥에서 누르고 안에서 떼면 토글되지 않음
+    cb->onMouseButton(press({ 0.f, 0.f }));
+    cb->onMouseButton(release({ 18.f, 32.f }));
+    check(!state, "SCheckBox: 바깥 프레스 + 안쪽 릴리즈 무시");
+
+    // 안에서 누르고 바깥에서 떼면 토글되지 않음
+    cb->onMouseButton(press({ 18.f, 32.f }));
+    cb->onMouseButton(release({ 0.f, 0.f }));
+    check(!state, "SCheckBox: 안쪽 프레스 + 바깥 릴리즈 무시");
+
+    // 호버 상태에서 거짓 그리기 → 테두리 hoverBorder
+    cb->onMouseMove(move({ 18.f, 32.f }, false));
+    HPaintContext pNoIcon(nullptr);
+    cb->paint(pNoIcon, box);
+    check(pNoIcon.elements.size() == 1 &&
+          pNoIcon.elements[0].cornerRadius == 3.f &&
+          pNoIcon.elements[0].borderWidth == 1.f &&
+          pNoIcon.elements[0].borderColor == st.hoverBorder,
+          "SCheckBox: 거짓 호버 테두리 = hoverBorder, 반경 3");
+
+    // 안쪽 프레스 + 릴리즈 → 참 전환, 아이콘 공급자 없으면 "v" 폴백
+    cb->onMouseButton(press({ 18.f, 32.f }));
+    cb->onMouseButton(release({ 18.f, 32.f }));
+    check(state, "SCheckBox: 안쪽 프레스+릴리즈 토글");
+
+    pNoIcon.elements.clear();
+    cb->paint(pNoIcon, box);
+    check(pNoIcon.elements.size() == 2 &&
+          pNoIcon.elements[0].color == st.checkedBg &&
+          pNoIcon.elements[1].type == HDrawElement::Type::Text &&
+          pNoIcon.elements[1].text == "v",
+          "SCheckBox: 참 + 아이콘 없음 → \"v\" 폴백");
+
+    // 아이콘 공급자에 "check" 가 있으면 Icon 요소 생성
+    HFontAtlas atlas;
+    EditorIcons icons;
+    icons.addSvg("check", R"(<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>)");
+    atlas.setIconSource(&icons);
+    HPaintContext pIcon(&atlas);
+    cb->paint(pIcon, box);
+    check(pIcon.elements.size() == 2 &&
+          pIcon.elements[1].type == HDrawElement::Type::Icon &&
+          pIcon.elements[1].text == "check",
+          "SCheckBox: 참 + check 아이콘 → Icon 요소");
+    atlas.setIconSource(nullptr);
+
+    // SScrollBox::Style 기본/커스텀 검사
+    auto sbChild = HNew(SVerticalBox);
+    sbChild->addSlot(HNew(SBorder), SVerticalBox::ESizeRule::Fixed, 400.f);
+    auto sb = HNew(SScrollBox)->style({ {0,0,0,0}, {0.2f,0.2f,0.2f,1.f}, {0.5f,0.5f,0.5f,1.f}, 6.f, 3.f })
+        ->content(sbChild);
+    HGeometry sbGeo; sbGeo.position = { 0.f, 0.f }; sbGeo.size = { 100.f, 100.f };
+    sb->onArrangeChildren(sbGeo);
+    sb->onMouseMove(move({ 95.f, 10.f }, false));
+    HPaintContext pSb(nullptr);
+    sb->paint(pSb, sbGeo);
+    check(!pSb.elements.empty() &&
+          pSb.elements.back().cornerRadius == 3.f &&
+          pSb.elements.back().color == glm::vec4(0.5f, 0.5f, 0.5f, 1.f),
+          "SScrollBox: 스타일 폭 6 · 반경 3 · 손잡이 호버 색");
+}
+
+void testTooltipAndDisabled() {
+    std::printf("testTooltipAndDisabled\n");
+
+    int disBtnClicks = 0, disTogClicks = 0, disChkClicks = 0;
+
+    auto btnA = HNew(SButton)
+        ->style({ {0.2f,0.2f,0.2f,1.f}, {0.8f,0.8f,0.8f,1.f}, {0.1f,0.1f,0.1f,1.f}, 4.f, {0.4f,0.4f,0.4f,1.f} })
+        ->content(HNew(STextBlock)->text("DisBtn")->color({1.f,1.f,1.f,1.f}))
+        ->onClick([&] { ++disBtnClicks; });
+    btnA->enabled.set(false);
+    btnA->tooltip.set("Tip A");
+
+    auto togB = HNew(SToggleButton)
+        ->style({ {0.2f,0.2f,0.2f,1.f}, {0.7f,0.7f,0.7f,1.f}, {0.9f,0.1f,0.1f,1.f}, {0.f,1.f,0.f,1.f}, 0.f, {0.4f,0.4f,0.4f,1.f} })
+        ->isActive([] { return true; })
+        ->content(HNew(STextBlock)->text("DisTog")->color({1.f,1.f,1.f,1.f}))
+        ->onClick([&] { ++disTogClicks; });
+    togB->enabled.set(false);
+    togB->tooltip.set("Tip B");
+
+    auto edgeBtn = HNew(SButton)->content(HNew(STextBlock)->text("Edge"));
+    edgeBtn->tooltip.set("Edge Tooltip Long Text");
+
+    auto root = HNew(SOverlay);
+    root->addSlot(HNew(SBox)->padding(kPadA)->content(btnA))
+        ->addSlot(HNew(SBox)->padding(kPadB)->content(togB))
+        ->addSlot(HNew(SBox)->padding(HPadding{ 350.f, 270.f, 0.f, 0.f })->content(edgeBtn));
+
+    HSlateContext ctx;
+    ctx.setRootWidget(root);
+    ctx.arrange({ kW, kH });
+
+    // 1. 머무름: 0.3초 < 0.5초 -> 안 뜸, +0.25초 -> 뜸 (비활성 버튼에도 뜸)
+    ctx.handlePointerEvent(move(kInA, false));
+    ctx.tickTooltip(0.30f);
+    check(!ctx.isTooltipVisible(), "툴팁: 0.30초에는 아직 안 뜸");
+    ctx.tickTooltip(0.25f);
+    check(ctx.isTooltipVisible(),  "툴팁: 0.55초 머무르면 비활성 단추 위에서도 뜸");
+
+    std::vector<HDrawElement> elems;
+    ctx.collectElements({ kW, kH }, nullptr, elems);
+    const bool hasTipA = std::any_of(elems.begin(), elems.end(), [](const HDrawElement& e) {
+        return e.type == HDrawElement::Type::Text && e.text == "Tip A";
+    });
+    check(hasTipA, "툴팁: collectElements 에 Tip A 포함");
+
+    // 2. 누르면 닫히고, 벗어나서 다시 머물러야 뜸
+    ctx.handlePointerEvent(press(kInA));
+    ctx.handlePointerEvent(release(kInA));
+    check(disBtnClicks == 0,       "비활성 SButton: 클릭 무시");
+    check(!ctx.isTooltipVisible(), "툴팁: 누르면 즉시 닫힘");
+    ctx.tickTooltip(0.60f);
+    check(!ctx.isTooltipVisible(), "툴팁: 누른 뒤 벗어나지 않으면 다시 안 뜸");
+    ctx.handlePointerEvent(move(kEmpty, false));
+    ctx.tickTooltip(0.60f);
+    check(!ctx.isTooltipVisible(), "툴팁: 빈 곳에서는 안 뜸");
+    ctx.handlePointerEvent(move(kInA, false));
+    ctx.tickTooltip(0.55f);
+    check(ctx.isTooltipVisible(),  "툴팁: 다시 들어와 0.55초 머무르면 뜸");
+
+    // 3. 위젯 바뀜 -> 타이머 리셋
+    ctx.handlePointerEvent(move(kInB, false));
+    check(!ctx.isTooltipVisible(), "툴팁: 다른 위젯으로 옮기면 닫힘");
+    ctx.tickTooltip(0.30f);
+    check(!ctx.isTooltipVisible(), "툴팁: 위젯 바뀐 뒤 0.30초에는 아직 안 뜸");
+    ctx.tickTooltip(0.25f);
+    check(ctx.isTooltipVisible(),  "툴팁: 위젯 바뀐 뒤 0.55초에 Tip B 뜸");
+
+    // 4. 화면 가장자리 위치 조정
+    ctx.handlePointerEvent(move({ 390.f, 290.f }, false));
+    ctx.tickTooltip(0.55f);
+    elems.clear();
+    ctx.collectElements({ kW, kH }, nullptr, elems);
+    bool edgeInside = false;
+    for (const auto& e : elems) {
+        if (e.type == HDrawElement::Type::Rect && e.layer >= 10) {
+            edgeInside = (e.rect.x >= 0.f && e.rect.y >= 0.f &&
+                          e.rect.x + e.rect.z <= kW && e.rect.y + e.rect.w <= kH);
+        }
+    }
+    check(edgeInside, "툴팁: 화면 오른쪽 아래 가장자리에서 안쪽으로 조정");
+
+    // 5. 비활성 모양 검사 (SButton · SToggleButton · SCheckBox)
+    HPaintContext pBtn(nullptr);
+    btnA->paint(pBtn, btnA->cachedGeometry());
+    check(pBtn.elements.size() >= 2 &&
+          pBtn.elements[0].color == glm::vec4(0.2f, 0.2f, 0.2f, 1.f) &&
+          pBtn.elements[1].color == glm::vec4(0.4f, 0.4f, 0.4f, 1.f),
+          "SButton 비활성: 기본 바탕 + disabledContent 글자 색 (호버 색 미사용)");
+
+    ctx.handlePointerEvent(press(kInB));
+    ctx.handlePointerEvent(release(kInB));
+    check(disTogClicks == 0, "비활성 SToggleButton: 클릭 무시");
+    HPaintContext pTog(nullptr);
+    togB->paint(pTog, togB->cachedGeometry());
+    check(pTog.elements.size() == 2 &&
+          pTog.elements[0].color == glm::vec4(0.2f, 0.2f, 0.2f, 1.f) &&
+          pTog.elements[1].color == glm::vec4(0.4f, 0.4f, 0.4f, 1.f),
+          "SToggleButton 비활성: 기본 바탕 + activeBar 미출력 + disabledContent 글자 색");
+
+    auto chk = HNew(SCheckBox)
+        ->style({ {0.1f,0.1f,0.1f,1.f}, {0.3f,0.3f,0.3f,1.f}, {0.2f,0.5f,0.9f,1.f},
+                  {0.5f,0.7f,1.0f,1.f}, {1.f,1.f,1.f,1.f}, 16.f, 3.f, 1.f, "", {0.4f,0.4f,0.4f,1.f} })
+        ->checked([] { return true; })
+        ->onClick([&] { ++disChkClicks; });
+    chk->enabled.set(false);
+    HGeometry chkGeo; chkGeo.position = { 0.f, 0.f }; chkGeo.size = { 16.f, 16.f };
+    chk->onArrangeChildren(chkGeo);
+    chk->onMouseMove(move({ 8.f, 8.f }, false));
+    chk->onMouseButton(press({ 8.f, 8.f }));
+    chk->onMouseButton(release({ 8.f, 8.f }));
+    check(disChkClicks == 0, "비활성 SCheckBox: 클릭 무시");
+    HPaintContext pChk(nullptr);
+    chk->paint(pChk, chkGeo);
+    check(pChk.elements.size() == 2 &&
+          pChk.elements[0].color == glm::vec4(0.1f, 0.1f, 0.1f, 1.f) &&
+          pChk.elements[0].borderColor == glm::vec4(0.3f, 0.3f, 0.3f, 1.f) &&
+          pChk.elements[1].color == glm::vec4(0.4f, 0.4f, 0.4f, 1.f),
+          "SCheckBox 비활성: 기본 바탕 + 기본 테두리 + disabledColor 체크 색");
+}
+
 int main() {
     std::printf("== HSlate input ==\n");
     testStrayReleaseDoesNotEdit();
@@ -1533,6 +1992,11 @@ int main() {
     testPanelPointer();
     testPanelPointerXr();
     testPanelFollow();
+    testRoundedAndShadowPaint();
+    testEditorIcons();
+    testUtf8AndBoldFont();
+    testCheckBoxAndScrollStyle();
+    testTooltipAndDisabled();
 
     if (g_failed) {
         std::printf("\n%d check(s) FAILED\n", g_failed);

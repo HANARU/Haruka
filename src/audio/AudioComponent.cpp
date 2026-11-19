@@ -1,4 +1,5 @@
 #include "AudioComponent.hpp"
+#include "../vfs/LogicalPath.hpp"
 #include "../scene/Actor.hpp"
 #include "AudioSystem.hpp"
 #include "../scene/ComponentFields.hpp"
@@ -155,7 +156,7 @@ float AudioComponent::occlusionAmount() const {
 // ── 직렬화 (DEF-22) ─────────────────────────────────────────────────────────────
 // 3D 설정은 AudioAttenuationSettings 의 텍스트 형식 그대로입니다(감쇠 모델은 이름).
 void AudioComponent::writeFields(ComponentFieldWriter& w) const {
-    w.s("file",        filePath);
+    w.s("file",        hvfs::toCanonical(filePath));
     w.f("volume",      volume);
     w.b("loop",        loop);
     w.b("autoPlay",    autoPlay);

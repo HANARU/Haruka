@@ -7,6 +7,7 @@
 // 실행: build/Release/HarukaSceneDocTest.exe
 #include "../src/editor/HCommandStack.hpp"
 #include "../src/editor/SceneDocument.hpp"
+#include "../src/core/ProjectDescriptor.hpp"
 #include "../src/core/ProjectSettings.hpp"
 #include "../src/core/FileUtil.hpp"
 
@@ -126,29 +127,46 @@ int main() {
     {
         std::vector<std::string> msg;
         ProjectSettings d = project_settings::parse("", msg);
-        check(d.startScene == "assets/scenes/LightingProbe.hscene" && msg.empty(), "빈 파일이면 기본 시작 씬");
+        check(d.startScene == "/Game/scenes/LightingProbe.hscene" && msg.empty(), "빈 파일이면 기본 시작 씬");
 
         msg.clear();
         ProjectSettings p = project_settings::parse(
             "# comment\r\n\r\nstartScene = assets/scenes/Levels/Base.hscene\r\n"
             "input.action.Grab = xr:right.squeeze\r\ninput.axis.MoveY = key:W/S\r\n", msg);
-        check(p.startScene == "assets/scenes/Levels/Base.hscene" && msg.empty(), "시작 씬 · 주석 · 빈 줄 · CRLF");
+        check(p.startScene == "assets/scenes/Levels/Base.hscene" && msg.empty(), "옛 시작 씬(assets/) · 주석 · 빈 줄 · CRLF");
+        msg.clear();
+        ProjectSettings g = project_settings::parse("startScene = /Game/scenes/Levels/Base.hscene\n", msg);
+        check(g.startScene == "/Game/scenes/Levels/Base.hscene" && msg.empty(), "새 시작 씬(/Game/)");
         check(p.input.size() == 2 && p.input[0].first == "input.action.Grab" && p.input[1].second == "key:W/S",
               "input. 줄은 순서대로 입력 시스템에 넘김");
 
         const char* bad[] = { "startScene = scenes/A.hscene", "startScene = assets/scenes/A.txt",
-                              "startScene = assets/../x.hscene", "startScene = assets\\scenes\\A.hscene" };
+                              "startScene = assets/../x.hscene", "startScene = assets\\scenes\\A.hscene",
+                              "startScene = /Game/../x.hscene", "startScene = /Game/scenes/A.txt" };
         bool allRejected = true;
         for (const char* b : bad) {
             msg.clear();
             ProjectSettings r = project_settings::parse(b, msg);
-            allRejected = allRejected && r.startScene == "assets/scenes/LightingProbe.hscene" && msg.size() == 1;
+            allRejected = allRejected && r.startScene == "/Game/scenes/LightingProbe.hscene" && msg.size() == 1;
         }
-        check(allRejected, "assets/ 밖 · 다른 확장자 · .. · 백슬래시 경로는 거부하고 기본값");
+        check(allRejected, "assets/ · /Game/ 밖 · 다른 확장자 · .. · 백슬래시 경로는 거부하고 기본값");
 
         msg.clear();
         project_settings::parse("nonsense\nfoo = 1\n", msg);
         check(msg.size() == 2, "= 없는 줄과 모르는 키는 경고");
+
+        // 프로젝트 파일(*.hproject, P3a)
+        {
+            std::vector<std::string> w, e;
+            ProjectDescriptor pd = project_descriptor::parse(
+                "# comment\nname = Samples\ncompany = Haruka\npackageId = com.haruka.game\nengineVersion = 0.1.0\nextra = 1\n", w, e);
+            check(e.empty() && w.size() == 1 && pd.name == "Samples" && pd.company == "Haruka" &&
+                  pd.packageId == "com.haruka.game" && pd.engineVersion == "0.1.0",
+                  ".hproject 정상 파싱 + 모르는 키 경고");
+            w.clear(); e.clear();
+            project_descriptor::parse("name = OnlyName\n", w, e);
+            check(e.size() == 3, "필수 키 누락 시 오류");
+        }
 
         // XR 리그 높이(2026-10-16): 보이지 않는 리그가 쓰는 값
         check(d.xrTrackedHeight && d.xrEyeHeight == 1.7f, "XR 리그 높이 기본값: 실제 키, 눈높이 1.7m");

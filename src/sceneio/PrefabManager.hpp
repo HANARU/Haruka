@@ -11,7 +11,7 @@ class AssetManager;
 // v1 / v2 (one actor, NAME: line) are still read.
 class PrefabManager {
 public:
-    static constexpr const char* kDir = "assets/prefabs";
+    static constexpr const char* kDir = "/Game/prefabs";
     static constexpr const char* kExt = ".hprefab";
 
     // Serialize the actor and its subtree to path (logical path, must end in .hprefab).

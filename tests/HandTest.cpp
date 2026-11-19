@@ -550,7 +550,7 @@ int main() {
     std::printf("HarukaHandTest\n");
     const fs::path root = HARUKA_SOURCE_DIR;
     hvfs::reset();
-    hvfs::mountDirectory(root, "", 0);
+    hvfs::mountDirectoryAs(root / "Projects/Samples/Content", "/Game/", 0);
     const fs::path tmp = fs::temp_directory_path() / "haruka_hand_test";
     std::error_code ec;
     fs::remove_all(tmp, ec);

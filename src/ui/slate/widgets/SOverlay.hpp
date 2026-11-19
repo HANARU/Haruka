@@ -52,6 +52,14 @@ public:
                 s.widget->paint(ctx, s.widget->cachedGeometry());
     }
 
+    std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) override {
+        if (!isVisible()) return nullptr;
+        for (int i = (int)slots_.size() - 1; i >= 0; --i)
+            if (auto w = slots_[i].widget->findTooltipWidget(pos)) return w;
+        if (!cachedGeo_.contains(pos)) return nullptr;
+        return tooltip.get().empty() ? nullptr : shared_from_this();
+    }
+
     HReply onMouseButton(const HPointerEvent& e) override {
         for (int i = (int)slots_.size() - 1; i >= 0; --i) {
             if (!slots_[i].widget->isVisible()) continue;   // paint 와 같은 기준

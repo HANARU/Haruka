@@ -1,5 +1,6 @@
 #include "EditorApp.hpp"
 #include "../runtime/EngineOptions.hpp"
+#include "../vfs/LogicalPath.hpp"
 #include "../math/Geometry.hpp"
 #include "../scene/ComponentRegistry.hpp"
 #include "../core/FrameTimings.hpp"
@@ -76,9 +77,20 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
 
     auto beginCmd = [&renderer]() { return renderer.beginOneTimeCmd(); };
     auto endCmd   = [&renderer](VkCommandBuffer cmd) { renderer.endOneTimeCmd(cmd); };
+    // 글꼴(D4): 엔진 콘텐츠의 Pretendard(보통 · 굵게, OFL). 없으면 아틀라스가 시스템 글꼴로 내려갑니다. 한글 글리프가 들어가도록
+    // 에디터 아틀라스는 2048 x 1024 입니다(게임 쪽 3D 패널은 기본 크기).
+    slateRenderer_.fontAtlas().setAtlasHeight(1024);
     slateRenderer_.init(renderer.getDevice(), renderer.getPhysDevice(),
-                        renderer.getSwapFormat(), renderer.pushDescriptorFn(), beginCmd, endCmd);
+                        renderer.getSwapFormat(), renderer.pushDescriptorFn(), beginCmd, endCmd,
+                        "/Engine/Fonts/Pretendard-Regular.ttf");
+    if (slateRenderer_.fontAtlas().loadBoldFont("/Engine/Fonts/Pretendard-SemiBold.ttf"))
+        HLOG(LogEditor, Log) << "Editor font: Pretendard (regular, semibold)";
+    else
+        HLOG(LogEditor, Warning) << "Editor font: Pretendard not found in /Engine/Fonts; using the system font";
 
+    // 아이콘(D3): /Engine/Editor/Icons 의 SVG 를 읽어 글꼴 아틀라스에 붙입니다. 못 읽으면 위젯이 글자로 그립니다.
+    icons_.load();
+    slateRenderer_.fontAtlas().setIconSource(&icons_);
     ui_.fonts   = &slateRenderer_.fontAtlas();
     ui_.uiScale = uiScale_;
 
@@ -202,7 +214,7 @@ void EditorApp::initPanels() {
         &ui_, &ctx_, &cmdStack_, &LogEditor,
         [this] { return doc_.path(); },
         [this](const std::string& path) {
-            if (path == doc_.path() || blockedDuringPlay("opening a scene")) return;
+            if (hvfs::toCanonical(path) == hvfs::toCanonical(doc_.path()) || blockedDuringPlay("opening a scene")) return;
             guardUnsaved("opening another scene", [this, path] { openScene(path); });
         },
         [this](Actor* a) { selectOnly(a); },
@@ -384,6 +396,7 @@ void EditorApp::tick(float dt) {
 
     // 단축키·메뉴 액션처럼 위젯 이벤트를 거치지 않고 상태만 바뀌는 경로도 여기서 소진합니다.
     flushChromeRebuilds();
+    slateRenderer_.context().tickTooltip(dumpMode_ ? (uiHoverActive_ ? 1.0f : 0.f) : dt);
 }
 
 // ── buildWidgetTree ────────────────────────────────────────────────────────────
@@ -391,6 +404,7 @@ void EditorApp::tick(float dt) {
 // 트리(dockRoot_)를 dockHost_ 에 조합합니다. root 는 [toolbar / dockHost_] 뿐이라, 이후
 // 메뉴바·상태바 같은 고정 크롬은 도크 영역 바깥에 얹으면 됩니다.
 void EditorApp::buildWidgetTree() {
+    slateRenderer_.context().setTooltipStyle(EditorUiKit::tooltipStyle(uiScale_));
     using VR = SVerticalBox;
     using HR = SHorizontalBox;
     using BR = SBorder;
@@ -434,7 +448,7 @@ void EditorApp::buildWidgetTree() {
             }
             return buf;
         }))
-        ->fontSize(s(12.f))->color({0.85f, 0.90f, 0.85f, 1.f})
+        ->fontSize(s(12.f))->color(EditorTheme::textPrimary)
         ->hAlign(EHAlign::Left)->vAlign(EVAlign::Top);
     // 뷰포트 오버레이는 [툴바 / 간격 / 통계 / 남는 공간] 을 한 세로 상자에 쌓습니다.
     // 통계를 상수 패딩으로 밀어내는 방식이면 폰트·uiScale·툴바 축약 단계가 바뀔 때마다
@@ -443,7 +457,7 @@ void EditorApp::buildWidgetTree() {
     auto vpLayer = HNew(VR)
         ->addSlot(vpBar, VR::ESizeRule::Auto, 0.f, HPadding{}, EHAlign::Left)
         ->addSlot(spacer(), VR::ESizeRule::Fixed, s(6.f))
-        ->addSlot(HNew(BR)->background({0.f, 0.f, 0.f, 0.55f})->padding(HPadding{s(6.f), s(4.f)})
+        ->addSlot(HNew(BR)->background(EditorTheme::statsBackdrop)->padding(HPadding{s(6.f), s(4.f)})
                       ->content(statsText),
                   VR::ESizeRule::Auto, 0.f, HPadding{}, EHAlign::Left)
         ->addSlot(spacer(), VR::ESizeRule::Fill)
@@ -451,7 +465,7 @@ void EditorApp::buildWidgetTree() {
         // 뷰포트 하단에 따로 둡니다. 드래그 중이 아니면 빈 문자열이라 자리를 차지하지 않습니다.
         ->addSlot(HNew(STextBlock)
                       ->text(AttrStr([this] { return vpToolbar_.readoutText(); }))
-                      ->fontSize(s(13.f))->color({1.f, 0.85f, 0.35f, 1.f})
+                      ->fontSize(s(13.f))->color(EditorTheme::warn)
                       ->hAlign(EHAlign::Left)->vAlign(EVAlign::Bottom),
                   VR::ESizeRule::Auto, 0.f, HPadding{}, EHAlign::Left);
 
@@ -470,19 +484,20 @@ void EditorApp::buildWidgetTree() {
     // (rebuildBottomPanel 이 탭마다 bottomHost_ 의 내용을 고릅니다). 로그 행 수는 행 영역의
     // 실측 높이로 정하는데, 스크롤 상자 안에서는 그 높이가 내용을 따라 늘어나 행 수가 함께
     // 불어나기 때문입니다.
-    bottomScroll_  = HNew(SScrollBox)->wheelStep(s(48.f))->barWidth(s(4.f));
-    bottomHost_    = HNew(BR)->background({0,0,0,0});
+    bottomScroll_  = HNew(SScrollBox)->style(EditorUiKit::scrollBoxStyle(s(1.f)))->wheelStep(s(48.f));
+    bottomHost_    = HNew(BR)->background(EditorTheme::transparent);
     auto tabBar = HNew(STabBar)
+        ->style(EditorUiKit::tabBarStyle(ui_.s(1.f)))
         ->addTab("Content Browser")
         ->addTab("Output Log")
         ->addTab("GPU Stats")
-        ->tabWidth(s(145.f))->height(s(30.f))->fontSize(s(13.f))
+        ->tabWidth(s(145.f))->height(s(EditorTheme::tabH))->fontSize(s(13.f))
         ->activeTab([this]() -> int { return bottomTab_; })
         ->onTabChanged([this](int i){ bottomTab_ = i; rebuildBottomPanel(); });
     auto bottomPanel = HNew(BR)
         ->background(kBgPanel)
         ->content(HNew(VR)
-            ->addSlot(tabBar,         VR::ESizeRule::Fixed, s(30.f))
+            ->addSlot(tabBar,         VR::ESizeRule::Fixed, s(EditorTheme::tabH))
             ->addSlot(bottomHost_,    VR::ESizeRule::Fill));
 
     // ── Register panels (신규 위젯도 add 한 줄이면 도킹 대상 — 확장성 seam) ──────
@@ -499,7 +514,7 @@ void EditorApp::buildWidgetTree() {
 
     // ── Menu bar (최상단 크롬) ──────────────────────────────────────────────────
     auto menuBar = HNew(BR)
-        ->background(kBgHeader)->borderColor(kBorder)->borderThickness(1.f)
+        ->background(EditorTheme::bgWindow)->borderColor(kBorder)->borderThickness(1.f)
         ->content(menus_.buildBar());
     buildMenus();
     menus_.rebuildBar();
@@ -512,7 +527,7 @@ void EditorApp::buildWidgetTree() {
     auto dockOverlay   = dock_.resetOverlay();
     auto menuPopupHost = menus_.resetPopupHost();
     auto logPopupHost = logPanel_.resetPopupHost();
-    modalHost_     = HNew(BR)->background({0.f, 0.f, 0.f, 0.f});
+    modalHost_     = HNew(BR)->background(EditorTheme::transparent);
     auto statusBar = statusBar_.build();
 
     // 상태바는 반드시 Fixed 입니다. Auto 면 내용에 따라 높이가 흔들려, 그때마다
@@ -814,6 +829,10 @@ void EditorApp::tickShortcuts() {
 void EditorApp::handleInput(float mouseX, float mouseY,
                              bool leftDown, bool leftJustUp,
                              float scrollDelta, float winW, float winH) {
+    if (dumpMode_ && uiHoverActive_) {
+        mouseX = uiHoverPos_.x;
+        mouseY = uiHoverPos_.y;
+    }
     // 위젯 콜백(펼침·눈·삭제)은 리빌드를 직접 하지 않고 플래그만 세웁니다. 슬롯 순회
     // 도중 clearSlots 가 돌면 지금 실행 중인 버튼과 그 std::function 자체가 파괴되기
     // 때문입니다. 이 함수에는 조기 return 이 여러 개라 소진은 스코프 가드로 합니다.

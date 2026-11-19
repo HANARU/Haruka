@@ -18,6 +18,12 @@ public:
     std::shared_ptr<SBorder> borderThickness(float t) {
         borderThick_ = t; return self();
     }
+    std::shared_ptr<SBorder> cornerRadius(float r) {
+        cornerRadius_ = r; return self();
+    }
+    std::shared_ptr<SBorder> shadow(glm::vec2 offset, float blur, glm::vec4 color) {
+        shadowOffset_ = offset; shadowBlur_ = blur; shadowColor_ = color; return self();
+    }
     std::shared_ptr<SBorder> padding(HPadding p) {
         padding_ = p; return self();
     }
@@ -63,15 +69,32 @@ public:
 
     void paint(HPaintContext& ctx, const HGeometry& geo) override {
         if (!isVisible()) return;
-        if (bgColor_.a > 0.f)
-            ctx.drawRect(geo, bgColor_);
-        if (borderThick_ > 0.f && borderColor_.a > 0.f)
-            ctx.drawBorder(geo, borderColor_, borderThick_);
+        if (shadowBlur_ > 0.f && shadowColor_.a > 0.f)
+            ctx.drawShadow(geo, cornerRadius_, shadowOffset_, shadowBlur_, shadowColor_);
+        if (cornerRadius_ > 0.f) {
+            const float bw = (borderThick_ > 0.f && borderColor_.a > 0.f) ? borderThick_ : 0.f;
+            if (bgColor_.a > 0.f || bw > 0.f)
+                ctx.drawRoundedRect(geo, bgColor_, cornerRadius_, borderColor_, bw);
+        } else {
+            if (bgColor_.a > 0.f)
+                ctx.drawRect(geo, bgColor_);
+            if (borderThick_ > 0.f && borderColor_.a > 0.f)
+                ctx.drawBorder(geo, borderColor_, borderThick_);
+        }
         if (child_ && child_->isVisible()) {
             if (clip_) ctx.pushClip(geo);
             child_->paint(ctx, child_->cachedGeometry());
             if (clip_) ctx.popClip();
         }
+    }
+
+    std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) override {
+        if (!isVisible()) return nullptr;
+        if (clip_ && !cachedGeo_.contains(pos)) return nullptr;
+        if (child_)
+            if (auto w = child_->findTooltipWidget(pos)) return w;
+        if (!cachedGeo_.contains(pos)) return nullptr;
+        return tooltip.get().empty() ? nullptr : shared_from_this();
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
@@ -95,9 +118,13 @@ public:
 
 private:
     std::shared_ptr<HWidget> child_;
-    glm::vec4 bgColor_     { 0.f, 0.f, 0.f, 0.f };
-    glm::vec4 borderColor_ { 0.f, 0.f, 0.f, 0.f };
-    float     borderThick_ = 0.f;
+    glm::vec4 bgColor_      { 0.f, 0.f, 0.f, 0.f };
+    glm::vec4 borderColor_  { 0.f, 0.f, 0.f, 0.f };
+    float     borderThick_  = 0.f;
+    float     cornerRadius_ = 0.f;
+    glm::vec2 shadowOffset_ { 0.f, 0.f };
+    float     shadowBlur_   = 0.f;
+    glm::vec4 shadowColor_  { 0.f, 0.f, 0.f, 0.f };
     HPadding  padding_     {};
     EHAlign   hAlign_      = EHAlign::Fill;
     EVAlign   vAlign_      = EVAlign::Fill;

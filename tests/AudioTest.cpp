@@ -726,8 +726,8 @@ int main() {
         bool allKnown = true;
         for (const auto& kv : w.fields()) allKnown = allKnown && dst.readField(kv.first, kv.second);
         check(allKnown, "쓴 이름을 모두 다시 읽음");
-        check(dst.filePath == src.filePath && dst.volume == 0.35f && dst.loop && !dst.autoPlay,
-              "파일 · 볼륨 · 반복 · 자동 재생이 그대로");
+        check(dst.filePath == "/Game/audio/chime.wav" && dst.volume == 0.35f && dst.loop && !dst.autoPlay,
+              "파일 경로(/Game/ 변환) · 볼륨 · 반복 · 자동 재생이 그대로");
         check(dst.attenuation.toText() == src.attenuation.toText(), "3D 설정이 그대로");
         AudioComponent bad;
         check(bad.readField("attenuation", "nonsense") && bad.attenuation.toText() == AudioAttenuationSettings{}.toText(),

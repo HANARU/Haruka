@@ -10,15 +10,27 @@ public:
     using ClickFn    = std::function<void()>;
     using IsActiveFn = std::function<bool()>;
 
+    struct Style {
+        glm::vec4 normal          { 0.18f, 0.18f, 0.21f, 1.f };
+        glm::vec4 hovered         { 0.28f, 0.28f, 0.33f, 1.f };
+        glm::vec4 active          { 0.07f, 0.33f, 0.58f, 1.f };
+        glm::vec4 activeBar       { 0.25f, 0.65f, 1.00f, 1.f };
+        float     cornerRadius    = 0.f;
+        glm::vec4 disabledContent { 0.45f, 0.45f, 0.50f, 1.f };
+    };
+
     std::shared_ptr<SToggleButton> content(std::shared_ptr<HWidget> w)
         { child_ = std::move(w); return self(); }
     std::shared_ptr<SToggleButton> onClick(ClickFn fn)
         { onClick_ = std::move(fn); return self(); }
     std::shared_ptr<SToggleButton> isActive(IsActiveFn fn)
         { isActiveFn_ = std::move(fn); return self(); }
-    std::shared_ptr<SToggleButton> normalColor (glm::vec4 c) { normal_  = c; return self(); }
-    std::shared_ptr<SToggleButton> hoveredColor(glm::vec4 c) { hovered_ = c; return self(); }
-    std::shared_ptr<SToggleButton> activeColor (glm::vec4 c) { active_  = c; return self(); }
+    std::shared_ptr<SToggleButton> style       (const Style& s) { style_ = s; return self(); }
+    std::shared_ptr<SToggleButton> normalColor (glm::vec4 c) { style_.normal    = c; return self(); }
+    std::shared_ptr<SToggleButton> hoveredColor(glm::vec4 c) { style_.hovered   = c; return self(); }
+    std::shared_ptr<SToggleButton> activeColor (glm::vec4 c) { style_.active    = c; return self(); }
+    std::shared_ptr<SToggleButton> activeBarColor(glm::vec4 c) { style_.activeBar = c; return self(); }
+    std::shared_ptr<SToggleButton> cornerRadius  (float     r) { style_.cornerRadius = r; return self(); }
     std::shared_ptr<SToggleButton> padding     (HPadding  p) { pad_     = p; return self(); }
 
     glm::vec2 computeDesiredSize() override {
@@ -35,18 +47,36 @@ public:
 
     void paint(HPaintContext& ctx, const HGeometry& geo) override {
         if (!isVisible()) return;
-        bool act = isActiveFn_ ? isActiveFn_() : false;
-        glm::vec4 bg = act ? active_ : (isHovered_ ? hovered_ : normal_);
-        if (bg.a > 0.f) ctx.drawRect(geo, bg);
+        const bool en  = enabled.get();
+        const bool act = en && isActiveFn_ ? isActiveFn_() : false;
+        glm::vec4 bg = !en      ? style_.normal
+                     : act      ? style_.active
+                     : isHovered_ ? style_.hovered
+                                  : style_.normal;
+        if (bg.a > 0.f) {
+            if (style_.cornerRadius > 0.f) ctx.drawRoundedRect(geo, bg, style_.cornerRadius);
+            else                           ctx.drawRect(geo, bg);
+        }
         if (act) {
             HGeometry bar = geo.makeChild({0.f, geo.size.y - 2.f}, {geo.size.x, 2.f});
-            ctx.drawRect(bar, glm::vec4{0.25f, 0.65f, 1.00f, 1.f});
+            ctx.drawRect(bar, style_.activeBar);
         }
-        if (child_ && child_->isVisible())
+        if (child_ && child_->isVisible()) {
+            if (!en) ctx.pushDisabledColor(style_.disabledContent);
             child_->paint(ctx, child_->cachedGeometry());
+            if (!en) ctx.popDisabledColor();
+        }
+    }
+
+    std::shared_ptr<HWidget> findTooltipWidget(glm::vec2 pos) override {
+        if (!isVisible() || !cachedGeo_.contains(pos)) return nullptr;
+        if (child_)
+            if (auto w = child_->findTooltipWidget(pos)) return w;
+        return tooltip.get().empty() ? nullptr : shared_from_this();
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
+        if (!enabled.get()) return HReply::Unhandled();
         if (e.button == 0) {
             // 프레스와 릴리즈가 모두 내 위에서 일어났을 때만 발화합니다. 이 위젯은 캡처를
             // 요청하지 않으므로(캡처는 SNumberField 만 씁니다) 눌린 곳을 스스로 기억해야,
@@ -62,8 +92,8 @@ public:
         return HReply::Unhandled();
     }
     HReply onMouseMove(const HPointerEvent& e) override {
-        isHovered_ = cachedGeo_.contains(e.position);
-        if (!e.down) armed_ = false;   // 눌린 채 리빌드되어 남은 상태를 정리
+        isHovered_ = enabled.get() && cachedGeo_.contains(e.position);
+        if (!e.down || !enabled.get()) armed_ = false;   // 눌린 채 리빌드되어 남은 상태를 정리
         return HReply::Unhandled();
     }
 
@@ -71,9 +101,7 @@ private:
     std::shared_ptr<HWidget> child_;
     ClickFn    onClick_;
     IsActiveFn isActiveFn_;
-    glm::vec4  normal_  { 0.18f, 0.18f, 0.21f, 1.f };
-    glm::vec4  hovered_ { 0.28f, 0.28f, 0.33f, 1.f };
-    glm::vec4  active_  { 0.07f, 0.33f, 0.58f, 1.f };
+    Style      style_;
     HPadding   pad_     { 9.f, 4.f };
     bool       isHovered_ = false;
     bool       armed_     = false;   // 이 위젯 위에서 눌렸는가(프레스-릴리즈 짝 판정)

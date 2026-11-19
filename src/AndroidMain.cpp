@@ -107,11 +107,15 @@ extern "C" void android_main(android_app* app) {
     JNIEnv* env = nullptr;
     app->activity->vm->AttachCurrentThread(&env, nullptr);
 
+#ifndef HARUKA_GAME_TARGET_NAME
+#define HARUKA_GAME_TARGET_NAME "HarukaGame"
+#endif
+
     // 콘텐츠 · 쓰기 폴더는 앱의 외부 파일 폴더(/sdcard/Android/data/<패키지>/files)입니다. 묶음 파일은 adb push 로 넣고,
     // 그 폴더에 넣을 수 없는 기기를 위해 OBB 폴더도 찾습니다.
     const char* ext = app->activity->externalDataPath ? app->activity->externalDataPath : app->activity->internalDataPath;
     const std::filesystem::path files = ext ? std::filesystem::path(ext) : std::filesystem::path("/data/local/tmp");
-    happ::setPlatformDirs(files, files, "HarukaGame");
+    happ::setPlatformDirs(files, files, HARUKA_GAME_TARGET_NAME);
     if (app->activity->obbPath) happ::addPackDir(app->activity->obbPath);
 
     std::unique_ptr<IEngineFrontend> frontend = createEngineFrontend();

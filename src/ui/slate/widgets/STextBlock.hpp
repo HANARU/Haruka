@@ -24,6 +24,10 @@ public:
     std::shared_ptr<STextBlock> color(Attr<glm::vec4> c) {
         color_ = std::move(c); return self();
     }
+    // 굵은 글꼴(D4). 굵은 글꼴이 없는 아틀라스에서는 보통으로 그립니다.
+    std::shared_ptr<STextBlock> bold(bool b = true) {
+        face_ = b ? 1 : 0; return self();
+    }
     std::shared_ptr<STextBlock> hAlign(EHAlign a) {
         hAlign_ = a; return self();
     }
@@ -60,7 +64,7 @@ public:
         textGeo.position = { tx, ty };
         textGeo.size     = { tw, th };
         textGeo.scale    = geo.scale;
-        ctx.drawText(textGeo, t, fontSize_, color_.get());
+        ctx.drawText(textGeo, t, fontSize_, color_.get(), face_);
     }
 
 private:
@@ -69,7 +73,7 @@ private:
     // 도는 테스트) 예전 근사를 씁니다. 같은 문자열이면 다시 재지 않습니다.
     glm::vec2 measure(const std::string& t) {
         const HFontAtlas* font = HFontAtlas::metrics();
-        if (font == measuredFont_ && fontSize_ == measuredSize_ && t == measuredText_)
+        if (font == measuredFont_ && fontSize_ == measuredSize_ && face_ == measuredFace_ && t == measuredText_)
             return measured_;
         size_t lines = 1, longest = 0, cur = 0;
         for (char c : t) {
@@ -77,10 +81,11 @@ private:
             else            { ++cur; }
         }
         longest = std::max(longest, cur);
-        const float w = font ? font->measureText(t, fontSize_) : longest * fontSize_ * 0.6f;
+        const float w = font ? font->measureText(t, fontSize_, face_) : longest * fontSize_ * 0.6f;
         measured_     = { w, lines * fontSize_ * 1.2f };
         measuredText_ = t;
         measuredSize_ = fontSize_;
+        measuredFace_ = face_;
         measuredFont_ = font;
         return measured_;
     }
@@ -93,6 +98,8 @@ private:
     EVAlign            vAlign_   = EVAlign::Center;
     std::string        measuredText_;
     float              measuredSize_ = -1.f;
+    int                face_         = 0;
+    int                measuredFace_ = -1;
     const HFontAtlas*  measuredFont_ = nullptr;
     glm::vec2          measured_ { 0.f, 0.f };
 

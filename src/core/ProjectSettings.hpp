@@ -1,4 +1,5 @@
 #pragma once
+#include "../vfs/LogicalPath.hpp"
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -15,10 +16,10 @@
 //
 // 형식은 engine.ini 와 같은 "이름 = 값" 줄입니다. '#' 로 시작하는 줄은 주석입니다.
 struct ProjectSettings {
-    static constexpr const char* kPath = "assets/project.ini";
+    static constexpr const char* kPath = "/Config/project.ini";
 
     // 실행하면 처음 여는 씬(논리 경로). 에디터는 마지막으로 연 씬이 있으면 그것을 먼저 엽니다.
-    std::string startScene = "assets/scenes/LightingProbe.hscene";
+    std::string startScene = "/Game/scenes/LightingProbe.hscene";
     // input. 으로 시작하는 줄(입력 바인딩)은 입력 시스템이 따로 해석합니다. 순서를 지켜 넘깁니다.
     std::vector<std::pair<std::string, std::string>> input;
     // XR 리그 높이(2026-10-16). 리그가 없는 씬에서 엔진이 붙이는 보이지 않는 리그가 씁니다. 씬에 둔 리그는
@@ -105,12 +106,15 @@ inline std::string trim(const std::string& s) {
     return s.substr(a, b - a + 1);
 }
 
-// 논리 경로 규칙: assets/ 아래의 .hscene 이어야 합니다. 씬 파일은 그 밖에 두지 않습니다.
+// 논리 경로 규칙: assets/ 또는 /Game/ 아래의 .hscene 이어야 합니다. 씬 파일은 그 밖에 두지 않습니다.
 inline bool isSceneLogicalPath(const std::string& p) {
-    const std::string ext = ".hscene";
-    return p.rfind("assets/", 0) == 0 && p.size() > ext.size() + 7 &&
-           p.compare(p.size() - ext.size(), ext.size(), ext) == 0 &&
-           p.find("..") == std::string::npos && p.find('\\') == std::string::npos;
+    if (p.find("..") != std::string::npos || p.find('\\') != std::string::npos) return false;
+    const std::string canon = hvfs::toCanonical(p);
+    if (!hvfs::isGamePath(canon)) return false;
+    const std::string_view rel = hvfs::gameRelative(canon);
+    constexpr std::string_view ext = ".hscene";
+    return rel.size() > ext.size() &&
+           rel.compare(rel.size() - ext.size(), ext.size(), ext) == 0;
 }
 
 // platform 은 접미사 줄을 적용할 플랫폼(settings_platform::kAndroid 등)입니다. 비우면 접미사 줄은 모두 건너뜁니다.
@@ -138,7 +142,7 @@ inline ProjectSettings parse(const std::string& text, std::vector<std::string>& 
     auto apply = [&](const std::string& key, const std::string& value) {
         if (key == "startScene") {
             if (isSceneLogicalPath(value)) s.startScene = value;
-            else messages.push_back("'startScene' must be a .hscene path under assets/ (got '" + value + "'); using " + s.startScene);
+            else messages.push_back("'startScene' must be a .hscene path under /Game/ (got '" + value + "'); using " + s.startScene);
         } else if (key == "xr.height") {
             if      (value == "tracked") s.xrTrackedHeight = true;
             else if (value == "fixed")   s.xrTrackedHeight = false;

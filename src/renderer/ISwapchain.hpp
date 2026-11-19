@@ -40,6 +40,7 @@ public:
     virtual const std::vector<VkImageView>& imageViews() const = 0;
     virtual VkFormat   format()     const = 0;
     virtual VkExtent2D extent()     const = 0;
+    virtual bool       supportsTransferSrc() const { return false; }
 
     uint32_t imageCount() const { return (uint32_t)images().size(); }
 };

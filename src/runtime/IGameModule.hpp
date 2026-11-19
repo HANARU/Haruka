@@ -26,6 +26,7 @@ class IGameModule {
 public:
     virtual ~IGameModule() = default;
 
+    virtual void onRegister ()                             {}
     virtual void onStart    (EngineContext& ctx)          = 0;
     virtual void onBeginPlay(EngineContext& ctx)           {}
     virtual void onTick     (float dt, EngineContext& ctx) {}

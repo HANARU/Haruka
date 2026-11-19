@@ -23,6 +23,9 @@ public:
     struct Policy {
         // 에셋 루트로 쓸 프로젝트 폴더(그 아래 assets/). 비어 있으면 실행 파일 옆의 assets/ 를 씁니다.
         std::string projectDir;
+        // /Engine/ 으로 마운트할 엔진 콘텐츠 폴더(D3, 2026-11-19, <엔진>/Engine/Content). 비어 있거나 없으면 실행 폴더의
+        // Engine/Content 를 찾고, 그것도 없으면 마운트하지 않습니다(에디터 아이콘은 글자로 돌아감).
+        std::string engineContentDir;
         // 명령줄에 --xr · --no-xr 이 없을 때 프로젝트 설정 xr.startInVr 로 VR 시작을 정함(게임). 거짓이면 --xr 로만 켬(에디터).
         bool startXrFromProject = false;
         // 헤드셋이 입력 초점을 잃으면(벗음 · 시스템 메뉴) 게임을 일시정지(Meta VRC.Quest.Functional.2).

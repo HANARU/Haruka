@@ -35,8 +35,10 @@ struct Stat {
 };
 
 void reset();   // 모든 마운트 해제(엔진 부팅 · 시험)
-// root 아래 낱개 파일을 마운트합니다. prefix 가 비어 있지 않으면 그 접두어("assets/")로 시작하는 경로만 찾습니다.
+// root 아래 낱개 파일을 마운트합니다. prefix 가 비어 있지 않으면 그 접두어("shaders/")로 시작하는 경로만 찾습니다.
 void mountDirectory(const std::filesystem::path& root, const std::string& prefix, int priority);
+// 디스크 폴더 root 를 가상 접두어(예: "/Game/") 아래로 마운트합니다. 찾을 때 접두어를 떼고 root 아래에서 찾습니다.
+void mountDirectoryAs(const std::filesystem::path& root, const std::string& virtualPrefix, int priority);
 bool mountPack(const std::filesystem::path& file, int priority, std::string& err);
 bool mountPack(std::unique_ptr<hpak::PakReader> reader, const std::string& name, int priority);   // 시험 · 메모리 묶음
 

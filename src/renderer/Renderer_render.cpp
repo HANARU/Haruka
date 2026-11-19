@@ -1080,6 +1080,31 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
             throw std::runtime_error("Failed to submit draw command!");
     }
 
+    // ── Capture before present (swapchain image is still acquired) ────────────
+    if (desktop && captureNextSwapchain_) {
+        captureNextSwapchain_ = false;
+        lastSwapCaptured_     = false;
+        lastSwapUnsupported_  = false;
+        lastSwapExtent_       = {};
+        lastSwapRgba_.clear();
+        if (!swapchain_->supportsTransferSrc()) {
+            lastSwapUnsupported_ = true;
+            if (!swapCaptureUnsupportedLogged_) {
+                swapCaptureUnsupportedLogged_ = true;
+                HLOG(LogRenderer, Warning)
+                    << "Swapchain capture skipped: surface does not support VK_IMAGE_USAGE_TRANSFER_SRC_BIT";
+            }
+        } else {
+            lastSwapExtent_ = swapchain_->extent();
+            lastSwapCaptured_ = readbackImageToRgba(
+                swapchain_->images()[imgIdx], 0, lastSwapExtent_, swapchain_->format(),
+                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                lastSwapRgba_);
+        }
+    }
+
     // ── Present ───────────────────────────────────────────────────────────────
     if (desktop) {
         ScopedCpuTimer t(ft.present);

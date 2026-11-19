@@ -32,7 +32,9 @@ void PrefabManager::save(const Actor* root, const std::string& path) {
     // 에디터 빌드는 프로젝트 폴더에 씁니다(hproj). 실행 폴더에 쓰면 다음 빌드의 에셋 복사가 덮어씁니다.
     // 임시 파일에 다 쓴 뒤 바꿔, 쓰다 실패해도 원래 프리팹이 남습니다.
     std::string err;
-    if (!hfile::writeAtomic(hproj::resolve(path), "# Haruka Prefab v3\n" + SceneSerializer::writeActorSet(set, parents), &err)) {
+    if (!hfile::writeAtomic(hproj::resolve(path),
+                           std::string(hprefab::kPrefabHeaderV4) + "\n" + SceneSerializer::writeActorSet(set, parents),
+                           &err)) {
         HLOG(LogAsset, Error) << "Prefab cannot write: " << path << " (" << err << ")";
         return;
     }

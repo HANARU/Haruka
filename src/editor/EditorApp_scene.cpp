@@ -12,6 +12,7 @@
 #include "../core/AppPaths.hpp"
 #include "../core/ProjectPaths.hpp"
 #include "../core/ProjectSettings.hpp"
+#include "../vfs/LogicalPath.hpp"
 #include "../core/TextUtf.hpp"
 #include "../audio/AudioSystem.hpp"
 #include "../platform/IWindow.hpp"
@@ -25,7 +26,7 @@ namespace fs = std::filesystem;
 
 static constinit HLogCategory LogEditorScene{ "Editor", ELogVerbosity::Log };
 
-static constexpr const char* kScenesDir = "assets/scenes";
+static constexpr const char* kScenesDir = "/Game/scenes";
 static constexpr const char* kStatePath = "Config/editor_state.txt";
 
 // ── 에디터 상태(기계별) ──────────────────────────────────────────────────────────
@@ -238,7 +239,7 @@ void EditorApp::saveSceneAs(std::function<void()> then) {
     }
     ModalSpec m;
     m.title            = "Save Scene As";
-    m.message          = "Name under assets/scenes (letters, digits, space, - _ and / for folders):";
+    m.message          = "Name under /Game/scenes (letters, digits, space, - _ and / for folders):";
     m.hasInput         = true;
     m.inputPlaceholder = "SceneName";
     m.buttons.push_back({ "Save", [this, then] {
@@ -259,7 +260,7 @@ void EditorApp::saveSceneAs(std::function<void()> then) {
         }
         std::error_code ec;
         auto commit = [this, logical, then] { if (writeSceneTo(logical) && then) then(); };
-        if (logical != doc_.path() && fs::exists(hproj::resolve(logical), ec)) {
+        if (hvfs::toCanonical(logical) != hvfs::toCanonical(doc_.path()) && fs::exists(hproj::resolve(logical), ec)) {
             ModalSpec c;
             c.title   = "Replace Scene";
             c.message = logical + " already exists.\nReplace it?";
@@ -392,7 +393,7 @@ void EditorApp::rebuildModal() {
     add(spacer(), s(8.f));
     std::stringstream lines(m.message);
     for (std::string ln; std::getline(lines, ln);) {
-        add(HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f })->padding(HPadding{ s(16.f), 0.f })
+        add(HNew(SBorder)->background(EditorTheme::transparent)->padding(HPadding{ s(16.f), 0.f })
                 ->content(HNew(STextBlock)->text(ln)->fontSize(s(13.f))->color(kTextBody)
                     ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
             lineH);
@@ -400,6 +401,7 @@ void EditorApp::rebuildModal() {
     if (m.hasInput) {
         add(spacer(), s(8.f));
         dialogBox_ = HNew(SSearchBox)
+            ->style(EditorUiKit::searchBoxStyle(s(1.f)))
             ->text(AttrStr([this]() -> std::string { return dialogText_; }))
             ->placeholder(m.inputPlaceholder)
             ->focused([this] { return dialogFocused_; })
@@ -407,7 +409,7 @@ void EditorApp::rebuildModal() {
             ->onClick([this] { setTextFocus(EFocusTarget::Dialog); })
             ->icon(false)
             ->fontSize(s(13.f));
-        add(HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f })->padding(HPadding{ s(16.f), 0.f })->content(dialogBox_),
+        add(HNew(SBorder)->background(EditorTheme::transparent)->padding(HPadding{ s(16.f), 0.f })->content(dialogBox_),
             s(28.f));
     } else {
         dialogBox_.reset();
@@ -421,9 +423,9 @@ void EditorApp::rebuildModal() {
                                     ? item.substr(std::string(kScenesDir).size() + 1) : item;
             items->addSlot(
                 HNew(SButton)
-                    ->normalColor({ 0.f, 0.f, 0.f, 0.f })
-                    ->hoveredColor({ 0.20f, 0.42f, 0.68f, 1.f })
-                    ->pressedColor({ 0.14f, 0.34f, 0.56f, 1.f })
+                    ->normalColor(EditorTheme::transparent)
+                    ->hoveredColor(EditorTheme::selectRow)
+                    ->pressedColor(EditorTheme::accentPressed)
                     ->padding(HPadding{ s(10.f), s(3.f) })
                     ->hAlign(EHAlign::Fill)
                     ->onClick([this, item] {
@@ -435,9 +437,10 @@ void EditorApp::rebuildModal() {
                 VR::ESizeRule::Fixed, rowH);
         }
         const float listH = std::min((float)m.list.size() * rowH, s(300.f));
-        add(HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f })->padding(HPadding{ s(12.f), 0.f })->content(
-                HNew(SBorder)->background({ 0.08f, 0.08f, 0.09f, 1.f })->borderColor(kBorder)->borderThickness(1.f)
-                    ->content(HNew(SScrollBox)->content(items)->wheelStep(rowH * 3.f))),
+        add(HNew(SBorder)->background(EditorTheme::transparent)->padding(HPadding{ s(12.f), 0.f })->content(
+                HNew(SBorder)->background(EditorTheme::bgInput)->borderColor(kBorder)->borderThickness(1.f)
+                    ->content(HNew(SScrollBox)->style(EditorUiKit::scrollBoxStyle(s(1.f)))
+                        ->content(items)->wheelStep(rowH * 3.f))),
             listH);
     }
     add(spacer(), s(12.f));
@@ -445,8 +448,8 @@ void EditorApp::rebuildModal() {
     row->addSlot(spacer(), HR::ESizeRule::Fill, 1.f);
     for (int i = 0; i < (int)m.buttons.size(); ++i) {
         const ModalButton& b = m.buttons[i];
-        const glm::vec4 normal  = b.isDefault ? glm::vec4{ 0.07f, 0.33f, 0.58f, 1.f } : glm::vec4{ 0.18f, 0.18f, 0.21f, 1.f };
-        const glm::vec4 hovered = b.isDefault ? glm::vec4{ 0.10f, 0.42f, 0.72f, 1.f } : glm::vec4{ 0.26f, 0.26f, 0.31f, 1.f };
+        const glm::vec4 normal  = b.isDefault ? EditorTheme::accent      : EditorTheme::ctlNormal;
+        const glm::vec4 hovered = b.isDefault ? EditorTheme::accentHover : EditorTheme::ctlHover;
         row->addSlot(textButton(b.label, 13.f, kTextBody, { 10.f, 4.f }, normal, hovered, [this, i] {
                          if (!modal_ || i >= (int)modal_->buttons.size()) return;
                          triggerModal(modal_->buttons[i].action);
@@ -458,13 +461,18 @@ void EditorApp::rebuildModal() {
     add(spacer(), s(12.f));
 
     auto panel = HNew(SBox)->widthOverride(panelW)->heightOverride(height)->content(
-        HNew(SBorder)->background({ 0.10f, 0.10f, 0.115f, 1.f })
-            ->borderColor({ 0.34f, 0.34f, 0.40f, 1.f })->borderThickness(1.f)
+        HNew(SBorder)->background(EditorTheme::bgPopup)
+            ->borderColor(EditorTheme::borderPopup)->borderThickness(EditorTheme::borderThin)
+            ->cornerRadius(s(EditorTheme::radiusPopup))
+            ->shadow({ 0.f, s(EditorTheme::shadowOffset.y) }, s(EditorTheme::shadowBlur), EditorTheme::shadowColor)
             ->content(col));
     // 화면 전체를 어둡게 덮는 캐처가 바깥 누름과 휠을 삼킵니다. 대화상자 밖을 눌러도 닫히지 않습니다
     // (저장 확인을 실수로 넘기지 않게).
-    auto catcher = HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.45f })->onWheel([](float) { return true; })
-        ->content(HNew(SButton)->normalColor({ 0, 0, 0, 0 })->hoveredColor({ 0, 0, 0, 0 })->pressedColor({ 0, 0, 0, 0 })
+    auto catcher = HNew(SBorder)->background(EditorTheme::modalScrim)->onWheel([](float) { return true; })
+        ->content(HNew(SButton)
+                      ->normalColor(EditorTheme::transparent)
+                      ->hoveredColor(EditorTheme::transparent)
+                      ->pressedColor(EditorTheme::transparent)
                       ->onClick([] {})->content(spacer()));
     auto inner = HNew(SOverlay);
     inner->addSlot(catcher);
