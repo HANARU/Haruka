@@ -45,6 +45,26 @@ struct EngineOptions {
     std::optional<bool> ssao;
     bool                autoLod = true;  // --no-auto-lod : glTF 자동 LOD 를 컴포넌트에 배정하지 않음(O13 검증용)
 
+    // ── 에디터 UI 회귀 덤프 (S6-0, 2026-11-19, 에디터 전용) ──────────────────────────────────────
+    bool        hiddenWindow = false;    // --hidden-window : OS 창을 숨긴 채 생성(보이는 창 없음)
+    uint32_t    windowW      = 1600;     // --window-size=WxH : 창 크기(기본 1600x900)
+    uint32_t    windowH      = 900;
+    std::string writeRoot;               // --write-root=<dir> : Config · Logs · Cache 쓰기 루트 격리
+    std::string uiDumpPath;              // --ui-dump=<path> : 마지막 프레임 에디터 HSlate 요소 덤프(에디터 전용)
+    std::string uiSelect;                // --ui-select=<name[,name...]> : 첫 프레임 뒤 액터 선택(에디터 전용)
+    std::string uiOpenMenu;              // --ui-open-menu=<name> : 첫 프레임 뒤 상단 메뉴 열기(에디터 전용)
+    std::string uiBottomTab;             // --ui-bottom-tab=<name> : 첫 프레임 뒤 하단 탭 전환(에디터 전용)
+    bool        uiLogCategories = false; // --ui-log-categories : 첫 프레임 뒤 로그 Categories 팝업 열기(에디터 전용)
+    std::string uiOutlinerSearch;        // --ui-outliner-search=<text> : 아웃라이너 검색어(에디터 전용)
+    std::string uiRename;                // --ui-rename=<actor> : 액터 이름 바꾸기 시작(에디터 전용)
+    std::string uiOutlinerCollapse;      // --ui-outliner-collapse=<actor> : 아웃라이너 접힘(에디터 전용)
+    bool        uiPlay          = false; // --ui-play : 첫 프레임 뒤 Play 시작(에디터 전용)
+    std::string uiLayout;                // --ui-layout=<file> : 도크 배치 파일 읽기 전용 오버라이드(에디터 전용)
+    std::string viewportDumpPath;        // --viewport-dump=<file> : 마지막 프레임 에디터 선·삼각형 덤프(에디터 전용)
+    std::string uiGizmoMode;             // --ui-gizmo-mode=select|move|rotate|scale : 기즈모 모드(에디터 전용)
+    bool        uiLocalSpace    = false; // --ui-local-space : 기즈모 로컬 좌표계(에디터 전용)
+    std::string uiPick;                  // --ui-pick=<x>,<y> : 첫 프레임 뒤 창 좌표 픽(에디터 전용)
+
     // ── 플랫폼 진입점이 정하는 것 (명령줄 아님, 2026-10-31 패키징 3단계) ────────────────────────────
     PlatformContext platform;            // Android: android_app · JavaVM · 액티비티
     // XR 이 없으면 시작하지 않음(Quest 는 데스크톱으로 계속할 화면이 없음). 런타임 · 헤드셋을 못 쓰거나 세션을 못 만들면
@@ -66,7 +86,7 @@ inline constexpr int kExitBlank      = 4;   // 저장한 화면이 비어 있음
 
 // 자동 확인 실행인지(프레임 수 · 시간 제한 · 캡처 중 하나). 이때만 종료 코드가 결과를 알립니다.
 inline bool isAutomated(const EngineOptions& o) {
-    return o.frames > 0 || o.timeoutSec > 0.f || !o.capturePath.empty();
+    return o.frames > 0 || o.timeoutSec > 0.f || !o.capturePath.empty() || !o.uiDumpPath.empty();
 }
 
 // wanted 가 0 이면 프레임 수는 보지 않습니다.

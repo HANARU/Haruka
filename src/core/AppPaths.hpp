@@ -22,6 +22,8 @@ const std::string& exeStem();
 // 쓰기 루트를 정합니다. main() 이 로그를 열기 전에 한 번 부릅니다. 사용자 폴더를 쓰기로 했는데 그 폴더를 얻거나
 // 만들지 못하면 실행 폴더로 내려가고 false 를 돌려줍니다(호출자가 로그로 알림).
 bool initWriteRoot(bool userDataFolder);
+// 실행 옵션(--write-root)으로 쓰기 루트를 강제로 지정합니다(덤프/시험 격리용, S6-0).
+bool setWriteRoot(const std::filesystem::path& dir);
 // 쓰기 루트. initWriteRoot 전에는 실행 폴더입니다.
 const std::filesystem::path& writeRoot();
 // 쓰기 루트가 실행 폴더와 같은지(에디터). 같으면 패키지 기본 설정과 사용자 설정이 한 파일입니다.

@@ -83,6 +83,18 @@ bool initWriteRoot(bool userDataFolder) {
 #endif
 }
 
+bool setWriteRoot(const std::filesystem::path& dir) {
+    State& s = state();
+    if (dir.empty()) return false;
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec || !fs::is_directory(dir, ec)) return false;
+    s.writeRoot = fs::weakly_canonical(dir, ec);
+    if (ec) s.writeRoot = dir;
+    s.platformDirs = true;
+    return true;
+}
+
 const fs::path& writeRoot() {
     const State& s = state();
     return s.writeRoot.empty() ? s.exeDir : s.writeRoot;

@@ -316,3 +316,19 @@ struct ActorPresenceCmd : ICommand {
         snaps.clear();
     }
 };
+
+#include "EditTools.hpp"
+
+namespace hcmd {
+inline std::unique_ptr<ReparentCmd> makeReparent(World& world, Actor* child, Actor* newParent, int index,
+                                                 const Actor* editorCam) {
+    if (!child || child == editorCam || newParent == editorCam) return nullptr;
+    for (Actor* p = newParent; p; p = p->getParent())
+        if (p == child) return nullptr;   // 자기 자신이나 자손 아래로는 옮기지 않습니다(사이클)
+    Actor* oldParent = child->getParent();
+    if (oldParent == newParent && index < 0) return nullptr;
+    return std::make_unique<ReparentCmd>(world, child->id,
+                                         oldParent ? oldParent->id : 0, child->siblingIndex(), child->transform(),
+                                         newParent ? newParent->id : 0, index, hxform::localUnder(*child, newParent));
+}
+} // namespace hcmd

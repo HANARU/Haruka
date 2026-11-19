@@ -106,14 +106,14 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 2 | S4 Component 기반 정리(에디터 함수 → 등록식 visualizer, collisionMesh · blocksFloor → 질의) | 끝남(2026-11-18, 9절) |
 | 2 | S7 나머지: 컴포넌트를 소유 시스템 옆으로 | 끝남(2026-11-18, 10절) |
 | 2 | S5 렌더 경계(추출을 렌더러 밖으로, GPU 핸들 → 렌더러 표, AssetManager → 업로드 인터페이스) | 끝남(2026-11-18, 12절). AssetManager 업로드 인터페이스(옛 S5e)는 하지 않기로 함(assets → renderer 는 규칙 안의 방향) |
-| 3 | S6 EditorApp 분해(아웃라이너 · 디테일 · 로그 · 도킹 · 메뉴와 툴바 · 뷰포트 컨트롤러) | |
+| 3 | S6 EditorApp 분해(아웃라이너 · 디테일 · 로그 · 도킹 · 메뉴와 툴바 · 뷰포트 컨트롤러) | 코드 끝남(2026-11-19, 13절). 창 에디터 확인 남음 |
 
 완료 기준:
 - 1단계: 1단계 몫의 허용 목록 항목 0(core · scene · runtime 순환 0), `Engine::run` 100줄 이하(단계 호출만), 정적 시스템 포인터 0. → **채움(2026-11-18, S3 뒤)**
 - 2단계: renderer 가 components 헤더를 include 하는 곳 0, Component 기반 클래스의 에디터 그리기 · 시스템별 질의 함수 0(S4 에서 채움.
   속성 목록 · 편집 확정 알림은 리플렉션으로 남김, 9절), 허용 목록의 컴포넌트 관련 항목 0.
   매번 기준 PNG 전부(왼눈 · 오른눈 · Quest 값 · LightingProbe · UIPanelProbe) + 검증 레이어 0. → **채움(2026-11-18, S5d 뒤, 허용 목록 0)**
-- 3단계: EditorApp.cpp 1,000줄 이하, 함수 150줄 이하, 창 에디터 확인 통과.
+- 3단계: EditorApp.cpp 1,000줄 이하, 함수 150줄 이하, 창 에디터 확인 통과. → **EditorApp.cpp 974줄 · 150줄 넘는 함수 0 채움(2026-11-19, S6g 뒤). 창 확인은 `Handoff` 점검표로 남음**
 
 ## 7. 프레임 단계 (S2, 2026-11-18)
 
@@ -272,3 +272,30 @@ Android 빌드 통과. 기준 PNG 값은 2026-11-18 사용자가 PC 점검 중 �
 확인(S5c): 검사 1,972(LOD 고르기 순수 함수 +4, 메시 추출 +3), 경고 0, 기준 PNG 7장 그대로 · 검증 0, LodProbe(`--no-auto-lod` `54d2431a` · 켬 `e941bba3`, 고른 단계 1 · 1 · 2 · 3)도 그대로라 LOD 상태를 옮겨도 고르는 단계가 같습니다. CPU 프레임 중앙값(perf.sh, 다섯 장면) 차이 −0.05 ~ +0.01 ms, Android 빌드 통과.
 
 확인(S5d): 검사 1,975(반사 캡처 · UI 패널 추출 +3), 경고 0, 아키텍처 시험 허용 0, 기준 PNG 7장 · LodProbe 두 장 그대로 · 검증 0, 반사 캡처 로그 수 그대로(다시 찍기 늘지 않음), CPU 프레임 중앙값 차이 −0.04 ~ +0.03 ms, Android 빌드 통과. 이것으로 2단계 완료 기준을 채웠습니다.
+
+## 13. 에디터 분해 (S6, 2026-11-19)
+
+방향: `EditorApp` 은 공유 상태(월드 · 선택 · 명령 스택 · 기즈모 모드 · 스냅 · 카메라 속도 등)를 갖고 패널을 조립하는 자리만 맡습니다.
+패널 클래스는 자기 위젯과 상태를 갖고, `EditorApp*` 를 받지 않습니다. 공유 상태는 `Deps` 구조(포인터 · 콜백)로 받습니다.
+옮기는 동안 긴 함수는 이름 있는 단계 함수로 나눴습니다.
+
+회귀 확인은 창 없는 UI 덤프로 합니다(S6-0). `--hidden-window` · `--write-root` 로 사용자 Config 와 격리하고, `--ui-dump` 가 HSlate 그리기 목록을
+글자로 씁니다(FPS · 시간 · 로그 글자 등 흔들리는 값은 `#`). 덤프 모드 전용 옵션으로 선택 · 메뉴 · 하단 탭 · 검색어 · 이름 바꾸기 · 접힘 ·
+Play · 도크 배치(`--ui-layout`) · 기즈모 모드(`--ui-gizmo-mode` · `--ui-local-space`) · 픽(`--ui-pick`) 상태를 만들고,
+`--viewport-dump` 로 렌더러에 넘기는 기즈모 · 아이콘 · 범위 선 목록도 씁니다. 단계마다 **옮기기 전에** 기준을 떠 두고, 옮긴 뒤 모든 장면이
+글자 하나까지 같아야 넘어갔습니다(마지막 38장면, `build/chk/uidump.sh`). 덤프가 못 보는 조작(키 입력 · 끌기 · 클릭 분기)은 옮기기 전후 코드를
+대조했고, 창 확인으로 마무리합니다.
+
+| 단계 | 새 클래스 · 파일 | EditorApp.cpp |
+|---|---|---|
+| S6-0 | 덤프 장치(`--hidden-window` · `--ui-dump` · 상태 옵션), 숨은 창은 키 · 마우스를 읽지 않음 | 4,497 → 4,594 |
+| S6a | `EditorUiKit`(공용 위젯 모양), `OutputLogPanel` | 3,975 |
+| S6b | `DetailsPanel` | 3,546 |
+| S6c | `ContentBrowserPanel`(파일 목록 소유), `GpuStatsPanel` | 3,309 |
+| S6d | `TextInputController`(포커스 중재 · 글자 입력), `OutlinerPanel`(재부모 명령은 `hcmd::makeReparent`) | 2,681 |
+| S6e | `EditorMenus`(정의는 EditorApp 이 목록으로 넘김), `EditorToolbar` · `StatusBarPanel`, `ViewportToolbar` | 2,137 |
+| S6f | `dock/DockTree`(위젯 없는 트리 연산, `HarukaDockTest` 28건), `EditorDock`(배치 · 입력 · 닫기 · 다시 열기) | 1,516 |
+| S6g | `EditorViewportController`(에디터 카메라 · 기즈모 단축키와 끌기 · 픽 · 아이콘 · 좌표), `EditorApp_dump.cpp`, `init` · `tick` 나누기 | **974** |
+
+확인(S6g 뒤): 시험 28 · 검사 2,003, 경고 0(Release · Debug), 아키텍처 시험 허용 0, UI · 뷰포트 덤프 38장면 같음 · 검증 0, 기준 PNG 7장 그대로,
+사용자 Config 그대로, Android 빌드 통과. `src/editor` 의 150줄 넘는 함수는 S6 이전부터 있던 `EditorGizmo::handleDrag`(약 190줄) 하나입니다.

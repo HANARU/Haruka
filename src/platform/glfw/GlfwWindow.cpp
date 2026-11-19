@@ -9,8 +9,8 @@
 #include <windows.h>
 #endif
 
-GlfwWindow::GlfwWindow(uint32_t w, uint32_t h, const std::string& t)
-    : width(w), height(h), title(t) {}
+GlfwWindow::GlfwWindow(uint32_t w, uint32_t h, const std::string& t, bool hidden)
+    : width(w), height(h), title(t), hidden_(hidden) {}
 
 GlfwWindow::~GlfwWindow() {
     cleanup();
@@ -19,6 +19,7 @@ GlfwWindow::~GlfwWindow() {
 void GlfwWindow::init() {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    if (hidden_) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
     if (!window) {
         throw std::runtime_error("Failed to create GLFW window");
@@ -176,7 +177,12 @@ float GlfwWindow::getScrollDelta() {
     return v;
 }
 
+// 숨긴 창(--hidden-window, 에디터 UI 덤프)은 사용자 입력을 받지 않습니다. 마우스는 창 밖 고정 위치 · 버튼과 키는 늘 떼어 둔 상태입니다.
+// 예전에는 만들 때 읽은 실제 커서 위치(창 기준)가 남아, 커서가 우연히 놓인 자리의 위젯이 호버로 그려져 덤프가 실행마다 달랐습니다(2026-11-19).
+static constexpr double kHiddenMouse = -10000.0;
+
 bool GlfwWindow::isKeyDown(int key) const {
+    if (hidden_) return false;
     if (key >= 0 && key <= GLFW_KEY_LAST && keyLatch_[key]) return true;
     return glfwGetKey(window, key) == GLFW_PRESS;
 }
@@ -186,11 +192,13 @@ int GlfwWindow::keyPressCount(int key) const {
 }
 
 bool GlfwWindow::isMouseButtonDown(int button) const {
+    if (hidden_) return false;
     if (button >= 0 && button <= GLFW_MOUSE_BUTTON_LAST && buttonLatch_[button]) return true;
     return glfwGetMouseButton(window, button) == GLFW_PRESS;
 }
 
 void GlfwWindow::getMousePosition(float& x, float& y) const {
+    if (hidden_) { x = y = (float)kHiddenMouse; return; }
     x = (float)lastMouseX;
     y = (float)lastMouseY;
 }

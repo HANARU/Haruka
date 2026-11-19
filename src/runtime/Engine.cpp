@@ -244,7 +244,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         HLOG(LogEngine, Warning) << "--headless is for the game executable; opening a window";
     }
     if (options.headless && policy_.allowHeadless) window_ = std::make_unique<HeadlessWindow>();
-    else                                           window_ = std::make_unique<GlfwWindow>(1600, 900, "Haruka Engine");
+    else                                           window_ = std::make_unique<GlfwWindow>(options.windowW, options.windowH, "Haruka Engine", options.hiddenWindow);
 #endif
     window_->init();
     headless_ = !window_->providesSurface();
@@ -348,6 +348,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     audio->setPhysics(physics);   // 소리 차폐 판정(2026-11-06, Audio_Design.md 9-4)
 
     // 앞단(에디터 또는 게임).
+    frontend_->setOptions(options_);
     frontend_->init(*renderer_, world_, *assets_, *window_);
     frontend_->setAudio(audio_);   // 에디터: 저장된 소리 출력 장치를 openInitialScene 에서 적용(2026-10-16)
 
@@ -715,6 +716,7 @@ int Engine::finishRun() {
             if (!ok) blank = true;
         }
     }
+    frontend_->onRunFinished();
     stats_.logPacing("run");
     // GPU 구간 시간(타임스탬프, 지수 이동 평균). 요약 줄의 형식은 그대로 두고 따로 남깁니다(패스 비용 비교용).
     {

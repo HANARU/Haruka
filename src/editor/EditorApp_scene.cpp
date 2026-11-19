@@ -64,20 +64,6 @@ void EditorApp::saveEditorState() const {
         HLOG(LogEditorScene, Warning) << "Editor state not saved: " << err;
 }
 
-void EditorApp::scanSceneFiles() {
-    sceneFiles_.clear();
-    std::error_code ec;
-    const fs::path dir = hproj::resolve(kScenesDir);
-    if (!fs::exists(dir, ec)) return;
-    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
-         it.increment(ec)) {
-        if (!it->is_regular_file(ec) || it->path().extension() != ".hscene") continue;
-        const std::string rel = fs::relative(it->path(), dir, ec).generic_string();
-        if (!ec && !rel.empty()) sceneFiles_.push_back(std::string(kScenesDir) + "/" + rel);
-    }
-    std::sort(sceneFiles_.begin(), sceneFiles_.end());
-}
-
 std::string EditorApp::sceneTitle() const {
     return doc_.displayName() + (sceneDirty() ? "*" : "");
 }
@@ -94,7 +80,7 @@ void EditorApp::openInitialScene(const std::string& startScene) {
     loadEditorState();
     if (audio_ && !audioOutput_.empty()) audio_->setOutputDevice(audioOutput_);
     if (audio_) audio_->setHrtfMode(hrtfMode_);
-    scanSceneFiles();
+    contentPanel_.scanScenes();
     std::error_code ec;
     auto usable = [&](const std::string& p) {
         return project_settings::isSceneLogicalPath(p) && fs::exists(hproj::resolve(p), ec);
@@ -121,7 +107,7 @@ void EditorApp::openScene(const std::string& logicalPath) {
     saveEditorState();
     bottomDirty_ = true;
     // 에디터 카메라를 빼고 셉니다.
-    const size_t count = ctx_.world->getActors().size() - (editorCamActor_ ? 1 : 0);
+    const size_t count = ctx_.world->getActors().size() - (viewport_.cameraActor() ? 1 : 0);
     HLOG(LogEditorScene, Log) << "Scene opened: " << logicalPath << " (" << count << " actors)";
 }
 
@@ -196,14 +182,15 @@ void EditorApp::openAudioOutputDialog() {
 
 void EditorApp::openSceneDialog() {
     if (blockedDuringPlay("opening a scene")) return;
-    scanSceneFiles();
+    contentPanel_.scanScenes();
     ModalSpec m;
     m.title = "Open Scene";
-    if (sceneFiles_.empty()) {
+    const auto& scenes = contentPanel_.sceneFiles();
+    if (scenes.empty()) {
         m.message = "No .hscene files in assets/scenes.";
     } else {
         m.message = "Scenes in assets/scenes:";
-        m.list    = sceneFiles_;
+        m.list    = scenes;
         m.onPick  = [this](const std::string& path) {
             guardUnsaved("opening another scene", [this, path] { openScene(path); });
         };
@@ -222,7 +209,7 @@ bool EditorApp::writeSceneTo(const std::string& logicalPath) {
     doc_.markSaved(logicalPath, cmdStack_.stateToken());
     lastScene_ = logicalPath;
     saveEditorState();
-    scanSceneFiles();
+    contentPanel_.scanScenes();
     bottomDirty_ = true;   // 콘텐츠 브라우저의 SCENES 목록(지금 씬 강조)
     HLOG(LogEditorScene, Log) << "Scene saved: " << logicalPath;
     return true;
@@ -341,8 +328,8 @@ void EditorApp::cancelModalNow() {
 void EditorApp::openModal(ModalSpec spec) {
     // 열려 있던 편집 · 메뉴 · 팝업을 정리합니다. 대화상자가 떠 있는 동안 그쪽으로 입력이 가면 안 됩니다.
     if (currentFocus() != EFocusTarget::None) setTextFocus(EFocusTarget::None);
-    if (openMenu_ >= 0) { openMenu_ = -1; menuBarDirty_ = menuPopupDirty_ = true; }
-    if (logPopupOpen_)  { logPopupOpen_ = false; logPopupDirty_ = true; }
+    menus_.close();
+    logPanel_.closePopup();
     modal_ = std::make_unique<ModalSpec>(std::move(spec));
     if (modal_->hasInput) setTextFocus(EFocusTarget::Dialog);
     modalDirty_ = true;

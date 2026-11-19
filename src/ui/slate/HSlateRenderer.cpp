@@ -3,6 +3,7 @@
 #include "HPaintContext.hpp"
 #include "HGeometry.hpp"
 #include "../../vfs/Vfs.hpp"
+#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
@@ -600,9 +601,8 @@ static bool buildDrawListFromElements(const std::vector<HDrawElement>& elements,
     return true;
 }
 
-bool HSlateContext::buildDrawList(glm::vec2 size, HFontAtlas& fonts,
-                                  VkImageView whiteView, uint32_t maxVerts,
-                                  HSlateDrawList& out) {
+bool HSlateContext::collectElements(glm::vec2 size, HFontAtlas* fonts, std::vector<HDrawElement>& out) {
+    out.clear();
     if (!root_ || root_->isCollapsed()) return false;
 
     HGeometry fullGeo;
@@ -612,7 +612,7 @@ bool HSlateContext::buildDrawList(glm::vec2 size, HFontAtlas& fonts,
 
     arrange(fullGeo.size);
 
-    HPaintContext ctx(&fonts);
+    HPaintContext ctx(fonts);
     root_->paint(ctx, fullGeo);
 
     std::stable_sort(ctx.elements.begin(), ctx.elements.end(),
@@ -620,7 +620,63 @@ bool HSlateContext::buildDrawList(glm::vec2 size, HFontAtlas& fonts,
             return a.layer < b.layer;
         });
 
-    return buildDrawListFromElements(ctx.elements, fonts, whiteView, maxVerts, out);
+    out = std::move(ctx.elements);
+    return true;
+}
+
+bool HSlateContext::buildDrawList(glm::vec2 size, HFontAtlas& fonts,
+                                  VkImageView whiteView, uint32_t maxVerts,
+                                  HSlateDrawList& out) {
+    std::vector<HDrawElement> elements;
+    if (!collectElements(size, &fonts, elements)) return false;
+    return buildDrawListFromElements(elements, fonts, whiteView, maxVerts, out);
+}
+
+bool HSlateRenderer::dumpElements(glm::vec2 size, const std::string& path) {
+    std::vector<HDrawElement> elements;
+    if (!ctx_.collectElements(size, &fonts_, elements)) return false;
+
+    std::error_code ec;
+    const std::filesystem::path p(path);
+    if (p.has_parent_path()) std::filesystem::create_directories(p.parent_path(), ec);
+
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);
+    if (!f.is_open()) return false;
+
+    char buf[512];
+    for (const HDrawElement& e : elements) {
+        const char* kind = e.type == HDrawElement::Type::Rect    ? "Rect"
+                         : e.type == HDrawElement::Type::Texture ? "Texture"
+                                                                 : "Text";
+        int n = std::snprintf(buf, sizeof(buf),
+            "%s rect=(%.2f,%.2f,%.2f,%.2f) color=(%.3f,%.3f,%.3f,%.3f) layer=%d",
+            kind, e.rect.x, e.rect.y, e.rect.z, e.rect.w,
+            e.color.r, e.color.g, e.color.b, e.color.a, e.layer);
+        if (n > 0) f.write(buf, n);
+        if (e.clipped) {
+            n = std::snprintf(buf, sizeof(buf), " clip=(%.2f,%.2f,%.2f,%.2f)",
+                              e.clip.x, e.clip.y, e.clip.z, e.clip.w);
+            if (n > 0) f.write(buf, n);
+        }
+        if (e.type == HDrawElement::Type::Texture) {
+            n = std::snprintf(buf, sizeof(buf), " tex uv=(%.3f,%.3f,%.3f,%.3f)",
+                              e.uvRect.x, e.uvRect.y, e.uvRect.z, e.uvRect.w);
+            if (n > 0) f.write(buf, n);
+        } else if (e.type == HDrawElement::Type::Text) {
+            n = std::snprintf(buf, sizeof(buf), " size=%.2f text=\"", e.fontSize);
+            if (n > 0) f.write(buf, n);
+            for (unsigned char c : e.text) {
+                if (c == '\\') f << "\\\\";
+                else if (c == '"') f << "\\\"";
+                else if (c == '\n') f << "\\n";
+                else if (c == '\r') f << "\\r";
+                else f << (char)c;
+            }
+            f << '"';
+        }
+        f << '\n';
+    }
+    return f.good();
 }
 
 // ── recordDrawList ─────────────────────────────────────────────────────────────

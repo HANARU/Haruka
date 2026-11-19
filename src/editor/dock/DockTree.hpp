@@ -1,10 +1,15 @@
 #pragma once
+#include <functional>
 #include <memory>
+#include <sstream>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 class HWidget;
+
+enum class EDockZone { None, Center, Left, Right, Top, Bottom };
 
 // ── DockNode ──────────────────────────────────────────────────────────────────
 // 에디터 도크 트리의 한 노드입니다. children 이 비면 **리프(탭 스택)**, 아니면 **분할 노드**.
@@ -66,3 +71,34 @@ private:
     std::unordered_map<std::string, PanelDef> defs_;
     std::vector<std::string>                  order_;
 };
+
+// ── 순수 도크 트리 연산 (위젯·화면 크기 비의존, S6f) ────────────────────────────
+using DockPanelHome = std::unordered_map<std::string, std::vector<std::string>>;
+
+DockNode* dockFindParent(DockNode* cur, DockNode* target, int& outIdx);
+void      dockNormalize(DockNode* n);
+void      dockSerialize(const DockNode* n, std::ostringstream& o);
+std::unique_ptr<DockNode> dockParse(std::istringstream& in, int depth, bool& ok);
+std::unique_ptr<DockNode> dockPrune(std::unique_ptr<DockNode> n,
+                                    const std::function<bool(const std::string&)>& valid,
+                                    std::unordered_set<std::string>& seen);
+
+bool      dockContains(const DockNode* n, const std::string& id);
+DockNode* dockFindLeaf(DockNode* n, const std::string& id);
+void      dockRemoveTab(DockNode* leaf, int idx);
+bool      dockPanelIsActive(const DockNode* n, const std::string& id);
+
+void dockCollapseEmptyLeaf(std::unique_ptr<DockNode>& root, DockNode* leaf);
+void dockAttachSplit(std::unique_ptr<DockNode>& root, DockNode* target,
+                     const std::string& panelId, EDockZone zone, float share);
+bool dockRedock(std::unique_ptr<DockNode>& root, DockNode* src, int srcIdx,
+                const std::string& panelId, DockNode* target, EDockZone zone);
+
+bool dockClosePanel(std::unique_ptr<DockNode>& root, DockPanelHome& home,
+                    const std::string& id, bool closable);
+bool dockShowPanel(std::unique_ptr<DockNode>& root, DockPanelHome& home,
+                   const std::string& id);
+
+std::string               dockSerializeLayout(const DockNode* root);
+std::unique_ptr<DockNode> dockParseLayout(const std::string& text,
+                                          const std::function<bool(const std::string&)>& valid);

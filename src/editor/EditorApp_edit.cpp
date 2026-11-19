@@ -18,14 +18,14 @@ static constinit HLogCategory LogEditorEdit{ "Editor", ELogVerbosity::Log };
 
 // ── 선택 ─────────────────────────────────────────────────────────────────────────
 void EditorApp::selectOnly(Actor* a) {
-    if (a == editorCamActor_) a = nullptr;
+    if (a == viewport_.cameraActor()) a = nullptr;
     ctx_.selection.clear();
     if (a) ctx_.selection.push_back(a);
     ctx_.selected = a;
 }
 
 void EditorApp::toggleSelect(Actor* a) {
-    if (!a || a == editorCamActor_) return;
+    if (!a || a == viewport_.cameraActor()) return;
     auto& s = ctx_.selection;
     if (auto it = std::find(s.begin(), s.end(), a); it != s.end()) s.erase(it);
     else                                                              s.push_back(a);
@@ -33,7 +33,7 @@ void EditorApp::toggleSelect(Actor* a) {
 }
 
 void EditorApp::addSelect(Actor* a) {
-    if (!a || a == editorCamActor_) return;
+    if (!a || a == viewport_.cameraActor()) return;
     auto& s = ctx_.selection;
     s.erase(std::remove(s.begin(), s.end(), a), s.end());
     s.push_back(a);
@@ -44,16 +44,17 @@ void EditorApp::selectRange(Actor* a) {
     if (!a) return;
     if (!ctx_.selected) { selectOnly(a); return; }
     int from = -1, to = -1;
-    for (int i = 0; i < (int)outlinerRows_.size(); ++i) {
-        if (outlinerRows_[i].id == ctx_.selected->id) from = i;
-        if (outlinerRows_[i].id == a->id)             to   = i;
+    const auto& rows = outlinerPanel_.rows();
+    for (int i = 0; i < (int)rows.size(); ++i) {
+        if (rows[i].id == ctx_.selected->id) from = i;
+        if (rows[i].id == a->id)             to   = i;
     }
     if (from < 0 || to < 0) { addSelect(a); return; }
     std::vector<Actor*> range;
     const int step = to >= from ? 1 : -1;
     for (int i = from;; i += step) {
-        if (Actor* r = ctx_.world->findById(outlinerRows_[(size_t)i].id))
-            if (r != editorCamActor_) range.push_back(r);
+        if (Actor* r = ctx_.world->findById(rows[(size_t)i].id))
+            if (r != viewport_.cameraActor()) range.push_back(r);
         if (i == to) break;
     }
     ctx_.selection = std::move(range);   // 기준(주 선택)부터 a 까지, a 가 마지막
@@ -67,7 +68,7 @@ bool EditorApp::isSelected(const Actor* a) const {
 std::vector<Actor*> EditorApp::selectionRoots() const {
     std::vector<Actor*> roots;
     for (Actor* a : ctx_.selection) {
-        if (!a || a == editorCamActor_) continue;
+        if (!a || a == viewport_.cameraActor()) continue;
         bool ancestorSelected = false;
         for (Actor* p = a->getParent(); p && !ancestorSelected; p = p->getParent())
             ancestorSelected = isSelected(p);
@@ -79,16 +80,16 @@ std::vector<Actor*> EditorApp::selectionRoots() const {
 void EditorApp::deleteSelection() {
     const std::vector<Actor*> roots = selectionRoots();
     if (roots.empty() || !ctx_.world || !ctx_.assets) return;
-    gizmo_.cancel();
+    viewport_.gizmo().cancel();
     groupDrag_.clear();
     std::vector<uint64_t> ids;
     for (Actor* r : roots) ids.push_back(r->id);
     selectOnly(nullptr);
-    renaming_ = false;
+    outlinerPanel_.cancelRename();
     auto cmd = makePresenceCmd(false, std::move(ids));
     cmd->redo();
     cmdStack_.push(std::move(cmd));
-    outlinerDirty_ = true;
+    outlinerPanel_.markDirty();
 }
 
 // ── 복사 · 붙여넣기 · 복제 ────────────────────────────────────────────────────────
@@ -131,7 +132,7 @@ std::vector<Actor*> EditorApp::spawnActorSet(const std::string& clip) {
         names.insert(r->name);
         // 원래 부모가 이 씬에 있으면 그 아래, 같은 로컬 트랜스폼으로 둡니다(UE · Unity 처럼 원래 자리).
         if (sameSession && i < rootParents.size() && rootParents[i])
-            if (Actor* p = ctx_.world->findById(rootParents[i]); p && p != editorCamActor_) r->attachTo(p);
+            if (Actor* p = ctx_.world->findById(rootParents[i]); p && p != viewport_.cameraActor()) r->attachTo(p);
     }
     return roots;
 }
@@ -149,9 +150,9 @@ void EditorApp::pasteClipboard() {
     if (roots.empty()) { HLOG(LogEditorEdit, Warning) << "Paste: the clipboard has no Haruka actors"; return; }
     recordActorCreation(roots);
     selectOnly(nullptr);
-    for (Actor* r : roots) { addSelect(r); revealActor(r); }
-    outlinerRevealSel_ = true;
-    outlinerDirty_     = true;
+    for (Actor* r : roots) { addSelect(r); outlinerPanel_.revealActor(r); }
+    outlinerPanel_.revealSelected();
+    outlinerPanel_.markDirty();
     HLOG(LogEditorEdit, Log) << "Pasted " << roots.size() << (roots.size() == 1 ? " actor" : " actors");
 }
 
@@ -162,42 +163,32 @@ void EditorApp::duplicateSelection() {
     if (roots.empty()) return;
     recordActorCreation(roots);
     selectOnly(nullptr);
-    for (Actor* r : roots) { addSelect(r); revealActor(r); }
-    outlinerRevealSel_ = true;
-    outlinerDirty_     = true;
+    for (Actor* r : roots) { addSelect(r); outlinerPanel_.revealActor(r); }
+    outlinerPanel_.revealSelected();
+    outlinerPanel_.markDirty();
     HLOG(LogEditorEdit, Log) << "Duplicated " << roots.size() << (roots.size() == 1 ? " actor" : " actors");
 }
 
 // ── 부모 바꾸기 ───────────────────────────────────────────────────────────────────
-static std::unique_ptr<ReparentCmd> makeReparent(World& world, Actor* child, Actor* newParent, int index,
-                                                 const Actor* editorCam) {
-    if (!child || child == editorCam || newParent == editorCam) return nullptr;
-    for (Actor* p = newParent; p; p = p->getParent())
-        if (p == child) return nullptr;   // 자기 자신이나 자손 아래로는 옮기지 않습니다(사이클)
-    Actor* oldParent = child->getParent();
-    if (oldParent == newParent && index < 0) return nullptr;
-    return std::make_unique<ReparentCmd>(world, child->id,
-                                         oldParent ? oldParent->id : 0, child->siblingIndex(), child->transform(),
-                                         newParent ? newParent->id : 0, index, hxform::localUnder(*child, newParent));
-}
-
 bool EditorApp::reparentUndoable(Actor* child, Actor* newParent, int index) {
     if (!ctx_.world) return false;
-    auto cmd = makeReparent(*ctx_.world, child, newParent, index, editorCamActor_);
+    auto cmd = hcmd::makeReparent(*ctx_.world, child, newParent, index, viewport_.cameraActor());
     if (!cmd) return false;
     cmd->redo();
     cmdStack_.push(std::move(cmd));
-    if (newParent) outlinerCollapsed_.erase(newParent->id);
-    revealActor(child);
-    outlinerRevealSel_ = true;
-    outlinerDirty_     = true;
-    detailsDirty_      = true;   // 로컬 트랜스폼이 바뀜
+    if (newParent) outlinerPanel_.uncollapseActor(newParent->id);
+    outlinerPanel_.revealActor(child);
+    outlinerPanel_.revealSelected();
+    outlinerPanel_.markDirty();
+    detailsPanel_.markDirty();   // 로컬 트랜스폼이 바뀜
     return true;
 }
 
 // ── 화면 맞추기(F) ────────────────────────────────────────────────────────────────
 void EditorApp::frameSelection() {
-    if (!editorCamActor_ || !editorCam_ || ctx_.selection.empty()) return;
+    Actor*           camActor = viewport_.cameraActor();
+    CameraComponent* cam      = viewport_.camera();
+    if (!camActor || !cam || ctx_.selection.empty()) return;
     glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
     for (Actor* a : ctx_.selection) {
         glm::vec3 l(0.f), h(0.f);
@@ -221,13 +212,10 @@ void EditorApp::frameSelection() {
     }
     const glm::vec3     center = (lo + hi) * 0.5f;
     const float         radius = std::max(glm::length(hi - lo) * 0.5f, 0.1f);
-    const HViewportRect vr     = viewportFbRect();
+    const HViewportRect vr     = viewport_.viewportFbRect();
     const float         aspect = vr.height > 0.f ? vr.width / vr.height : 1.f;
-    const float         dist   = hframe::fitDistance(radius, glm::radians(editorCam_->fovY), aspect) * 1.1f;
-    focusFrom_ = editorCamActor_->worldPosition();
-    focusTo_   = center - editorCam_->forward() * dist;
-    focusT_    = 0.f;
-    focusAnim_ = true;
+    const float         dist   = hframe::fitDistance(radius, glm::radians(cam->fovY), aspect) * 1.1f;
+    viewport_.startFocusAnim(camActor->worldPosition(), center - cam->forward() * dist);
 }
 
 // ── 기즈모로 여러 액터 함께 움직이기 ─────────────────────────────────────────────
@@ -238,7 +226,7 @@ void EditorApp::beginGroupDrag() {
     const std::vector<Actor*> roots = selectionRoots();
     // 주 선택의 조상도 선택되어 있으면(주 선택이 루트가 아님) 주 선택만 움직입니다. 조상을 함께 움직이면 주 선택이 두 번 움직입니다.
     if (std::find(roots.begin(), roots.end(), p) == roots.end()) return;
-    const Transform& sl     = gizmo_.dragStartTransform();
+    const Transform& sl     = viewport_.gizmo().dragStartTransform();
     const Actor*     parent = p->getParent();
     groupPivotStart_.pos   = parent ? glm::vec3(parent->worldMatrix() * glm::vec4(sl.position(), 1.f)) : sl.position();
     groupPivotStart_.rot   = parent ? parent->worldRotation() * sl.rotation() : sl.rotation();
@@ -272,84 +260,4 @@ void EditorApp::commitGizmoDrag(const Transform& before, const Transform& after)
     if (composite->cmds.size() == 1) cmdStack_.push(std::move(composite->cmds.front()));
     else                             cmdStack_.push(std::move(composite));
     groupDrag_.clear();
-}
-
-// 스플리터 · 탭이 같은 누름을 가져갈 때 아웃라이너 끌기를 지웁니다(DEF-139).
-void EditorApp::cancelOutlinerDrag() {
-    outDragId_     = 0;
-    outDragActive_ = false;
-    if (outlinerDropOverlay_) outlinerDropOverlay_->active = false;
-}
-
-// ── 아웃라이너에서 끌어 놓아 부모 바꾸기 ─────────────────────────────────────────
-// 행을 누르고 6px 넘게 끌면 끌기입니다. 다른 행 위에서 놓으면 그 액터의 자식으로, 목록의 빈 곳에서 놓으면 루트로
-// 옮깁니다. 끈 행이 선택에 들어 있으면 선택된 루트 전부를, 아니면 그 행 하나를 옮깁니다(UE 아웃라이너와 같음).
-void EditorApp::tickOutlinerDrag(float mx, float my, bool leftDown) {
-    const glm::vec2 m{ mx, my };
-    auto rowAt = [&](const glm::vec2& p) -> uint64_t {
-        for (const OutlinerRowHit& h : outlinerRowHits_)
-            if (h.widget && h.widget->cachedGeometry().contains(p)) return h.id;
-        return 0;
-    };
-    auto hideDrop = [&] { if (outlinerDropOverlay_) outlinerDropOverlay_->active = false; };
-
-    if (leftDown && !prevLeftDown_) {
-        outDragId_     = 0;
-        outDragActive_ = false;
-        hideDrop();
-        if (modal_ || !outlinerVisible_ || !outlinerList_ || !outlinerList_->cachedGeometry().contains(m)) return;
-        if (const uint64_t id = rowAt(m)) { outDragId_ = id; outDragStart_ = m; }
-        return;
-    }
-    if (leftDown && outDragId_) {
-        if (!outDragActive_ && glm::length(m - outDragStart_) > s(6.f)) outDragActive_ = true;
-        if (!outDragActive_ || !outlinerDropOverlay_) return;
-        const bool inList = outlinerList_ && outlinerList_->cachedGeometry().contains(m);
-        const uint64_t target = inList ? rowAt(m) : 0;
-        outlinerDropOverlay_->active = inList;
-        if (target && target != outDragId_) {
-            for (const OutlinerRowHit& h : outlinerRowHits_)
-                if (h.id == target) outlinerDropOverlay_->rect = h.widget->cachedGeometry();
-        } else if (inList) {
-            // 루트로: 목록 아래쪽에 얇은 띠
-            const HGeometry& lg = outlinerList_->cachedGeometry();
-            HGeometry band = lg;
-            band.position.y = lg.position.y + lg.size.y - s(6.f);
-            band.size.y     = s(6.f);
-            outlinerDropOverlay_->rect = band;
-        }
-        return;
-    }
-    if (!leftDown && outDragId_) {
-        const uint64_t dragId = outDragId_;
-        const bool     active = outDragActive_;
-        outDragId_     = 0;
-        outDragActive_ = false;
-        hideDrop();
-        if (!active || !ctx_.world) return;
-        if (!outlinerList_ || !outlinerList_->cachedGeometry().contains(m)) return;   // 목록 밖에서 놓으면 취소
-        Actor* dragged = ctx_.world->findById(dragId);
-        if (!dragged) return;
-        const uint64_t targetId = rowAt(m);
-        if (targetId == dragId) return;
-        Actor* parent = targetId ? ctx_.world->findById(targetId) : nullptr;
-        const std::vector<Actor*> movers = isSelected(dragged) ? selectionRoots() : std::vector<Actor*>{ dragged };
-        auto composite = std::make_unique<CompositeCmd>();
-        for (Actor* a : movers) {
-            auto cmd = makeReparent(*ctx_.world, a, parent, -1, editorCamActor_);
-            if (!cmd) continue;
-            cmd->redo();
-            composite->add(std::move(cmd));
-        }
-        if (composite->empty()) {
-            HLOG(LogEditorEdit, Warning) << "Cannot move '" << dragged->name << "' there (an actor cannot go under itself or its child)";
-            return;
-        }
-        if (composite->cmds.size() == 1) cmdStack_.push(std::move(composite->cmds.front()));
-        else                             cmdStack_.push(std::move(composite));
-        if (parent) outlinerCollapsed_.erase(parent->id);
-        for (Actor* a : movers) revealActor(a);
-        outlinerDirty_ = true;
-        detailsDirty_  = true;
-    }
 }

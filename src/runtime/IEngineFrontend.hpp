@@ -9,6 +9,7 @@ class World;
 class AssetManager;
 class IWindow;
 class AudioSystem;
+struct EngineOptions;
 
 // ── 엔진 앞단 (2026-10-19, 런타임 분리 DEF-12) ─────────────────────────────────────
 // 엔진(Engine)은 에디터를 직접 알지 않고 이 인터페이스로만 묻습니다. 실행 파일마다 앞단 하나를 링크합니다.
@@ -41,10 +42,12 @@ public:
     virtual Policy policy() const = 0;
 
     // ── 부팅 · 종료 ─────────────────────────────────────────────────────────────
+    virtual void setOptions(const EngineOptions& /*options*/) {}
     virtual void init(Renderer& renderer, World& world, AssetManager& assets, IWindow& window) = 0;
     virtual void setAudio(AudioSystem* /*audio*/) {}
     // 처음 열 씬. 에디터는 마지막으로 연 씬을 먼저 열고, 게임은 프로젝트 설정의 시작 씬을 엽니다.
     virtual void openInitialScene(const std::string& startScene) = 0;
+    virtual void onRunFinished() {}
     virtual void cleanup() = 0;
 
     // ── 상태 ────────────────────────────────────────────────────────────────────

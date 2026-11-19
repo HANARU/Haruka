@@ -7,7 +7,7 @@
 
 class GlfwWindow : public IWindow {
 public:
-    GlfwWindow(uint32_t width, uint32_t height, const std::string& title);
+    GlfwWindow(uint32_t width, uint32_t height, const std::string& title, bool hidden = false);
     ~GlfwWindow() override;
 
     void init() override;
@@ -59,6 +59,7 @@ private:
     uint32_t width;
     uint32_t height;
     std::string title;
+    bool hidden_ = false;
 
     GLFWwindow* window  = nullptr;
     bool        resized = false;

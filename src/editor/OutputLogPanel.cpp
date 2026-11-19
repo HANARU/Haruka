@@ -1,0 +1,614 @@
+#include "OutputLogPanel.hpp"
+#include "../core/AppPaths.hpp"
+#include "../ui/slate/widgets/SBox.hpp"
+#include "../ui/slate/widgets/SHorizontalBox.hpp"
+#include "../ui/slate/widgets/SOverlay.hpp"
+#include "../ui/slate/widgets/STextBlock.hpp"
+#include "../ui/slate/widgets/SToggleButton.hpp"
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <utility>
+
+namespace fs = std::filesystem;
+
+namespace {
+constexpr const char* kLogFilterPath = "Config/editor_log.txt";
+constexpr ELogVerbosity kLogSeverities[] = {
+    ELogVerbosity::Error, ELogVerbosity::Warning, ELogVerbosity::Log, ELogVerbosity::Verbose
+};
+} // namespace
+
+void OutputLogPanel::init(const EditorUiKit* ui, HLogCategory* logCat, float menuBarH, bool dumpMode,
+                          std::function<void()> onSearchClicked) {
+    ui_              = ui;
+    logCat_          = logCat;
+    menuBarH_        = menuBarH;
+    dumpMode_        = dumpMode;
+    onSearchClicked_ = std::move(onSearchClicked);
+}
+
+bool OutputLogPanel::tick(bool tabActive) {
+    bool logChanged = false;
+    if (const uint64_t seq = HLog::latestSeq(); seq != seenSeq_) {
+        seenSeq_   = seq;
+        viewDirty_ = true;
+        logChanged = true;
+    }
+    if (tabActive && rowsBox_) {
+        const HGeometry& lg = rowsBox_->cachedGeometry();
+        const glm::ivec2 sig{ (int)(lg.size.x / 4.f), (int)(lg.size.y / 4.f) };
+        if (sig.y != rowsSig_.y)      rebuildRows();
+        else if (sig != rowsSig_)   { rowsSig_ = sig; viewDirty_ = true; }
+    }
+    if (popupOpen_) syncCategories();
+    return logChanged;
+}
+
+void OutputLogPanel::flushRebuilds(bool tabActive) {
+    if (popupDirty_) { popupDirty_ = false; rebuildPopup(); }
+    if (viewDirty_ && tabActive && rowsBox_) { viewDirty_ = false; refreshView(); }
+}
+
+std::shared_ptr<SBorder> OutputLogPanel::resetPopupHost() {
+    popupHost_  = HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f });
+    popupOpen_  = false;
+    popupPanel_.reset();
+    return popupHost_;
+}
+
+void OutputLogPanel::openPopup() {
+    popupOpen_  = true;
+    popupDirty_ = true;
+}
+
+void OutputLogPanel::closePopup() {
+    if (!popupOpen_) return;
+    popupOpen_  = false;
+    popupDirty_ = true;
+}
+
+void OutputLogPanel::handleOutsideClick(glm::vec2 mousePos) {
+    if (!popupOpen_) return;
+    const bool inPanel  = popupPanel_ && popupPanel_->cachedGeometry().contains(mousePos);
+    const bool onButton = catButton_  && catButton_->cachedGeometry().contains(mousePos);
+    if (!inPanel && !onButton) {
+        popupOpen_  = false;
+        popupDirty_ = true;
+    }
+}
+
+bool OutputLogPanel::popupContains(glm::vec2 pos) const {
+    return popupOpen_ && popupPanel_ && popupPanel_->cachedGeometry().contains(pos);
+}
+
+bool OutputLogPanel::searchContains(glm::vec2 p) const {
+    return searchBox_ && searchBox_->cachedGeometry().contains(p);
+}
+
+OutputLogPanel::SearchField OutputLogPanel::searchField() {
+    return {
+        search_,
+        searchFocused_,
+        searchSelAll_,
+        [this](glm::vec2 p) { return searchBox_ && searchBox_->cachedGeometry().contains(p); },
+        [this] { viewDirty_ = true; }
+    };
+}
+
+void OutputLogPanel::releaseTab(bool tabActive) {
+    rowsBox_.reset();
+    searchBox_.reset();
+    catButton_.reset();
+    if (!tabActive) closePopup();
+}
+
+void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
+    using HR = SHorizontalBox;
+    using VR = SVerticalBox;
+    const EditorUiKit& u = *ui_;
+    const glm::vec4 btnN{ 0.16f, 0.16f, 0.19f, 1.f };
+    const glm::vec4 btnH{ 0.26f, 0.26f, 0.31f, 1.f };
+
+    searchBox_ = HNew(SSearchBox);
+    searchBox_
+        ->placeholder("Search log...")
+        ->text(AttrStr([this]() -> std::string { return search_; }))
+        ->focused([this]() -> bool { return searchFocused_; })
+        ->selectedAll([this]() -> bool { return searchSelAll_; })
+        ->onClick([this] { if (onSearchClicked_) onSearchClicked_(); })
+        ->fontSize(u.s(12.f));
+
+    catButton_ = u.textButton("Categories", 11.f, EditorUiKit::kTextBody, HPadding{ 8.f, 3.f }, btnN, btnH,
+                              [this] { popupOpen_ = !popupOpen_; popupDirty_ = true; });
+
+    auto verbToggle = [&](const char* label, ELogVerbosity v) {
+        const int vi = (int)v;
+        glm::vec4 textCol = (v == ELogVerbosity::Log) ? EditorUiKit::kTextBody : EditorUiKit::logColor(v);
+        if (v == ELogVerbosity::Verbose) textCol = { 0.55f, 0.55f, 0.60f, 1.f };
+        return HNew(SToggleButton)
+            ->isActive([this, vi] { return showVerb_[vi]; })
+            ->onClick([this, vi] {
+                showVerb_[vi] = !showVerb_[vi];
+                viewDirty_    = true;
+                saveFilter();
+            })
+            ->normalColor(btnN)->hoveredColor(btnH)->activeColor({ 0.20f, 0.22f, 0.27f, 1.f })
+            ->padding(HPadding{ u.s(7.f), u.s(2.f) })
+            ->content(HNew(STextBlock)->text(label)->fontSize(u.s(11.f))->color(textCol)
+                ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
+    };
+    auto counter = [&](bool errors) {
+        const ELogVerbosity v = errors ? ELogVerbosity::Error : ELogVerbosity::Warning;
+        return HNew(SButton)
+            ->normalColor({ 0.f, 0.f, 0.f, 0.f })->hoveredColor(btnH)->pressedColor(btnN)
+            ->padding(HPadding{ u.s(5.f), u.s(2.f) })
+            ->onClick([this, v] {
+                for (bool& on : showVerb_) on = false;
+                showVerb_[(int)v] = true;
+                viewDirty_ = true;
+                saveFilter();
+            })
+            ->content(HNew(STextBlock)
+                ->text(AttrStr([this, errors]() -> std::string { return errors ? errText_ : warnText_; }))
+                ->fontSize(u.s(11.f))
+                ->color(Attr<glm::vec4>([this, errors, v] {
+                    return (errors ? hasErr_ : hasWarn_) ? EditorUiKit::logColor(v) : EditorUiKit::kTextDim;
+                })));
+    };
+    const HPadding vpad{ 0.f, u.s(3.f) };
+    auto filterRow = HNew(HR)
+        ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(4.f))
+        ->addSlot(searchBox_,   HR::ESizeRule::Fixed, u.s(200.f), vpad)
+        ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(6.f))
+        ->addSlot(catButton_,   HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(10.f))
+        ->addSlot(verbToggle("Err",  ELogVerbosity::Error),   HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(verbToggle("Warn", ELogVerbosity::Warning), HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(verbToggle("Log",  ELogVerbosity::Log),     HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(verbToggle("Verb", ELogVerbosity::Verbose), HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(u.spacer(),   HR::ESizeRule::Fill)
+        ->addSlot(counter(true),  HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(counter(false), HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(6.f))
+        ->addSlot(u.textButton("Clear", 11.f, EditorUiKit::kTextBody, HPadding{ 8.f, 3.f }, btnN, btnH,
+                               [this] {
+                                   pullRecords();
+                                   clearedSeq_ = mirrorSeq_;
+                                   anchorSeq_  = 0;
+                                   scrollReq_  = 0;
+                                   viewDirty_  = true;
+                               }),
+                  HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(4.f));
+
+    rowsBox_ = HNew(SVerticalBox);
+    auto jumpButton = HNew(SButton)
+        ->normalColor({ 0.10f, 0.30f, 0.50f, 1.f })->hoveredColor(EditorUiKit::kAccent)
+        ->pressedColor({ 0.06f, 0.22f, 0.38f, 1.f })
+        ->padding(HPadding{ u.s(8.f), u.s(2.f) })
+        ->onClick([this] {
+            anchorSeq_ = 0;
+            scrollReq_ = 0;
+            viewDirty_ = true;
+        })
+        ->content(HNew(STextBlock)
+            ->text(AttrStr([this]() -> std::string { return jumpText_; }))
+            ->fontSize(u.s(11.f))->color(EditorUiKit::kTextHdr)
+            ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
+    jumpButton->visibility.bind([this] {
+        return anchorSeq_ != 0 ? EVisibility::Visible : EVisibility::Collapsed;
+    });
+    auto rowsArea = HNew(SOverlay);
+    rowsArea->addSlot(rowsBox_);
+    rowsArea->addSlot(jumpButton, EHAlign::Right, EVAlign::Bottom, HPadding{ 0.f, 0.f, u.s(10.f), u.s(4.f) });
+
+    bottomContent.addSlot(HNew(SBorder)->background(EditorUiKit::kBgHeader)->content(filterRow),
+                          VR::ESizeRule::Fixed, u.s(28.f));
+    bottomContent.addSlot(HNew(SBorder)->background({ 0.f, 0.f, 0.f, 0.f })
+                              ->padding(HPadding{ u.s(4.f), u.s(2.f) })->content(rowsArea)
+                              ->onWheel([this](float d) {
+                                  scrollReq_ += (d > 0.f) ? 3 : -3;
+                                  viewDirty_  = true;
+                                  return true;
+                              }),
+                          VR::ESizeRule::Fill);
+    rebuildRows();
+}
+
+void OutputLogPanel::pullRecords() {
+    std::vector<HLogRecord> fresh;
+    HLog::copySince(mirrorSeq_, fresh);
+    if (fresh.empty()) return;
+
+    for (HLogRecord& r : fresh) {
+        if (r.category >= catNames_.size()) syncCategories();
+        if (r.category < catCounts_.size()) ++catCounts_[r.category];
+        mirror_.push_back(std::move(r));
+    }
+    while (mirror_.size() > HLog::kCapacity) {
+        const uint16_t c = mirror_.front().category;
+        if (c < catCounts_.size()) --catCounts_[c];
+        mirror_.pop_front();
+    }
+    mirrorSeq_ = mirror_.back().seq;
+
+    uint32_t errs = 0, warns = 0;
+    for (const HLogCategoryState* st : HLog::categories()) {
+        errs  += st->errors.load(std::memory_order_relaxed);
+        warns += st->warnings.load(std::memory_order_relaxed);
+    }
+    errText_  = "E " + std::to_string(errs);
+    warnText_ = "W " + std::to_string(warns);
+    hasErr_   = errs  > 0;
+    hasWarn_  = warns > 0;
+}
+
+void OutputLogPanel::syncCategories() {
+    const std::vector<HLogCategoryState*> cats = HLog::categories();
+    if (cats.size() == catNames_.size()) return;
+    for (size_t i = catNames_.size(); i < cats.size(); ++i) {
+        catNames_.push_back(EditorUiKit::toDisplayAscii(cats[i]->name));
+        catHidden_.push_back(hiddenNames_.count(cats[i]->name) ? 1 : 0);
+    }
+    catCounts_.resize(cats.size(), 0);
+    if (popupOpen_) popupDirty_ = true;
+}
+
+void OutputLogPanel::setCategoryHidden(uint16_t index, bool hidden) {
+    if (index >= catHidden_.size()) return;
+    catHidden_[index] = hidden ? 1 : 0;
+    if (const HLogCategoryState* st = HLog::categoryAt(index)) {
+        if (hidden) hiddenNames_.insert(st->name);
+        else        hiddenNames_.erase(st->name);
+    }
+    viewDirty_ = true;
+}
+
+void OutputLogPanel::loadFilter() {
+    std::ifstream f(happ::inWriteRoot(kLogFilterPath));
+    if (!f) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream ls(line);
+        std::string key, a, b;
+        ls >> key >> a >> b;
+        ELogVerbosity v = ELogVerbosity::Off;
+        if (key == "severity" && parseLogVerbosity(a, v) && v != ELogVerbosity::Off &&
+            (b == "on" || b == "off"))
+            showVerb_[(int)v] = (b == "on");
+        else if (key == "hide" && !a.empty())
+            hiddenNames_.insert(a);
+    }
+}
+
+void OutputLogPanel::saveFilter() const {
+    std::error_code ec;
+    fs::create_directories(happ::inWriteRoot("Config"), ec);
+    std::ofstream f(happ::inWriteRoot(kLogFilterPath), std::ios::trunc);
+    if (!f) { if (logCat_) HLOG(*logCat_, Warning) << "Output Log filter save failed (" << kLogFilterPath << ")"; return; }
+    f << "# Haruka Output Log display filter v1. Search text is not saved.\n";
+    for (ELogVerbosity v : kLogSeverities)
+        f << "severity " << logVerbosityName(v) << (showVerb_[(int)v] ? " on\n" : " off\n");
+    for (const std::string& name : hiddenNames_) f << "hide " << name << '\n';
+}
+
+void OutputLogPanel::saveLevels() const {
+    if (!HLog::saveLevelOverrides(happ::inWriteRoot(HLog::kLevelOverridesPath).string()))
+        if (logCat_) HLOG(*logCat_, Warning) << "log level save failed (" << HLog::kLevelOverridesPath << ")";
+}
+
+bool OutputLogPanel::recordVisible(const HLogRecord& r, const std::string& needleLower) const {
+    const int v = (int)r.verbosity;
+    if (v <= 0 || v >= 5 || !showVerb_[v]) return false;
+    if (r.category < catHidden_.size() && catHidden_[r.category]) return false;
+    if (needleLower.empty()) return true;
+
+    auto icontains = [&](const std::string& hay) {
+        return std::search(hay.begin(), hay.end(), needleLower.begin(), needleLower.end(),
+                           [](char a, char b) {
+                               return std::tolower((unsigned char)a) == (unsigned char)b;
+                           }) != hay.end();
+    };
+    if (icontains(r.text)) return true;
+    return r.category < catNames_.size() && icontains(catNames_[r.category]);
+}
+
+void OutputLogPanel::rebuildRows() {
+    if (!rowsBox_) return;
+    const EditorUiKit& u = *ui_;
+    const HGeometry& g = rowsBox_->cachedGeometry();
+    rowsSig_ = { (int)(g.size.x / 4.f), (int)(g.size.y / 4.f) };
+
+    const float rowH = u.s(kRowH);
+    const int   cap  = std::max(4, g.size.y > rowH ? (int)(g.size.y / rowH) : 10);
+    rowCap_ = cap;
+
+    rowsBox_->clearSlots();
+    viewRows_.assign((size_t)cap, ViewRow{});
+
+    using HR = SHorizontalBox;
+    using VR = SVerticalBox;
+    for (int i = 0; i < cap; ++i) {
+        rowsBox_->addSlot(
+            HNew(HR)
+                ->addSlot(HNew(STextBlock)
+                              ->text(AttrStr([this, i]() -> std::string {
+                                  return i < (int)viewRows_.size() ? viewRows_[i].time : std::string();
+                              }))
+                              ->fontSize(u.s(11.f))->color({ 0.36f, 0.36f, 0.40f, 1.f })
+                              ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
+                          HR::ESizeRule::Fixed, u.s(kTimeW))
+                ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(8.f))
+                ->addSlot(HNew(STextBlock)
+                              ->text(AttrStr([this, i]() -> std::string {
+                                  return i < (int)viewRows_.size() ? viewRows_[i].category : std::string();
+                              }))
+                              ->fontSize(u.s(11.f))->color({ 0.50f, 0.58f, 0.70f, 1.f })
+                              ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                          HR::ESizeRule::Fixed, u.s(kCatW))
+                ->addSlot(HNew(STextBlock)
+                              ->text(AttrStr([this, i]() -> std::string {
+                                  return i < (int)viewRows_.size() ? viewRows_[i].text : std::string();
+                              }))
+                              ->fontSize(u.s(12.f))
+                              ->color(Attr<glm::vec4>([this, i] {
+                                  return i < (int)viewRows_.size() ? viewRows_[i].color : glm::vec4(1.f);
+                              }))
+                              ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                          HR::ESizeRule::Fill),
+            VR::ESizeRule::Fixed, rowH);
+    }
+    viewDirty_ = false;
+    refreshView();
+}
+
+void OutputLogPanel::refreshView() {
+    pullRecords();
+
+    std::string needle = search_;
+    for (char& c : needle) c = (char)std::tolower((unsigned char)c);
+    auto shown      = [&](size_t i) { return recordVisible(mirror_[i], needle); };
+    auto firstAfter = [&](uint64_t seq) {
+        return (size_t)(std::upper_bound(mirror_.begin(), mirror_.end(), seq,
+                                         [](uint64_t v, const HLogRecord& r) { return v < r.seq; })
+                        - mirror_.begin());
+    };
+
+    const size_t n   = mirror_.size();
+    const size_t lo  = firstAfter(clearedSeq_);
+    const int    cap = std::max(1, rowCap_);
+    size_t end = anchorSeq_ ? std::max(lo, firstAfter(anchorSeq_)) : n;
+
+    for (int k = scrollReq_; k > 0 && end > lo; ) { --end; if (shown(end)) --k; }
+    for (int k = -scrollReq_; k > 0 && end < n; ++end) if (shown(end)) --k;
+    scrollReq_ = 0;
+
+    std::vector<size_t> picked;
+    picked.reserve((size_t)cap);
+    for (size_t i = end; i > lo && (int)picked.size() < cap; ) { --i; if (shown(i)) picked.push_back(i); }
+    std::reverse(picked.begin(), picked.end());
+    for (; end < n && (int)picked.size() < cap; ++end) if (shown(end)) picked.push_back(end);
+
+    if (!anchorSeq_) pinSeq_ = mirrorSeq_;
+    size_t below = 0, fresh = 0;
+    for (size_t i = n; i > end; ) {
+        --i;
+        if (!shown(i)) continue;
+        ++below;
+        if (mirror_[i].seq > pinSeq_) ++fresh;
+    }
+    if (below == 0 || picked.empty()) {
+        anchorSeq_ = 0;
+        pinSeq_    = 0;
+        jumpText_.clear();
+    } else {
+        anchorSeq_ = mirror_[picked.back()].seq;
+        jumpText_  = fresh == 0 ? std::string("v Latest")
+                   : fresh == 1 ? std::string("v 1 new line")
+                                : "v " + std::to_string(fresh) + " new lines";
+    }
+
+    const EditorUiKit& u = *ui_;
+    const HGeometry& g   = rowsBox_ ? rowsBox_->cachedGeometry() : HGeometry{};
+    const float      msgW = g.size.x - u.s(kTimeW) - u.s(8.f) - u.s(kCatW) - u.s(4.f);
+
+    viewRows_.resize(picked.size());
+    for (size_t i = 0; i < picked.size(); ++i) {
+        const HLogRecord& r   = mirror_[picked[i]];
+        ViewRow&          row = viewRows_[i];
+
+        if (dumpMode_) {
+            row.time = "#.##";
+        } else {
+            char tb[32];
+            std::snprintf(tb, sizeof tb, "%.2f", (double)r.time);
+            row.time = tb;
+        }
+
+        const std::string& cat = r.category < catNames_.size() ? catNames_[r.category]
+                                                               : std::string("?");
+        row.category = u.ellipsizeText(cat, u.s(kCatW) - u.s(4.f), u.s(11.f));
+
+        std::string text;
+        text.reserve(r.text.size() + 10);
+        if (r.verbosity == ELogVerbosity::Error)   text += "Error: ";
+        if (r.verbosity == ELogVerbosity::Warning) text += "Warning: ";
+        if (dumpMode_) {
+            text += "#";
+        } else {
+            text += r.text;
+            text = EditorUiKit::toDisplayAscii(std::move(text));
+        }
+        row.text  = (msgW > u.s(24.f)) ? u.ellipsizeText(text, msgW, u.s(12.f)) : std::string();
+        row.color = EditorUiKit::logColor(r.verbosity);
+    }
+}
+
+void OutputLogPanel::addPopupCategoryRow(SVerticalBox& list, HLogCategoryState* st,
+                                         float rowH, const glm::vec4& btnN, const glm::vec4& btnH) {
+    using HR = SHorizontalBox;
+    using VR = SVerticalBox;
+    const EditorUiKit& u = *ui_;
+    const HPadding vpad{ 0.f, u.s(2.f) };
+    const uint16_t idx = st->index;
+    list.addSlot(HNew(HR)
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(8.f))
+        ->addSlot(HNew(SToggleButton)
+                      ->isActive([this, idx] { return !(idx < catHidden_.size() && catHidden_[idx]); })
+                      ->onClick([this, idx] {
+                          if (idx >= catHidden_.size()) return;
+                          setCategoryHidden(idx, !catHidden_[idx]);
+                          saveFilter();
+                      })
+                      ->normalColor(btnN)->hoveredColor(btnH)->activeColor({ 0.20f, 0.22f, 0.27f, 1.f })
+                      ->padding(HPadding{ u.s(6.f), u.s(1.f) })
+                      ->content(HNew(STextBlock)
+                          ->text(AttrStr([this, idx]() -> std::string {
+                              return (idx < catHidden_.size() && catHidden_[idx]) ? "off" : "on";
+                          }))
+                          ->fontSize(u.s(10.f))->color(EditorUiKit::kTextBody)
+                          ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center)),
+                  HR::ESizeRule::Fixed, u.s(36.f), vpad)
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(8.f))
+        ->addSlot(HNew(STextBlock)->text(EditorUiKit::toDisplayAscii(st->name))->fontSize(u.s(12.f))->color(EditorUiKit::kTextBody)
+                      ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                  HR::ESizeRule::Fill)
+        ->addSlot(HNew(STextBlock)
+                      ->text(AttrStr([this, idx]() -> std::string {
+                          return idx < catCounts_.size() ? std::to_string(catCounts_[idx]) : "0";
+                      }))
+                      ->fontSize(u.s(11.f))->color(EditorUiKit::kTextDim)
+                      ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
+                  HR::ESizeRule::Fixed, u.s(50.f))
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(12.f))
+        ->addSlot(HNew(SButton)
+                      ->normalColor(btnN)->hoveredColor(btnH)->pressedColor({ 0.12f, 0.12f, 0.15f, 1.f })
+                      ->padding(HPadding{ u.s(6.f), u.s(1.f) })->hAlign(EHAlign::Left)
+                      ->onClick([this, st] {
+                          const uint8_t next = (uint8_t)((st->level.load(std::memory_order_relaxed) + 1) % 5);
+                          st->level.store(next, std::memory_order_relaxed);
+                          saveLevels();
+                      })
+                      ->content(HNew(STextBlock)
+                          ->text(AttrStr([st]() -> std::string { return logVerbosityName(st->currentLevel()); }))
+                          ->fontSize(u.s(11.f))
+                          ->color(Attr<glm::vec4>([st] {
+                              return st->currentLevel() != st->defaultLevel
+                                  ? glm::vec4{ 0.45f, 0.72f, 1.00f, 1.f } : EditorUiKit::kTextBody;
+                          }))
+                          ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
+                  HR::ESizeRule::Fixed, u.s(80.f), vpad)
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(8.f)),
+        VR::ESizeRule::Fixed, rowH);
+}
+
+std::shared_ptr<SVerticalBox> OutputLogPanel::buildPopupList(const std::vector<HLogCategoryState*>& cats) {
+    using HR = SHorizontalBox;
+    using VR = SVerticalBox;
+    const EditorUiKit& u = *ui_;
+    const glm::vec4 btnN{ 0.16f, 0.16f, 0.19f, 1.f };
+    const glm::vec4 btnH{ 0.26f, 0.26f, 0.31f, 1.f };
+    const float rowH = u.s(22.f);
+
+    auto colText = [&](const char* label, EHAlign ha) {
+        return HNew(STextBlock)->text(label)->fontSize(u.s(10.f))->color(EditorUiKit::kTextDim)
+            ->hAlign(ha)->vAlign(EVAlign::Center);
+    };
+
+    auto list = HNew(VR);
+    list->addSlot(HNew(HR)
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(6.f))
+        ->addSlot(u.textButton("All", 11.f, EditorUiKit::kTextBody, HPadding{ 8.f, 2.f }, btnN, btnH, [this] {
+                      std::fill(catHidden_.begin(), catHidden_.end(), (char)0);
+                      hiddenNames_.clear();
+                      viewDirty_ = true;
+                      saveFilter();
+                  }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, u.s(4.f) })
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(4.f))
+        ->addSlot(u.textButton("None", 11.f, EditorUiKit::kTextBody, HPadding{ 8.f, 2.f }, btnN, btnH, [this] {
+                      for (uint16_t i = 0; i < (uint16_t)catHidden_.size(); ++i) setCategoryHidden(i, true);
+                      saveFilter();
+                  }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, u.s(4.f) })
+        ->addSlot(u.spacer(), HR::ESizeRule::Fill)
+        ->addSlot(u.textButton("Reset levels", 11.f, EditorUiKit::kTextBody, HPadding{ 8.f, 2.f }, btnN, btnH, [this] {
+                      HLog::resetLevels();
+                      saveLevels();
+                  }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, u.s(4.f) })
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(6.f)),
+        VR::ESizeRule::Fixed, u.s(28.f));
+    list->addSlot(HNew(HR)
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(8.f))
+        ->addSlot(colText("Show", EHAlign::Left),     HR::ESizeRule::Fixed, u.s(44.f))
+        ->addSlot(colText("Category", EHAlign::Left), HR::ESizeRule::Fill)
+        ->addSlot(colText("Count", EHAlign::Right),   HR::ESizeRule::Fixed, u.s(50.f))
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(12.f))
+        ->addSlot(colText("Capture", EHAlign::Left),  HR::ESizeRule::Fixed, u.s(80.f))
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(8.f)),
+        VR::ESizeRule::Fixed, u.s(20.f));
+
+    for (HLogCategoryState* st : cats)
+        addPopupCategoryRow(*list, st, rowH, btnN, btnH);
+    return list;
+}
+
+void OutputLogPanel::positionPopupPanel(const std::shared_ptr<HWidget>& panel,
+                                        const std::shared_ptr<HWidget>& absorber,
+                                        float panelW, float panelH) {
+    const EditorUiKit& u    = *ui_;
+    const HGeometry&   host = popupHost_->cachedGeometry();
+    const HGeometry&   btn  = catButton_->cachedGeometry();
+    const bool  up   = (btn.position.y + btn.size.y * 0.5f) > (host.position.y + host.size.y * 0.5f);
+    float       top  = up ? btn.position.y - panelH - u.s(2.f) : btn.position.y + btn.size.y + u.s(2.f);
+    const float minT = host.position.y + u.s(menuBarH_);
+    top = std::clamp(top, minT, std::max(minT, host.position.y + host.size.y - panelH));
+    const float left = std::clamp(btn.position.x, host.position.x,
+                                  std::max(host.position.x, host.position.x + host.size.x - panelW));
+
+    const HPadding at{ left - host.position.x, top - host.position.y, 0.f, 0.f };
+    auto ov = HNew(SOverlay);
+    ov->addSlot(absorber, EHAlign::Left, EVAlign::Top, at);
+    ov->addSlot(panel,    EHAlign::Left, EVAlign::Top, at);
+    popupPanel_ = panel;
+    popupHost_->content(ov);
+}
+
+void OutputLogPanel::rebuildPopup() {
+    if (!popupHost_) return;
+    popupPanel_.reset();
+    if (!popupOpen_ || !catButton_) {
+        popupOpen_ = false;
+        popupHost_->content(nullptr);
+        return;
+    }
+    syncCategories();
+
+    std::vector<HLogCategoryState*> cats = HLog::categories();
+    std::sort(cats.begin(), cats.end(), [](const HLogCategoryState* a, const HLogCategoryState* b) {
+        return a->name < b->name;
+    });
+
+    const EditorUiKit& u = *ui_;
+    const float rowH     = u.s(22.f);
+    const float panelW   = u.s(330.f);
+    const float headerH  = u.s(28.f) + u.s(20.f);
+    const float panelH   = headerH + rowH * (float)cats.size() + u.s(8.f);
+
+    auto panel = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
+        HNew(SBorder)
+            ->background({ 0.055f, 0.055f, 0.07f, 1.f })
+            ->borderColor({ 0.34f, 0.34f, 0.40f, 1.f })->borderThickness(1.f)
+            ->padding(HPadding{ 0.f, u.s(4.f) })
+            ->content(buildPopupList(cats)));
+    auto absorber = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
+        HNew(SBorder)->onWheel([](float) { return true; })->content(
+            HNew(SButton)->normalColor({ 0.f, 0.f, 0.f, 0.f })->hoveredColor({ 0.f, 0.f, 0.f, 0.f })
+                ->pressedColor({ 0.f, 0.f, 0.f, 0.f })->content(u.spacer())));
+
+    positionPopupPanel(panel, absorber, panelW, panelH);
+}

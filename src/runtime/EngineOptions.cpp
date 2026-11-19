@@ -68,6 +68,61 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (a == "--ssao")           o.ssao          = true;
         else if (a == "--no-ssao")        o.ssao          = false;
         else if (a == "--no-auto-lod")    o.autoLod       = false;
+        else if (a == "--hidden-window")  o.hiddenWindow  = true;
+        else if (a == "--ui-log-categories") o.uiLogCategories = true;
+        else if (a == "--ui-play")           o.uiPlay          = true;
+        else if (a == "--ui-local-space")    o.uiLocalSpace    = true;
+        else if (valueOf(a, "--window-size", v)) {
+            if (!parseSize(v, o.windowW, o.windowH)) unknown.push_back(a);
+        }
+        else if (valueOf(a, "--write-root", v)) {
+            if (!v.empty()) o.writeRoot = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-dump", v)) {
+            if (!v.empty()) o.uiDumpPath = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-select", v)) {
+            if (!v.empty()) o.uiSelect = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-open-menu", v)) {
+            if (!v.empty()) o.uiOpenMenu = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-bottom-tab", v)) {
+            if (!v.empty()) o.uiBottomTab = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-outliner-search", v)) {
+            if (!v.empty()) o.uiOutlinerSearch = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-rename", v)) {
+            if (!v.empty()) o.uiRename = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-outliner-collapse", v)) {
+            if (!v.empty()) o.uiOutlinerCollapse = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-layout", v)) {
+            if (!v.empty()) o.uiLayout = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--viewport-dump", v)) {
+            if (!v.empty()) o.viewportDumpPath = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-gizmo-mode", v)) {
+            if (!v.empty()) o.uiGizmoMode = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-pick", v)) {
+            if (!v.empty()) o.uiPick = v;
+            else unknown.push_back(a);
+        }
         else if (valueOf(a, "--synthetic-eyes", v)) {
             if (parseSize(v, o.syntheticEyeW, o.syntheticEyeH)) o.syntheticEyes = true;
             else unknown.push_back(a);

@@ -342,6 +342,20 @@ set(RUNTIME_SOURCES
 )
 set(EDITOR_SOURCES
     src/editor/EditorApp.cpp
+    src/editor/EditorApp_dump.cpp
+    src/editor/EditorUiKit.cpp
+    src/editor/EditorViewportController.cpp
+    src/editor/dock/DockTree.cpp
+    src/editor/EditorDock.cpp
+    src/editor/EditorMenus.cpp
+    src/editor/EditorChromePanels.cpp
+    src/editor/ViewportToolbar.cpp
+    src/editor/TextInputController.cpp
+    src/editor/OutlinerPanel.cpp
+    src/editor/DetailsPanel.cpp
+    src/editor/ContentBrowserPanel.cpp
+    src/editor/GpuStatsPanel.cpp
+    src/editor/OutputLogPanel.cpp
     src/editor/ComponentVisualizers.cpp
     src/editor/EditorApp_scene.cpp
     src/editor/EditorApp_edit.cpp
@@ -947,6 +961,16 @@ if(NOT ANDROID)
         set_target_properties(HarukaEditCmdTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    add_executable(HarukaDockTest
+        tests/DockTreeTest.cpp
+        src/editor/dock/DockTree.cpp
+    )
+    target_include_directories(HarukaDockTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaDockTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaDockTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 액터 생성 · 삭제 Undo 테스트 -----------------------------------------
     # 서브트리를 떠 두고 원래 ID · 원래 부모로 되살리는지, World 의 ID 순서와 다음 ID 가 지켜지는지,
     # 커맨드 스택과 purge 사이의 규칙을 검산합니다. 씬 직렬화 대신 테스트용 글 형식을 넘깁니다.
@@ -1124,7 +1148,7 @@ if(NOT ANDROID)
     # 임시 폴더의 경로를 std::string 으로 넘기는데, 매니페스트가 없으면 CP949 바이트가 되어 가상 파일 시스템이 찾지 못합니다.
     set(HARUKA_TESTS HarukaPakTest HarukaGltfTest HarukaGeometryTest HarukaActorTest HarukaCommandTest HarukaActorUndoTest
         HarukaLogTest HarukaAudioTest HarukaSlateTest HarukaPhysicsTest HarukaStereoTest HarukaInputTest HarukaBatchTest
-        HarukaRenderExtTest HarukaSceneTest HarukaLightTest HarukaAssetCacheTest HarukaSceneDocTest HarukaEditCmdTest
+        HarukaRenderExtTest HarukaSceneTest HarukaLightTest HarukaAssetCacheTest HarukaSceneDocTest HarukaEditCmdTest HarukaDockTest
         HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest HarukaMathTest HarukaArchTest)
     if(WIN32)
         list(APPEND HARUKA_TESTS HarukaVkImportTest)
@@ -1157,6 +1181,7 @@ if(NOT ANDROID)
     add_test(NAME asset_cache          COMMAND HarukaAssetCacheTest)
     add_test(NAME scene_document       COMMAND HarukaSceneDocTest)
     add_test(NAME editor_commands      COMMAND HarukaEditCmdTest)
+add_test(NAME dock_tree            COMMAND HarukaDockTest)
     add_test(NAME vulkan_baseline      COMMAND HarukaVulkanBaselineTest)
     add_test(NAME barrier_compat       COMMAND HarukaBarrierTest)
     add_test(NAME memory_types         COMMAND HarukaMemoryTest)

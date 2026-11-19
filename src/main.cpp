@@ -82,7 +82,11 @@ int main(int argc, char** argv) {
     // 앞단(에디터 또는 게임)을 먼저 정합니다. 쓰기 루트(설정 · 로그 · 캐시를 둘 폴더)가 앞단 정책에 달려 있어,
     // 로그를 열기 전에 알아야 합니다(2026-10-19).
     std::unique_ptr<IEngineFrontend> frontend = createEngineFrontend();
-    const bool writeRootOk = happ::initWriteRoot(frontend->policy().userDataFolder);
+    std::vector<std::string> unknownArgs;
+    const EngineOptions options = hopt::parse(std::vector<std::string>(argv + (argc > 0 ? 1 : 0), argv + argc), unknownArgs);
+    const bool writeRootOk = !options.writeRoot.empty()
+        ? happ::setWriteRoot(options.writeRoot)
+        : happ::initWriteRoot(frontend->policy().userDataFolder);
 
     // 표준 출력 핸들이 없어 파일로 돌렸는지입니다(창 없는 실행 --headless 와는 다른 뜻).
     const bool stdioRedirected = redirectStdioIfHeadless();   // setvbuf 보다 먼저. 새 스트림에 적용되어야 한다.
@@ -116,8 +120,6 @@ int main(int argc, char** argv) {
         }
     } logGuard;
 
-    std::vector<std::string> unknownArgs;
-    const EngineOptions options = hopt::parse(std::vector<std::string>(argv + (argc > 0 ? 1 : 0), argv + argc), unknownArgs);
     for (const auto& a : unknownArgs)
         HLOG(LogEngine, Warning) << "Unknown command line option ignored: " << a;
 

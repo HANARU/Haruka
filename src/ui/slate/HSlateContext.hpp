@@ -7,6 +7,7 @@
 #include <cstdint>
 
 struct UIVertex { glm::vec2 pos, uv; glm::vec4 color; };
+struct HDrawElement;
 
 struct HSlateDrawList {
     std::vector<UIVertex> vertices;
@@ -62,6 +63,8 @@ public:
     bool   buildDrawList(glm::vec2 size, HFontAtlas& fonts,
                          VkImageView whiteView, uint32_t maxVerts,
                          HSlateDrawList& out);
+    // S6-0: 배치 후 paint() 를 실행해 정렬된 HDrawElement 목록만 수집합니다.
+    bool   collectElements(glm::vec2 size, HFontAtlas* fonts, std::vector<HDrawElement>& out);
 
 private:
     std::shared_ptr<HWidget> root_;

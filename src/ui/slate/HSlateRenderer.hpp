@@ -60,6 +60,8 @@ public:
     bool buildDrawList(glm::vec2 size, VkImageView whiteView, HSlateDrawList& out) {
         return ctx_.buildDrawList(size, fonts_, whiteView, kMaxVerts, out);
     }
+    // S6-0: 에디터 UI HDrawElement 목록을 텍스트 파일로 덤프합니다.
+    bool dumpElements(glm::vec2 size, const std::string& path);
     static constexpr uint32_t maxVerts() { return kMaxVerts; }
 
     // 슬롯 정점 오프셋을 0 으로 돌립니다. 한 프레임에 에디터 오버레이와 패널 여럿이 같은 슬롯 버퍼에
