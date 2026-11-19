@@ -39,6 +39,7 @@
 | [Hand_Grasp_Design.md](Hand_Grasp_Design.md) | 손 쥐기(2026-11-07, A · B 단계 구현, 헤드셋 확인 대기): 조사 요약, 혼합형 결정(자동 맞춤 + 지정 자세), 스키닝 · OpenXR 26관절 손 뼈대 · 컨트롤러 손가락 · 볼록 껍질 충돌체 · 자동 맞춤의 단계별 설계, A · B 단계 결과 |
 | [Text_System.md](Text_System.md) | 글자 체계(2026-11-19): 유니코드 입력 · 편집 칸, Windows IME, 표시 글 `HText`(번역 · 서식 · 숫자), 글꼴 대체 사슬 · 아틀라스 페이지. 완료 조건 체크리스트와 결과 |
 | [Object_References.md](Object_References.md) | 참조 체계(2026-11-19): 액터 고유 ID(GUID) · 액터 참조 `HActorRef` · 복제 · 프리팹의 GUID 정책, 에셋 참조 색인 · 끊긴 참조 검사 · 참조를 고치며 옮기기. 체크리스트와 결과 |
+| [Crash_Reporting.md](Crash_Reporting.md) | 크래시 보고 · 검사 매크로(2026-11-19): `HCHECK` · `HENSURE` · `HCHECK_SLOW`, Windows 예외 필터 · 미니덤프(도우미 스레드), Android 시그널 보고서, Release PDB, `--debug-crash`. 체크리스트와 결과 |
 | [Math_Reinforcement.md](Math_Reinforcement.md) | 수학 보강(2026-11-17): 조사 요약, 적용한 것(던지기 속도 · 법선 · PCF 4탭 · 화면 크기 LOD · 연속 충돌 · 볼록 · 메시 충돌체 · 소리 가상화 · 최대 거리 밖 무음), 남긴 것 |
 | [Core_Stabilization_Spec.md](Core_Stabilization_Spec.md) | 결함 심층 분석 + 마스터 체크리스트(정본) |
 | [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) | 결함 작업 지시서(정본, Stabilization 과 상태 일치) |

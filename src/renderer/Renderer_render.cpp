@@ -21,7 +21,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
-#include <cassert>
+#include "../core/HCheck.hpp"
 #include <random>
 #include <functional>
 
@@ -645,7 +645,7 @@ Renderer::RenderView Renderer::extractRenderView(const RenderSceneInput& scene, 
     // 그래도 nullptr 이 나오면 GeometryPass 가 그 항목을 세 서브패스 모두에서 건너뛴다.
     // 예전에는 머티리얼 푸시만 건너뛰고 그려서, 직전 메시의 텍스처로 그려졌다(DEF-28).
     auto materialForRow = [&v](uint32_t row) -> const MaterialHandle* {
-        assert(row < v.materialRows.size() && "firstInstance가 materialRows 범위를 벗어났습니다");
+        HCHECK_SLOW(row < v.materialRows.size() && "firstInstance가 materialRows 범위를 벗어났습니다");
         return row < v.materialRows.size() ? v.materialRows[row] : nullptr;
     };
     auto toItems = [&](const std::vector<GpuDrawCmd>& draws,

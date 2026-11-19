@@ -3,7 +3,7 @@
 #include "../MaterialHandle.hpp"
 #include "../SpecConstants.hpp"
 #include "../GpuScene.hpp"
-#include <cassert>
+#include "../../core/HCheck.hpp"
 #include <cstring>
 #include <iterator>
 #include <stdexcept>
@@ -721,7 +721,7 @@ void GeometryPass::record(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewI
 // 한 번만 기록하고 GPU 가 두 층에 그립니다. 선 · 기즈모 · 패널도 두 눈에 함께 그려집니다.
 void GeometryPass::recordMultiview(VkCommandBuffer cmd, uint32_t frameIdx, const Inputs& in,
                                    VkQueryPool tsPool, uint32_t tsQueryAfterMain) {
-    assert(multiviewReady() && "recordMultiview needs two scene layers and the multiview pipelines");
+    HCHECK_MSG(multiviewReady(), "recordMultiview needs two scene layers and the multiview pipelines");
     recordImpl(cmd, frameIdx, mvPass_, mvFramebufs_[frameIdx], mv_, 0, in, tsPool, tsQueryAfterMain);
 }
 
@@ -809,7 +809,7 @@ void GeometryPass::recordImpl(VkCommandBuffer cmd, uint32_t frameIdx, VkRenderPa
     if (in.opaqueItems) {
         bool boundMirrored = false;
         for (const auto& item : *in.opaqueItems) {
-            assert(item.material && "DrawItem without material");
+            HCHECK_SLOW(item.material && "DrawItem without material");
             if (!item.material) continue;
             bindFor(boundMirrored, item.mirrored, ps.depth, ps.depthMirrored);
             bindIndexFor(item.index16);
@@ -879,7 +879,7 @@ void GeometryPass::recordImpl(VkCommandBuffer cmd, uint32_t frameIdx, VkRenderPa
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, normal);
             bool boundMirrored = false;
             for (const auto& item : *in.transparentItems) {
-                assert(item.material && "DrawItem without material");
+                HCHECK_SLOW(item.material && "DrawItem without material");
                 if (!item.material) continue;
                 bindFor(boundMirrored, item.mirrored, normal, flipped);
                 bindIndexFor(item.index16);

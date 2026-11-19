@@ -2,7 +2,7 @@
 #include "MemoryTypeSelect.hpp"
 #include <stdexcept>
 #include <algorithm>
-#include <cassert>
+#include "../core/HCheck.hpp"
 #include <string>
 #include "../core/HLog.hpp"
 
@@ -75,7 +75,7 @@ void HarukaAllocator::init(VkDevice dev, VkPhysicalDevice physDev, VkDeviceSize 
     VkPhysicalDeviceProperties devProps;
     vkGetPhysicalDeviceProperties(physDev, &devProps);
     bigGranularity = devProps.limits.bufferImageGranularity;
-    assert(heapSize == kHeapTarget);   // Zone 오프셋은 1GB 기준 상수입니다
+    HCHECK_MSG(heapSize == kHeapTarget, "zone offsets assume a 1 GB heap");   // Zone 오프셋은 1GB 기준 상수입니다
     freeListB.push_back({ kZoneBOffset, kZoneBSize });
     HLOG(LogMemory, Log) << "Zone B ready: "
                          << kZoneBSize / (1024 * 1024) << "MB FreeList"
@@ -227,7 +227,7 @@ VkResult HarukaAllocator::bind(VkBuffer buf, const HarukaAllocation& alloc) {
 }
 
 VkResult HarukaAllocator::bind(VkImage img, HarukaAllocation& alloc) {
-    assert(alloc.zone != AllocZone::Dedicated);   // allocLazyImage 가 이미 바인드함
+    HCHECK(alloc.zone != AllocZone::Dedicated);   // allocLazyImage 가 이미 바인드함
     VkMemoryRequirements reqs;
     vkGetImageMemoryRequirements(device, img, &reqs);
 

@@ -58,6 +58,9 @@ struct EngineOptions {
     bool        uiLogCategories = false; // --ui-log-categories : 첫 프레임 뒤 로그 Categories 팝업 열기(에디터 전용)
     std::string uiOutlinerSearch;        // --ui-outliner-search=<text> : 아웃라이너 검색어(에디터 전용)
     std::string uiRename;                // --ui-rename=<actor> : 액터 이름 바꾸기 시작(에디터 전용)
+    // --debug-crash=segv|stack|purecall|abort|terminate|throw|check|ensure : 몇 프레임 뒤 일부러 크래시(크래시 보고 D5,
+    // Docs/Crash_Reporting.md). 크래시 보고서 확인용입니다.
+    std::string debugCrash;
     std::string uiAssetActions;          // --ui-asset-actions=<logical path> : 에셋 대화상자 열기(참조 체계 A-5, 에디터 전용)
     bool        uiActorPicker = false;   // --ui-actor-picker : 선택한 액터의 첫 액터 참조 칸의 고르기 목록 열기(R-7, 에디터 전용)
     // --ui-move-asset=<from>|<to> : 첫 프레임 뒤 에셋을 옮김(참조 체계 A-5, 에디터 전용). 프로젝트 파일을 실제로 옮기므로
@@ -96,6 +99,7 @@ inline constexpr int kExitOk         = 0;
 inline constexpr int kExitTimeout    = 2;   // 시간 안에 원한 프레임 수를 못 그림
 inline constexpr int kExitValidation = 3;   // 검증 레이어 오류(Debug 빌드)
 inline constexpr int kExitBlank      = 4;   // 저장한 화면이 비어 있음
+inline constexpr int kExitEnsure     = 5;   // HENSURE 가 실패함(크래시 보고 D5, core/HCheck.hpp)
 
 // 자동 확인 실행인지(프레임 수 · 시간 제한 · 캡처 중 하나). 이때만 종료 코드가 결과를 알립니다.
 inline bool isAutomated(const EngineOptions& o) {

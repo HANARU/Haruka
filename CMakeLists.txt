@@ -10,6 +10,16 @@ option(HARUKA_PACKAGE_GAME  "Enable CPack Windows ZIP packaging for Samples" ${P
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Release 도 PDB(디버그 기호)를 만듭니다(크래시 보고 D4, Docs/Crash_Reporting.md). 최적화는 그대로이고(/OPT:REF · /OPT:ICF 를
+# 다시 켬), 실행 파일에는 PDB 파일 이름만 넣어(MSBuild 의 $(TargetName), CMake 가 %_PDB% 의 % 를 두 겹으로 써서 쓰지 않음) 빌드 PC 의 경로가 배포 파일에 남지 않게 합니다. PDB 는 배포 ZIP 에 넣지 않습니다.
+if(MSVC)
+    string(APPEND CMAKE_CXX_FLAGS_RELEASE " /Zi")
+    string(APPEND CMAKE_C_FLAGS_RELEASE " /Zi")
+    foreach(kind EXE SHARED MODULE)
+        string(APPEND CMAKE_${kind}_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF /PDBALTPATH:$(TargetName).pdb")
+    endforeach()
+endif()
+
 if(MSVC)
     # Force English compiler diagnostics (suppress Korean locale output)
     set(ENV{VSLANG} 1033)
@@ -323,6 +333,7 @@ set(RUNTIME_SOURCES
     src/core/HLog.cpp
     src/core/HText.cpp
     src/core/AssetRefs.cpp
+    src/core/CrashHandler.cpp
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp
     src/components/RenderExtract.cpp
@@ -1012,6 +1023,19 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaRefTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 크래시 보고 테스트(Docs/Crash_Reporting.md) ---------------------------
+    # 자기 자신을 자식 프로세스로 띄워 종류마다 일부러 크래시시키고, 보고서 폴더 · crash.txt · crash.dmp · 다음 실행 알림 · 보관 수를 봅니다.
+    add_executable(HarukaCrashTest
+        tests/CrashTest.cpp
+        src/core/CrashHandler.cpp
+        src/core/HLog.cpp
+    )
+    target_include_directories(HarukaCrashTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaCrashTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaCrashTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 오디오 테스트 ------------------------------------------------------
     # 출력 장치 없는 miniaudio 엔진(noDevice)에서 출력 샘플을 직접 당겨, 청취자 방향·거리
     # 감쇠·일시정지·비활성 정지·OGG 디코딩을 귀가 아니라 숫자로 검산합니다. Vulkan 도 창도
@@ -1186,6 +1210,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME log_category         COMMAND HarukaLogTest)
     add_test(NAME text_system          COMMAND HarukaTextTest)
     add_test(NAME object_refs          COMMAND HarukaRefTest)
+    add_test(NAME crash_reports        COMMAND HarukaCrashTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)

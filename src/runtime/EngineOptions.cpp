@@ -104,6 +104,13 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (!v.empty()) o.uiRename = v;
             else unknown.push_back(a);
         }
+        else if (valueOf(a, "--debug-crash", v)) {
+            static const char* const kKinds[] = { "segv", "stack", "purecall", "abort", "terminate", "throw", "check", "ensure" };
+            bool known = false;
+            for (const char* k : kKinds) known = known || v == k;
+            if (known) o.debugCrash = v;
+            else unknown.push_back(a);
+        }
         else if (valueOf(a, "--ui-asset-actions", v)) {
             if (!v.empty()) o.uiAssetActions = v;
             else unknown.push_back(a);

@@ -33,6 +33,7 @@
 #include "runtime/EngineOptions.hpp"
 #include "core/FileUtil.hpp"
 #include "core/HLog.hpp"
+#include "core/CrashHandler.hpp"
 #include "runtime/IEngineFrontend.hpp"
 
 namespace {
@@ -120,6 +121,9 @@ extern "C" void android_main(android_app* app) {
 
     std::unique_ptr<IEngineFrontend> frontend = createEngineFrontend();
     happ::initWriteRoot(frontend->policy().userDataFolder);   // 폴더는 위에서 정함(아무것도 하지 않음)
+    // 크래시 처리기(크래시 보고 C-5): 시그널을 대체 스택에서 받아 <외부 파일 폴더>/Logs/Crashes 에 글 보고서를 쓰고 tombstone 도 남깁니다.
+    const std::filesystem::path crashRoot = happ::inWriteRoot("Logs/Crashes");
+    const bool crashOk = hcrash::install({ crashRoot, happ::exeStem(), 10 });
     const std::string logPath = happ::inWriteRoot("Logs/" + happ::exeStem() + ".log").string();
     const bool logFileOk = HLog::openFileSink(logPath);
     std::string levelsWhy;
@@ -129,6 +133,10 @@ extern "C" void android_main(android_app* app) {
     HLOG(LogEngine, Log) << "Android: write folder " << happ::writeRoot().generic_string()
                          << (app->activity->obbPath ? std::string(", OBB folder ") + app->activity->obbPath : std::string());
     if (!logFileOk) { HLOG(LogEngine, Warning) << "Could not open the log file " << logPath << "; logging to logcat only"; }
+    if (!crashOk) { HLOG(LogEngine, Warning) << "Could not install the crash handler; a crash will leave only the tombstone"; }
+    if (const std::filesystem::path prev = hcrash::takePending(crashRoot); !prev.empty()) {
+        HLOG(LogEngine, Warning) << "The previous run stopped with a crash; report: " << prev.generic_string();
+    }
 
     pumpUntilReady(app, state, 3000);
 
@@ -146,6 +154,8 @@ extern "C" void android_main(android_app* app) {
         exitCode = engine.run();
     } catch (const std::exception& e) {
         HLOG(LogEngine, Error) << "FATAL: " << e.what();
+        const std::filesystem::path report = hcrash::writeReport(std::string("FATAL: ") + e.what());
+        if (!report.empty()) { HLOG(LogEngine, Error) << "Crash report: " << report.generic_string(); }
         exitCode = 1;
     }
     HLOG(LogEngine, Log) << "Android: engine finished (exit code " << exitCode << ")";

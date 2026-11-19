@@ -100,6 +100,9 @@ void submit(const HLogCategory& cat, ELogVerbosity v, std::string_view text);
 uint64_t latestSeq();
 // afterSeq 보다 뒤의 레코드를 out 에 덧붙입니다. 반환값은 이미 링에서 밀려나 주지 못한 개수입니다.
 size_t   copySince(uint64_t afterSeq, std::vector<HLogRecord>& out);
+// 크래시 보고서용(Docs/Crash_Reporting.md D3): 가장 최근 maxCount 개를 "경과초 [카테고리] 수준: 본문" 줄로 out 에 덧붙입니다. 잠금을 기다리지
+// 않고 몇 번만 시도하므로, 로그를 쓰던 스레드가 멈춘 채 크래시해도 막히지 않습니다. 잠금을 얻지 못하면 false.
+bool     tryRecentLines(size_t maxCount, std::vector<std::string>& out);
 // 심각도가 maxVerbosity 이하인 가장 최근 레코드. 상태바가 Verbose 에 덮이지 않게 하는 용도입니다.
 bool     latestAtMost(ELogVerbosity maxVerbosity, HLogRecord& out);
 

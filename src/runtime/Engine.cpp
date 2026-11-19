@@ -8,6 +8,7 @@
 #include "../platform/IWindow.hpp"
 #include "../xr/XrSystem.hpp"
 #include "../core/HLog.hpp"
+#include "../core/CrashHandler.hpp"
 #include "IGameModule.hpp"
 #include "../scene/ComponentRegistry.hpp"
 #include "../core/EngineSettings.hpp"
@@ -707,6 +708,11 @@ void Engine::renderFrame(FrameState& f) {
 // 9. 루프 끝: 자동 실행 끝내기 · FPS 제목 · 프레임 통계 · 최소화 중 쉼.
 void Engine::endLoop(FrameState& f, LoopState& loop) {
     IWindow& win = *window_;
+    // 개발 스위치(크래시 보고 D5): 세 프레임을 그린 뒤 한 번 일으킵니다. throw 는 main 이 잡아 보고서를 쓰고, ensure 는 계속 돕니다.
+    if (!options_.debugCrash.empty() && !debugCrashDone_ && drawnFrames_ >= 3) {
+        debugCrashDone_ = true;
+        hcrash::debugCrash(options_.debugCrash);
+    }
     if (!loop.closeAsked && options_.frames > 0 && drawnFrames_ >= options_.frames) {
         loop.closeAsked = true;
         win.setShouldClose(true);

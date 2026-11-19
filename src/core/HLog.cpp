@@ -10,6 +10,8 @@
 #include <map>
 #include <mutex>
 #include <streambuf>
+#include <thread>
+#include <algorithm>
 #include <unordered_map>
 
 #ifdef __ANDROID__
@@ -268,6 +270,26 @@ void HLog::submit(const HLogCategory& cat, ELogVerbosity v, std::string_view tex
 // ── 소비 ──────────────────────────────────────────────────────────────────────
 uint64_t HLog::latestSeq() {
     return sink().latest.load(std::memory_order_relaxed);
+}
+
+bool HLog::tryRecentLines(size_t maxCount, std::vector<std::string>& out) {
+    Sink& k = sink();
+    std::unique_lock<std::mutex> lock(k.mtx, std::defer_lock);
+    for (int i = 0; i < 50 && !lock.try_lock(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(4));
+    if (!lock.owns_lock()) return false;
+    // 카테고리 이름은 레지스트리 잠금이 필요합니다. 얻지 못하면(등록 중에 크래시) 번호로 적습니다.
+    Registry& reg = registry();
+    std::unique_lock<std::mutex> regLock(reg.mtx, std::try_to_lock);
+    const size_t n = std::min(maxCount, k.count);
+    for (size_t i = n; i > 0; --i) {
+        const HLogRecord& r = k.ring[(k.head + kCapacity - i) % kCapacity];
+        std::string cat = "#" + std::to_string(r.category);
+        if (regLock.owns_lock() && r.category < reg.states.size()) cat = reg.states[r.category]->name;
+        char head[48];
+        std::snprintf(head, sizeof(head), "%8.2f ", (double)r.time);
+        out.push_back(head + ("[" + cat + "] ") + logVerbosityName(r.verbosity) + ": " + r.text);
+    }
+    return true;
 }
 
 size_t HLog::copySince(uint64_t afterSeq, std::vector<HLogRecord>& out) {

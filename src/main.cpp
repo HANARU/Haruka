@@ -1,6 +1,7 @@
 #include "runtime/Engine.hpp"
 #include "runtime/EngineOptions.hpp"
 #include "core/HLog.hpp"
+#include "core/CrashHandler.hpp"
 #include "core/AppPaths.hpp"
 #include "core/ProjectDescriptor.hpp"
 
@@ -117,6 +118,11 @@ int main(int argc, char** argv) {
             writeRootOk = happ::initWriteRoot(false);
     }
 
+    // 크래시 처리기는 쓰기 위치가 정해지자마자, 로그보다 먼저 설치합니다(크래시 보고 C-5, Docs/Crash_Reporting.md). 보고서는
+    // <쓰기 루트>/Logs/Crashes/<시각>_<실행 파일>/ 에 남습니다.
+    const std::filesystem::path crashRoot = happ::inWriteRoot("Logs/Crashes");
+    const bool crashOk = hcrash::install({ crashRoot, happ::exeStem(), 10 });
+
     // 표준 출력 핸들이 없어 파일로 돌렸는지입니다(창 없는 실행 --headless 와는 다른 뜻).
     const bool stdioRedirected = redirectStdioIfHeadless();   // setvbuf 보다 먼저. 새 스트림에 적용되어야 한다.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -151,6 +157,10 @@ int main(int argc, char** argv) {
 
     for (const auto& a : unknownArgs)
         HLOG(LogEngine, Warning) << "Unknown command line option ignored: " << a;
+    if (!crashOk)
+        HLOG(LogEngine, Warning) << "Could not install the crash handler; a crash will leave no report";
+    if (const std::filesystem::path prev = hcrash::takePending(crashRoot); !prev.empty())
+        HLOG(LogEngine, Warning) << "The previous run stopped with a crash; report: " << prev.generic_string();
 
     int exitCode = EXIT_SUCCESS;
     uint32_t errorsBeforeTeardown = 0;
@@ -160,6 +170,9 @@ int main(int argc, char** argv) {
         errorsBeforeTeardown = Engine::validationErrorCount();
     } catch (const std::exception& e) {
         HLOG(LogEngine, Error) << "FATAL: " << e.what();
+        // 잡은 예외도 보고서를 남깁니다(콜 스택은 잡은 자리, 최근 로그가 원인을 보여 줌).
+        const std::filesystem::path report = hcrash::writeReport(std::string("FATAL: ") + e.what());
+        if (!report.empty()) HLOG(LogEngine, Error) << "Crash report: " << report.generic_string();
         return EXIT_FAILURE;
     }
     // 정리(장치 · 인스턴스 파괴) 중에 난 검증 오류(지우지 않은 객체 등)도 자동 실행의 실패로 봅니다. 요약 줄은 정리 전에 남으므로
@@ -169,6 +182,12 @@ int main(int argc, char** argv) {
                                << Engine::validationErrorCount() - errorsBeforeTeardown << "; exit code "
                                << hopt::kExitValidation;
         exitCode = hopt::kExitValidation;
+    }
+
+    // HENSURE 실패는 계속 돌지만 자동 실행에서는 실패로 알립니다(크래시 보고 C-7).
+    if (exitCode == hopt::kExitOk && hopt::isAutomated(options) && hcrash::ensureCount() > 0) {
+        HLOG(LogEngine, Error) << "Ensure failures: " << hcrash::ensureCount() << "; exit code " << hopt::kExitEnsure;
+        exitCode = hopt::kExitEnsure;
     }
 
     HLOG(LogEngine, Log) << "Clean exit.";
