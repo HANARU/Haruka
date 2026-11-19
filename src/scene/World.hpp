@@ -5,6 +5,7 @@
 #include <typeindex>
 #include <unordered_map>
 #include "Actor.hpp"
+#include "TweenSystem.hpp"
 #include "../core/HDelegate.hpp"
 
 class World {
@@ -29,6 +30,10 @@ public:
     // 옮깁니다. 그래야 되살린 뒤 저장해도 파일 안의 순서와 아웃라이너 자리가 지우기 전과 같습니다.
     // 틱 중에는 부르지 마십시오(actors 를 순회하는 중일 수 있음).
     bool   reassignId(Actor* actor, uint64_t newId);
+
+    // 트윈(애니메이션 A7): 월드 틱 끝에 진행하고, 액터를 지우면 그 액터의 트윈도 지웁니다.
+    TweenSystem&       tweens()       { return tweens_; }
+    const TweenSystem& tweens() const { return tweens_; }
 
     // Fired after an actor is added / before it is removed
     HEvent<Actor*> onActorSpawned;
@@ -78,6 +83,7 @@ public:
 private:
     // 액터보다 먼저 선언합니다(나중에 파괴). 액터를 지우는 중에 컴포넌트가 서비스를 찾을 수 있습니다(리그의 캐릭터 해제 등).
     std::unordered_map<std::type_index, void*> services_;
+    TweenSystem tweens_;
 
     struct TypeListBase {
         virtual ~TypeListBase() = default;

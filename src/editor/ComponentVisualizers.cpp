@@ -8,6 +8,7 @@
 #include "../components/HeightFogComponent.hpp"
 #include "../components/LightComponent.hpp"
 #include "../components/ReflectionCaptureComponent.hpp"
+#include "../components/SkinnedMeshComponent.hpp"
 #include "../audio/ReverbZoneComponent.hpp"
 #include "../physics/RigidBodyComponent.hpp"
 #include <glm/gtc/matrix_transform.hpp>
@@ -135,6 +136,21 @@ void drawRigidBody(const RigidBodyComponent& c) {
     }
 }
 
+// 뼈대(애니메이션 A6-2): 관절마다 부모 관절까지 선, 관절 자리에 작은 원. 지금 자세(jointGlobals)를 액터 월드 행렬로 옮깁니다.
+void drawSkeleton(const SkinnedMeshComponent& c) {
+    if (!c.owner || !c.hasSkin()) return;
+    const SkinSourceData& s = *c.skin();
+    const std::vector<glm::mat4>& g = c.jointGlobals();
+    const glm::mat4 w = c.owner->worldMatrix();
+    const glm::vec4 col{ 1.f, 0.55f, 0.85f, 1.f };
+    for (size_t j = 0; j < s.joints.size() && j < g.size(); ++j) {
+        const glm::vec3 p = glm::vec3(w * g[j][3]);
+        const int parent = s.joints[j].parent;
+        if (parent >= 0 && parent < (int)g.size()) hdebug::line(glm::vec3(w * g[(size_t)parent][3]), p, col);
+        hdebug::circle(p, glm::normalize(glm::vec3(w[1]) + glm::vec3(1e-6f)), 0.015f, col, 8);
+    }
+}
+
 } // namespace
 
 ComponentVisualizers::ComponentVisualizers() {
@@ -145,4 +161,5 @@ ComponentVisualizers::ComponentVisualizers() {
     add<ReflectionCaptureComponent>(iconOf({ 0.8f, 0.85f, 1.f, 1.f }, 6), drawReflectionCapture);
     add<ReverbZoneComponent>(iconOf({ 0.45f, 0.7f, 1.f, 1.f }, 4), drawReverbZone);
     add<RigidBodyComponent>(ComponentVisualizer{}, drawRigidBody);   // 아이콘 없음(메시가 잡힘)
+    add<SkinnedMeshComponent>(ComponentVisualizer{}, drawSkeleton);   // 아이콘 없음(메시가 잡힘), 2026-11-20
 }

@@ -1,6 +1,8 @@
 #pragma once
 #include "../scene/Component.hpp"
 #include "../renderer/RenderSceneInput.hpp"
+#include "../assets/Skin.hpp"
+#include "../geometry/MeshSource.hpp"   // morphed_ 정점 배열
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -12,15 +14,13 @@
 
 struct MeshHandle;
 struct MaterialHandle;
-struct MeshSourceVertex;
-struct SkinSourceData;
 
 // 뼈대로 움직이는 메시(2026-11-07, Docs/Hand_Grasp_Design.md 4-1). glTF 의 skin 이 있는 모델을 그리고, 관절마다 로컬 회전을
 // 바꿔 자세를 정합니다. 매 프레임 렌더러가 펜스를 기다린 뒤 지금 자세로 CPU 스키닝해 메가 버퍼의 그 프레임 구간에 직접
 // 씁니다(GpuScene::skinArena). 깊이 · 섀도 · 색 패스와 셰이더는 그대로입니다.
 //
-// 자세는 쉬는 자세(모델의 관절 로컬 TRS)에서 관절별 로컬 회전만 바꿉니다. 이동 · 배율은 쉬는 자세 그대로입니다. 손은
-// HandPoseComponent 가 이 컴포넌트의 관절 회전을 정합니다.
+// 자세는 관절마다 로컬 TRS 입니다(2026-11-20 애니메이션 D2). 손은 HandPoseComponent 가 관절 회전만 정하고, 애니메이션은
+// AnimationComponent 가 클립을 샘플링해 setPose 로 이동 · 회전 · 배율을 모두 정합니다.
 class SkinnedMeshComponent : public Component, public IRenderSkinSource {
 public:
     bool        visible     = true;
@@ -47,6 +47,14 @@ public:
     void setJointRotation(int joint, const glm::quat& q);
     void resetPose();   // 모든 관절을 쉬는 자세로
 
+    // 관절 로컬 TRS 전체(애니메이션). 크기가 관절 수와 다르면 무시합니다.
+    const std::vector<JointPose>& pose() const { return pose_; }
+    void setPose(const std::vector<JointPose>& pose);
+
+    // 모프 타깃 무게(애니메이션 A5). 크기가 타깃 수와 다르면 무시합니다. 처음 값은 모델의 기본 무게입니다.
+    const std::vector<float>& morphWeights() const { return morphWeights_; }
+    void setMorphWeights(const std::vector<float>& w);
+
     // 관절 전역 행렬(이 컴포넌트의 모델 공간 = 액터 로컬). 자세가 바뀌었으면 다시 계산합니다.
     const std::vector<glm::mat4>& jointGlobals() const;
 
@@ -58,6 +66,7 @@ public:
     void setSkinData(std::shared_ptr<const SkinSourceData> skin,
                      std::shared_ptr<const std::vector<MeshSourceVertex>> bindVertices);
 
+    // 마지막으로 스키닝한 자세의 경계(애니메이션 A6-3). 아직 스키닝하지 않았으면 쉬는 자세 메시의 경계입니다.
     bool localBounds(glm::vec3& outMin, glm::vec3& outMax) const override;
 
     const char*           typeName()     const override { return "SkinnedMeshComponent"; }
@@ -71,9 +80,14 @@ public:
 private:
     std::shared_ptr<const SkinSourceData>                skin_;
     std::shared_ptr<const std::vector<MeshSourceVertex>> bind_;
-    std::vector<glm::quat>                               pose_;
+    std::vector<JointPose>                               pose_;
+    std::vector<float>                                   morphWeights_;
+    mutable std::vector<MeshSourceVertex>                morphed_;   // 모프를 더한 바인드 정점(무게가 0 이 아닐 때만)
     mutable std::vector<glm::mat4>                       globals_;
     mutable std::vector<glm::mat4>                       palette_;
     mutable bool                                         dirty_ = true;
+    mutable bool                                         hasSkinnedBounds_ = false;
+    mutable glm::vec3                                    skinnedMin_{ 0.f };
+    mutable glm::vec3                                    skinnedMax_{ 0.f };
     bool                                                 transparentLoaded_ = false;
 };

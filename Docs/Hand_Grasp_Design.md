@@ -112,7 +112,7 @@
 **로더 · 캐시**
 
 - `GltfLoader` 가 glTF `skins`(관절 노드 · inverseBindMatrices), 정점의 `JOINTS_0` · `WEIGHTS_0`(영향 4개까지), 관절 노드의 쉬는
-  자세(rest pose)를 읽어 `MeshSourceData` 에 담습니다. 영향 5개 이상(`JOINTS_1`)은 무게가 큰 4개만 남기고 다시 정규화합니다.
+  자세(rest pose)를 읽어 `MeshSourceData` 에 담습니다. 영향 5개 이상(`JOINTS_1`)은 무게가 큰 4개만 남기고 다시 정규화(2026-11-20 부터 코드도 이대로, [Animation_System.md](Animation_System.md) A2-4)합니다.
 - `GassetCache` 버전을 6에서 7로 올립니다(스킨 데이터 · 4-3절의 볼록 껍질 점을 함께 저장).
 - `AssetManager` 는 지금 업로드 뒤 CPU 정점을 버립니다. 스킨이 있는 메시만 CPU 에 바인드 자세 정점 · 무게를 남깁니다(손 두 개라
   메모리는 1 MB 아래입니다).

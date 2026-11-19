@@ -576,6 +576,7 @@ void Engine::readDesktopInput(FrameState& f, LoopState& loop) {
     f.dt      = std::chrono::duration<float>(now - loop.prev).count();
     loop.prev = now;
     f.dt      = std::min(f.dt, 0.05f);
+    if (options_.fixedDt > 0.f) f.dt = options_.fixedDt;   // 결정적 확인(애니메이션 D9)
     renderer_->advanceTime(f.dt);
 
     win.getWindowSize(f.winW, f.winH);

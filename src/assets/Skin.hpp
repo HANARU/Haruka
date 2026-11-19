@@ -9,6 +9,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "AnimClip.hpp"
+
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -25,11 +28,25 @@ struct SkinJoint {
     glm::mat4   rootParent{ 1.f };        // parent == -1 일 때만: 관절이 아닌 조상 노드들의 전역 행렬
 };
 
+// 관절 하나의 로컬 자세(부모 관절 기준 이동 · 회전 · 배율, 2026-11-20 애니메이션 D2).
+struct JointPose {
+    glm::vec3 t{ 0.f };
+    glm::quat r{ 1.f, 0.f, 0.f, 0.f };
+    glm::vec3 s{ 1.f };
+};
+
 struct SkinSourceData {
     std::vector<SkinJoint> joints;
     std::vector<uint16_t>  jointIndex;    // 정점마다 4개(joints 안의 번호)
     std::vector<float>     jointWeight;   // 정점마다 4개, 합 1
     std::vector<int>       order;         // 부모가 자식보다 앞서는 평가 순서. buildOrder 가 채웁니다
+    std::vector<hanim::Clip> clips;       // 이 스킨의 관절을 움직이는 glTF 애니메이션(2026-11-20, Docs/Animation_System.md)
+    // 모프 타깃(2026-11-20, 애니메이션 A5 · D7): 타깃마다 정점별 위치 · 노멀 차이(바인드 공간). 배치는 [타깃][정점][xyz].
+    // 스킨이 없는 모프 메시는 관절 하나(단위 행렬, rootParent = 노드 행렬)짜리 스킨으로 만듭니다.
+    uint32_t                 morphCount = 0;
+    std::vector<float>       morphPos;            // morphCount x 정점 수 x 3
+    std::vector<float>       morphNrm;            // 비면 노멀 차이 없음
+    std::vector<float>       defaultWeights;      // glTF mesh.weights(없으면 0), 크기 morphCount
 };
 
 namespace hskin {
@@ -44,6 +61,21 @@ int findJoint(const SkinSourceData& skin, const std::string& name);
 
 // 관절 전역 행렬(모델 공간). localRot 가 null 이면 쉬는 자세, 아니면 관절마다 그 로컬 회전을 씁니다(이동 · 배율은 쉬는 자세).
 void computeGlobals(const SkinSourceData& skin, const glm::quat* localRot, std::vector<glm::mat4>& outGlobal);
+
+// 관절 전역 행렬(모델 공간). pose 는 관절마다 로컬 TRS 입니다(애니메이션, 2026-11-20). null 이면 쉬는 자세.
+void computeGlobals(const SkinSourceData& skin, const JointPose* pose, std::vector<glm::mat4>& outGlobal);
+
+// 쉬는 자세(두 판 중 어느 쪽인지 모호한 nullptr 인자용).
+inline void computeGlobals(const SkinSourceData& skin, std::nullptr_t, std::vector<glm::mat4>& outGlobal) {
+    computeGlobals(skin, static_cast<const glm::quat*>(nullptr), outGlobal);
+}
+
+// 쉬는 자세를 out 에 채웁니다(관절 수만큼).
+void restPose(const SkinSourceData& skin, std::vector<JointPose>& out);
+
+// 모프: bind 정점 n 개에 weights(크기 morphCount)만큼 차이를 더해 out 에 씁니다. 노멀은 다시 정규화합니다.
+// 무게가 모두 0 이면 false 를 돌려주고 out 을 건드리지 않습니다(그때는 bind 를 그대로 쓰면 됨).
+bool applyMorph(const MeshSourceVertex* bind, size_t n, const SkinSourceData& skin, const float* weights, MeshSourceVertex* out);
 
 // 스키닝 행렬 = 전역 x inverseBind.
 void computePalette(const SkinSourceData& skin, const std::vector<glm::mat4>& globals, std::vector<glm::mat4>& outPalette);

@@ -174,6 +174,9 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (valueOf(a, "--timeout", v)) {
             if (!parsePositiveFloat(v, o.timeoutSec)) unknown.push_back(a);
         }
+        else if (valueOf(a, "--fixed-dt", v)) {
+            if (!parsePositiveFloat(v, o.fixedDt) || o.fixedDt > 0.05f) unknown.push_back(a);
+        }
         else if (valueOf(a, "--capture", v)) {
             if (!v.empty()) o.capturePath = v;
             else unknown.push_back(a);

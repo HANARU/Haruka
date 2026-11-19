@@ -26,7 +26,10 @@ static constexpr uint32_t kMagic   = 0x47415354u; // "GAST"
 // 8: 내용 형식은 7 과 같습니다. 가져오기가 접선을 법선 행렬 대신 모델 행렬로 옮기고 거울 변환이면 손잡이를 뒤집도록
 //    고쳐(수학 보강 O1, 2026-11-17) 버전 7 이하 캐시는 다시 만듭니다.
 // 9: 메시마다 스킨 뒤에 자동 생성 LOD(u32 개수, 각 screenSize(f32) · 인덱스 수(u32) · 인덱스 배열)를 둡니다(O13, 2026-11-18).
-static constexpr uint32_t kVersion = 9u;
+// 10: 스킨 뒤에 애니메이션 클립(u32 개수, 각 이름 · 길이 f32 · 트랙 수 · 트랙마다 관절 i32 · 경로 u8 · 보간 u8 · 성분 u32 ·
+//     시간 수 u32 · 시간 f32[] · 값 수 u32 · 값 f32[])을 둡니다(2026-11-20, Docs/Animation_System.md A2-3). 그 뒤 모프
+//     (타깃 수 u32 · 기본 무게 f32[] · 위치 차이 수 u32 · f32[] · 노멀 차이 수 u32 · f32[], A5-1).
+static constexpr uint32_t kVersion = 10u;
 // 머리: magic(4) version(4) mtime(8) size(8) hash(8) meshCount(4)
 static constexpr std::streamoff kMtimeOffset = 8;
 
@@ -135,6 +138,28 @@ static void wSkin(std::ofstream& f, const SkinSourceData* s) {
     wU32(f, (uint32_t)s->jointIndex.size());
     f.write((const char*)s->jointIndex.data(), (std::streamsize)(s->jointIndex.size() * sizeof(uint16_t)));
     wFloats(f, s->jointWeight.data(), s->jointWeight.size());
+    wU32(f, (uint32_t)s->clips.size());   // 버전 10
+    for (const hanim::Clip& c : s->clips) {
+        wStr(f, c.name);
+        wF32(f, c.duration);
+        wU32(f, (uint32_t)c.tracks.size());
+        for (const hanim::Track& t : c.tracks) {
+            wU32(f, (uint32_t)(int32_t)t.target);
+            wU8(f, (uint8_t)t.path);
+            wU8(f, (uint8_t)t.interp);
+            wU32(f, t.comps);
+            wU32(f, (uint32_t)t.times.size());
+            wFloats(f, t.times.data(), t.times.size());
+            wU32(f, (uint32_t)t.values.size());
+            wFloats(f, t.values.data(), t.values.size());
+        }
+    }
+    wU32(f, s->morphCount);
+    wFloats(f, s->defaultWeights.data(), s->defaultWeights.size());
+    wU32(f, (uint32_t)s->morphPos.size());
+    wFloats(f, s->morphPos.data(), s->morphPos.size());
+    wU32(f, (uint32_t)s->morphNrm.size());
+    wFloats(f, s->morphNrm.data(), s->morphNrm.size());
 }
 
 void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceData>& meshes) {
@@ -250,6 +275,49 @@ static std::shared_ptr<SkinSourceData> rSkin(std::ifstream& f, uint32_t vertexCo
     f.read((char*)s->jointIndex.data(), (std::streamsize)(n * sizeof(uint16_t)));
     rFloats(f, s->jointWeight.data(), n);
     if (!f || !hskin::buildOrder(*s)) throw std::runtime_error("GassetCache: corrupted skin in " + cp);
+    // 클립(버전 10). 값 개수가 말이 되는지만 보고, 자세한 검사는 가져올 때 했습니다.
+    const uint32_t clipCount = rU32(f);
+    if (!f || clipCount > 4096) throw std::runtime_error("GassetCache: corrupted clips in " + cp);
+    s->clips.resize(clipCount);
+    for (hanim::Clip& c : s->clips) {
+        c.name     = rStr(f);
+        c.duration = rF32(f);
+        const uint32_t tc = rU32(f);
+        if (!f || tc > 65536) throw std::runtime_error("GassetCache: corrupted clips in " + cp);
+        c.tracks.resize(tc);
+        for (hanim::Track& t : c.tracks) {
+            t.target = (int)(int32_t)rU32(f);
+            const uint8_t path = rU8(f), interp = rU8(f);
+            t.comps = rU32(f);
+            const uint32_t keys = rU32(f);
+            if (!f || path > 3 || interp > 2 || t.comps == 0 || t.comps > 256 || keys == 0 || keys > (1u << 24))
+                throw std::runtime_error("GassetCache: corrupted clips in " + cp);
+            t.path   = (hanim::Path)path;
+            t.interp = (hanim::Interp)interp;
+            t.times.resize(keys);
+            rFloats(f, t.times.data(), keys);
+            const uint32_t vc = rU32(f);
+            const uint64_t want = (uint64_t)keys * t.comps * (t.interp == hanim::Interp::CubicSpline ? 3u : 1u);
+            if (!f || vc != want) throw std::runtime_error("GassetCache: corrupted clips in " + cp);
+            t.values.resize(vc);
+            rFloats(f, t.values.data(), vc);
+        }
+    }
+    if (!f) throw std::runtime_error("GassetCache: corrupted clips in " + cp);
+    s->morphCount = rU32(f);
+    if (!f || s->morphCount > 256) throw std::runtime_error("GassetCache: corrupted morph targets in " + cp);
+    s->defaultWeights.resize(s->morphCount);
+    rFloats(f, s->defaultWeights.data(), s->morphCount);
+    const uint64_t perTarget = (uint64_t)vertexCount * 3u;
+    const uint32_t np = rU32(f);
+    if (!f || np != perTarget * s->morphCount) throw std::runtime_error("GassetCache: corrupted morph targets in " + cp);
+    s->morphPos.resize(np);
+    rFloats(f, s->morphPos.data(), np);
+    const uint32_t nn = rU32(f);
+    if (!f || (nn != 0 && nn != np)) throw std::runtime_error("GassetCache: corrupted morph targets in " + cp);
+    s->morphNrm.resize(nn);
+    rFloats(f, s->morphNrm.data(), nn);
+    if (!f) throw std::runtime_error("GassetCache: corrupted morph targets in " + cp);
     return s;
 }
 

@@ -24,7 +24,7 @@ int SkinnedMeshComponent::findJoint(const std::string& name) const {
 }
 
 const glm::quat& SkinnedMeshComponent::jointRotation(int joint) const {
-    return (joint >= 0 && joint < (int)pose_.size()) ? pose_[joint] : kIdentity;
+    return (joint >= 0 && joint < (int)pose_.size()) ? pose_[joint].r : kIdentity;
 }
 
 const glm::quat& SkinnedMeshComponent::restRotation(int joint) const {
@@ -33,22 +33,31 @@ const glm::quat& SkinnedMeshComponent::restRotation(int joint) const {
 
 void SkinnedMeshComponent::setJointRotation(int joint, const glm::quat& q) {
     if (joint < 0 || joint >= (int)pose_.size()) return;
-    pose_[joint] = q;
+    pose_[joint].r = q;
     dirty_ = true;
 }
 
 void SkinnedMeshComponent::resetPose() {
     pose_.clear();
-    if (skin_) {
-        pose_.reserve(skin_->joints.size());
-        for (const SkinJoint& j : skin_->joints) pose_.push_back(j.restR);
-    }
+    if (skin_) hskin::restPose(*skin_, pose_);
+    morphWeights_ = skin_ ? skin_->defaultWeights : std::vector<float>{};
+    dirty_ = true;
+}
+
+void SkinnedMeshComponent::setMorphWeights(const std::vector<float>& w) {
+    if (w.size() != morphWeights_.size()) return;
+    morphWeights_ = w;
+}
+
+void SkinnedMeshComponent::setPose(const std::vector<JointPose>& pose) {
+    if (pose.size() != pose_.size()) return;
+    pose_ = pose;
     dirty_ = true;
 }
 
 const std::vector<glm::mat4>& SkinnedMeshComponent::jointGlobals() const {
     if (dirty_ && skin_) {
-        hskin::computeGlobals(*skin_, pose_.empty() ? nullptr : pose_.data(), globals_);
+        hskin::computeGlobals(*skin_, pose_.empty() ? static_cast<const JointPose*>(nullptr) : pose_.data(), globals_);
         hskin::computePalette(*skin_, globals_, palette_);
         dirty_ = false;
     }
@@ -58,7 +67,13 @@ const std::vector<glm::mat4>& SkinnedMeshComponent::jointGlobals() const {
 bool SkinnedMeshComponent::skinInto(MeshSourceVertex* out, glm::vec3& bmin, glm::vec3& bmax) const {
     if (!skin_ || !bind_ || !out) return false;
     jointGlobals();   // palette_ 갱신
-    hskin::skinVertices(bind_->data(), bind_->size(), *skin_, palette_.data(), out, bmin, bmax);
+    const MeshSourceVertex* src = bind_->data();
+    if (skin_->morphCount && !morphWeights_.empty()) {
+        morphed_.resize(bind_->size());
+        if (hskin::applyMorph(bind_->data(), bind_->size(), *skin_, morphWeights_.data(), morphed_.data())) src = morphed_.data();
+    }
+    hskin::skinVertices(src, bind_->size(), *skin_, palette_.data(), out, bmin, bmax);
+    if (!bind_->empty()) { skinnedMin_ = bmin; skinnedMax_ = bmax; hasSkinnedBounds_ = true; }
     return true;
 }
 
@@ -67,10 +82,12 @@ void SkinnedMeshComponent::setSkinData(std::shared_ptr<const SkinSourceData> ski
     skin_ = std::move(skin);
     bind_ = std::move(bindVertices);
     vertCount = bind_ ? (int)bind_->size() : 0;
+    hasSkinnedBounds_ = false;
     resetPose();
 }
 
 bool SkinnedMeshComponent::localBounds(glm::vec3& outMin, glm::vec3& outMax) const {
+    if (hasSkinnedBounds_) { outMin = skinnedMin_; outMax = skinnedMax_; return true; }
     if (!baseMesh) return false;
     outMin = baseMesh->aabbMin;
     outMax = baseMesh->aabbMax;

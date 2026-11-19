@@ -344,6 +344,7 @@ set(RUNTIME_SOURCES
     src/components/CoreComponents.cpp
     src/components/XrComponents.cpp
     src/components/SkinnedMeshComponent.cpp
+    src/components/AnimationComponent.cpp
     src/components/UIPanelComponent.cpp
     src/components/UIPanelPointer.cpp
     src/components/HandPoseComponent.cpp
@@ -372,6 +373,8 @@ set(RUNTIME_SOURCES
     src/assets/AssetManager.cpp
     src/assets/GassetCache.cpp
     src/assets/Skin.cpp
+    src/assets/Animation.cpp
+    src/assets/AnimStateMachine.cpp
     src/sceneio/PrefabManager.cpp
     src/sceneio/SceneSerializer.cpp
     src/sceneio/ComponentSerializer.cpp
@@ -1023,6 +1026,32 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaRefTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 애니메이션 테스트(2026-11-20, Docs/Animation_System.md) ------------------
+    # 트랙 샘플링 · 자세 섞기 · glTF 클립 가져오기 · 캐시 v10 · 재생기(크로스페이드 · 가산 · 이벤트 · 루트 모션) · 상태 기계를
+    # 화면 없이 검산합니다. 시험 모델 Projects/Samples/Content/models/anim/TestArm.glb 를 가상 파일 시스템으로 읽습니다.
+    add_executable(HarukaAnimTest
+        tests/AnimationTest.cpp
+        src/assets/Animation.cpp
+        src/assets/AnimStateMachine.cpp
+        src/assets/GltfLoader.cpp
+        src/assets/GassetCache.cpp
+        src/assets/Skin.cpp
+        src/geometry/MeshLod.cpp
+        src/components/AnimationComponent.cpp
+        src/components/SkinnedMeshComponent.cpp
+        src/scene/World.cpp
+        src/scene/Actor.cpp
+        src/scene/Component.cpp
+        src/core/HLog.cpp
+    )
+    target_link_libraries(HarukaAnimTest PRIVATE HarukaVfs tinygltf glm::glm meshoptimizer)
+    target_include_directories(HarukaAnimTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_compile_definitions(HarukaAnimTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(HarukaAnimTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaAnimTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 크래시 보고 테스트(Docs/Crash_Reporting.md) ---------------------------
     # 자기 자신을 자식 프로세스로 띄워 종류마다 일부러 크래시시키고, 보고서 폴더 · crash.txt · crash.dmp · 다음 실행 알림 · 보관 수를 봅니다.
     add_executable(HarukaCrashTest
@@ -1143,6 +1172,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_executable(HarukaGltfTest
         tests/GltfLoaderTest.cpp
         src/assets/GltfLoader.cpp
+        src/assets/Animation.cpp
         src/assets/Skin.cpp
         src/geometry/MeshLod.cpp
         src/core/HLog.cpp
@@ -1160,6 +1190,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_executable(HarukaHandTest
         tests/HandTest.cpp
         src/assets/GltfLoader.cpp
+        src/assets/Animation.cpp
         src/assets/GassetCache.cpp
         src/assets/Skin.cpp
         src/geometry/MeshLod.cpp
@@ -1211,6 +1242,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME text_system          COMMAND HarukaTextTest)
     add_test(NAME object_refs          COMMAND HarukaRefTest)
     add_test(NAME crash_reports        COMMAND HarukaCrashTest)
+    add_test(NAME animation            COMMAND HarukaAnimTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)

@@ -6,6 +6,7 @@
 #include "GltfLoader.hpp"
 #include "AssetLog.hpp"
 #include "Skin.hpp"
+#include "Animation.hpp"
 #include "../geometry/MeshLod.hpp"
 #include "../vfs/PakFormat.hpp"
 #include "../vfs/PathUtf8.hpp"
@@ -193,7 +194,7 @@ static void generateTangents(std::vector<MeshSourceVertex>& verts,
 
 // ─── node hierarchy ──────────────────────────────────────────────────────────
 
-struct NodeRef { glm::mat4 world; int meshIdx; int skin = -1; };
+struct NodeRef { glm::mat4 world; int meshIdx; int skin = -1; int node = -1; };
 
 static glm::mat4 nodeLocalMatrix(const tinygltf::Node& n) {
     if (!n.matrix.empty()) {
@@ -226,7 +227,7 @@ static void flattenNodes(const tinygltf::Model& model, int nodeIdx,
                           const glm::mat4& parent, std::vector<NodeRef>& out) {
     const auto& n = model.nodes[nodeIdx];
     glm::mat4   w = parent * nodeLocalMatrix(n);
-    if (n.mesh >= 0) out.push_back({ w, n.mesh, n.skin });
+    if (n.mesh >= 0) out.push_back({ w, n.mesh, n.skin, nodeIdx });
     for (int c : n.children) flattenNodes(model, c, w, out);
 }
 
@@ -269,9 +270,165 @@ static float readComponent(const uint8_t* base, size_t idx, int stride, int comp
     }
 }
 
+// ─── 애니메이션 클립 (2026-11-20, Docs/Animation_System.md A2) ─────────────────────
+// 접근자 값 하나를 float 로 읽습니다. 회전 · 무게는 정규화 정수(i8 · u8 · i16 · u16)도 허용합니다(glTF 규약).
+static bool readAnimFloat(const tinygltf::Accessor& acc, const uint8_t* p, int comp, float& out) {
+    switch (acc.componentType) {
+        case TINYGLTF_COMPONENT_TYPE_FLOAT:          { float v; std::memcpy(&v, p + comp * 4, 4); out = v; return true; }
+        case TINYGLTF_COMPONENT_TYPE_BYTE:           { int8_t v; std::memcpy(&v, p + comp, 1); out = std::max(v / 127.f, -1.f); return acc.normalized; }
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:  { out = p[comp] / 255.f; return acc.normalized; }
+        case TINYGLTF_COMPONENT_TYPE_SHORT:          { int16_t v; std::memcpy(&v, p + comp * 2, 2); out = std::max(v / 32767.f, -1.f); return acc.normalized; }
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: { uint16_t v; std::memcpy(&v, p + comp * 2, 2); out = v / 65535.f; return acc.normalized; }
+        default: return false;
+    }
+}
+
+// 접근자 전체를 float 로 읽습니다(성분 nComp 개씩). 범위 · 형식이 틀리면 false.
+static bool readAnimAccessor(const tinygltf::Model& model, int accIdx, int nComp, std::vector<float>& out) {
+    if (accIdx < 0 || accIdx >= (int)model.accessors.size()) return false;
+    const auto& acc = model.accessors[accIdx];
+    if (tinygltf::GetNumComponentsInType(acc.type) != nComp) return false;
+    if (acc.bufferView < 0 || acc.bufferView >= (int)model.bufferViews.size()) return false;
+    const auto& bv = model.bufferViews[acc.bufferView];
+    if (bv.buffer < 0 || bv.buffer >= (int)model.buffers.size()) return false;
+    const auto& buf = model.buffers[bv.buffer];
+    const int cSz = tinygltf::GetComponentSizeInBytes(acc.componentType);
+    if (cSz <= 0) return false;
+    const size_t stride = bv.byteStride > 0 ? bv.byteStride : (size_t)cSz * nComp;
+    const size_t begin = bv.byteOffset + acc.byteOffset;
+    if (acc.count && begin + (acc.count - 1) * stride + (size_t)cSz * nComp > buf.data.size()) return false;
+    out.resize(acc.count * (size_t)nComp);
+    for (size_t i = 0; i < acc.count; ++i)
+        for (int c = 0; c < nComp; ++c)
+            if (!readAnimFloat(acc, buf.data.data() + begin + i * stride, c, out[i * nComp + c])) return false;
+    return true;
+}
+
+// nodeToJoint(glTF 노드 번호 → 관절 번호)의 관절을 움직이는 채널을 클립으로 모읍니다. 관절이 아닌 노드를 가리키는 채널은
+// 건너뛰고 클립마다 한 번 알립니다. 깨진 클립은 그 클립만 버립니다. 무게 채널은 morphCount 가 0 이 아니고 이 메시가 붙은
+// 노드(meshNode)를 가리킬 때만 받습니다.
+static std::vector<hanim::Clip> readClips(const tinygltf::Model& model, const std::unordered_map<int, int>& nodeToJoint,
+                                          int meshNode, int morphCount, int jointCount, const std::string& path) {
+    std::vector<hanim::Clip> clips;
+    for (size_t ai = 0; ai < model.animations.size(); ++ai) {
+        const auto& anim = model.animations[ai];
+        hanim::Clip clip;
+        clip.name = anim.name.empty() ? ("Animation" + std::to_string(ai)) : anim.name;
+        size_t skipped = 0;
+        std::string bad;
+        for (const auto& ch : anim.channels) {
+            hanim::Track tr;
+            if      (ch.target_path == "translation") { tr.path = hanim::Path::Translation; tr.comps = 3; }
+            else if (ch.target_path == "rotation")    { tr.path = hanim::Path::Rotation;    tr.comps = 4; }
+            else if (ch.target_path == "scale")       { tr.path = hanim::Path::Scale;       tr.comps = 3; }
+            else if (ch.target_path == "weights")     { tr.path = hanim::Path::Weights;     tr.comps = (uint32_t)std::max(morphCount, 0); }
+            else { ++skipped; continue; }
+            if (tr.path == hanim::Path::Weights) {
+                if (morphCount <= 0 || ch.target_node != meshNode) { ++skipped; continue; }
+            } else {
+                const auto it = nodeToJoint.find(ch.target_node);
+                if (it == nodeToJoint.end()) { ++skipped; continue; }
+                tr.target = it->second;
+            }
+            if (ch.sampler < 0 || ch.sampler >= (int)anim.samplers.size()) { bad = "channel sampler out of range"; break; }
+            const auto& sm = anim.samplers[ch.sampler];
+            if      (sm.interpolation == "STEP")        tr.interp = hanim::Interp::Step;
+            else if (sm.interpolation == "CUBICSPLINE") tr.interp = hanim::Interp::CubicSpline;
+            else                                        tr.interp = hanim::Interp::Linear;
+            if (!readAnimAccessor(model, sm.input, 1, tr.times)) { bad = "sampler input is not a float SCALAR"; break; }
+            // 무게는 SCALAR 접근자에 키마다 morphCount 개가 이어져 있습니다.
+            const int accComps = tr.path == hanim::Path::Weights ? 1 : (int)tr.comps;
+            if (!readAnimAccessor(model, sm.output, accComps, tr.values)) { bad = "sampler output has an unsupported type"; break; }
+            clip.tracks.push_back(std::move(tr));
+        }
+        if (bad.empty() && clip.tracks.empty()) continue;   // 이 스킨과 관계없는 애니메이션
+        if (bad.empty()) {
+            clip.duration = hanim::computeDuration(clip);
+            std::string err;
+            if (!hanim::validate(clip, jointCount, morphCount, &err)) bad = err;
+        }
+        if (!bad.empty()) {
+            HLOG(LogAsset, Warning) << path << ": animation '" << clip.name << "' skipped (" << bad << ")";
+            continue;
+        }
+        if (skipped) {
+            HLOG(LogAsset, Log) << path << ": animation '" << clip.name << "': " << skipped
+                                << " channel(s) target nodes outside this skin and are ignored";
+        }
+        clips.push_back(std::move(clip));
+    }
+    return clips;
+}
+
+// ─── 모프 타깃 (2026-11-20, Docs/Animation_System.md A5 · D7) ─────────────────────
+// prim.targets 의 POSITION · NORMAL 차이와 mesh.weights 를 out 에 채웁니다. 타깃이 없으면 true(모프 없음). 형식이 틀리면
+// 경고하고 false(모프를 버림).
+static bool readMorph(const tinygltf::Model& model, const tinygltf::Primitive& prim, size_t vertexCount,
+                      const std::vector<double>& meshWeights, SkinSourceData& out, const std::string& path) {
+    out.morphCount = 0;
+    out.morphPos.clear();
+    out.morphNrm.clear();
+    out.defaultWeights.clear();
+    if (prim.targets.empty()) return true;
+    if (prim.targets.size() > 256) {
+        HLOG(LogAsset, Warning) << path << ": " << prim.targets.size() << " morph targets (max 256); morphs ignored";
+        return false;
+    }
+    const size_t tc = prim.targets.size();
+    bool normals = true;
+    for (const auto& t : prim.targets) normals = normals && t.count("NORMAL");
+    out.morphPos.assign(tc * vertexCount * 3, 0.f);
+    if (normals) out.morphNrm.assign(tc * vertexCount * 3, 0.f);
+    std::vector<float> tmp;
+    for (size_t t = 0; t < tc; ++t) {
+        const auto& tgt = prim.targets[t];
+        const auto pit = tgt.find("POSITION");
+        if (pit != tgt.end()) {
+            if (!readAnimAccessor(model, pit->second, 3, tmp) || tmp.size() != vertexCount * 3) {
+                HLOG(LogAsset, Warning) << path << ": morph target " << t << " POSITION is not a VEC3 per vertex; morphs ignored";
+                out.morphPos.clear(); out.morphNrm.clear();
+                return false;
+            }
+            std::copy(tmp.begin(), tmp.end(), out.morphPos.begin() + (ptrdiff_t)(t * vertexCount * 3));
+        }
+        if (normals) {
+            if (!readAnimAccessor(model, tgt.at("NORMAL"), 3, tmp) || tmp.size() != vertexCount * 3) {
+                HLOG(LogAsset, Warning) << path << ": morph target " << t << " NORMAL is not a VEC3 per vertex; normal deltas ignored";
+                out.morphNrm.clear();
+                normals = false;
+            } else {
+                std::copy(tmp.begin(), tmp.end(), out.morphNrm.begin() + (ptrdiff_t)(t * vertexCount * 3));
+            }
+        }
+    }
+    out.morphCount = (uint32_t)tc;
+    out.defaultWeights.assign(tc, 0.f);
+    for (size_t t = 0; t < tc && t < meshWeights.size(); ++t) out.defaultWeights[t] = (float)meshWeights[t];
+    return true;
+}
+
+// 스킨이 없는 모프 메시: 관절 하나(쉬는 자세 단위, rootParent = 노드 전역 행렬)짜리 스킨으로 만들어 스킨 경로로 그립니다(D7).
+// 정점은 메시 로컬 공간 그대로이고 노드 행렬은 rootParent 가 곱합니다. 모프를 읽지 못하면 nullptr(보통 메시).
+static std::shared_ptr<SkinSourceData> makeMorphSkin(const tinygltf::Model& model, const tinygltf::Primitive& prim,
+                                                     size_t vertexCount, const std::vector<double>& meshWeights,
+                                                     const glm::mat4& nodeWorld, int meshNode, const std::string& path) {
+    auto out = std::make_shared<SkinSourceData>();
+    if (!readMorph(model, prim, vertexCount, meshWeights, *out, path) || out->morphCount == 0) return nullptr;
+    out->joints.resize(1);
+    out->joints[0].name       = "root";
+    out->joints[0].rootParent = nodeWorld;
+    out->jointIndex.assign(vertexCount * hskin::kInfluences, 0);
+    out->jointWeight.assign(vertexCount * hskin::kInfluences, 0.f);
+    for (size_t i = 0; i < vertexCount; ++i) out->jointWeight[i * hskin::kInfluences] = 1.f;
+    hskin::buildOrder(*out);
+    out->clips = readClips(model, {}, meshNode, (int)out->morphCount, 1, path);
+    return out;
+}
+
 static std::shared_ptr<SkinSourceData> readSkin(const tinygltf::Model& model, int skinIdx, const tinygltf::Primitive& prim,
                                                 size_t vertexCount, const std::vector<glm::mat4>& global,
-                                                const std::vector<int>& parent, const std::string& path) {
+                                                const std::vector<int>& parent, int meshNode,
+                                                const std::vector<double>& meshWeights, const std::string& path) {
     if (skinIdx < 0 || skinIdx >= (int)model.skins.size()) return nullptr;
     const auto& sk = model.skins[skinIdx];
     if (!prim.attributes.count("JOINTS_0") || !prim.attributes.count("WEIGHTS_0")) {
@@ -344,21 +501,65 @@ static std::shared_ptr<SkinSourceData> readSkin(const tinygltf::Model& model, in
     (void)jCnt; (void)wCnt;
     out->jointIndex.assign(vertexCount * hskin::kInfluences, 0);
     out->jointWeight.assign(vertexCount * hskin::kInfluences, 0.f);
-    size_t badIndex = 0, noWeight = 0;
+    // JOINTS_1 · WEIGHTS_1(영향 5 ~ 8)이 있으면 8개 중 무게가 큰 4개를 남기고 다시 정규화합니다(2026-11-20, 애니메이션 A2-4).
+    const tinygltf::Accessor* j1Acc = nullptr;
+    const tinygltf::Accessor* w1Acc = nullptr;
+    const uint8_t* j1Base = nullptr;
+    const uint8_t* w1Base = nullptr;
+    int j1Stride = 0, w1Stride = 0;
+    if (prim.attributes.count("JOINTS_1") && prim.attributes.count("WEIGHTS_1")) {
+        const auto& ja = model.accessors[prim.attributes.at("JOINTS_1")];
+        const auto& wa = model.accessors[prim.attributes.at("WEIGHTS_1")];
+        if (ja.type == TINYGLTF_TYPE_VEC4 && wa.type == TINYGLTF_TYPE_VEC4 && ja.count >= vertexCount && wa.count >= vertexCount) {
+            j1Acc = &ja;
+            w1Acc = &wa;
+            auto [b1, s1, c1] = accessorInfo(model, prim.attributes.at("JOINTS_1"));
+            auto [b2, s2, c2] = accessorInfo(model, prim.attributes.at("WEIGHTS_1"));
+            (void)c1; (void)c2;
+            j1Base = b1; j1Stride = s1; w1Base = b2; w1Stride = s2;
+        } else {
+            HLOG(LogAsset, Warning) << path << ": JOINTS_1/WEIGHTS_1 are not VEC4 per vertex; only the first 4 influences are used";
+        }
+    }
+    size_t badIndex = 0, noWeight = 0, trimmed = 0;
     for (size_t i = 0; i < vertexCount; ++i) {
-        float sum = 0.f;
-        for (int k = 0; k < hskin::kInfluences; ++k) {
-            const float ji = readComponent(jBase, i, jStride, k, jAcc.componentType, false);
-            float       w  = readComponent(wBase, i, wStride, k, wAcc.componentType, wAcc.normalized);
+        int   idx8[8] = {};
+        float w8[8]   = {};
+        const int count = j1Acc ? 8 : hskin::kInfluences;
+        for (int k = 0; k < count; ++k) {
+            const bool second = k >= hskin::kInfluences;
+            const int  kk = second ? k - hskin::kInfluences : k;
+            const float ji = second ? readComponent(j1Base, i, j1Stride, kk, j1Acc->componentType, false)
+                                    : readComponent(jBase, i, jStride, kk, jAcc.componentType, false);
+            float w = second ? readComponent(w1Base, i, w1Stride, kk, w1Acc->componentType, w1Acc->normalized)
+                             : readComponent(wBase, i, wStride, kk, wAcc.componentType, wAcc.normalized);
             int idx = (int)ji;
             if (idx < 0 || idx >= jc) { if (w > 0.f) ++badIndex; idx = 0; w = 0.f; }
             if (!(w > 0.f)) w = 0.f;
-            out->jointIndex[i * hskin::kInfluences + k]  = (uint16_t)idx;
-            out->jointWeight[i * hskin::kInfluences + k] = w;
-            sum += w;
+            idx8[k] = idx;
+            w8[k]   = w;
+        }
+        if (count > hskin::kInfluences) {
+            // 무게가 큰 순서로 앞 4칸에 모읍니다(같으면 앞 번호 먼저).
+            int order[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+            std::stable_sort(order, order + 8, [&](int a, int b) { return w8[a] > w8[b]; });
+            if (w8[order[4]] > 0.f) ++trimmed;
+            int ti[4];
+            float tw[4];
+            for (int k = 0; k < 4; ++k) { ti[k] = idx8[order[k]]; tw[k] = w8[order[k]]; }
+            for (int k = 0; k < 4; ++k) { idx8[k] = ti[k]; w8[k] = tw[k]; }
+        }
+        float sum = 0.f;
+        for (int k = 0; k < hskin::kInfluences; ++k) {
+            out->jointIndex[i * hskin::kInfluences + k]  = (uint16_t)idx8[k];
+            out->jointWeight[i * hskin::kInfluences + k] = w8[k];
+            sum += w8[k];
         }
         if (sum > 0.f) for (int k = 0; k < hskin::kInfluences; ++k) out->jointWeight[i * hskin::kInfluences + k] /= sum;
         else ++noWeight;
+    }
+    if (trimmed) {
+        HLOG(LogAsset, Log) << path << ": " << trimmed << " vertex(es) had more than 4 skin influences; kept the largest 4";
     }
     if (badIndex) {
         HLOG(LogAsset, Warning) << path << ": " << badIndex << " skin weight(s) point at a missing joint and were dropped";
@@ -366,13 +567,12 @@ static std::shared_ptr<SkinSourceData> readSkin(const tinygltf::Model& model, in
     if (noWeight) {
         HLOG(LogAsset, Warning) << path << ": " << noWeight << " vertex(es) have no skin weight and stay at the bind pose";
     }
-    if (prim.attributes.count("JOINTS_1")) {
-        HLOG(LogAsset, Warning) << path << ": JOINTS_1/WEIGHTS_1 are ignored (up to 4 influences per vertex)";
-    }
     if (!hskin::buildOrder(*out)) {
         HLOG(LogAsset, Warning) << path << ": skin " << skinIdx << " joint hierarchy has a cycle; drawn without skinning";
         return nullptr;
     }
+    readMorph(model, prim, vertexCount, meshWeights, *out, path);
+    out->clips = readClips(model, nodeToJoint, meshNode, (int)out->morphCount, jc, path);
     return out;
 }
 
@@ -521,7 +721,9 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
             // 스킨 메시는 정점을 바인드 공간 그대로 둡니다(glTF 규약: 스킨 메시 노드의 트랜스폼은 무시). 스키닝 행렬이
             // 관절 · 조상 트랜스폼을 모두 담습니다. 스킨을 읽지 못하면 보통 메시처럼 노드 트랜스폼을 굽습니다.
             if (ref.skin >= 0)
-                d.skin = readSkin(model, ref.skin, prim, posCount, nodeGlobal, nodeParent, path);
+                d.skin = readSkin(model, ref.skin, prim, posCount, nodeGlobal, nodeParent, ref.node, mesh.weights, path);
+            else if (!prim.targets.empty())   // 스킨 없는 모프 메시(애니메이션 A5)
+                d.skin = makeMorphSkin(model, prim, posCount, mesh.weights, ref.world, ref.node, path);
             const glm::mat4 worldMat = d.skin ? glm::mat4(1.f) : ref.world;
             // Normals use the inverse-transpose (stay perpendicular under non-uniform scale). Tangents lie in the surface,
             // so they use the plain upper 3x3; a mirroring transform (negative determinant) flips the bitangent sign.

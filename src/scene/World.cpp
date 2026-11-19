@@ -38,6 +38,7 @@ void World::destroyImmediate(Actor* actor) {
         [actor](const auto& a) { return a.get() == actor; });
     if (owned == actors.end()) return;
 
+    tweens_.cancelAll(actor);
     onActorDestroyed.broadcast(actor);
     actor->notifyDestroy();
     idMap_.erase(actor->id);
@@ -67,6 +68,7 @@ void World::tick(float dt) {
     ticking_ = true;
     for (auto& a : actors)
         if (a->activeInHierarchy()) a->tick(dt);
+    tweens_.tick(dt);   // 액터 틱 뒤(콜백이 지운 액터는 아래에서 지움)
     ticking_ = false;
     flushDestroyQueue();
 }

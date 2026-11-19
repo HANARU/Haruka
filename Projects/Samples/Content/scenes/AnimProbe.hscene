@@ -1,0 +1,147 @@
+# Haruka Scene v6
+# Animation probe (2026-11-20, Docs/Animation_System.md A6-4). TestArm columns play glTF clips during Play:
+# left = Wave (LINEAR / STEP rotation), middle = Bounce (CUBICSPLINE root translation, hand scale), right = Flex (morph weight).
+# The blue quad (TestMorph, no skin) lifts its top edge with a STEP morph clip. Use --fixed-dt for repeatable captures.
+ACTOR:Sun
+GUID:a17a000000000001
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:LightComponent
+enabled=1
+type=directional
+color=1 1 1
+intensity=3
+attenuationRadius=10
+innerConeAngle=15
+outerConeAngle=30
+direction=0.37139067 0.74278134 0.557086
+useTemperature=0
+temperatureK=6500
+castShadows=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Ground
+GUID:a17a000000000002
+POS:0 -0.1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:6 0.2 6
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+END_ACTOR
+ACTOR:Camera
+GUID:a17a000000000003
+POS:0 0.9 2.6
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:CameraComponent
+enabled=1
+fovY=60
+zNear=0.05
+zFar=1000
+primary=1
+END_COMPONENT
+END_ACTOR
+ACTOR:ArmWave
+GUID:a17a000000000004
+POS:-0.7 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:SkinnedMeshComponent
+enabled=1
+visible=1
+transparent=0
+model=/Game/models/anim/TestArm.glb
+meshIndex=0
+END_COMPONENT
+COMPONENT:AnimationComponent
+enabled=1
+clip=Wave
+autoPlay=1
+loop=1
+speed=1
+rootMotion=0
+END_COMPONENT
+END_ACTOR
+ACTOR:ArmBounce
+GUID:a17a000000000005
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:SkinnedMeshComponent
+enabled=1
+visible=1
+transparent=0
+model=/Game/models/anim/TestArm.glb
+meshIndex=0
+END_COMPONENT
+COMPONENT:AnimationComponent
+enabled=1
+clip=Bounce
+autoPlay=1
+loop=1
+speed=1
+rootMotion=0
+END_COMPONENT
+END_ACTOR
+ACTOR:ArmFlex
+GUID:a17a000000000006
+POS:0.7 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:SkinnedMeshComponent
+enabled=1
+visible=1
+transparent=0
+model=/Game/models/anim/TestArm.glb
+meshIndex=0
+END_COMPONENT
+COMPONENT:AnimationComponent
+enabled=1
+clip=Flex
+autoPlay=1
+loop=1
+speed=1
+rootMotion=0
+END_COMPONENT
+END_ACTOR
+ACTOR:MorphQuad
+GUID:a17a000000000007
+POS:-1.6 0.2 -0.5
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.5 0.5 0.5
+ACTIVE:1
+COMPONENT:SkinnedMeshComponent
+enabled=1
+visible=1
+transparent=0
+model=/Game/models/anim/TestMorph.glb
+meshIndex=0
+END_COMPONENT
+COMPONENT:AnimationComponent
+enabled=1
+clip=Lift
+autoPlay=1
+loop=1
+speed=1
+rootMotion=0
+END_COMPONENT
+END_ACTOR

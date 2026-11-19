@@ -60,6 +60,50 @@ void computeGlobals(const SkinSourceData& skin, const glm::quat* localRot, std::
     else                        for (int j = 0; j < (int)n; ++j) eval(j);
 }
 
+void computeGlobals(const SkinSourceData& skin, const JointPose* pose, std::vector<glm::mat4>& outGlobal) {
+    if (!pose) { computeGlobals(skin, static_cast<const glm::quat*>(nullptr), outGlobal); return; }
+    const size_t n = skin.joints.size();
+    outGlobal.assign(n, glm::mat4(1.f));
+    auto eval = [&](int j) {
+        const SkinJoint& jt = skin.joints[j];
+        const glm::mat4 local = trs(pose[j].t, pose[j].r, pose[j].s);
+        outGlobal[j] = (jt.parent >= 0 ? outGlobal[jt.parent] : jt.rootParent) * local;
+    };
+    if (skin.order.size() == n) for (int j : skin.order) eval(j);
+    else                        for (int j = 0; j < (int)n; ++j) eval(j);
+}
+
+void restPose(const SkinSourceData& skin, std::vector<JointPose>& out) {
+    out.resize(skin.joints.size());
+    for (size_t j = 0; j < skin.joints.size(); ++j) out[j] = { skin.joints[j].restT, skin.joints[j].restR, skin.joints[j].restS };
+}
+
+bool applyMorph(const MeshSourceVertex* bind, size_t n, const SkinSourceData& skin, const float* weights, MeshSourceVertex* out) {
+    if (!weights || skin.morphCount == 0 || skin.morphPos.size() != (size_t)skin.morphCount * n * 3) return false;
+    bool any = false;
+    for (uint32_t t = 0; t < skin.morphCount; ++t) any = any || weights[t] != 0.f;
+    if (!any) return false;
+    const bool nrm = skin.morphNrm.size() == skin.morphPos.size();
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = bind[i];
+        for (uint32_t t = 0; t < skin.morphCount; ++t) {
+            const float w = weights[t];
+            if (w == 0.f) continue;
+            const float* d = &skin.morphPos[((size_t)t * n + i) * 3];
+            out[i].pos[0] += w * d[0]; out[i].pos[1] += w * d[1]; out[i].pos[2] += w * d[2];
+            if (nrm) {
+                const float* e = &skin.morphNrm[((size_t)t * n + i) * 3];
+                out[i].normal[0] += w * e[0]; out[i].normal[1] += w * e[1]; out[i].normal[2] += w * e[2];
+            }
+        }
+        if (nrm) {
+            const float l = std::sqrt(out[i].normal[0] * out[i].normal[0] + out[i].normal[1] * out[i].normal[1] + out[i].normal[2] * out[i].normal[2]);
+            if (l > 1e-12f) { out[i].normal[0] /= l; out[i].normal[1] /= l; out[i].normal[2] /= l; }
+        }
+    }
+    return true;
+}
+
 void computePalette(const SkinSourceData& skin, const std::vector<glm::mat4>& globals, std::vector<glm::mat4>& outPalette) {
     const size_t n = std::min(skin.joints.size(), globals.size());
     outPalette.resize(skin.joints.size(), glm::mat4(1.f));
