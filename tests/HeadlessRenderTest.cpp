@@ -125,6 +125,20 @@ int main() {
             o = parse({ bad }, u);
             check(!o.syntheticEyes && u.size() == 1, std::string(bad) + " → 거부(합성 눈을 켜지 않음)");
         }
+        // 사용자 설정(Docs/Save_And_Settings.md D10).
+        o = parse({ "--user-setting=audio.music=0.25", "--user-setting=input.axis.MoveX=keys:D/A, xr:left.stick.x" }, u);
+        check(u.empty() && o.userSettings.size() == 2 && o.userSettings[0].first == "audio.music" && o.userSettings[0].second == "0.25"
+                  && o.userSettings[1].second == "keys:D/A, xr:left.stick.x",
+              "--user-setting=<이름>=<값> 두 번(값의 = 뒤 · 공백 · 쉼표 그대로)");
+        o = parse({ "--user-setting-at=10:render.ao=false" }, u);
+        check(u.empty() && o.userSettingsAt.size() == 1 && o.userSettingsAt[0].frame == 10 && o.userSettingsAt[0].name == "render.ao"
+                  && o.userSettingsAt[0].value == "false",
+              "--user-setting-at=10:render.ao=false");
+        for (const char* bad : { "--user-setting=", "--user-setting==1", "--user-setting=audio.music", "--user-setting-at=render.ao=1",
+                                 "--user-setting-at=x:render.ao=1", "--user-setting-at=5:=1" }) {
+            o = parse({ bad }, u);
+            check(o.userSettings.empty() && o.userSettingsAt.empty() && u.size() == 1, std::string(bad) + " → 거부");
+        }
         o = parse({ "--timeout=5" }, u);
         check(o.timeoutSec == 5.f && u.empty(), "--timeout=5");
         o = parse({ "--timeout=2.5" }, u);

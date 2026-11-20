@@ -68,6 +68,11 @@ struct EngineOptions {
     // --switch-sync : 전환을 미리 읽기 없이 동기로(비교용).
     std::vector<std::pair<std::string, uint32_t>> switchScenes;
     bool        switchSync = false;
+    // --user-setting=<이름>=<값> (여러 번) : 시작할 때 사용자 설정을 바꾸고 저장(Docs/Save_And_Settings.md D10, 다시 시작 확인용).
+    std::vector<std::pair<std::string, std::string>> userSettings;
+    // --user-setting-at=<프레임>:<이름>=<값> (여러 번) : 그 프레임을 그린 뒤 실행 중에 바꿈(게임 코드가 바꾸는 것과 같은 길, S3-6 확인용).
+    struct TimedUserSetting { uint32_t frame = 0; std::string name, value; };
+    std::vector<TimedUserSetting> userSettingsAt;
     std::string uiAssetActions;          // --ui-asset-actions=<logical path> : 에셋 대화상자 열기(참조 체계 A-5, 에디터 전용)
     bool        uiActorPicker = false;   // --ui-actor-picker : 선택한 액터의 첫 액터 참조 칸의 고르기 목록 열기(R-7, 에디터 전용)
     // --ui-move-asset=<from>|<to> : 첫 프레임 뒤 에셋을 옮김(참조 체계 A-5, 에디터 전용). 프로젝트 파일을 실제로 옮기므로

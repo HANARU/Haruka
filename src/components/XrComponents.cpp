@@ -8,6 +8,7 @@
 #include "../scene/Actor.hpp"
 #include "../scene/ComponentRegistry.hpp"
 #include "../core/DebugDraw.hpp"
+#include "../core/UserSettings.hpp"
 #include "../scene/Reflect.hpp"
 #include "../scene/World.hpp"
 #include "../input/HInputSystem.hpp"
@@ -246,14 +247,18 @@ void RigLocomotionComponent::tick(float dt) {
         releaseCharacter();
         if (glm::dot(move, move) > 0.f) rig.setWorldPosition(rig.worldPosition() + move * moveSpeed * dt);
     }
-    if (teleport && xr.focused) tickTeleport(rig, head ? head->worldPosition() : rig.worldPosition());
+    // 플레이어의 편안함 설정(월드 서비스, Docs/Save_And_Settings.md D7)이 있으면 씬 값보다 앞섭니다.
+    const ComfortSettings* comfort = rig.world() ? rig.world()->service<ComfortSettings>() : nullptr;
+    const bool  teleportOn = comfort ? comfort->teleportOn(teleport) : teleport;
+    const float snapDeg    = comfort ? comfort->snapTurn(snapTurnDeg) : snapTurnDeg;
+    if (teleportOn && xr.focused) tickTeleport(rig, head ? head->worldPosition() : rig.worldPosition());
     else                        aiming_ = false;
 
     if (xr.focused) {
         // 스냅 회전: 스틱을 70% 넘게 기울이면 한 번, 30% 아래로 돌아오면 다시 받을 준비. 머리 둘레로 돌려 제자리에서 돕니다.
         const float t = in.axis("TurnX");
         if (snapArmed_ && std::fabs(t) > 0.7f) {
-            rotateRigAbout(rig, headPos + move * moveSpeed * dt, up, glm::radians(t > 0.f ? -snapTurnDeg : snapTurnDeg));
+            rotateRigAbout(rig, headPos + move * moveSpeed * dt, up, glm::radians(t > 0.f ? -snapDeg : snapDeg));
             snapArmed_ = false;
         } else if (std::fabs(t) < 0.3f) {
             snapArmed_ = true;

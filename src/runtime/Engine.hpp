@@ -2,6 +2,7 @@
 #include "../scene/World.hpp"
 #include "ModuleManager.hpp"
 #include "../core/ProjectSettings.hpp"
+#include "../core/UserSettings.hpp"
 #include "IEngineFrontend.hpp"
 #include "EngineOptions.hpp"
 #include "FrameStats.hpp"
@@ -9,6 +10,7 @@
 #include "../renderer/RenderSceneInput.hpp"
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 
@@ -22,6 +24,7 @@ class PhysicsSystem;
 class AudioSystem;
 class XrSessionController;
 class XrViewOrigin;
+class SaveStore;
 struct EngineContext;
 
 // 실행 옵션(EngineOptions)은 EngineOptions.hpp 에 있습니다(2026-10-31, 명령줄 해석을 창 없이 시험하려고 옮김).
@@ -53,6 +56,24 @@ private:
     // 창 없는 자동 실행(--frames · --timeout · --capture)을 마무리합니다: 캡처를 저장하고 요약을 남긴 뒤 종료 코드를 정합니다.
     int finishRun();
     void setupInputBindings();   // 프로젝트 설정 레이어(키 바인딩). 게임 코드와 분리.
+
+    // ── 사용자 설정 · 저장 게임 (2026-11-20, Docs/Save_And_Settings.md) ─────────────────────────────
+    // 시작할 때 user_settings.ini 를 읽고 --user-setting 을 덮어 저장합니다. 그래픽 품질 · 소리 · 입력 · 편안함을 모두 적용한 뒤,
+    // 프레임 처음(streamAssets)에 변경 번호가 바뀌었으면 바로 적용 항목만 다시 적용하고, 마지막 변경 1 초 뒤 · 종료할 때 저장합니다.
+    void loadUserSettings();
+    void applyLiveUserSettings(bool startup);
+    void applyUserInput(bool startup);
+    void updateUserSettings();
+    void saveUserSettings(const char* why);
+    UserSettings                         userSettings_;
+    ComfortSettings                      comfort_;            // 월드 서비스(world_.setService), 이동 · 리그 높이가 읽음
+    std::unique_ptr<SaveStore>           saves_;              // <쓰기 루트>/Saves
+    uint64_t                             settingsApplied_ = 0;
+    bool                                 settingsDirty_   = false;
+    std::chrono::steady_clock::time_point settingsChangedAt_{};
+    std::map<std::string, std::string>   restartApplied_;     // 시작할 때 쓴 다시 시작 항목의 값(바뀌면 한 번 알림)
+    std::map<std::string, std::string>   inputApplied_;       // 지금 적용한 사용자 입력 덮어쓰기
+    std::string                          audioLogged_, postLogged_;   // 같은 값을 다시 알리지 않게
 
     // ── 메인 루프의 프레임 단계 (2026-11-18, 엔진 구조 안정화 S2) ──────────────────────────────────────
     // run() 은 아래 단계를 이 순서로 부르기만 합니다. 순서가 규칙입니다(Unity PlayerLoop · UE TickGroup 처럼 단계 목록으로 둠).
@@ -93,6 +114,7 @@ private:
     uint32_t      drawnFrames_    = 0;         // 그린 프레임 수(XR · 합성 눈 · 데스크톱)
     bool          debugCrashDone_ = false;     // --debug-crash 를 한 번 일으켰는지
     size_t        switchNext_     = 0;         // --switch-scene 다음 항목
+    size_t        settingNext_    = 0;         // --user-setting-at 다음 항목
     void          streamAssets();             // 프레임 처음: 업로드 예산 · 씬 전환(비동기 로딩)
     uint32_t      syntheticImage_ = 0;         // 다음에 그릴 합성 눈 이미지
     uint32_t      lastSynthetic_  = UINT32_MAX;   // 마지막으로 그린 합성 눈 이미지(캡처용)

@@ -17,6 +17,8 @@
 #include "../core/ProjectPaths.hpp"
 #include "../core/FileUtil.hpp"
 #include "../core/AppPaths.hpp"
+#include "../core/SaveGame.hpp"
+#include "../core/TextFloat.hpp"
 #include "../core/DebugDraw.hpp"
 #include "../assets/GassetCache.hpp"
 #include "../vfs/Vfs.hpp"
@@ -282,6 +284,10 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         }
     }
 
+    // 사용자 설정(쓰기 루트의 Config/user_settings.ini, 2026-11-20). 프로젝트 설정 위에 플레이어가 바꾼 값만 덮습니다.
+    loadUserSettings();
+    saves_ = std::make_unique<SaveStore>(happ::inWriteRoot("Saves"));
+
     // 그리기 행 · 라이트 · 물리 바디 상한(DEF-10). 렌더러 · 물리를 만들기 전에 읽습니다.
     const EngineLimits limits = loadEngineLimits("Config/engine.ini");
     HLOG(LogEngine, Log) << "Limits: draw rows " << limits.maxDrawRows << ", lights " << limits.maxLights
@@ -330,6 +336,13 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         q.heightFog         = project_.renderHeightFog;
         q.reflectionCapture = project_.renderReflectionCapture;
         q.lightLimit        = project_.renderLightLimit;
+        // 사용자 설정이 프로젝트 값 위에 덮습니다(다시 시작 항목, Docs/Save_And_Settings.md D7).
+        q.csmCascades    = (uint32_t)userSettings_.getInt("render.csmCascades", (int)q.csmCascades);
+        q.shadowDistance = userSettings_.getFloat("render.shadowDistance", q.shadowDistance);
+        q.contactShadows = userSettings_.getBool("render.contactShadows", q.contactShadows);
+        q.heightFog      = userSettings_.getBool("render.heightFog", q.heightFog);
+        for (const UserSettings::KeyInfo& k : UserSettings::keys())
+            if (k.apply == UserSettings::Apply::Restart) restartApplied_[std::string(k.name)] = userSettings_.getString(k.name);
         renderer_->setQuality(q);
         const Renderer::Quality d;
         if (q.csmCascades != d.csmCascades || q.shadowDistance != d.shadowDistance || q.contactShadows != d.contactShadows ||
@@ -338,17 +351,25 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
                                  << " m, contact shadows " << (q.contactShadows ? "on" : "off") << ", height fog "
                                  << (q.heightFog ? "on" : "off") << ", reflection capture " << (q.reflectionCapture ? "on" : "off")
                                  << ", light limit " << (q.lightLimit ? std::to_string(q.lightLimit) : std::string("engine.ini"))
-                                 << " (" << ProjectSettings::kPath << ")";
+                                 << " (" << ProjectSettings::kPath
+                                 << (userSettings_.has("render.csmCascades") || userSettings_.has("render.shadowDistance")
+                                     || userSettings_.has("render.contactShadows") || userSettings_.has("render.heightFog")
+                                         ? std::string(" + ") + UserSettings::kPath : std::string())
+                                 << ")";
         }
     }
     // 후처리 패스 켬/끔(프로젝트 설정 render.ao · render.bloom). --ssao · --no-ssao 가 AO 를 덮어씁니다.
-    renderer_->setPostFeatures(project_.renderAo, project_.renderBloom);
+    renderer_->setPostFeatures(userSettings_.getBool("render.ao", project_.renderAo),
+                               userSettings_.getBool("render.bloom", project_.renderBloom));
     if (options.ssao.has_value()) renderer_->setAoEnabled(*options.ssao);
     if (!renderer_->aoEnabled() || !renderer_->bloomEnabled()) {
         HLOG(LogEngine, Log) << "Post:" << (renderer_->aoEnabled() ? "" : " AO off")
                              << (renderer_->bloomEnabled() ? "" : " Bloom off") << " ("
                              << (options.ssao.has_value() && !*options.ssao ? "--no-ssao, " : "")
-                             << ProjectSettings::kPath << ")";
+                             << ProjectSettings::kPath
+                             << (userSettings_.has("render.ao") || userSettings_.has("render.bloom")
+                                     ? std::string(" + ") + UserSettings::kPath : std::string())
+                             << ")";
     }
     renderer_->init(window_.get(), xr_.get());
     if (xr_) {
@@ -403,6 +424,9 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     physics->setWorld(&world_);
     physics_ = physics;
     audio->setPhysics(physics);   // 소리 차폐 판정(2026-11-06, Audio_Design.md 9-4)
+    // 편안함 설정은 월드 서비스로 둡니다(이동 컴포넌트 · 리그 높이가 읽음). 소리 크기와 함께 사용자 설정에서 적용합니다.
+    world_.setService<ComfortSettings>(&comfort_);
+    applyLiveUserSettings(true);
 
     // 앞단(에디터 또는 게임).
     // 표시 글 문화권(글자 체계 T3): --culture 가 있으면 그 표(/Engine · /Game 의 Localization)를 읽습니다. 에디터는 없으면
@@ -430,7 +454,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
     // 게임 모듈(씬 콘텐츠) + 프레임 컨텍스트.
     ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_, *renderer_,
-                                  ComponentRegistry::get(), {} });
+                                  ComponentRegistry::get(), userSettings_, *saves_, {} });
     ctx_->requestScene = [this](const std::string& path) { return frontend_->requestScene(path, false); };
     game_ = createGameModule();   // 링크한 게임 모듈(runtime/IGameModule.hpp)
     game_->onRegister();          // 씬 열기 전에 UIPanel 내용 · 게임 타입 등록
@@ -446,6 +470,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
 Engine::~Engine() {
     if (game_)     game_->onShutdown();
+    if (settingsDirty_) saveUserSettings("shutdown");
     modules_.shutdownAll();
     if (assets_)   assets_->clear();
     if (frontend_) frontend_->cleanup();
@@ -455,6 +480,161 @@ Engine::~Engine() {
     if (xr_)       xr_->destroySession();
     if (renderer_) renderer_->cleanup();
     if (xr_)       xr_->shutdown();
+}
+
+// ── 사용자 설정 (2026-11-20, Docs/Save_And_Settings.md D6 ~ D10) ─────────────────────────────────────────
+void Engine::loadUserSettings() {
+    const std::filesystem::path path = happ::inWriteRoot(UserSettings::kPath);
+    std::vector<std::string> messages;
+    const bool found = userSettings_.load(path, messages);
+    for (const auto& m : messages) HLOG(LogEngine, Warning) << UserSettings::kPath << ": " << m;
+    // --user-setting 은 시작할 때 바꾸고 바로 저장합니다(다시 시작 확인용).
+    bool changed = false;
+    for (const auto& [name, value] : options_.userSettings) {
+        std::string why;
+        const uint64_t before = userSettings_.revision();
+        if (!userSettings_.set(name, value, &why)) {
+            HLOG(LogEngine, Warning) << "--user-setting=" << name << "=" << value << ": " << why;
+            continue;
+        }
+        if (!why.empty()) { HLOG(LogEngine, Warning) << "--user-setting: " << why; }
+        changed = changed || userSettings_.revision() != before;
+    }
+    if (changed) saveUserSettings("--user-setting");
+    settingsApplied_ = userSettings_.revision();
+    if (!found && userSettings_.values().empty()) return;
+    std::string list;
+    for (const auto& [k, v] : userSettings_.values()) list += (list.empty() ? "" : ", ") + k + "=" + v;
+    HLOG(LogEngine, Log) << "User settings (" << UserSettings::kPath << "): "
+                         << (list.empty() ? std::string("none changed") : list);
+}
+
+void Engine::applyLiveUserSettings(bool startup) {
+    // 소리: 마스터와 버스 다섯. 덮어쓰지 않은 값은 1(원래 크기)입니다.
+    if (audio_) {
+        audio_->setMasterVolume(userSettings_.getFloat("audio.master", 1.f));
+        static constexpr const char* kBus[kAudioBusCount] = { "audio.sfx", "audio.music", "audio.voice", "audio.ambient", "audio.ui" };
+        for (int b = 0; b < kAudioBusCount; ++b) audio_->setBusVolume((EAudioBus)b, userSettings_.getFloat(kBus[b], 1.f));
+        bool anyAudio = userSettings_.has("audio.master");
+        for (const char* k : kBus) anyAudio = anyAudio || userSettings_.has(k);
+        std::string vols = "master " + floatToText(audio_->masterVolume());
+        for (int b = 0; b < kAudioBusCount; ++b)
+            vols += std::string(", ") + audioBusName((EAudioBus)b) + " " + floatToText(audio_->busVolume((EAudioBus)b));
+        if ((anyAudio || !audioLogged_.empty()) && vols != audioLogged_) {
+            HLOG(LogEngine, Log) << "Audio volumes: " << vols << " (user settings)";
+            audioLogged_ = vols;
+        }
+    }
+    // 후처리: --ssao · --no-ssao 가 있으면 AO 는 그 값을 지킵니다. 시작할 때는 렌더러를 만들 때 이미 정했습니다.
+    if (startup && renderer_) {
+        postLogged_ = std::string("AO ") + (renderer_->aoEnabled() ? "on" : "off") + ", Bloom " + (renderer_->bloomEnabled() ? "on" : "off");
+    } else if (renderer_) {
+        const bool ao = options_.ssao.has_value() ? *options_.ssao : userSettings_.getBool("render.ao", project_.renderAo);
+        renderer_->setPostFeatures(ao, userSettings_.getBool("render.bloom", project_.renderBloom));
+        const std::string post = std::string("AO ") + (renderer_->aoEnabled() ? "on" : "off") + ", Bloom "
+                                 + (renderer_->bloomEnabled() ? "on" : "off");
+        if (post != postLogged_) {
+            HLOG(LogEngine, Log) << "Post: " << post << " (user settings)";
+            postLogged_ = post;
+        }
+    }
+    // 편안함.
+    const ComfortSettings c = ComfortSettings::from(userSettings_);
+    if (!(c == comfort_) || (startup && !(c == ComfortSettings{}))) {
+        comfort_ = c;
+        HLOG(LogEngine, Log) << "Comfort: snap turn "
+                             << (c.snapTurnDeg > 0.f ? floatToText(c.snapTurnDeg) + " deg" : std::string("scene"))
+                             << ", teleport " << (c.teleport < 0 ? "scene" : c.teleport ? "on" : "off")
+                             << ", height " << (c.height < 0 ? "scene" : c.height == 0 ? "tracked" : "fixed")
+                             << ", eye height " << (c.eyeHeight > 0.f ? floatToText(c.eyeHeight) + " m" : std::string("scene"))
+                             << " (user settings)";
+    }
+}
+
+// 사용자 입력 덮어쓰기(input.action.* · input.axis.*). 같은 이름의 프로젝트 바인딩을 대신하고, 덮어쓰기를 지우면 프로젝트 바인딩으로
+// 돌아갑니다. 틀린 글은 알리고 프로젝트 바인딩을 둡니다. "none" 은 그 동작 · 축을 비웁니다.
+void Engine::applyUserInput(bool startup) {
+    HInputSystem& in = HInputSystem::get();
+    const auto& base = project_.input.empty() ? HInputSystem::defaultBindings() : project_.input;
+    auto projectLine = [&](const std::string& key) -> const std::string* {
+        for (const auto& [k, v] : base)
+            if (k == key) return &v;
+        return nullptr;
+    };
+    std::map<std::string, std::string> want;
+    for (const auto& [k, v] : userSettings_.values())
+        if (k.rfind("input.action.", 0) == 0 || k.rfind("input.axis.", 0) == 0) want[k] = v;
+    if (want == inputApplied_) return;
+    int applied = 0;
+    // 지운 덮어쓰기: 프로젝트 바인딩으로 돌립니다.
+    for (const auto& [k, v] : inputApplied_) {
+        if (want.count(k)) continue;
+        const bool isAction = k.rfind("input.action.", 0) == 0;
+        const std::string name = k.substr(isAction ? 13 : 11);
+        std::string err;
+        if (const std::string* p = projectLine(k)) in.applyBinding(k, *p, err);
+        else if (isAction) in.unbind(name);
+        else in.unbindAxis(name);
+    }
+    std::map<std::string, std::string> now;
+    for (const auto& [k, v] : want) {
+        const bool isAction = k.rfind("input.action.", 0) == 0;
+        const std::string name = k.substr(isAction ? 13 : 11);
+        if (v == "none") {
+            if (isAction) in.unbind(name);
+            else in.unbindAxis(name);
+            now[k] = v;
+            ++applied;
+            continue;
+        }
+        std::string err;
+        if (in.applyBinding(k, v, err)) {
+            now[k] = v;
+            ++applied;
+        } else {
+            HLOG(LogEngine, Warning) << UserSettings::kPath << ": " << k << " = " << v << ": " << err
+                                     << "; keeping the project binding";
+            std::string e2;
+            if (const std::string* p = projectLine(k)) in.applyBinding(k, *p, e2);
+            else if (isAction) in.unbind(name);   // 프로젝트 바인딩이 없으면 예전 덮어쓰기를 남기지 않음
+            else in.unbindAxis(name);
+        }
+    }
+    // 틀린 줄도 적용한 것으로 기억해, 바뀌기 전까지 프레임마다 다시 알리지 않습니다.
+    inputApplied_ = want;
+    if (applied > 0 || !startup) {
+        HLOG(LogEngine, Log) << "Input bindings: " << applied << " user override(s) (" << UserSettings::kPath << ")";
+    }
+}
+
+void Engine::updateUserSettings() {
+    const auto now = std::chrono::steady_clock::now();
+    if (userSettings_.revision() != settingsApplied_) {
+        settingsApplied_ = userSettings_.revision();
+        applyLiveUserSettings(false);
+        applyUserInput(false);
+        for (auto& [name, applied] : restartApplied_) {
+            const std::string v = userSettings_.getString(name);
+            if (v == applied) continue;
+            HLOG(LogEngine, Log) << "User setting " << name << " = " << (v.empty() ? std::string("(project default)") : v)
+                                 << " takes effect after a restart";
+            applied = v;   // 같은 변경을 한 번만 알림
+        }
+        settingsDirty_     = true;
+        settingsChangedAt_ = now;
+    }
+    // 슬라이더를 끄는 동안 매 프레임 쓰지 않게, 마지막 변경 1 초 뒤에 씁니다.
+    if (settingsDirty_ && now - settingsChangedAt_ >= std::chrono::seconds(1)) saveUserSettings("changed");
+}
+
+void Engine::saveUserSettings(const char* why) {
+    settingsDirty_ = false;
+    std::string err;
+    if (userSettings_.save(happ::inWriteRoot(UserSettings::kPath), &err)) {
+        HLOG(LogEngine, Log) << "Saved " << UserSettings::kPath << " (" << why << ")";
+    } else {
+        HLOG(LogEngine, Warning) << "Saving " << UserSettings::kPath << " failed: " << err;
+    }
 }
 
 // ── 입력 바인딩 (프로젝트 설정 레이어, 게임 코드와 분리) ────────────────────────
@@ -471,6 +651,8 @@ void Engine::setupInputBindings() {
         else HLOG(LogEngine, Warning) << ProjectSettings::kPath << ": " << key << " = " << value << ": " << err << "; skipped";
     }
     HLOG(LogEngine, Log) << "Input bindings: " << applied << (project_.input.empty() ? " (engine defaults)" : " (project settings)");
+    inputApplied_.clear();
+    applyUserInput(true);
     // 컨트롤러 진동은 XR 모듈로 보냅니다(세션이 입력을 받는 동안만 실제로 울림).
     in.setHapticSink([this](int hand, float amplitude, float seconds) {
         if (xr_ && xr_->hasSession()) xr_->applyHaptic(hand, amplitude, seconds);
@@ -560,7 +742,7 @@ void Engine::beginXrFrame(FrameState& f) {
     // 화면 카메라가 씬 리그의 머리면 그 리그의 높이 모드를, 아니면 프로젝트 설정의 값을 씁니다. 프레임을 시작하기 전에 정해
     // 한 프레임 안에서는 바뀌지 않게 합니다.
     f.view = viewOrigin_->choose(world_);
-    if (xr_) viewOrigin_->applyRigSpace(*xr_, f.view, project_);
+    if (xr_) viewOrigin_->applyRigSpace(*xr_, f.view, project_, &comfort_);
     f.xrBegun = xrSession_->beginFrame(f.xrFrame);
 }
 
@@ -637,6 +819,7 @@ void Engine::updatePlayState(FrameState& f, LoopState& loop) {
 void Engine::streamAssets() {
     if (assets_) assets_->pump(kUploadBudgetMs);
     frontend_->updateSceneTransition();
+    updateUserSettings();
 }
 
 // 6. 틱. 앞단(에디터 UI) → 디버그 선 비우기 → 입력 → 월드 · 게임 · 모듈 → 따라오는 패널 → 월드 UI 포인터.
@@ -732,6 +915,16 @@ void Engine::endLoop(FrameState& f, LoopState& loop) {
         const auto& sw = options_.switchScenes[switchNext_++];
         if (!frontend_->requestScene(sw.first, options_.switchSync)) {
             HLOG(LogEngine, Warning) << "--switch-scene: " << sw.first << " was not accepted (game executable only)";
+        }
+    }
+    // 개발 스위치(저장 · 설정 S3-6): 정한 프레임을 그린 뒤 사용자 설정을 바꿉니다(다음 프레임 처음에 적용).
+    for (; settingNext_ < options_.userSettingsAt.size() && drawnFrames_ >= options_.userSettingsAt[settingNext_].frame; ++settingNext_) {
+        const auto& us = options_.userSettingsAt[settingNext_];
+        std::string why;
+        if (!userSettings_.set(us.name, us.value, &why)) {
+            HLOG(LogEngine, Warning) << "--user-setting-at: " << why;
+        } else {
+            HLOG(LogEngine, Log) << "--user-setting-at: frame " << drawnFrames_ << " set " << us.name << " = " << us.value;
         }
     }
     if (!options_.debugCrash.empty() && !debugCrashDone_ && drawnFrames_ >= 3) {

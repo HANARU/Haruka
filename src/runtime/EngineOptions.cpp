@@ -190,6 +190,18 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (!good) { o.switchScenes.clear(); unknown.push_back(a); }
         }
         else if (a == "--switch-sync") o.switchSync = true;
+        else if (valueOf(a, "--user-setting", v)) {
+            const size_t eq = v.find('=');
+            if (eq == std::string::npos || eq == 0) unknown.push_back(a);
+            else o.userSettings.push_back({ v.substr(0, eq), v.substr(eq + 1) });
+        }
+        else if (valueOf(a, "--user-setting-at", v)) {
+            const size_t colon = v.find(':'), eq = v.find('=');
+            uint32_t frame = 0;
+            if (colon == std::string::npos || eq == std::string::npos || eq < colon + 2 || !parseUint(v.substr(0, colon), frame))
+                unknown.push_back(a);
+            else o.userSettingsAt.push_back({ frame, v.substr(colon + 1, eq - colon - 1), v.substr(eq + 1) });
+        }
         else if (valueOf(a, "--fixed-dt", v)) {
             if (!parsePositiveFloat(v, o.fixedDt) || o.fixedDt > 0.05f) unknown.push_back(a);
         }

@@ -3,6 +3,7 @@
 #include "../components/CameraComponent.hpp"
 #include "../core/HLog.hpp"
 #include "../core/ProjectSettings.hpp"
+#include "../core/UserSettings.hpp"
 #include "../scene/World.hpp"
 #include "../xr/XrSystem.hpp"
 
@@ -16,10 +17,14 @@ XrViewChoice XrViewOrigin::choose(World& world) const {
     return v;
 }
 
-void XrViewOrigin::applyRigSpace(XrSystem& xr, const XrViewChoice& view, const ProjectSettings& project) const {
+void XrViewOrigin::applyRigSpace(XrSystem& xr, const XrViewChoice& view, const ProjectSettings& project,
+                                 const ComfortSettings* comfort) const {
     if (!xr.hasSession()) return;
     const auto* rc = view.rig ? view.rig->getComponent<XrRigComponent>() : nullptr;
-    xr.setRigSpace(rc ? rc->trackedHeight : project.xrTrackedHeight, rc ? rc->eyeHeight : project.xrEyeHeight);
+    const bool  tracked = rc ? rc->trackedHeight : project.xrTrackedHeight;
+    const float eye     = rc ? rc->eyeHeight : project.xrEyeHeight;
+    // 플레이어의 편안함 설정(앉아서 하기 · 눈높이)이 씬 · 프로젝트 값보다 앞섭니다(Docs/Save_And_Settings.md D7).
+    xr.setRigSpace(comfort ? comfort->trackedHeight(tracked) : tracked, comfort ? comfort->eye(eye) : eye);
 }
 
 void XrViewOrigin::applyToCamera(const XrViewChoice& view, XrSystem* xr, World& world) {

@@ -41,6 +41,7 @@
 | [Object_References.md](Object_References.md) | 참조 체계(2026-11-19): 액터 고유 ID(GUID) · 액터 참조 `HActorRef` · 복제 · 프리팹의 GUID 정책, 에셋 참조 색인 · 끊긴 참조 검사 · 참조를 고치며 옮기기. 체크리스트와 결과 |
 | [Crash_Reporting.md](Crash_Reporting.md) | 크래시 보고 · 검사 매크로(2026-11-19): `HCHECK` · `HENSURE` · `HCHECK_SLOW`, Windows 예외 필터 · 미니덤프(도우미 스레드), Android 시그널 보고서, Release PDB, `--debug-crash`. 체크리스트와 결과 |
 | [Engine_Foundation_Gaps.md](Engine_Foundation_Gaps.md) | 엔진 기반 공백 감사(2026-11-20): 필수인데 부족한 기능 14 후보(애니메이션 · 비동기 로딩 · 저장 · 게임플레이 도구 · CVar · 계측 · VFX · 텍스처 압축 · 조인트 · 프리팹 · 입력 · 내비 · 오디오 · 핫리로드 · 접근성)의 현재 상태 · 부족한 점 · 의존 · 우선순위 · 검증 체크리스트 |
+| [Save_And_Settings.md](Save_And_Settings.md) | 저장 게임 · 사용자 설정(2026-11-20, 기반 공백 3위): 저장 파일 형식(CRC-32 · 데이터 버전) · 슬롯(임시 파일 · 디스크 내보내기 · 이전 저장본) · 사용자 설정 층(바꾼 값만, 소리 · 그래픽 · 입력 · 편안함 · game.*) · `--user-setting`. 체크리스트와 결과 |
 | [Async_Loading.md](Async_Loading.md) | 비동기 로딩 · 레벨 전환 · 언로드(2026-11-20, 기반 공백 2위): 워커 스레드 읽기 · 프레임 예산 업로드 · 대기 없는 업로드 · 지연 해제 · 메가 버퍼 구간 할당자 · 게임 씬 전환 · `--switch-scene`. 체크리스트와 결과 |
 | [Animation_System.md](Animation_System.md) | 애니메이션(2026-11-20, 기반 공백 1위): glTF 클립 · 샘플링 · 재생기 · 크로스페이드 · 가산 · 이벤트 · 루트 모션 · 상태 기계 · 모프 타깃 · 트윈 · `--fixed-dt`. 체크리스트와 결과 |
 | [Math_Reinforcement.md](Math_Reinforcement.md) | 수학 보강(2026-11-17): 조사 요약, 적용한 것(던지기 속도 · 법선 · PCF 4탭 · 화면 크기 LOD · 연속 충돌 · 볼록 · 메시 충돌체 · 소리 가상화 · 최대 거리 밖 무음), 남긴 것 |

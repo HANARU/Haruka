@@ -9,6 +9,8 @@ class AssetManager;
 class IWindow;
 class IRenderExtensionHost;
 class ComponentRegistry;
+class UserSettings;
+class SaveStore;
 
 // ── EngineContext — subsystem references passed each frame ────────────────────
 struct EngineContext {
@@ -21,6 +23,11 @@ struct EngineContext {
     // 컴포넌트 타입 등록(DEF-22). Layer 2 컴포넌트를 여기에 등록하면 씬 · 프리팹 저장과 에디터 추가가 됩니다.
     // onStart 에서 씬을 읽기 전에 등록하십시오(core/ComponentRegistry.hpp).
     ComponentRegistry&    components;
+    // 사용자 설정(2026-11-20, Docs/Save_And_Settings.md): 소리 크기 · 그래픽 · 키 · 편안함 · game.* 값. set 하면 다음 프레임에 적용되고
+    // 1 초 뒤 저장됩니다(core/UserSettings.hpp).
+    UserSettings&         settings;
+    // 저장 게임 슬롯(<쓰기 루트>/Saves, core/SaveGame.hpp).
+    SaveStore&            saves;
     // 씬 전환(2026-11-20, Docs/Async_Loading.md D6): 모델을 백그라운드로 읽는 동안 지금 씬을 계속 그리고, 다 되면 바꿉니다.
     // 게임 실행 파일만 지원합니다(에디터는 false). 씬 글을 읽지 못해도 false.
     std::function<bool(const std::string&)> requestScene;
