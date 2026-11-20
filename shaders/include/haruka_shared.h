@@ -20,6 +20,9 @@ using mat4  = glm::mat4;
 // 한 프레임에 그리는 뷰(눈)의 최대 수. 단안은 0 번만, 스테레오는 0=왼쪽 · 1=오른쪽입니다.
 #define HARUKA_MAX_VIEWS 2
 
+// 한 프레임에 싣는 상자 투영 데칼의 최대 수(파티클 · 데칼 D11, 2026-11-20). DecalComponent::kMaxDecals 와 같습니다.
+#define HARUKA_MAX_DECALS 8
+
 // 특수화 상수(specialization constant) 번호(2026-11-01). 셰이더의 layout(constant_id = …) 와 C++ 의
 // SpecConstants::addInt 가 이 번호를 함께 씁니다. 겹치지 않도록 새 항목은 여기에 다음 번호(1, 2 …)로 더합니다.
 // 값은 모두 4바이트 정수입니다(SpecConstants.hpp).
@@ -34,6 +37,14 @@ using mat4  = glm::mat4;
 // gl_ViewIndex)로 고릅니다(멀티뷰 2026-11-18). 단안이면 [1] 은 [0] 과 같은 값입니다.
 // prevViewProj(가짜 TAA 용, 읽는 곳 없음)는 2026-10-04 에 지웠습니다(DEF-15). 진짜 TAA 나
 // Quest 의 프레임 합성(AppSW)에는 눈별 이전 행렬이 필요하므로 그때 viewProj 처럼 [2] 로 넣습니다.
+// 상자 투영 데칼 하나(FrameUBO.decals, 2026-11-20, Docs/Particles_And_Decals.md D11). pbr.frag 의 applyDecals 가 읽습니다.
+struct GpuDecal {
+    mat4 worldToBox;   // 월드 → 상자 로컬([-0.5, 0.5]³ 안이면 영향), inverse(액터 월드 × scale(size))
+    vec4 color;        // rgb = 선형 알베도, a = 불투명도
+    vec4 axis;         // xyz = 상자 +Y 의 월드 방향(투영은 −Y 로), w = 거칠기(음수면 그대로)
+    ivec4 mode;        // x = 섞기(0 Replace · 1 Multiply), y = 모양(0 원 · 1 부드러운 원 · 2 고리 · 3 사각), zw = 예약
+};
+
 struct FrameUBO {
     mat4  viewProj[HARUKA_MAX_VIEWS];   // 눈별 view-projection
     mat4  lightViewProj;                // shadow camera VP (두 눈 공용)
@@ -60,6 +71,9 @@ struct FrameUBO {
     // 반사 캡처(2026-11-17, ReflectionCaptureComponent): x y z = 캡처 위치, w = 영향 반경(0 = 없음). captureParams.x = 밝기.
     vec4  capturePos;
     vec4  captureParams;
+    // 상자 투영 데칼(2026-11-20). decalInfo.x = 데칼 수(0 ~ HARUKA_MAX_DECALS, 0 이면 pbr.frag 가 반복하지 않음), yzw = 예약.
+    ivec4 decalInfo;
+    GpuDecal decals[HARUKA_MAX_DECALS];
 };
 
 // 메시마다 월드 행렬 (set 2, binding 0). 행 번호 = gl_InstanceIndex.

@@ -1,7 +1,9 @@
 #include "RenderExtract.hpp"
 #include "CameraComponent.hpp"
+#include "DecalComponent.hpp"
 #include "HeightFogComponent.hpp"
 #include "LightComponent.hpp"
+#include "ParticleSystemComponent.hpp"
 #include "ReflectionCaptureComponent.hpp"
 #include "SkinnedMeshComponent.hpp"
 #include "StaticMeshComponent.hpp"
@@ -10,6 +12,7 @@
 #include "../scene/World.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
+#include <cmath>
 
 void extractRenderScene(const World& world, RenderSceneInput& out) {
     if (const CameraComponent* cam = CameraComponent::activeIn(world)) {
@@ -127,5 +130,36 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         rp.twoSided    = pc->twoSided;
         rp.brightness  = std::clamp(pc->brightness, UIPanelComponent::kMinBrightness, 1.f);
         out.panels.push_back(rp);
+    }
+
+    out.particles.clear();
+    for (const ParticleSystemComponent* ps : world.componentsOf<ParticleSystemComponent>()) {
+        if (!ps->owner->activeInHierarchy() || !ps->isEnabled()) continue;
+        if (ps->instances().empty()) continue;
+        RenderParticleBatch b;
+        b.data   = ps->instances().data();
+        b.count  = (uint32_t)ps->instances().size();
+        b.blend  = ps->desc.blend;
+        b.center = ps->center();
+        out.particles.push_back(b);
+    }
+
+    out.decals.clear();
+    for (const DecalComponent* dc : world.componentsOf<DecalComponent>()) {
+        const Actor* a = dc->owner;
+        if (!a->activeInHierarchy() || !dc->isEnabled() || !(dc->opacity > 0.f)) continue;
+        const glm::mat4 box = a->worldMatrix() * glm::scale(glm::mat4(1.f), dc->size);
+        if (std::fabs(glm::determinant(glm::mat3(box))) < 1e-12f) continue;   // 크기 0 인 축
+        RenderDecal d;
+        d.worldToBox = glm::inverse(box);
+        const glm::vec3 up = glm::vec3(box[1]);
+        d.axis      = glm::normalize(up);
+        d.center    = glm::vec3(box[3]);
+        d.color     = dc->color;
+        d.opacity   = dc->opacity;
+        d.roughness = dc->roughness;
+        d.blend     = (int32_t)dc->blend;
+        d.shape     = (int32_t)dc->shape;
+        out.decals.push_back(d);
     }
 }

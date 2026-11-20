@@ -195,6 +195,12 @@ public:
     void        destroyUIPanelTarget(uint32_t handle);
     const UIPanelPass& uiPanels() const { return panels_; }
 
+    // ── 빌보드 파티클 (2026-11-20, Docs/Particles_And_Decals.md) ──────────────────────────
+    // 직전 프레임에 그린 파티클 수(상한에서 잘린 뒤)와 드로 수. 시험 · 측정용입니다.
+    uint32_t    particleCount() const     { return particleList_.count; }
+    uint32_t    particleDrawCount() const { return (uint32_t)particleRanges_.size(); }
+    uint32_t    decalCount() const        { return decalCount_; }
+
     // 씬을 그릴 3D 뷰포트 rect(프레임버퍼 픽셀)를 지정합니다. 에디터가 매 프레임 호출하며,
     // 값이 바뀔 때만 renderExtent 타깃을 재생성합니다(Viewport_Render_Design.md). 지정하지
     // 않으면 창 전체로 렌더합니다(게임 빌드). drawFrame 이전(에디터 tick)에서 호출해야 합니다.
@@ -334,6 +340,14 @@ private:
         }
     };
     void updateReflectionCapture(const RenderSceneInput& scene);
+    // 파티클: 이미터들을 눈 가운데 기준으로 정렬해 한 줄로 잇고(ParticleOrder), 모양 아틀라스를 처음 쓸 때 올립니다.
+    void gatherParticles(const RenderSceneInput& scene);
+    TexSlot                            particleAtlas_;
+    std::vector<vfx::ParticleInstance> particleInst_;
+    std::vector<ParticleRange>         particleRanges_;
+    ParticleOrderScratch               particleScratch_;
+    GeometryPass::ParticleList         particleList_;
+    uint32_t                           decalCount_ = 0;
     void performReflectionCapture(const RenderSceneInput& scene, const glm::vec3& pos);
     CaptureKey       captureKey_;
     glm::vec4        capturePos_{ 0.f };      // xyz 위치, w 반경(0 = 없음) → FrameUBO.capturePos
@@ -514,7 +528,7 @@ private:
     // 라이트 개수는 updateLightSSBO가 실제로 채운 값을 반환하고 updateUBO가 그것을 받는다.
     // 양쪽이 각자 세면 라이트 상한(render.maxLights)에서 잘린 실제 개수와 UBO가 알려주는 개수가 어긋나,
     // pbr.frag가 SSBO 범위 밖을 읽는다. 계산 지점을 하나로 두는 것이 이 구조의 요점이다.
-    void     updateUBO(const RenderFog& fog, uint32_t lightCount);
+    void     updateUBO(const RenderFog& fog, uint32_t lightCount, const std::vector<RenderDecal>& decals);
     uint32_t updateLightSSBO(const std::vector<RenderLight>& lights);   // 실제로 업로드한 라이트 수를 반환
     // 드로우 커맨드와 transform SSBO 행의 유일한 생성 지점.
     // opaqueOut/transpOut의 firstInstance와 materialRowsOut의 인덱스는 같은 배정(hbatch::build)

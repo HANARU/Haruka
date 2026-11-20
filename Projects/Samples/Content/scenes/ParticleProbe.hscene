@@ -1,0 +1,249 @@
+# Haruka Scene v5
+# Particle and decal probe (2026-11-20, Docs/Particles_And_Decals.md). Fixed seeds: the same --fixed-dt run gives the same PNG.
+# Left: additive fountain (cone, gravity). Middle: alpha smoke (size and color curves, spin). Right: looping star burst (sphere, local space).
+# Floor: red circle decal (replace), dark ring decal (multiply, glossy). Sphere: square decal from above (angle fade on the sides).
+ACTOR:Sun
+POS:0 0 0
+ROT:-50 0 0
+QUAT:-0.42261826 0 0 0.90630779
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:LightComponent
+enabled=1
+type=directional
+color=1 1 1
+intensity=3
+attenuationRadius=10
+innerConeAngle=15
+outerConeAngle=30
+useTemperature=0
+temperatureK=6500
+castShadows=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Ground
+POS:0 -0.1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:20 0.2 20
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+END_ACTOR
+ACTOR:Camera
+POS:0 1.2 3.2
+ROT:-10 0 0
+QUAT:-0.08715574 0 0 0.9961947
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:CameraComponent
+enabled=1
+fovY=60
+zNear=0.05
+zFar=1000
+primary=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Fountain
+POS:-1.2 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:ParticleSystemComponent
+enabled=1
+autoPlay=1
+rate=150
+burst=0
+duration=2
+loop=1
+maxParticles=1000
+seed=1
+space=world
+lifeMin=1
+lifeMax=1.6
+speedMin=2.2
+speedMax=3
+shape=cone
+coneAngle=12
+radius=0.05
+size=0.08
+spinMin=0
+spinMax=0
+gravity=0 -4 0
+drag=0.2
+sizeCurve=0 1; 1 0.4
+colorCurve=0 4 2 0.6 1; 0.6 2 0.6 0.1 0.8; 1 0.5 0.1 0 0
+blend=additive
+sprite=softCircle
+END_COMPONENT
+END_ACTOR
+ACTOR:Smoke
+POS:-0.3 0 -0.8
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:ParticleSystemComponent
+enabled=1
+autoPlay=1
+rate=24
+burst=6
+duration=2
+loop=1
+maxParticles=200
+seed=2
+space=world
+lifeMin=2
+lifeMax=3
+speedMin=0.35
+speedMax=0.6
+shape=cone
+coneAngle=20
+radius=0.15
+size=0.35
+spinMin=-30
+spinMax=30
+gravity=0 0.1 0
+drag=0.3
+sizeCurve=0 0.5; 1 2.2
+colorCurve=0 0.08 0.08 0.09 0; 0.15 0.07 0.07 0.08 0.85; 1 0.05 0.05 0.06 0
+blend=alpha
+sprite=softCircle
+END_COMPONENT
+END_ACTOR
+ACTOR:Sparks
+POS:1.2 1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:ParticleSystemComponent
+enabled=1
+autoPlay=1
+rate=0
+burst=60
+duration=1
+loop=1
+maxParticles=500
+seed=3
+space=local
+lifeMin=0.6
+lifeMax=1
+speedMin=1
+speedMax=2
+shape=sphere
+coneAngle=25
+radius=0.05
+size=0.07
+spinMin=0
+spinMax=0
+gravity=0 -2 0
+drag=2
+sizeCurve=0 1; 1 0.3
+colorCurve=0 1.5 2 4 1; 1 0.2 0.4 1 0
+blend=additive
+sprite=star
+END_COMPONENT
+END_ACTOR
+ACTOR:Rings
+POS:0.5 0.6 0.8
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:ParticleSystemComponent
+enabled=1
+autoPlay=1
+rate=4
+burst=1
+duration=2
+loop=1
+maxParticles=20
+seed=4
+space=world
+lifeMin=1.5
+lifeMax=1.5
+speedMin=0.1
+speedMax=0.1
+shape=cone
+coneAngle=0
+radius=0
+size=0.15
+spinMin=0
+spinMax=0
+gravity=0 0 0
+drag=0
+sizeCurve=0 0.5; 1 2
+colorCurve=0 0.2 0.9 0.4 0.9; 1 0.2 0.9 0.4 0
+blend=alpha
+sprite=ring
+END_COMPONENT
+END_ACTOR
+ACTOR:DecalCircle
+POS:-0.6 0 0.9
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:DecalComponent
+enabled=1
+size=0.8 0.4 0.8
+color=0.6 0.06 0.04
+opacity=1
+roughness=-1
+blend=replace
+shape=circle
+END_COMPONENT
+END_ACTOR
+ACTOR:DecalRing
+POS:0.7 0 1.2
+ROT:0 30 0
+QUAT:0 0.25881905 0 0.96592583
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:DecalComponent
+enabled=1
+size=1 0.4 1
+color=0.15 0.15 0.18
+opacity=0.9
+roughness=0.15
+blend=multiply
+shape=ring
+END_COMPONENT
+END_ACTOR
+ACTOR:Ball
+POS:0.4 0.35 -0.2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.7 0.7 0.7
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color E0E0E0FF 0 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:DecalBall
+POS:0.4 0.6 -0.2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:DecalComponent
+enabled=1
+size=0.45 0.6 0.45
+color=0.05 0.25 0.7
+opacity=1
+roughness=-1
+blend=replace
+shape=square
+END_COMPONENT
+END_ACTOR

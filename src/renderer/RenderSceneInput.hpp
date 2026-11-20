@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "../vfx/ParticleSim.hpp"
+
 struct MeshHandle;
 struct MaterialHandle;
 struct MeshSourceVertex;
@@ -110,6 +112,27 @@ struct RenderUIPanel {                    // componentsOf<UIPanelComponent> 순�
     float               brightness  = 1.f;
 };
 
+// 파티클 이미터 하나(2026-11-20, Docs/Particles_And_Decals.md). 인스턴스는 월드 공간이고 컴포넌트가 가진 목록을 가리킵니다
+// (이 프레임 동안 유효). 정렬은 렌더러가 두 눈 가운데를 안 뒤에 합니다(D9).
+struct RenderParticleBatch {               // componentsOf<ParticleSystemComponent> 순서 그대로, 빈 이미터는 뺌
+    const vfx::ParticleInstance* data   = nullptr;
+    uint32_t                     count  = 0;
+    vfx::Blend                   blend  = vfx::Blend::Additive;
+    glm::vec3                    center{ 0.f };   // 이미터 월드 위치(이미터끼리 정렬)
+};
+
+// 상자 투영 데칼 하나(D11). 렌더러가 눈 가운데에서 가까운 것부터 HARUKA_MAX_DECALS 개를 FrameUBO 에 싣습니다.
+struct RenderDecal {                       // componentsOf<DecalComponent> 순서 그대로
+    glm::mat4 worldToBox{ 1.f };           // inverse(액터 월드 × scale(size))
+    glm::vec3 axis{ 0.f, 1.f, 0.f };       // 상자 +Y 의 월드 방향(단위)
+    glm::vec3 center{ 0.f };
+    glm::vec3 color{ 1.f };                // 선형 알베도
+    float     opacity   = 1.f;
+    float     roughness = -1.f;            // 음수 = 거칠기 그대로
+    int32_t   blend     = 0;               // 0 Replace · 1 Multiply
+    int32_t   shape     = 0;               // 0 원 · 1 부드러운 원 · 2 고리 · 3 사각
+};
+
 struct RenderSceneInput {
     RenderCamera                   camera;
     std::vector<RenderLight>       lights;
@@ -118,4 +141,6 @@ struct RenderSceneInput {
     std::vector<RenderSkinnedMesh> skinned;
     RenderReflectionCapture        capture;
     std::vector<RenderUIPanel>     panels;
+    std::vector<RenderParticleBatch> particles;
+    std::vector<RenderDecal>       decals;
 };

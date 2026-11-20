@@ -14,6 +14,8 @@
 #include "SkinnedMeshComponent.hpp"
 #include "StaticMeshComponent.hpp"
 #include "UIPanelComponent.hpp"
+#include "ParticleSystemComponent.hpp"
+#include "DecalComponent.hpp"
 
 void registerCoreComponents() {
     auto& r = ComponentRegistry::get();
@@ -33,6 +35,9 @@ void registerCoreComponents() {
     if (!r.find("AnimationComponent"))   r.registerType<AnimationComponent>  ("AnimationComponent",   "Animation");
     // 물리 조인트(2026-11-20, Docs/Physics_Joints_And_Events.md D5)
     if (!r.find("JointComponent"))       r.registerType<JointComponent>      ("JointComponent",       "Joint");
+    // 파티클 · 데칼(2026-11-20, Docs/Particles_And_Decals.md)
+    if (!r.find("ParticleSystemComponent")) r.registerType<ParticleSystemComponent>("ParticleSystemComponent", "Particle System");
+    if (!r.find("DecalComponent"))       r.registerType<DecalComponent>      ("DecalComponent",       "Decal");
     // 3D UI 패널 P1b(2026-11-16, Spatial_Representation_Design 6단계)
     if (!r.find("UIPanelComponent"))     r.registerType<UIPanelComponent>    ("UIPanelComponent",     "UI Panel");
 }

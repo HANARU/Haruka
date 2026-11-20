@@ -167,7 +167,7 @@ PostPass::Params Renderer::postParams() const {
     return p;
 }
 
-void Renderer::updateUBO(const RenderFog& fog, uint32_t lightCount) {
+void Renderer::updateUBO(const RenderFog& fog, uint32_t lightCount, const std::vector<RenderDecal>& decals) {
     FrameUBO ubo{};
     const PostPass::Params post = postParams();
 
@@ -225,6 +225,28 @@ void Renderer::updateUBO(const RenderFog& fog, uint32_t lightCount) {
     // 반사 캡처(2026-11-17): 위치 · 반경(0 = 없음) · 밝기
     ubo.capturePos    = capturePos_;
     ubo.captureParams = glm::vec4(captureIntensity_, 0.f, 0.f, 0.f);
+    // 상자 투영 데칼(2026-11-20, D11): 두 눈 가운데에서 가까운 것부터 HARUKA_MAX_DECALS 개(같은 거리는 입력 순서).
+    {
+        std::vector<std::pair<float, uint32_t>> order;
+        order.reserve(decals.size());
+        for (uint32_t i = 0; i < (uint32_t)decals.size(); ++i) {
+            const glm::vec3 d = decals[i].center - viewCenter_;
+            order.push_back({ glm::dot(d, d), i });
+        }
+        if (order.size() > (size_t)HARUKA_MAX_DECALS)
+            std::sort(order.begin(), order.end());
+        const uint32_t n = (uint32_t)std::min(order.size(), (size_t)HARUKA_MAX_DECALS);
+        for (uint32_t k = 0; k < n; ++k) {
+            const RenderDecal& d = decals[order[k].second];
+            GpuDecal& g  = ubo.decals[k];
+            g.worldToBox = d.worldToBox;
+            g.color      = glm::vec4(d.color, d.opacity);
+            g.axis       = glm::vec4(d.axis, d.roughness);
+            g.mode       = glm::ivec4(d.blend, d.shape, 0, 0);
+        }
+        ubo.decalInfo = glm::ivec4((int)n, 0, 0, 0);
+        decalCount_   = n;
+    }
     // 지수 고도 안개(2026-11-17): 켜진 첫 HeightFogComponent. 없으면 밀도 0(셰이더가 건너뜀).
     ubo.fogColor  = glm::vec4(0.f);
     ubo.fogParams = glm::vec4(0.f);
@@ -598,6 +620,25 @@ void Renderer::gatherUIPanels(const RenderSceneInput& scene, std::vector<Geometr
     }
 }
 
+// ── 빌보드 파티클 (2026-11-20, Docs/Particles_And_Decals.md D9 · D10) ─────────────────────────────────────
+void Renderer::gatherParticles(const RenderSceneInput& scene) {
+    HPROF_SCOPE("Renderer.Particles");
+    particleList_ = GeometryPass::ParticleList{};
+    if (scene.particles.empty()) { particleInst_.clear(); particleRanges_.clear(); return; }
+    if (!particleAtlas_.imageView) {
+        std::vector<uint8_t> px;
+        vfx::buildSpriteAtlas(px);
+        particleAtlas_ = scene_.uploadTexture(px.data(), vfx::kAtlasSize, vfx::kAtlasSize, VK_FORMAT_R8G8B8A8_UNORM);
+    }
+    buildParticleStream(scene.particles, viewCenter_, GeometryPass::kMaxParticleInstances, particleInst_, particleRanges_,
+                        particleScratch_);
+    particleList_.data    = particleInst_.data();
+    particleList_.count   = (uint32_t)particleInst_.size();
+    particleList_.ranges  = &particleRanges_;
+    particleList_.atlas   = particleAtlas_.imageView;
+    particleList_.sampler = panelSampler_;
+}
+
 // ── extractRenderView ──────────────────────────────────────────────────────────
 // 렌더러는 RenderSceneInput 만 소비합니다(추출은 components/RenderExtract, S5b~d). 이후 패스 기록에서도
 // World/Actor/Component 를 참조하지 않습니다.
@@ -617,10 +658,11 @@ Renderer::RenderView Renderer::extractRenderView(const RenderSceneInput& scene, 
 
     // 순서 주의: 라이트 SSBO를 먼저 채워 실제 개수를 확정한 뒤 UBO에 싣는다.
     const uint32_t lightCount = updateLightSSBO(scene.lights);
-    updateUBO(scene.fog, lightCount);
+    updateUBO(scene.fog, lightCount, scene.decals);
     buildDrawCommands(scene, v.opaqueDraws, v.transpDraws, v.materialRows, v.rowFlags, v.shadowDraws);
     frameStats_.drawCalls = (uint32_t)v.opaqueDraws.size();
     gatherUIPanels(scene, v.panels);
+    gatherParticles(scene);
 
     if (hasCamera_) {
         for (uint32_t i = 0; i < viewCount_; ++i) {
@@ -847,6 +889,7 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
     gin.transparentItems = &view.transparentItems;
     gin.panelSampler     = panelSampler_;
     gin.panels           = &view.panels;
+    gin.particles        = particleList_.count ? &particleList_ : nullptr;
 
     // 단안은 뷰포트 전체, 스테레오 흉내는 뷰포트의 왼쪽 · 오른쪽 절반, XR 은 스왑체인의 그 눈 층에
     // 합성합니다.

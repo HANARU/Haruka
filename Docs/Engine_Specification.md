@@ -69,7 +69,7 @@
 |---|---|
 | 소스 | `src/` 의 `.cpp` · `.hpp` 179 파일, 30,275 줄 |
 | 셰이더 | GLSL 20 파일(셰이더 19 + 공용 헤더 1), 841 줄(2026-11-02). 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 37개 실행 파일, 검사 2,940개(`ctest -C Release`, 2026-11-20 물리 조인트 · 충돌 이벤트 뒤) |
+| 자동 테스트 | 38개 실행 파일, 검사 3,031개(`ctest -C Release`, 2026-11-20 파티클 · 데칼 뒤) |
 | 문서 | `Docs/` 활성 문서 28개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳤습니다. 같은 날 빛 · 그림자 조사 후속에서 DEF-148 을 고치고 DEF-158 ~ 161(4건)을 등재해 모두 고쳤습니다. 2026-11-02 헤드셋 확인에서 DEF-162 · 163, 마지막 점검에서 DEF-164 를 등재해 모두 고쳤습니다. 2026-11-06 검토 결함 묶음 DEF-130 ~ 147(18건)을 모두 고쳤고, 같은 날 임포트 검토에서 DEF-165(텍스처 밉맵)를, 공간 음향 조사에서 DEF-166(패닝 문서 오류)을 등재해 고쳐, 지금은 166건 중 해결 155 · 열림 5 · 보류 3 · 닫음 3 입니다. 그 뒤 DEF-167(보류, 2026-11-16)과 DEF-168 ~ 172(2026-11-17 ~ 18, 모두 해결)를 등재해 172건 중 해결 160 · 열림 5 · 보류 4 · 닫음 3 입니다 |
@@ -174,7 +174,8 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | `src/memory/` | 2 · 388 | `HarukaAllocator`(1GB 단일 힙, 세 구역) |
 | `src/assets/` | 10 · 1,669 | `AssetManager`, glTF 로더, `.gasset` 캐시, 스킨 |
 | `src/geometry/` | 5 · 1,321 | 절차 도형 기술자와 메시 생성기 |
-| `src/components/` | 24 · 3,316 | Light · Camera · StaticMesh · SkinnedMesh · HeightFog · ReflectionCapture · UIPanel · HandPose, XR 리그 · 추적 자세 · 이동 · 잡기(`XrComponents`), 기본 컴포넌트 등록 |
+| `src/components/` | 24 · 3,316 | Light · Camera · StaticMesh · SkinnedMesh · HeightFog · ReflectionCapture · UIPanel · HandPose · ParticleSystem · Decal, XR 리그 · 추적 자세 · 이동 · 잡기(`XrComponents`), 기본 컴포넌트 등록 |
+| `src/vfx/` | 2 · 436 | 파티클 시뮬레이션(순수 계산, 2026-11-20): `ParticleSim`(이미터 설정 · 상태 · 인스턴스 · 정렬 · 모양 아틀라스) |
 | `src/physics/` | 8 · 2,196 | `PhysicsSystem`(Jolt), `RigidBodyComponent`, `JointComponent`, 충돌 레이어 표(`PhysicsLayers.hpp`), 접촉 알림 형(`PhysicsEvents.hpp`) |
 | `src/audio/` | 15 · 3,106 | `AudioSystem`(miniaudio, 출력 장치 선택, 가상 파일 시스템 파일 콜백, 음원별 노드 사슬 · 차폐 · 공용 리버브 · HRTF 노드), 3D 감쇠 · 차폐 설정, 차폐 · 잔향 계산(`AudioOcclusion` · `AudioReverb`), verblib 설정, HRTF 인터페이스(`AudioHrtf`)와 Steam Audio 구현(`SteamAudioHrtf`, 라이브러리를 실행 중에 엶), `AudioComponent` · `ReverbZoneComponent` |
 | `src/input/` | 3 · 456 | `HInputSystem`(액션 · 축 바인딩, 키 · 마우스 축, 설정 줄 바인딩, 햅틱), XR 입력 상태 |
@@ -297,7 +298,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 ### 4-4. 렌더러
 
 **프레임 구성**: 다시 그릴 월드 UI 패널을 먼저 텍스처에 그리고(밉 포함), 섀도는 프레임에 한 번 그립니다. 그다음 눈마다 메인 패스(서브패스 3개:
-깊이 프리패스 → 불투명 PBR → 반투명 PBR · UI 패널 · 라인 · 기즈모, MSAA 를 HDR 로 resolve) → SSAO → Bloom → 톤매핑을 반복합니다. XR 이면
+깊이 프리패스 → 불투명 PBR → 반투명 PBR · 파티클 · UI 패널 · 라인 · 기즈모, MSAA 를 HDR 로 resolve) → SSAO → Bloom → 톤매핑을 반복합니다. XR 이면
 왼쪽 눈을 에디터 뷰포트에 거울 화면으로 한 번 더 톤매핑하고, 마지막에 UI 를 그립니다.
 
 | 기능 | 사양 |
@@ -315,6 +316,8 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 톤매핑 | ACES(Narkowicz 근사), 노출 1.0, sRGB 인코딩(스왑체인 형식에 따라 셰이더 또는 GPU). HDR 알파는 후처리 가중치입니다(2026-11-16): 장면은 1(장면 파이프라인은 알파를 쓰지 않음), UI 패널 화소는 0 이라 노출 · AO · 블룸 · 톤매핑을 건너뜁니다. 렌더 확장도 알파를 그대로 두어야 합니다 |
 | 월드 UI 패널 | `UIPanelComponent`(4-10 절). 패널마다 sRGB 텍스처(알파를 곱한 색, GPU 블릿 밉)를 두고, 프레임마다 그리기 목록을 만들어 해시가 바뀐 패널만 GPU 로 다시 그립니다. 텍스처는 지연 삭제(제출 번호 + 2 프레임 뒤)합니다. 반투명 서브패스에서 반투명 물체 뒤에 그리며 장면 깊이에 가려집니다(깊이는 쓰지 않음). 조명을 받지 않고, 샘플러는 가장자리 고정 · 밉 선형 · 이방성 |
 | 반투명 | 메인 패스 세 번째 서브패스. 뒤에서 앞으로 정렬한 목록 전체를 뒷면만 한 번, 앞면만 한 번 그립니다(볼록 메시 하나의 앞뒤를 맞추는 방식이며, 메시마다 묶지 않으므로 서로 겹친 반투명 물체 사이의 순서는 어긋날 수 있음). 반투명도 그림자를 던집니다(알파 무시) |
+| 파티클 | `ParticleSystemComponent`(2026-11-20, [Particles_And_Decals.md](Particles_And_Decals.md)). CPU 이미터(순수 계산 `src/vfx`: 비율 · 터뜨리기 · 수명 · 원뿔/구 속도 · 중력 · 감쇠 · 색/크기 수명 곡선 · 회전 · 상한 1 ~ 65,536 · 로컬/월드 · 결정적 시드), 월드 시간 배율을 따름. 반투명 서브패스에서 반투명 메시 뒤 · UI 패널 앞에 빌보드 인스턴싱(인스턴스 48 B, 프레임 슬롯마다 호스트 버퍼, 두 눈 가운데를 바라봄), 엔진 모양 아틀라스(부드러운 원 · 원 · 고리 · 별) × 파티클 색, 가산 · 알파(알파를 곱한 색, HDR 알파는 그대로), 깊이 시험만. 알파는 이미터끼리 + 이미터 안 먼 것부터 정렬, 합이 상한을 넘으면 먼 이미터부터 잘림. 조명 · 안개 · 부드러운 파티클은 없음 |
+| 데칼 | `DecalComponent`(2026-11-20). 포워드 상자 데칼: pbr.frag 가 조명 전에 화소를 상자 로컬로 옮겨 알베도를 바꿈(Replace · Multiply, 거칠기 선택), 로컬 −Y 로 투영, 법선 각 페이드, 모양은 셰이더 계산(원 · 부드러운 원 · 고리 · 사각). 한 프레임 최대 8개(FrameUBO, 눈 가운데에서 가까운 것부터), 없으면 반복하지 않음. 데칼 텍스처는 없음 |
 | 컬링 | CPU 에서 바운딩 구 대 6평면. 두 눈 각각 판정해 하나라도 통과하면 그림 |
 | 인스턴싱 | 같은 지오메트리 · 머티리얼의 불투명 메시를 자동으로 묶어 `instanceCount = N` 드로우 하나로(셰이더는 `gl_InstanceIndex` 로 행을 읽음). 반투명은 묶지 않음 |
 | 오류 머티리얼 | 머티리얼이 없는 메시는 자홍색으로 그리고 액터마다 한 번 경고 |
@@ -457,7 +460,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 37개, 검사 2,940개(2026-11-20).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 38개, 검사 3,031개(2026-11-20).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -469,6 +472,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `text_system` | 121 | 글자 체계([Text_System.md](Text_System.md)): UTF-8 읽기 · 고치기, 글자(grapheme) · 단어 경계, 한글 NFC, ASCII 대소문자 무시, 편집 상태, 입력 처리기(가짜 창 · 클립보드 · 자동 반복 · IME 조합 · 후보 창 자리), HText(번역 · 낡은 번역 · 층 · 서식 · 숫자), .po 읽기, HTEXT 모으기 · 한국어 표가 소스 키를 모두 덮음, 씬 이름 |
 | `object_refs` | 98 | 참조 체계([Object_References.md](Object_References.md)): 액터 GUID(형식 · 겹침 · World 색인), 액터 참조(지우면 끊기고 되살리면 이어짐), 씬 v6 GUID 왕복 · 옛 파일 · 겹친 GUID, Fresh 정책(프리팹 두 번 꺼내기 · 복제한 쌍 · 밖 참조 · 등록되지 않은 컴포넌트 · CRLF), Undo · Play 뒤 참조, 디테일 액터 참조 칸 · 고르기 목록, 에셋 참조 색인(옛 assets/ 형식 · ini · glTF uri) · 끊긴 참조 · 옮기기(파일 · 폴더 · 거절 · 바이트 보존 · 되돌리기 · 코드 경고), 샘플 프로젝트에 끊긴 참조 없음, 샘플 LookAtComponent |
 | `cpu_profiling` | 85 | CPU 구간 계측([CPU_Profiling.md](CPU_Profiling.md)): 중첩 스코프(순서 · 포함), 스레드 구분(끝난 스레드 수집 · 이름), 시작 · 멈춤 · 상한(버린 수), Chrome trace JSON(작은 파서로 다시 읽기 · 이스케이프 · 마이크로초 표기 · 정렬), 끈 번역 단위(`constexpr` · 이벤트 0), FrameTimings 공유 측정 지점, 추적 경로 규칙 · 기록기 · 콘솔 명령 · `--trace-frames`, 스코프 비용 |
+| `particles_decals` | 90 | 파티클 · 데칼([Particles_And_Decals.md](Particles_And_Decals.md)): 결정적 시드(같은 시드 = 같은 비트 · reset · 구), 수명 제거 · 상한 · 비율 · 반복 안 함 · 반복 터뜨리기 · dt 상한, 수명 비율 곡선(보간 · 범위 · 글자 왕복 · 거절), 중력 · 감쇠 · 로컬/월드 · 회전한 원뿔, 월드 시간 배율 · stop · play · autoPlay, 정렬(먼 것부터 · 같은 거리 순서 · 이미터끼리 · 상한에서 먼 것부터 잘림 · 드로 합치기), 모양 아틀라스, 필드 왕복, 데칼 상자 · 모양 · 각도 · 추출, 확인 장면 `ParticleProbe.hscene` 두 번 같음 |
 | `physics_joints` | 55 | 물리 조인트 · 충돌 이벤트 · 레이어([Physics_Joints_And_Events.md](Physics_Joints_And_Events.md)): 레이어 표 해석 · `project.ini` 줄, 레이어로 무시한 쌍(통과 · 알림 0 · 질의 마스크), 접촉 시작 · 유지 · 끝(잠듦은 끝 아님), 트리거 들어감 · 나감(지나감 · 안에서 잠듦 · 잠든 몸 둘레에 생김 · 지우면 나감), 질의는 트리거를 맞추지 않음, 알림 안에서 삭제, 경첩 문 한계 · 상대 삭제, 슬라이더 · 거리 · 고정, 셰이프 캐스트(구 · 상자 · 캡슐 · 회전 · 마스크 · 무시 · 시작 겹침), 필드 왕복 · 디테일 칸, 확인 장면 `PhysicsJointProbe.hscene` |
 | `gameplay_tools` | 84 | 게임플레이 기본 도구([Gameplay_Tools.md](Gameplay_Tools.md)): 시간 배율 · 게임 시간, 타이머(정확한 틱 · 배율 · 반복 따라잡기 · 16 번 상한 · 주인 삭제 취소 · 콜백 안 취소 · 추가 · clear), 물리 뒤 틱, 태그(규칙 · 색인 캐시 · 씬 파일 왕복), 이벤트 버스(형별 · 순서 · 발행 중 해제 · 재발행 · 이동), CVar(등록 · 범위 · 보관 · 콜백 · 출처), 콘솔 명령(값 · help · list · reset · 따옴표 인자) |
 | `save_settings` | 89 | 저장 게임 · 사용자 설정([Save_And_Settings.md](Save_And_Settings.md)): 저장 파일 왕복(int64 · float 비트 · 줄바꿈 든 문자열 · vec3 · GUID), CRC 로 잘림 · 손상 거절, 형식 · 데이터 버전, 슬롯 이름 규칙, 다시 시작 왕복, `.bak`(잘린 본 파일 · 본 파일 없음 · 둘 다 손상), 남은 `.tmp`, 목록 · 지우기, 다시 읽은 씬의 GUID 참조, 설정 형 · 범위 · 바꾼 값만 쓰기 · 모르는 이름 보존 · BOM · UTF-16, 편안함 서비스 |
@@ -554,6 +558,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 스키닝 · 애니메이션 · 모프 | 2026-11-20 에 들어옴([Animation_System.md](Animation_System.md)): CPU 스키닝(손 쥐기 때부터) · glTF 클립 · 재생기 · 크로스페이드 · 가산 · 상태 기계 · 루트 모션 · 모프 타깃 · 트윈. 없는 것: GPU 스키닝, 스킨 없는 노드 애니메이션, 블렌드 공간 · 리타기팅 · 애니메이션 그래프 편집기. 다른 기반 공백은 [Engine_Foundation_Gaps.md](Engine_Foundation_Gaps.md) |
 | glTF `alphaMode = MASK` | 없음 |
 | GPU 컬링 · 간접 드로우 | 없음(순수 오버헤드여서 지웠음) |
+| 파티클 · 데칼 | 2026-11-20 에 들어옴([Particles_And_Decals.md](Particles_And_Decals.md)): CPU 이미터 · 빌보드 · 정렬 · 포워드 상자 데칼. 파티클 텍스처 파일 · Sub UV · 메시 파티클 · 조명 · 안개 · 부드러운 파티클 · GPU 시뮬레이션 · 충돌 · 데칼 텍스처 · 에디터 미리보기는 없음 |
 | 3D UI 패널 헤드셋 확인 | 패널 보이기(P1) · 마우스 · 컨트롤러 레이 입력(P2)까지 있음. 헤드셋 확인(P3) · OpenXR quad 레이어(P4, 선택) · SDF 글꼴 · 손 찌르기는 없음([Spatial_Representation_Design.md](Spatial_Representation_Design.md) 10절) |
 | Floating Origin | 없음(Layer 1 옵션 후보). Reverse-Z + 무한 원평면 · QTangent 정점(28 B) · 3 행 트랜스폼은 있음(2026-11-17) |
 | `FrameUBO.invViewProj` | 보류(DEF-13, 첫 사용처가 생길 때) |

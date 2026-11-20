@@ -33,6 +33,7 @@ constexpr int      MAX_FRAMES = 2;
 using hgpu::FrameUBO;
 using hgpu::GpuTransform;
 using hgpu::GpuLight;
+using hgpu::GpuDecal;
 
 // 한 프레임에 그리는 뷰(눈)의 최대 수. 셰이더와 같은 값입니다.
 constexpr uint32_t kMaxViews = HARUKA_MAX_VIEWS;
@@ -44,7 +45,8 @@ inline void packAffine(const glm::mat4& m, GpuTransform& out) {
 
 // C++ 배치가 셰이더(std140/std430) 배치와 같은지 컴파일할 때 확인합니다.
 static_assert(sizeof(GpuTransform) == 48, "GpuTransform is three vec4 rows (std430 stride 48)");
-static_assert(sizeof(FrameUBO) == 448,                   "FrameUBO layout changed: update shaders/include/haruka_shared.h rules");
+static_assert(sizeof(GpuDecal) == 112, "GpuDecal is a mat4 and three vec4");
+static_assert(sizeof(FrameUBO) == 1360,                  "FrameUBO layout changed: update shaders/include/haruka_shared.h rules");
 static_assert(offsetof(FrameUBO, lightViewProj) == 128,  "FrameUBO.lightViewProj offset");
 static_assert(offsetof(FrameUBO, eyePos)        == 192,  "FrameUBO.eyePos offset");
 static_assert(offsetof(FrameUBO, screenParams)  == 224,  "FrameUBO.screenParams offset");
@@ -57,6 +59,8 @@ static_assert(offsetof(FrameUBO, fogParams)     == 320,  "FrameUBO.fogParams off
 static_assert(offsetof(FrameUBO, lightViewProjNear) == 336, "FrameUBO.lightViewProjNear offset");
 static_assert(offsetof(FrameUBO, cascadeNear)   == 400,  "FrameUBO.cascadeNear offset");
 static_assert(offsetof(FrameUBO, capturePos)    == 416,  "FrameUBO.capturePos offset");
+static_assert(offsetof(FrameUBO, decalInfo)     == 448,  "FrameUBO.decalInfo offset");
+static_assert(offsetof(FrameUBO, decals)        == 464,  "FrameUBO.decals offset");
 static_assert(sizeof(GpuLight)     == 64,                "GpuLight must be four vec4");
 
 // 셰이더의 HARUKA_VIEW_PUSH_CONSTANT 와 같은 배치입니다. PBR · 깊이 · 라인 파이프라인 레이아웃이
@@ -71,6 +75,10 @@ struct GpuPanelPush { glm::mat4 model; int32_t viewIndex; int32_t flags; float b
 static_assert(sizeof(GpuPanelPush) == 80, "GpuPanelPush must match PanelPush in ui_panel shaders");
 static_assert(offsetof(GpuPanelPush, brightness) == 72, "GpuPanelPush.brightness offset");
 static_assert(offsetof(GpuPanelPush, viewIndex) == 64, "GpuPanelPush.viewIndex offset");
+
+// 빌보드 파티클 푸시 상수(2026-11-20). shaders/particle.vert 의 ParticlePush 와 같은 배치입니다.
+struct GpuParticlePush { int32_t viewIndex; int32_t pad0 = 0, pad1 = 0, pad2 = 0; };
+static_assert(sizeof(GpuParticlePush) == 16, "GpuParticlePush must match ParticlePush in particle.vert");
 
 // 그릴 뷰(눈) 하나. view 는 월드 → 눈, proj 는 눈 → 클립(Vulkan: 깊이 [0,1], Y 아래).
 // 단안은 카메라 하나, 스테레오는 눈 둘입니다(DEF-09).

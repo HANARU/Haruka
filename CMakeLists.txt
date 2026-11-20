@@ -189,6 +189,7 @@ set(GLSL_SHADERS
     ui.vert     ui.frag
     line.vert   line.frag
     ui_panel.vert ui_panel.frag
+    particle.vert particle.frag
 )
 
 file(GLOB SHADER_FILES_ON_DISK RELATIVE ${SHADER_SRC_DIR}
@@ -361,6 +362,9 @@ set(RUNTIME_SOURCES
     src/components/HandPoseComponent.cpp
     src/components/HeightFogComponent.cpp
     src/components/ReflectionCaptureComponent.cpp
+    src/components/ParticleSystemComponent.cpp
+    src/components/DecalComponent.cpp
+    src/vfx/ParticleSim.cpp
     src/xr/GraspSolver.cpp
     src/renderer/Renderer.cpp
     src/renderer/Renderer_swap.cpp
@@ -376,6 +380,7 @@ set(RUNTIME_SOURCES
     src/renderer/passes/ShadowPass.cpp
     src/renderer/passes/PostPass.cpp
     src/renderer/passes/GeometryPass.cpp
+    src/renderer/passes/GeometryPass_particles.cpp
     src/renderer/passes/UIPanelPass.cpp
     src/geometry/PrimitiveDesc.cpp
     src/geometry/PrimitiveBuilder.cpp
@@ -814,6 +819,10 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/components/SkinnedMeshComponent.cpp
         src/components/StaticMeshComponent.cpp
         src/components/UIPanelComponent.cpp
+        src/components/ParticleSystemComponent.cpp
+        src/components/DecalComponent.cpp
+        src/vfx/ParticleSim.cpp
+        src/core/Profiler.cpp
         src/ui/slate/HPaintContext.cpp
         src/ui/slate/HFontAtlas.cpp
         src/assets/Skin.cpp
@@ -1094,6 +1103,18 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaGameplayTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 파티클 · 데칼 테스트(Docs/Particles_And_Decals.md) ---------------------------
+    # 이미터 시뮬레이션(결정적 시드 · 수명 · 상한 · 곡선 · 공간 · 시간 배율), 그리기 순서(이미터끼리 · 이미터 안 정렬),
+    # 씬 파일 왕복, 데칼 상자 · 모양 · 각도 계산, 확인 장면을 창 · GPU 없이 봅니다.
+    add_executable(HarukaParticleTest tests/ParticleTest.cpp)
+    target_link_libraries(HarukaParticleTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaParticleTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(HarukaParticleTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(HarukaParticleTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaParticleTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- CPU 구간 계측 테스트(Docs/CPU_Profiling.md) --------------------------------
     # 중첩 · 스레드 구분 · 시작 / 멈춤 · 상한 · Chrome trace JSON(다시 읽어 검사) · 끈 번역 단위(ProfilerOffTest.cpp, 매크로 비용 0) ·
     # FrameTimings 공유 측정 지점 · 추적 경로 규칙을 창 · GPU 없이 봅니다.
@@ -1334,6 +1355,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
     add_test(NAME physics_joints       COMMAND HarukaJointTest)
+    add_test(NAME particles_decals     COMMAND HarukaParticleTest)
     add_test(NAME stereo_views         COMMAND HarukaStereoTest)
     add_test(NAME math_common          COMMAND HarukaMathTest)
     add_test(NAME architecture_deps    COMMAND HarukaArchTest)

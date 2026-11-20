@@ -217,6 +217,39 @@ vec3 applyHeightFog(vec3 color, vec3 worldPos) {
     return mix(color, ubo.fogColor.rgb, amount);
 }
 
+// ── 상자 투영 데칼 (2026-11-20, Docs/Particles_And_Decals.md D11) ─────────────────────────────────────────
+// 포워드 데칼: 조명 전에 알베도(와 거칠기 · 금속도)를 바꿔 데칼도 빛 · 그림자 · 안개를 그대로 받습니다. 식은 C++ 의
+// hdecal::shapeMask · angleFade · weight(components/DecalComponent.hpp)와 같습니다. 데칼이 없으면(decalInfo.x = 0) 돌지 않습니다.
+float decalMask(int shape, vec2 uv) {
+    vec2  c = uv * 2.0 - 1.0;
+    float r = length(c);
+    if (shape == 1) { float k = max(0.0, 1.0 - r * r); return k * k; }
+    if (shape == 2) return smoothstep(0.55, 0.62, r) * (1.0 - smoothstep(0.88, 0.95, r));
+    if (shape == 3) return 1.0 - smoothstep(0.96, 1.0, max(abs(c.x), abs(c.y)));
+    return 1.0 - smoothstep(0.94, 1.0, r);
+}
+
+void applyDecals(vec3 worldPos, vec3 geomN, inout vec3 albedo, inout float roughness, inout float metallic) {
+    int n = min(ubo.decalInfo.x, HARUKA_MAX_DECALS);
+    for (int i = 0; i < n; ++i) {
+        vec3 l = (ubo.decals[i].worldToBox * vec4(worldPos, 1.0)).xyz;
+        if (any(greaterThan(abs(l), vec3(0.5)))) continue;
+        float a = decalMask(ubo.decals[i].mode.y, l.xz + 0.5)
+                * smoothstep(0.1, 0.5, dot(geomN, ubo.decals[i].axis.xyz))
+                * ubo.decals[i].color.a;
+        if (a <= 0.0) continue;
+        vec3 dc = ubo.decals[i].color.rgb;
+        if (ubo.decals[i].mode.x == 1) {
+            albedo *= mix(vec3(1.0), dc, a);
+        } else {
+            albedo   = mix(albedo, dc, a);
+            metallic = mix(metallic, 0.0, a);   // 칠은 금속이 아님
+        }
+        float rough = ubo.decals[i].axis.w;
+        if (rough >= 0.0) roughness = max(mix(roughness, rough, a), 0.04);
+    }
+}
+
 void main() {
     // ── Sample PBR maps ───────────────────────────────────────────────────────
     // albedoMap과 emissiveMap은 VK_FORMAT_R8G8B8A8_SRGB로 업로드되므로 샘플러가
@@ -236,6 +269,8 @@ void main() {
     // 스페큘러 AA 를 먼저, 최소 거칠기 클램프를 나중에 둡니다(Filament 와 같은 순서). fragN 은 보간으로 길이가
     // 1 이 아니므로 정규화한 값을 미분합니다. 직접광 · IBL mip · BRDF LUT 가 모두 이 값을 씁니다.
     float roughness = max(specularAARoughness(mrTex.y, normalize(fragN)), 0.04);
+
+    if (ubo.decalInfo.x > 0) applyDecals(fragWorldPos, normalize(fragN), albedo, roughness, metallic);
 
     float ao        = texture(aoMap,       fragUV).r;
     vec3  emissive  = texture(emissiveMap, fragUV).rgb;   // SRGB 포맷이라 이미 선형이다

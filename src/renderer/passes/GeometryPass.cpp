@@ -659,6 +659,8 @@ void GeometryPass::createPipelineSet(VkRenderPass rp, PipelineSet& ps) {
         vkDestroyShaderModule(rc_->device, frag, nullptr);
         if (r != VK_SUCCESS) throw std::runtime_error("Failed to create UI panel pipeline!");
     }
+
+    createParticlePipelines(rp, ps);   // 빌보드 파티클(subpass 2, GeometryPass_particles.cpp)
 }
 
 void GeometryPass::destroySet(PipelineSet& set) {
@@ -697,6 +699,7 @@ void GeometryPass::destroy() {
     if (linePipelineLayout_) { vkDestroyPipelineLayout(rc_->device, linePipelineLayout_, nullptr); linePipelineLayout_ = VK_NULL_HANDLE; }
     if (panelLayout_)    { vkDestroyPipelineLayout(rc_->device, panelLayout_, nullptr);         panelLayout_    = VK_NULL_HANDLE; }
     if (panelSetLayout_) { vkDestroyDescriptorSetLayout(rc_->device, panelSetLayout_, nullptr); panelSetLayout_ = VK_NULL_HANDLE; }
+    destroyParticleResources();
     for (int i = 0; i < MAX_FRAMES; ++i) {
         if (lineVertPtr_[i]) { vkUnmapMemory(rc_->device, lineVertMem_[i]); lineVertPtr_[i] = nullptr; }
         if (lineVertBuf_[i]) { vkDestroyBuffer(rc_->device, lineVertBuf_[i], nullptr); lineVertBuf_[i] = VK_NULL_HANDLE; }
@@ -893,6 +896,9 @@ void GeometryPass::recordImpl(VkCommandBuffer cmd, uint32_t frameIdx, VkRenderPa
         drawAll(ps.transparentBack, ps.transparentBackMirrored);     // 뒷면
         drawAll(ps.transparentFront, ps.transparentFrontMirrored);   // 앞면
     }
+
+    // 빌보드 파티클(2026-11-20). 반투명 메시 뒤 · 패널 앞이고, 파티클끼리는 정렬된 순서입니다(Docs/Particles_And_Decals.md D9).
+    if (in.particles) recordParticles(cmd, frameIdx, viewIndex, ps, in, vp, sc);
 
     // 월드 UI 패널(3D UI P1b). 반투명 물체 뒤에 그려 패널 뒤의 유리가 비쳐 보이게 합니다(패널 앞의 반투명은 순서가
     // 어긋나지만 드뭅니다). 두 눈이 같은 텍스처를 읽습니다. 아직 한 번도 그리지 않은 패널(view 없음)은 건너뜁니다.

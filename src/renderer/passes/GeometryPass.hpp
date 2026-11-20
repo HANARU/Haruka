@@ -5,6 +5,7 @@
 #include "HPass.hpp"
 #include "../RenderContext.hpp"
 #include "../RenderTypes.hpp"
+#include "../ParticleOrder.hpp"
 
 struct MaterialHandle;
 
@@ -56,12 +57,24 @@ public:
         float       brightness = 1.f;   // 색에 곱함(알파는 그대로)
     };
 
+    // 빌보드 파티클(2026-11-20, Docs/Particles_And_Decals.md D7). data 는 월드 공간 인스턴스를 그릴 순서대로 이은 것이고(ParticleOrder),
+    // ranges 가 드로 단위(섞기 방식)입니다. 첫 눈을 기록할 때 이 프레임 슬롯의 인스턴스 버퍼로 복사하고 두 눈이 함께 읽습니다.
+    struct ParticleList {
+        const vfx::ParticleInstance*      data    = nullptr;
+        uint32_t                          count   = 0;
+        const std::vector<ParticleRange>* ranges  = nullptr;
+        VkImageView                       atlas   = VK_NULL_HANDLE;   // 모양 아틀라스(선형 RGBA8)
+        VkSampler                         sampler = VK_NULL_HANDLE;
+    };
+    static constexpr uint32_t kMaxParticleInstances = vfx::kMaxParticles;
+
     struct Inputs {
         VkDescriptorSet frameSet, sceneSet, transformSet;
         VkBuffer        vertexBuffer, indexBuffer;
         VkSampler       textureSampler, clampSampler;
         VkSampler       panelSampler = VK_NULL_HANDLE;   // 패널: 가장자리 고정 · 밉 선형 · 이방성
         const std::vector<PanelDraw>* panels = nullptr;  // 반투명 뒤에 그림
+        const ParticleList*           particles = nullptr;   // 반투명 메시 뒤 · 패널 앞에 그림(반사 캡처는 넘기지 않음)
         // CPU 드로우 (subpass 0/1 은 opaqueItems, subpass 2 는 transparentItems)
         const std::vector<DrawItem>* opaqueItems      = nullptr;
         const std::vector<DrawItem>* transparentItems = nullptr;
@@ -123,9 +136,12 @@ private:
         VkPipeline line = VK_NULL_HANDLE;             // 에디터 선 · 월드 UI 포인터(subpass 2)
         VkPipeline tri = VK_NULL_HANDLE;              // 기즈모 삼각형(subpass 2)
         VkPipeline panel = VK_NULL_HANDLE;            // 월드 UI 패널(subpass 2)
+        VkPipeline particleAdd   = VK_NULL_HANDLE;    // 빌보드 파티클 가산(subpass 2)
+        VkPipeline particleAlpha = VK_NULL_HANDLE;    // 빌보드 파티클 알파 섞기(subpass 2)
         template <class F> void forEach(F&& f) {
             for (VkPipeline* p : { &depth, &opaque, &transparentBack, &transparentFront, &depthMirrored, &opaqueMirrored,
-                                   &transparentBackMirrored, &transparentFrontMirrored, &line, &tri, &panel })
+                                   &transparentBackMirrored, &transparentFrontMirrored, &line, &tri, &panel,
+                                   &particleAdd, &particleAlpha })
                 f(*p);
         }
     };
@@ -192,6 +208,17 @@ private:
     // 월드 UI 패널(3D UI P1b, subpass 2). 정점 버퍼 없이 정점 번호로 사각형을 만들고, 텍스처는 set 1 푸시 디스크립터입니다.
     VkPipelineLayout      panelLayout_    = VK_NULL_HANDLE;
     VkDescriptorSetLayout panelSetLayout_ = VK_NULL_HANDLE;
+
+    // 빌보드 파티클(subpass 2). set 1 은 아틀라스 푸시 디스크립터, 인스턴스 버퍼는 프레임 슬롯마다 하나(처음 그릴 때 만듦).
+    VkPipelineLayout      particleLayout_    = VK_NULL_HANDLE;
+    VkDescriptorSetLayout particleSetLayout_ = VK_NULL_HANDLE;
+    VkBuffer              particleBuf_[MAX_FRAMES] = {};
+    VkDeviceMemory        particleMem_[MAX_FRAMES] = {};
+    void*                 particlePtr_[MAX_FRAMES] = {};
+    void createParticlePipelines(VkRenderPass rp, PipelineSet& ps);   // GeometryPass_particles.cpp
+    void destroyParticleResources();
+    void recordParticles(VkCommandBuffer cmd, uint32_t frameIdx, uint32_t viewIndex, const PipelineSet& ps,
+                         const Inputs& in, const VkViewport& vp, const VkRect2D& sc);
 
     // 호스트에서 쓰는 정점 버퍼 하나를 만들고 매핑합니다(라인·삼각형 공용).
     void createHostVertexBuffer(VkDeviceSize size, const char* what,

@@ -181,6 +181,7 @@ void Renderer::cleanup() {
     freeTexSlot(TexSlot{ iblIrradianceImage_, iblIrradianceView_, iblIrradianceAlloc_ });
     freeTexSlot(TexSlot{ iblPrefilterImage_,  iblPrefilterView_,  iblPrefilterAlloc_  });
     if (captureImage_) freeTexSlot(TexSlot{ captureImage_, captureView_, captureAlloc_ });   // 반사 캡처(2026-11-17)
+    if (particleAtlas_.imageView) { freeTexSlot(particleAtlas_); particleAtlas_ = TexSlot{}; }   // 파티클 모양 아틀라스(2026-11-20)
     captureImage_ = VK_NULL_HANDLE; captureView_ = VK_NULL_HANDLE;
     if (iblSampler_)  { vkDestroySampler(device, iblSampler_, nullptr);  iblSampler_  = VK_NULL_HANDLE; }
     if (brdfSampler_) { vkDestroySampler(device, brdfSampler_, nullptr); brdfSampler_ = VK_NULL_HANDLE; }
