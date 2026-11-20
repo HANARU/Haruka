@@ -26,7 +26,7 @@
 | 11 | 내비게이션 · AI | 없음 | 내비 메시 · 경로 찾기 · 상태 기계 | |
 | 12 | 오디오 버스 그래프 · 사운드 큐 | **2026-11-21 구현**: 버스마다 노드(부모 · 볼륨 · 음소거 · 미터), 스냅숏(우선순위 · 페이드), 신호 기준 더킹, 마스터 피크 리미터(기본 끔), 사운드 큐 `.hcue`(가중치 · 시드 · 피치 · 볼륨 · 동시 재생 상한 · 재시작 간격), CVar · 콘솔 | (남음) 에디터 버스 믹서 패널 · 믹스 정의 파일 · 버스 효과 · `ui` 버스 일시정지 제외 | [Audio_Design.md](Audio_Design.md) 12절 |
 | 13 | 에셋 핫리로드 · 가져오기 설정 | **2026-11-20 구현**: 에디터 폴더 감시 · 모델 · 의존 텍스처 · 씬 · import.ini 다시 읽기, `/Config/import.ini` 패턴 표(배율 · 자동 LOD · sRGB) | (남음) 오디오 · 프리팹 다시 읽기 · 다시 가져오기 메뉴 · 물리 형상 · 스킨 배율 · 압축 | [Asset_Hot_Reload.md](Asset_Hot_Reload.md) |
-| 14 | 접근성 | 스냅 회전 각도만 | 자막 · 글자 크기 · 비네트 · 앉은 자세 | |
+| 14 | 접근성 | **2026-11-21 구현**: 자막(큐 · 머리 고정 · 화면 아래) · 글자 배율 · 이동 중 비네트 · 앉은 자세 보정 · 한 손 조작 · 색약 보정 | (남음) 헤드셋 확인 · 자막 깊이 무시 · 큰 대비 테마 · 설정 화면 | [Accessibility.md](Accessibility.md) |
 
 네트워크는 [Layer_Architecture.md](Layer_Architecture.md) 에서 범위 밖으로 정했으므로 넣지 않았습니다. 다중 스레드 작업 시스템은 2번(비동기
 로딩)의 선행 요소로 함께 다룹니다.
@@ -202,11 +202,19 @@
 - **현재 상태:** 스냅 회전 각도만 있습니다.
 - **부족한 점:** 자막(소리 이벤트 → 글), 글자 크기 배율(3D UI), 이동 중 비네트, 앉은 자세 높이 보정, 한 손 조작.
 - **의존 관계:** 사용자 설정(3위)에 저장합니다. 글자는 [Text_System.md](Text_System.md) 를 씁니다.
+- **진행(2026-11-21):** [Accessibility.md](Accessibility.md) 의 [필수] 체크리스트와 [선택] 색약 보정을 채웠습니다.
+  - [x] 자막 큐 · 사운드 컴포넌트 자막 칸 · 머리 고정 / 화면 아래 표시 · 켜기 · 크기 · 배경 불투명도, 창 없는 확인 PNG
+  - [x] 글자 크기 배율(3D UI 패널 · 자막, 기본 1.0 은 같은 화면)
+  - [x] 이동 중 비네트(후처리, 세기 0 이면 같은 PNG)
+  - [x] 앉은 자세(바닥 기준 공간 보정 · 다시 맞추기) · 한 손 조작(스틱 맞바꿈 · 텔레포트 손)
+  - [x] 설정 `comfort.*` · `access.*` 저장 · 왕복, 단위 시험 `accessibility`
+  - [ ] 큰 대비 UI 테마([선택]) · 헤드셋 확인
 
 ## 4. 진행 기록
 
 | 날짜 | 후보 | 상태 |
 |---|---|---|
+| 2026-11-21 | 14 접근성 | 끝([Accessibility.md](Accessibility.md)): 자막 큐 `SubtitleQueue`(최대 줄 수 · 우선순위 · 같은 id · 글자 수 표시 시간) 와 표시 `SubtitlePanel`(3D UI 패널 경로, XR 머리 고정 시선 아래 · 데스크톱 화면 아래, 배경 불투명도 · 크기), `AudioComponent` 자막 칸 · 콘솔 `subtitle.say`, 글자 배율 `access.textScale`(패널 트리 다시 만듦), 후처리 비네트 `comfort.vignette`(이동 컴포넌트가 속도를 알림) · 색약 보정 `access.colorFilter`, 앉은 자세 `comfort.seated` · `comfort.standingHeight` · `comfort.recenterSeated`, 한 손 조작 `access.hand`(스틱 맞바꿈 · 텔레포트 손), 시험 `accessibility` 111. 검사 3,253 → 3,364, 기준 PNG · UI 덤프 같음. 남음: 헤드셋 확인 · 자막 깊이 무시 · 큰 대비 테마 · 설정 화면 |
 | 2026-11-21 | 10 입력 확장 | 끝([Input_Extensions.md](Input_Extensions.md)): 플랫폼 층 `HGamepadState` · `IWindow::readGamepad`(GLFW 표준 매핑, 쓰던 패드 유지 · 없으면 번호가 가장 작은 패드, 연결 · 해제 로그), `pad:` 동작 · 축 소스, `input.mod.*` 수정자(패드 기본 원형 데드존 0.15, XR 은 그대로), `input.context.*` 컨텍스트와 `pushContext` · `popContext`(위 컨텍스트가 매핑한 소스는 아래로 가지 않음, `blockLower`), `rebind` · `resetBinding` · `resetAllBindings` · 충돌 목록, 덮어쓰기 규칙을 `HInputSystem::applyUserOverrides` 로 옮김. 검사 3,175 → 3,253, 기준 PNG · UI 덤프 같음. 남음: 실제 패드 확인 · 패드 진동 · 패드 시선 · 재지정 UI |
 | 2026-11-21 | 12 오디오 버스 그래프 · 사운드 큐 | 끝([Audio_Design.md](Audio_Design.md) 12절): 버스마다 passthrough 노드(게인 1 이면 손대지 않음, sfx 를 입력 목록 맨 앞에), 부모 버스 · 음소거 · 출력 피크 미터, FMOD 식 우선순위 스냅숏, 신호 기준 더킹(공격 · 유지 · 해제), 앞보기 없는 피크 리미터(기본 끔, 켤 때만 사슬에 넣어 바이트 동일 유지), 사운드 큐 `.hcue`(가중치 랜덤 · splitmix64 시드 · 피치 · 볼륨 범위 · stopOldest/rejectNew · 재시작 간격), CVar · 콘솔 `audio.*`, 시험 `audio_mix` 86. 귀 확인 · 루프백 실측 · 믹서 패널이 남음 |
 | 2026-11-20 | 13 에셋 핫리로드 · 가져오기 설정 | 끝([Asset_Hot_Reload.md](Asset_Hot_Reload.md)): 에디터가 프로젝트 폴더를 감시(300 ms 모으기)해 모델 · .gltf 옆 텍스처 · 씬 · `import.ini` 변경을 처리합니다. 모델은 다시 가져와 컴포넌트에 바꿔 끼우고 옛 메시 · LOD · 머티리얼은 은퇴 목록으로 보냅니다. 씬은 수정이 없을 때만 다시 열기를 묻습니다. `/Config/import.ini` 경로 패턴 표(배율 · 자동 LOD · sRGB)의 해시가 `.gasset` 캐시 키에 들어갑니다. 시험 58 검사, 기존 결함 DEF-174 · 175 수정. 남은 것은 오디오 · 프리팹 다시 읽기 · 다시 가져오기 메뉴 · 물리 형상 · 스킨 메시 배율 · 텍스처 압축 설정 · 창 실기 확인 |

@@ -21,6 +21,12 @@ layout(push_constant) uniform Params {
     // 뷰포트 비율에 맞춰 가운데를 잘라 읽습니다.
     vec2  uvScale;
     vec2  uvOffset;
+    // 접근성(2026-11-21, Docs/Accessibility.md D6 · D9). 0 이면 그 단계를 건너뛰어 예전과 같은 화소입니다.
+    float vignette;      // 이동 중 비네트 세기 0 ~ 1
+    float colorFilter;   // 1 = 색 보정 행렬을 곱함
+    vec4  colorCol0;     // 보정 행렬 열(xyz)
+    vec4  colorCol1;
+    vec4  colorCol2;
 };
 
 // 선형 → sRGB (IEC 61966-2-1 곡선).
@@ -61,6 +67,17 @@ void main() {
     // 않음)이고 패널 화소는 0 이라, 패널 색을 노출 · AO · 블룸 · 톤매핑 없이 에디터 UI 와 같은 색으로 냅니다. MSAA 로 섞인
     // 가장자리는 두 결과를 가중치로 섞습니다. 1 이면 예전과 같은 경로라 패널이 없는 화면은 바이트 단위로 같습니다.
     if (src.a < 1.0) ldr = mix(clamp(src.rgb, 0.0, 1.0), ldr, clamp(src.a, 0.0, 1.0));
+
+    // 색 보정(D9): Machado 시뮬레이션으로 만든 보정 행렬을 선형 색에 곱합니다.
+    if (colorFilter > 0.5)
+        ldr = clamp(mat3(colorCol0.xyz, colorCol1.xyz, colorCol2.xyz) * ldr, 0.0, 1.0);
+
+    // 이동 중 비네트(D6): 눈 화면 가운데에서 멀수록 어둡게. haccess::vignetteMask 와 같은 식입니다.
+    if (vignette > 0.0) {
+        float r     = length((inUV - 0.5) * 2.0);
+        float inner = mix(0.95, 0.3, vignette);
+        ldr *= 1.0 - min(2.0 * vignette, 1.0) * smoothstep(inner, inner + 0.45, r);
+    }
 
     if (encodeSrgb > 0.5) ldr = linearToSrgb(ldr);
     outColor = vec4(ldr, 1.0);

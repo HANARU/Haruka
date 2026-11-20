@@ -164,6 +164,8 @@ PostPass::Params Renderer::postParams() const {
     p.bloomOn = bloomOn_;
     // 카메라 노출 보정(EV, 2026-11-17 노출 배선): 기준 노출 × 2^EV. 카메라가 없거나 0 이면 기준 그대로.
     p.exposure *= std::exp2(cameraExposureEv_);
+    p.vignette    = cameraVignette_;      // 접근성(Docs/Accessibility.md D6 · D9)
+    p.colorFilter = cameraColorFilter_;
     return p;
 }
 
@@ -497,7 +499,9 @@ void Renderer::buildDrawCommands(const RenderSceneInput& scene,
 // 이번 프레임에 그릴 눈을 정합니다. 단안은 활성 카메라 하나, 스테레오 흉내 모드는 카메라 좌우의
 // 두 눈입니다(DEF-09). 눈 위치는 뷰 행렬의 역에서 읽습니다(예전 cameraPos 와 같은 식).
 void Renderer::gatherViews(const RenderCamera& cam, const XrFrameTarget* xr) {
-    cameraExposureEv_ = cam.present ? cam.exposureEv : 0.f;
+    cameraExposureEv_  = cam.present ? cam.exposureEv : 0.f;
+    cameraVignette_    = cam.present ? std::clamp(cam.vignette, 0.f, 1.f) : 0.f;
+    cameraColorFilter_ = cam.present ? cam.colorFilter : 0;
     if (captureOverride_) {   // 반사 캡처 중: 큐브 한 면의 눈 하나(Renderer_capture.cpp)
         hasCamera_ = true;
         viewCount_ = 1;

@@ -8,6 +8,7 @@
 #include "../scene/Actor.hpp"
 #include "../scene/ComponentRegistry.hpp"
 #include "../core/DebugDraw.hpp"
+#include "../core/Accessibility.hpp"
 #include "../core/UserSettings.hpp"
 #include "../scene/Reflect.hpp"
 #include "../scene/World.hpp"
@@ -254,6 +255,7 @@ void RigLocomotionComponent::tick(float dt) {
     if (teleportOn && xr.focused) tickTeleport(rig, head ? head->worldPosition() : rig.worldPosition());
     else                        aiming_ = false;
 
+    float yawRate = 0.f;   // 부드러운 회전 속도(°/s, 비네트용). 스냅 회전은 순간이라 넣지 않음
     if (xr.focused) {
         // 스냅 회전: 스틱을 70% 넘게 기울이면 한 번, 30% 아래로 돌아오면 다시 받을 준비. 머리 둘레로 돌려 제자리에서 돕니다.
         const float t = in.axis("TurnX");
@@ -267,11 +269,15 @@ void RigLocomotionComponent::tick(float dt) {
         // 데스크톱: 마우스(오른쪽 버튼 끌기)로 둘러보기. 좌우는 리그를 머리 둘레로, 위아래는 머리만 숙입니다.
         const float lx = in.axis("LookX"), ly = in.axis("LookY");
         if (lx != 0.f) rotateRigAbout(rig, headPos, up, glm::radians(-lx * lookSensitivity));
+        yawRate = dt > 0.f ? std::fabs(lx * lookSensitivity) / dt : 0.f;
         if (ly != 0.f && head) {
             pitchDeg_ = std::clamp(pitchDeg_ - ly * lookSensitivity, -85.f, 85.f);
             head->setLocalRotation(glm::angleAxis(glm::radians(pitchDeg_), glm::vec3(1.f, 0.f, 0.f)));
         }
     }
+    // 이동 중 비네트(Docs/Accessibility.md D6): 이번 틱의 부드러운 이동 · 회전 속도를 알립니다.
+    if (AccessibilityState* acc = rig.world() ? rig.world()->service<AccessibilityState>() : nullptr)
+        acc->reportMotion(glm::length(velocity_), yawRate);
 }
 
 // 리그 자신(자식 포함)과 손에 든 물체는 캐릭터 · 텔레포트 판정에서 뺍니다.
@@ -328,9 +334,11 @@ RigLocomotionComponent::~RigLocomotionComponent() { releaseCharacter(); }
 void RigLocomotionComponent::tickTeleport(Actor& rig, const glm::vec3& headPos) {
     HInputSystem& in = HInputSystem::get();
     const float   t  = in.axis("Teleport");
+    // 한 손 조작(Docs/Accessibility.md D8): 손을 바꾸면 텔레포트 스틱과 함께 포물선도 왼손에서 나갑니다.
+    const ETrackedSource aimHand = in.handSwap() ? ETrackedSource::LeftHand : ETrackedSource::RightHand;
     Actor* hand = nullptr;
     for (Actor* c : rig.getChildren())
-        if (auto* tp = c->getComponent<TrackedPoseComponent>(); tp && tp->source == ETrackedSource::RightHand) hand = c;
+        if (auto* tp = c->getComponent<TrackedPoseComponent>(); tp && tp->source == aimHand) hand = c;
     PhysicsSystem* ps = physicsOf(rig);
     if (!hand || !ps) { aiming_ = false; return; }
 

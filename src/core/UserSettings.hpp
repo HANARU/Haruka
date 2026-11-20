@@ -77,14 +77,20 @@ struct ComfortSettings {
     int   teleport    = -1;    // -1 = 씬 값, 0 = 끔, 1 = 켬
     int   height      = -1;    // -1 = 씬 값, 0 = 추적(서서), 1 = 고정 눈높이(앉아서)
     float eyeHeight   = 0.f;   // 0 = 씬 값, 그 밖에는 0.5 ~ 2.5 m
+    // 접근성(2026-11-21, Docs/Accessibility.md D1 · D6 · D7)
+    float vignette       = 0.f;     // 이동 중 비네트 세기 0 ~ 1(0 = 끔)
+    bool  seated         = false;   // 앉은 자세: 바닥 기준 공간에서 선 눈높이 − 앉은 머리 높이를 더함
+    float standingHeight = 0.f;     // 0 = 씬 · 프로젝트 눈높이, 그 밖에는 1 ~ 2.5 m
 
     float snapTurn(float sceneDeg) const { return snapTurnDeg > 0.f ? snapTurnDeg : sceneDeg; }
     bool  teleportOn(bool scene) const   { return teleport < 0 ? scene : teleport == 1; }
     bool  trackedHeight(bool scene) const { return height < 0 ? scene : height == 0; }
     float eye(float sceneM) const        { return eyeHeight > 0.f ? eyeHeight : sceneM; }
+    float standing(float sceneM) const   { return standingHeight > 0.f ? standingHeight : sceneM; }
 
     static ComfortSettings from(const UserSettings& s);
     bool operator==(const ComfortSettings& o) const {
-        return snapTurnDeg == o.snapTurnDeg && teleport == o.teleport && height == o.height && eyeHeight == o.eyeHeight;
+        return snapTurnDeg == o.snapTurnDeg && teleport == o.teleport && height == o.height && eyeHeight == o.eyeHeight
+            && vignette == o.vignette && seated == o.seated && standingHeight == o.standingHeight;
     }
 };

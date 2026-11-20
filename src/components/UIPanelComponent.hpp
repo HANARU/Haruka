@@ -78,6 +78,9 @@ public:
     static constexpr float kReferencePixelsPerMeter = 1250.f;
     static float computeLayoutScale(float width, float height, float pixelsPerMeter);
     float layoutScale() const { return layoutScale_; }   // 마지막으로 확정한 값(textureSize 와 같이 바뀜)
+    // 플레이어 글자 배율(접근성 access.textScale, Docs/Accessibility.md D5). 월드의 AccessibilityState 값, 없으면 1. 팩토리는 글자 크기에
+    // s * panel.textScale() 을 곱합니다(크기 · 여백은 s 만). 값이 바뀌면 slate() 가 트리를 다시 만듭니다(레이아웃 다시 계산).
+    float textScale() const;
 
     // 내용 등록. 이름은 씬 파일에 저장되므로 한 번 정하면 바꾸지 않습니다. 같은 이름이면 덮어씁니다.
     // 팩토리는 패널(값 읽기 · 콜백 연결용)과 배치 배율을 받습니다. 배율이 바뀌면 트리를 다시 만듭니다.
@@ -131,6 +134,7 @@ private:
     HSlateContext slate_;
     std::string   builtContent_;   // 지금 트리를 만든 content(다르면 다시 만듦)
     float         builtScale_  = 0.f;   // 지금 트리를 만든 배율(다르면 다시 만듦)
+    float         builtTextScale_ = 1.f;   // 지금 트리를 만든 글자 배율(다르면 다시 만듦)
     float         layoutScale_ = 1.f;
     bool          built_   = false;
     bool          dirty_   = true;

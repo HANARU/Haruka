@@ -378,6 +378,26 @@ const std::vector<HInputSystem::Layer>& HInputSystem::layers() const {
 }
 
 // ── 값 읽기 ──────────────────────────────────────────────────────────────────────
+HXrAxis HInputSystem::swapHands(HXrAxis a) {
+    switch (a) {
+        case HXrAxis::LeftStickX:  return HXrAxis::RightStickX;
+        case HXrAxis::LeftStickY:  return HXrAxis::RightStickY;
+        case HXrAxis::RightStickX: return HXrAxis::LeftStickX;
+        case HXrAxis::RightStickY: return HXrAxis::LeftStickY;
+        default:                   return a;
+    }
+}
+
+HPadAxis HInputSystem::swapHands(HPadAxis a) {
+    switch (a) {
+        case HPadAxis::LeftX:  return HPadAxis::RightX;
+        case HPadAxis::LeftY:  return HPadAxis::RightY;
+        case HPadAxis::RightX: return HPadAxis::LeftX;
+        case HPadAxis::RightY: return HPadAxis::LeftY;
+        default:               return a;
+    }
+}
+
 float HInputSystem::axis(const std::string& name) const {
     float total = 0.f;
     const Context* def = nullptr;
@@ -394,8 +414,10 @@ float HInputSystem::axis(const std::string& name) const {
         auto hidden = [&](int src) { return L.hidden.count(src) != 0; };
 
         float best = 0.f;
-        for (HXrAxis a : b.xr) {
-            if (hidden(xrAxisSrc(a))) continue;
+        for (HXrAxis la : b.xr) {
+            if (hidden(xrAxisSrc(la))) continue;
+            // 한 손 조작(Docs/Accessibility.md D8): 바인딩 · 소비는 논리 소스 그대로, 값만 반대 손 스틱에서 읽습니다.
+            const HXrAxis a = handSwap_ ? swapHands(la) : la;
             float other = 0.f;
             bool  stick = true;
             switch (a) {
@@ -408,8 +430,9 @@ float HInputSystem::axis(const std::string& name) const {
             const float v = shapeAnalog(axisValue(xr_, a), other, stick, *m, std::max(m->deadzone, 0.f));
             if (std::fabs(v) > std::fabs(best)) best = v;
         }
-        for (HPadAxis a : b.pads) {
-            if (hidden(padAxisSrc(a)) || !pad_.connected) continue;
+        for (HPadAxis la : b.pads) {
+            if (hidden(padAxisSrc(la)) || !pad_.connected) continue;
+            const HPadAxis a = handSwap_ ? swapHands(la) : la;
             const size_t i = size_t(a);
             const bool  stick = a != HPadAxis::LeftTrigger && a != HPadAxis::RightTrigger;
             const float other = stick ? pad_.axes[i ^ 1u] : 0.f;   // LeftX ↔ LeftY, RightX ↔ RightY

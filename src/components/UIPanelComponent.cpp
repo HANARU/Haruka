@@ -1,6 +1,8 @@
 #include "UIPanelComponent.hpp"
 #include "../math/Damping.hpp"
+#include "../core/Accessibility.hpp"
 #include "../scene/Actor.hpp"
+#include "../scene/World.hpp"
 #include "../scene/ComponentFields.hpp"
 #include "../scene/Reflect.hpp"
 #include "../ui/slate/widgets/SBorder.hpp"
@@ -173,8 +175,14 @@ bool UIPanelComponent::localBounds(glm::vec3& outMin, glm::vec3& outMax) const {
 }
 
 // ── 위젯 트리 ─────────────────────────────────────────────────────────────────
+float UIPanelComponent::textScale() const {
+    const AccessibilityState* acc = owner && owner->world() ? owner->world()->service<AccessibilityState>() : nullptr;
+    return acc ? acc->access.textScale : 1.f;
+}
+
 HSlateContext& UIPanelComponent::slate() {
-    if (!built_ || builtContent_ != content || builtScale_ != layoutScale_) {
+    const float ts = textScale();
+    if (!built_ || builtContent_ != content || builtScale_ != layoutScale_ || builtTextScale_ != ts) {
         const float s = layoutScale_;
         std::shared_ptr<HWidget> root;
         auto& reg = contentRegistry();
@@ -183,7 +191,7 @@ HSlateContext& UIPanelComponent::slate() {
         if (!root) {
             // 모르는 이름: 빈 판 대신 이유를 보여 줍니다(씬 파일의 이름이 틀렸거나 그 내용을 등록하는 모듈이 없음).
             auto msg = std::make_shared<STextBlock>();
-            msg->text("Unknown UI panel content: \"" + content + "\"")->fontSize(32.f * s)
+            msg->text("Unknown UI panel content: \"" + content + "\"")->fontSize(32.f * s * ts)
                ->color(glm::vec4(1.f, 0.4f, 0.4f, 1.f));
             auto border = std::make_shared<SBorder>();
             border->background(glm::vec4(0.1f, 0.05f, 0.05f, 1.f))->padding(HPadding(32.f * s))->content(msg);
@@ -192,6 +200,7 @@ HSlateContext& UIPanelComponent::slate() {
         slate_.setRootWidget(std::move(root));
         builtContent_ = content;
         builtScale_   = s;
+        builtTextScale_ = ts;
         built_        = true;
         dirty_        = true;
     }

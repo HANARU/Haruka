@@ -7,8 +7,10 @@
 #include "ReflectionCaptureComponent.hpp"
 #include "SkinnedMeshComponent.hpp"
 #include "StaticMeshComponent.hpp"
+#include "SubtitlePanel.hpp"
 #include "UIPanelComponent.hpp"
 #include "../scene/Actor.hpp"
+#include "../core/Accessibility.hpp"
 #include "../scene/World.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -23,6 +25,11 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         out.camera.zNear      = cam->zNear;
         out.camera.zFar       = cam->zFar;
         out.camera.exposureEv = cam->exposureEv;
+        // 접근성(Docs/Accessibility.md D6 · D9): 비네트 세기 · 색 보정. 서비스가 없으면(시험 월드 등) 0.
+        if (const AccessibilityState* acc = world.service<AccessibilityState>()) {
+            out.camera.vignette    = acc->vignette();
+            out.camera.colorFilter = acc->access.colorFilter;
+        }
     } else {
         out.camera = RenderCamera{};
     }
@@ -129,6 +136,15 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         rp.textureSize = pc->textureSize();
         rp.twoSided    = pc->twoSided;
         rp.brightness  = std::clamp(pc->brightness, UIPanelComponent::kMinBrightness, 1.f);
+        out.panels.push_back(rp);
+    }
+    // 자막(Docs/Accessibility.md D4): 엔진이 가진 표시가 보일 때만 패널 목록 끝에 더합니다(액터가 아님).
+    if (SubtitlePanel* sp = world.service<SubtitlePanel>(); sp && sp->visible()) {
+        RenderUIPanel rp;
+        rp.key         = reinterpret_cast<uint64_t>(sp);
+        rp.source      = sp;
+        rp.model       = sp->model();
+        rp.textureSize = sp->textureSize();
         out.panels.push_back(rp);
     }
 

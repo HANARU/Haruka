@@ -106,9 +106,10 @@ public:
     //   trackedHeight = false LOCAL(세션을 시작할 때의 머리 = 원점)에 eyeHeight 를 더해 눈높이를 고정합니다.
     // 런타임에 바닥 공간이 없으면 tracked 여도 LOCAL + eyeHeight 로 갑니다. 더할 높이는 syncInput 이 floorOffset 에
     // 실어 원점 쪽에서 보정합니다. 두 공간을 함께 만들어 두고 프레임을 시작하기 전에 고릅니다(한 프레임 안에서는 바꾸지 않음).
-    void setRigSpace(bool trackedHeight, float eyeHeight);
+    // floorLift 는 바닥 기준 공간일 때 원점에 더할 높이입니다(앉은 자세 보정, Docs/Accessibility.md D7). 머리 기준이면 쓰지 않습니다.
+    void setRigSpace(bool trackedHeight, float eyeHeight, float floorLift = 0.f);
     bool floorSpaceAvailable() const;
-    // 지금 고른 공간에서 리그 원점(바닥)에 더할 높이(m). 바닥 기준이면 0, 머리 기준이면 눈높이입니다. 입력의 floorOffset 과
+    // 지금 고른 공간에서 리그 원점(바닥)에 더할 높이(m). 바닥 기준이면 floorLift(보통 0), 머리 기준이면 눈높이입니다. 입력의 floorOffset 과
     // 같은 값이지만 입력은 FOCUSED 일 때만 채워지므로, 시스템 메뉴가 떠 VISIBLE 인 동안에도 그리는 원점은 이것을 씁니다.
     float rigLift() const;
 

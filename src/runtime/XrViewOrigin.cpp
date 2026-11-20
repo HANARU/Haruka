@@ -1,7 +1,9 @@
 #include "XrViewOrigin.hpp"
 
 #include "../components/CameraComponent.hpp"
+#include "../core/Accessibility.hpp"
 #include "../core/HLog.hpp"
+#include "../input/HInputSystem.hpp"
 #include "../core/ProjectSettings.hpp"
 #include "../core/UserSettings.hpp"
 #include "../scene/World.hpp"
@@ -18,13 +20,23 @@ XrViewChoice XrViewOrigin::choose(World& world) const {
 }
 
 void XrViewOrigin::applyRigSpace(XrSystem& xr, const XrViewChoice& view, const ProjectSettings& project,
-                                 const ComfortSettings* comfort) const {
+                                 const ComfortSettings* comfort, AccessibilityState* access) const {
     if (!xr.hasSession()) return;
     const auto* rc = view.rig ? view.rig->getComponent<XrRigComponent>() : nullptr;
     const bool  tracked = rc ? rc->trackedHeight : project.xrTrackedHeight;
     const float eye     = rc ? rc->eyeHeight : project.xrEyeHeight;
     // 플레이어의 편안함 설정(앉아서 하기 · 눈높이)이 씬 · 프로젝트 값보다 앞섭니다(Docs/Save_And_Settings.md D7).
-    xr.setRigSpace(comfort ? comfort->trackedHeight(tracked) : tracked, comfort ? comfort->eye(eye) : eye);
+    const bool useTracked = comfort ? comfort->trackedHeight(tracked) : tracked;
+    // 앉은 자세(Docs/Accessibility.md D7): 바닥 기준 공간이면 선 눈높이 − 앉은 머리 높이를 원점에 더합니다. 머리 높이는 앞 프레임의
+    // 바닥 기준 입력에서 잽니다(처음 · 다시 맞추기 요청 뒤).
+    float lift = 0.f;
+    if (access && comfort) {
+        const HXrInputState& in = HInputSystem::get().xr();
+        const bool floor = useTracked && xr.floorSpaceAvailable();
+        lift = access->seatedLiftFor(comfort->seated, floor, comfort->standing(eye),
+                                     in.focused && in.floorSpace && in.head.valid, in.head.position.y);
+    }
+    xr.setRigSpace(useTracked, comfort ? comfort->eye(eye) : eye, lift);
 }
 
 void XrViewOrigin::applyToCamera(const XrViewChoice& view, XrSystem* xr, World& world) {

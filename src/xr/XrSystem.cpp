@@ -81,6 +81,7 @@ struct XrSystem::Impl {
     std::string    headsetAudioId;               // 헤드셋 소리 출력 장치(WASAPI 끝점 ID, UTF-8). 모르면 빈 문자열
     bool           trackedHeight = true;         // 리그 높이 모드(엔진이 고름): 실제 키(바닥 공간) 또는 고정 눈높이
     float          eyeHeight     = 1.7f;         // 머리 기준 공간일 때 원점(바닥)에 더하는 눈높이(m)
+    float          floorLift     = 0.f;          // 바닥 기준 공간일 때 원점에 더하는 높이(m, 앉은 자세 보정, Docs/Accessibility.md D7)
     bool           spaceLogged   = false;        // 이 세션에서 고른 공간을 로그로 남겼는지
     XrSpace        headSpace = XR_NULL_HANDLE;   // VIEW
     XrSwapchain    swapchain = XR_NULL_HANDLE;
@@ -701,7 +702,7 @@ void XrSystem::syncInput(int64_t displayTime, HXrInputState& out) {
     out.focused     = true;
     out.floorSpace  = m.floorSpace && m.appSpace == m.floorSpace;
     // 머리 기준 공간(LOCAL, 원점 = 시작할 때 머리)이면 리그(바닥) 위로 눈높이만큼 올려야 합니다.
-    out.floorOffset = out.floorSpace ? 0.f : m.eyeHeight;
+    out.floorOffset = out.floorSpace ? m.floorLift : m.eyeHeight;
 
     if (m.headSpace) {
         XrSpaceLocation loc{ XR_TYPE_SPACE_LOCATION };
@@ -844,9 +845,15 @@ void XrSystem::endFrame(int64_t displayTime, bool rendered) {
     m.ok(xrEndFrame(m.session, &ei), "xrEndFrame");
 }
 
-void XrSystem::setRigSpace(bool trackedHeight, float eyeHeight) {
+void XrSystem::setRigSpace(bool trackedHeight, float eyeHeight, float floorLift) {
     Impl& m = *impl_;
     const bool floor = trackedHeight && m.floorSpace;
+    if (m.floorLift != floorLift) {
+        char lift[32];
+        std::snprintf(lift, sizeof(lift), "%.2f", floorLift);
+        HLOG(LogXR, Log) << "Seated lift: " << lift << " m";
+        m.floorLift = floorLift;
+    }
     if (!m.spaceLogged || m.trackedHeight != trackedHeight || m.eyeHeight != eyeHeight) {
         char eye[32];
         std::snprintf(eye, sizeof(eye), "%.2f", eyeHeight);
@@ -866,7 +873,7 @@ const std::string& XrSystem::headsetAudioOutputId() const { return impl_->headse
 
 float XrSystem::rigLift() const {
     const Impl& m = *impl_;
-    return (m.floorSpace && m.appSpace == m.floorSpace) ? 0.f : m.eyeHeight;
+    return (m.floorSpace && m.appSpace == m.floorSpace) ? m.floorLift : m.eyeHeight;
 }
 
 void XrSystem::applyHaptic(int hand, float amplitude, float seconds) {

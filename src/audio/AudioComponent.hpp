@@ -28,6 +28,13 @@ public:
     float reverbSend  = 1.f;     // 0 ~ 2
     float reverbReach = 0.5f;    // 0 = 직접음 대 잔향 비율 일정, 1 = 잔향 크기가 거리와 무관(hrev::sendGain)
     static constexpr float kMaxReverbSend = 2.f;
+    // 자막(2026-11-21, Docs/Accessibility.md D3): 재생을 시작할 때 이 글을 월드의 자막 큐에 넣습니다. subtitleKey 가 "ns:key" 면
+    // 번역 표에서 찾고(없으면 subtitle 원문), subtitleSpeaker 는 화자입니다. subtitle 이 비면 아무것도 넣지 않습니다. 같은 컴포넌트가
+    // 다시 재생하면 그 줄을 바꿉니다(id = audio:<액터 id>). 길이는 글자 수로 자동입니다.
+    std::string subtitle;
+    std::string subtitleKey;
+    std::string subtitleSpeaker;
+    void emitSubtitle();
 
     // 꺼지거나(enabled) 액터가 비활성이 되면 멈추고 처음으로 되감습니다. 다시 켜지면
     // autoPlay 사운드를 처음부터 재생합니다(Unity 의 Play On Awake 와 같은 규칙).

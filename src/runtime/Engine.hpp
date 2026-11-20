@@ -3,6 +3,9 @@
 #include "ModuleManager.hpp"
 #include "../core/ProjectSettings.hpp"
 #include "../core/UserSettings.hpp"
+#include "../core/Accessibility.hpp"
+#include "../core/Subtitles.hpp"
+#include "../components/SubtitlePanel.hpp"
 #include "../core/CVar.hpp"
 #include "../core/TraceRecorder.hpp"
 #include "IEngineFrontend.hpp"
@@ -77,6 +80,12 @@ private:
     void saveUserSettings(const char* why);
     UserSettings                         userSettings_;
     ComfortSettings                      comfort_;            // 월드 서비스(world_.setService), 이동 · 리그 높이가 읽음
+    // 접근성(2026-11-21, Docs/Accessibility.md): 설정 · 비네트 · 앉은 자세 상태, 자막 큐와 표시. 모두 월드 서비스입니다.
+    AccessibilityState                   access_;
+    SubtitleQueue                        subtitles_;
+    SubtitlePanel                        subtitlePanel_;
+    std::string                          accessLogged_;
+    CVarRegistry::CVar*                  cvVignetteDebug_ = nullptr;   // comfort.vignetteDebug(비네트 모양 확인용)
     std::unique_ptr<SaveStore>           saves_;              // <쓰기 루트>/Saves
     uint64_t                             settingsApplied_ = 0;
     bool                                 settingsDirty_   = false;
@@ -106,6 +115,7 @@ private:
     void tickFrame(FrameState& f);
     void frontendInput(FrameState& f);
     void renderFrame(FrameState& f);
+    void updateAccessibility(const FrameState& f);   // 8 앞: 비네트 · 자막 큐 · 자막 자리(Docs/Accessibility.md)
     void endLoop(FrameState& f, LoopState& loop);
 
     // 프로젝트 설정(assets/project.ini, 2026-10-15). 에셋 루트를 정한 뒤 한 번 읽습니다.

@@ -8,6 +8,7 @@
 #include "../platform/IWindow.hpp"
 #include "../xr/XrSystem.hpp"
 #include "../core/HLog.hpp"
+#include "../core/FieldParse.hpp"
 #include "../core/CrashHandler.hpp"
 #include "IGameModule.hpp"
 #include "../scene/ComponentRegistry.hpp"
@@ -456,6 +457,9 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     audio->setPhysics(physics);   // 소리 차폐 판정(2026-11-06, Audio_Design.md 9-4)
     // 편안함 설정은 월드 서비스로 둡니다(이동 컴포넌트 · 리그 높이가 읽음). 소리 크기와 함께 사용자 설정에서 적용합니다.
     world_.setService<ComfortSettings>(&comfort_);
+    world_.setService<AccessibilityState>(&access_);   // 접근성(Docs/Accessibility.md D2): 글자 배율 · 비네트 · 앉은 자세
+    world_.setService<SubtitleQueue>(&subtitles_);     // 자막 큐(D3): 소리 · 게임 코드가 줄을 넣음
+    world_.setService<SubtitlePanel>(&subtitlePanel_); // 자막 표시(D4): 추출이 패널 목록 끝에 더함
     world_.setService<CVarRegistry>(&cvars_);
     applyLiveUserSettings(true);
 
@@ -555,6 +559,25 @@ void Engine::setupCVars() {
                                        HLOG(LogEngine, Log) << "Debug lines: " << (v.asBool() ? "on" : "off") << " (cvar debug.lines)";
                                    });
     trace_.registerCommands(cvars_);   // trace.start · trace.stop(Docs/CPU_Profiling.md D6)
+    // 접근성(Docs/Accessibility.md D3 · D7): 자막 확인 · 앉은 자세 다시 맞추기.
+    cvars_.addCommand("subtitle.say", "subtitle.say <text> [speaker] [seconds]: show a subtitle line (quote text with spaces)",
+                      [this](const std::vector<std::string>& args) -> std::string {
+                          if (args.empty() || args.size() > 3) return "usage: subtitle.say \"text\" [speaker] [seconds]";
+                          SubtitleLine l;
+                          l.text = HText::fromString(args[0]);
+                          if (args.size() > 1) l.speaker = HText::fromString(args[1]);
+                          if (args.size() > 2 && !fieldparse::toFloat(args[2], l.duration)) return "seconds must be a number";
+                          return subtitles_.push(std::move(l)) ? std::string("subtitle queued") : std::string("subtitle dropped (queue full)");
+                      });
+    cvVignetteDebug_ = cvars_.addFloat("comfort.vignetteDebug", 0.f, 0.f, 1.f,
+                                       "Force the movement vignette to this strength (0 = off, for checking the look)");
+    cvars_.addCommand("subtitle.clear", "subtitle.clear: remove all subtitle lines",
+                      [this](const std::vector<std::string>&) -> std::string { subtitles_.clear(); return "subtitles cleared"; });
+    cvars_.addCommand("comfort.recenterSeated", "comfort.recenterSeated: measure the seated head height again (VR seated mode)",
+                      [this](const std::vector<std::string>&) -> std::string {
+                          access_.requestSeatedRecalibrate();
+                          return "seated height will be measured on the next head pose";
+                      });
     cvars_.addCommand("scene", "scene <path>: switch to a scene in the background (game executable only)",
                       [this](const std::vector<std::string>& args) -> std::string {
                           if (args.size() != 1) return "usage: scene /Game/scenes/Name.hscene";
@@ -628,7 +651,24 @@ void Engine::applyLiveUserSettings(bool startup) {
                              << ", teleport " << (c.teleport < 0 ? "scene" : c.teleport ? "on" : "off")
                              << ", height " << (c.height < 0 ? "scene" : c.height == 0 ? "tracked" : "fixed")
                              << ", eye height " << (c.eyeHeight > 0.f ? floatToText(c.eyeHeight) + " m" : std::string("scene"))
+                             << ", vignette " << floatToText(c.vignette) << ", seated " << (c.seated ? "on" : "off")
+                             << ", standing height " << (c.standingHeight > 0.f ? floatToText(c.standingHeight) + " m" : std::string("scene"))
                              << " (user settings)";
+    }
+    // 접근성(Docs/Accessibility.md D1): 월드 서비스 값 · 손 바꾸기. 기본값이면 시작할 때 알리지 않습니다.
+    access_.access           = AccessSettings::from(userSettings_);
+    access_.vignetteStrength = comfort_.vignette;
+    HInputSystem::get().setHandSwap(access_.access.leftHanded);
+    {
+        static const char* kFilter[] = { "none", "protanopia", "deuteranopia", "tritanopia" };
+        const AccessSettings& a = access_.access;
+        const std::string line = std::string("subtitles ") + (a.subtitles ? "on" : "off") + ", subtitle size " + floatToText(a.subtitleSize)
+                               + ", background " + floatToText(a.subtitleBackground) + ", text scale " + floatToText(a.textScale)
+                               + ", hand " + (a.leftHanded ? "left" : "right") + ", color filter " + kFilter[std::clamp(a.colorFilter, 0, 3)];
+        if (line != accessLogged_ && (!accessLogged_.empty() || !(a == AccessSettings{}))) {
+            HLOG(LogEngine, Log) << "Accessibility: " << line << " (user settings)";
+        }
+        accessLogged_ = line;
     }
 }
 
@@ -782,7 +822,7 @@ void Engine::beginXrFrame(FrameState& f) {
     // 화면 카메라가 씬 리그의 머리면 그 리그의 높이 모드를, 아니면 프로젝트 설정의 값을 씁니다. 프레임을 시작하기 전에 정해
     // 한 프레임 안에서는 바뀌지 않게 합니다.
     f.view = viewOrigin_->choose(world_);
-    if (xr_) viewOrigin_->applyRigSpace(*xr_, f.view, project_, &comfort_);
+    if (xr_) viewOrigin_->applyRigSpace(*xr_, f.view, project_, &comfort_, &access_);
     f.xrBegun = xrSession_->beginFrame(f.xrFrame);
 }
 
@@ -933,6 +973,7 @@ void Engine::frontendInput(FrameState& f) {
 void Engine::renderFrame(FrameState& f) {
     HPROF_SCOPE("Engine.Render");
     Renderer& renderer = *renderer_;
+    updateAccessibility(f);
     {
         HPROF_SCOPE("Engine.ExtractScene");
         extractRenderScene(world_, sceneInput_);
@@ -970,6 +1011,39 @@ void Engine::renderFrame(FrameState& f) {
         renderer.drawFrame(sceneInput_);
         if (renderer.lastFrameDesktop()) ++drawnFrames_;
     }
+}
+
+// 8 앞. 접근성(2026-11-21, Docs/Accessibility.md): 이동 컴포넌트가 알린 속도로 비네트 세기를 갱신하고, Play 중에는 자막 큐의 시간을
+// 진행합니다. 자막이 보이면 화면 카메라 기준으로 자리를 정합니다: XR 세션이 머리를 주면 머리 고정(시선 아래), 합성 눈은 그 눈과 같은
+// 원점(XR 원점 + 리그 눈높이)의 머리 고정, 아니면 화면 아래입니다.
+void Engine::updateAccessibility(const FrameState& f) {
+    HPROF_SCOPE("Engine.Accessibility");
+    access_.tickVignette(f.dt);
+    if (cvVignetteDebug_ && cvVignetteDebug_->asFloat() > 0.f) access_.setVignette(cvVignetteDebug_->asFloat());
+    if (f.playing) subtitles_.update(f.dt);
+    subtitlePanel_.update(subtitles_, access_.access);
+    if (!subtitlePanel_.visible()) return;
+    CameraComponent* cam = f.view.cam ? f.view.cam : CameraComponent::activeIn(world_);
+    if (!cam || !cam->owner) return;
+    glm::vec3 pos = cam->owner->worldPosition();
+    glm::quat rot = cam->owner->worldRotation();
+    bool      headLocked = false;
+    auto fromMatrix = [&](const glm::mat4& m) {
+        pos = glm::vec3(m[3]);
+        rot = glm::quat_cast(glm::mat3(glm::normalize(glm::vec3(m[0])), glm::normalize(glm::vec3(m[1])),
+                                       glm::normalize(glm::vec3(m[2]))));
+        headLocked = true;
+    };
+    const HXrInputState& xr = HInputSystem::get().xr();
+    if (xr_ && xr_->hasSession() && xr.focused && xr.head.valid) {
+        fromMatrix(cam->xrOrigin() * glm::translate(glm::mat4(1.f), xr.head.position) * glm::mat4_cast(xr.head.orientation));
+    } else if (synthetic_) {
+        const auto* rigC = f.view.rig ? f.view.rig->getComponent<XrRigComponent>() : nullptr;
+        fromMatrix(cam->xrOrigin() * glm::translate(glm::mat4(1.f), glm::vec3(0.f, rigC ? rigC->eyeHeight : 0.f, 0.f)));
+    }
+    const float aspect = synthetic_ ? (float)options_.syntheticEyeW / (float)std::max(options_.syntheticEyeH, 1u)
+                       : (f.winW > 0 && f.winH > 0 ? (float)f.winW / (float)f.winH : 16.f / 9.f);
+    subtitlePanel_.place(pos, rot, headLocked, cam->fovY, aspect);
 }
 
 // 9. 루프 끝: 자동 실행 끝내기 · FPS 제목 · 프레임 통계 · 최소화 중 쉼.

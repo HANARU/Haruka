@@ -3,6 +3,9 @@
 #include "../scene/Actor.hpp"
 #include "AudioSystem.hpp"
 #include "../scene/ComponentFields.hpp"
+#include "../scene/World.hpp"
+#include "../core/HText.hpp"
+#include "../core/Subtitles.hpp"
 #include <algorithm>
 #include <filesystem>
 
@@ -138,7 +141,24 @@ std::string AudioComponent::readOnlyInfo() const {
 }
 
 void AudioComponent::play() {
-    if (audioSys_) audioSys_->playVoice(voice_);
+    if (audioSys_) {
+        audioSys_->playVoice(voice_);
+        emitSubtitle();   // 소리 장치가 없거나 사운드를 아직 만들지 않았어도 Play 중이면 자막은 냄
+    }
+}
+
+void AudioComponent::emitSubtitle() {
+    if (subtitle.empty() || !owner || !owner->world()) return;
+    SubtitleQueue* q = owner->world()->service<SubtitleQueue>();
+    if (!q) return;
+    SubtitleLine l;
+    const size_t colon = subtitleKey.find(':');
+    l.text = colon != std::string::npos && colon > 0 && colon + 1 < subtitleKey.size()
+           ? HText::localized(subtitleKey.substr(0, colon), subtitleKey.substr(colon + 1), subtitle)
+           : HText::fromString(subtitle);
+    if (!subtitleSpeaker.empty()) l.speaker = HText::fromString(subtitleSpeaker);
+    l.id = "audio:" + std::to_string(owner->id);
+    q->push(std::move(l));
 }
 
 void AudioComponent::stop() {
@@ -170,6 +190,9 @@ void AudioComponent::writeFields(ComponentFieldWriter& w) const {
     if (cone.enabled()) w.s("cone", cone.toText());
     w.f("reverbSend",  reverbSend);           // 2026-11-06. 없으면 기본값
     w.f("reverbReach", reverbReach);
+    if (!subtitle.empty())        w.s("subtitle", subtitle);   // 2026-11-21 접근성. 비면 쓰지 않음(기존 씬 파일 그대로)
+    if (!subtitleKey.empty())     w.s("subtitleKey", subtitleKey);
+    if (!subtitleSpeaker.empty()) w.s("subtitleSpeaker", subtitleSpeaker);
 }
 
 bool AudioComponent::readField(const std::string& key, const std::string& value) {
@@ -178,6 +201,9 @@ bool AudioComponent::readField(const std::string& key, const std::string& value)
     else if (key == "volume")   ok = fieldparse::toFloat(value, volume);
     else if (key == "loop")     ok = fieldparse::toBool (value, loop);
     else if (key == "autoPlay") ok = fieldparse::toBool (value, autoPlay);
+    else if (key == "subtitle")        subtitle = value;
+    else if (key == "subtitleKey")     subtitleKey = value;
+    else if (key == "subtitleSpeaker") subtitleSpeaker = value;
     else if (key == "attenuation") {
         // 3D 설정이 깨진 것은 소리를 버릴 이유가 아닙니다. 기본 설정으로 두고 알립니다.
         // fromText 는 결과 전체를 새 값으로 채우므로, 다른 키(silentBeyondMax)로 이미 읽은 값을 읽은 뒤에 되돌려 놓습니다

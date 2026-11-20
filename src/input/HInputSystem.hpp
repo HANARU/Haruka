@@ -150,6 +150,14 @@ public:
     void                 setGamepad(const HGamepadState& s) { pad_ = s; }
     const HGamepadState& gamepad() const { return pad_; }
 
+    // ── 한 손 조작(2026-11-21, Docs/Accessibility.md D8) ─────────────────────────────
+    // 켜면 축 값을 읽을 때 XR 스틱과 패드 스틱의 왼 · 오른쪽을 맞바꿉니다(이동 ↔ 회전 · 텔레포트). 바인딩 글 · 재지정 · 컨텍스트 소비는
+    // 논리 소스 그대로입니다. 트리거 · 그립 · 버튼은 바꾸지 않습니다. 엔진이 access.hand 로 정합니다.
+    void setHandSwap(bool on) { handSwap_ = on; }
+    bool handSwap() const { return handSwap_; }
+    static HXrAxis  swapHands(HXrAxis a);
+    static HPadAxis swapHands(HPadAxis a);
+
     // ── 마우스 시선(에디터가 Play 중 오른쪽 버튼 끌기 양을 넣고, 엔진이 프레임 끝에 비움) ─────────
     void setLookDelta(float dx, float dy) { lookDx_ = dx; lookDy_ = dy; }
 
@@ -229,6 +237,7 @@ private:
     HXrInputState xr_;
     HGamepadState pad_;
     float         lookDx_ = 0.f, lookDy_ = 0.f;
+    bool          handSwap_ = false;
     HapticSink    haptic_;
     Handle next_ = 0;
 };

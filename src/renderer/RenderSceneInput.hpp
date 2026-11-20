@@ -24,6 +24,9 @@ struct RenderCamera {
     float     zNear      = 0.1f;
     float     zFar       = 100.f;
     float     exposureEv = 0.f;
+    // 접근성(2026-11-21, Docs/Accessibility.md D6 · D9): 톤매핑 뒤 화면 단계. 0 이면 그 단계를 건너뜀(예전과 같은 화소).
+    float     vignette    = 0.f;   // 이동 중 비네트 세기 0 ~ 1
+    int       colorFilter = 0;     // 0 없음 · 1 protanopia · 2 deuteranopia · 3 tritanopia
 };
 
 enum class RenderLightKind : uint8_t { Directional, Point, Spot };

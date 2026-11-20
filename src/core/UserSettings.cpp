@@ -65,6 +65,15 @@ const std::vector<UserSettings::KeyInfo>& UserSettings::keys() {
         { "comfort.teleport",      K::Choice, 0.f, 0.f,   "scene|on|off", A::Live, false, "VR teleport" },
         { "comfort.height",        K::Choice, 0.f, 0.f,   "scene|tracked|fixed", A::Live, false, "VR height: tracked (standing) or fixed eye height (seated)" },
         { "comfort.eyeHeight",     K::Float,  0.f, 2.5f,  {}, A::Live,    false, "Fixed eye height in meters (0 = scene value, else 0.5..2.5)" },
+        { "comfort.vignette",      K::Float,  0.f, 1.f,   {}, A::Live,    false, "Darken the view edges while moving smoothly (0 = off, up to 1)" },
+        { "comfort.seated",        K::Bool,   0.f, 0.f,   {}, A::Live,    false, "Seated play: lift the view by standing minus seated head height (VR floor space)" },
+        { "comfort.standingHeight", K::Float, 0.f, 2.5f,  {}, A::Live,    false, "Standing eye height for seated play in meters (0 = scene value, else 1..2.5)" },
+        { "access.subtitles",      K::Bool,   0.f, 0.f,   {}, A::Live,    false, "Show subtitles" },
+        { "access.subtitleSize",   K::Float,  0.5f, 3.f,  {}, A::Live,    false, "Subtitle text size (1 = default)" },
+        { "access.subtitleBackground", K::Float, 0.f, 1.f, {}, A::Live,   false, "Subtitle background opacity (0 = none, 1 = solid)" },
+        { "access.textScale",      K::Float,  0.5f, 3.f,  {}, A::Live,    false, "Text scale for 3D UI panels and subtitles (1 = default)" },
+        { "access.hand",           K::Choice, 0.f, 0.f,   "right|left", A::Live, false, "Dominant hand: left swaps the move and turn/teleport sticks" },
+        { "access.colorFilter",    K::Choice, 0.f, 0.f,   "none|protanopia|deuteranopia|tritanopia", A::Live, false, "Color vision correction filter" },
         { "input.action.",         K::Text,   0.f, 0.f,   {}, A::Live,    true,  "Action binding, same text as project.ini (none = unbound)" },
         { "input.axis.",           K::Text,   0.f, 0.f,   {}, A::Live,    true,  "Axis binding, same text as project.ini (none = unbound)" },
         { "input.mod.",            K::Text,   0.f, 0.f,   {}, A::Live,    true,  "Axis modifiers: deadzone:0.2, axial, curve:2, sens:1.5, invert (none = defaults)" },
@@ -246,5 +255,9 @@ ComfortSettings ComfortSettings::from(const UserSettings& s) {
     c.height = h == "tracked" ? 0 : h == "fixed" ? 1 : -1;
     const float eye = s.getFloat("comfort.eyeHeight", 0.f);
     c.eyeHeight = eye > 0.f ? std::clamp(eye, 0.5f, 2.5f) : 0.f;
+    c.vignette = std::clamp(s.getFloat("comfort.vignette", 0.f), 0.f, 1.f);
+    c.seated   = s.getBool("comfort.seated", false);
+    const float stand = s.getFloat("comfort.standingHeight", 0.f);
+    c.standingHeight = stand > 0.f ? std::clamp(stand, 1.f, 2.5f) : 0.f;
     return c;
 }

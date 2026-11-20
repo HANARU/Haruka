@@ -267,6 +267,8 @@ private:
     bool               bloomOn_ = true;
     PostPass::Params   postParams() const;   // 이번 프레임의 합성 값(세기 · 노출 · 켬/끔)
     float              cameraExposureEv_ = 0.f;   // 활성 카메라의 노출 보정(gatherViews 가 채움)
+    float              cameraVignette_    = 0.f;  // 접근성 비네트 · 색 보정(gatherViews 가 채움, Docs/Accessibility.md)
+    int                cameraColorFilter_ = 0;
     float              contactLength_    = 0.f;   // 섀도 캐스터 방향광의 접촉 그림자 길이(updateLightSSBO 가 채움, 0 = 끔)
     hvk::DeviceCaps    deviceCaps_;         // 고른 장치에서 읽은 값
     hvk::DevicePlan    devicePlan_;         // 켤 확장 · 기능(장치 생성과 샘플러가 함께 읽음)

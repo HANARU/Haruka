@@ -13,12 +13,12 @@ void SamplesGameModule::onRegister() {
     // 에디터는 Play 전에도 씬의 패널을 그리므로 첫 씬을 열기 전에 등록합니다.
     UIPanelComponent::registerContent("Demo", [](UIPanelComponent& panel, float s) {
         auto title = std::make_shared<STextBlock>();
-        title->text(panel.paramAttr("title", "Haruka UI Panel"))->fontSize(56.f * s)->color(glm::vec4(1.f));
+        title->text(panel.paramAttr("title", "Haruka UI Panel"))->fontSize(56.f * s * panel.textScale())->color(glm::vec4(1.f));
         auto sub = std::make_shared<STextBlock>();
         sub->text("World-space HSlate panel (3D UI P1)\n1250 px/m, mipmapped, not tone mapped")
-           ->fontSize(30.f * s)->color(glm::vec4(0.75f, 0.8f, 0.9f, 1.f));
+           ->fontSize(30.f * s * panel.textScale())->color(glm::vec4(0.75f, 0.8f, 0.9f, 1.f));
         auto label = std::make_shared<STextBlock>();
-        label->text("Button")->fontSize(32.f * s)->color(glm::vec4(1.f));
+        label->text("Button")->fontSize(32.f * s * panel.textScale())->color(glm::vec4(1.f));
         auto button = std::make_shared<SButton>();
         button->content(label)->padding(HPadding(28.f * s, 12.f * s))
               ->onClick(panel.actionCallback("demo.button"))

@@ -16,6 +16,7 @@ class World;
 class XrSystem;
 struct ProjectSettings;
 struct ComfortSettings;
+class AccessibilityState;
 
 // 이번 프레임의 화면 카메라와 그 원점. 프레임을 시작하기 전에 정해 한 프레임 안에서는 바뀌지 않게 합니다.
 struct XrViewChoice {
@@ -28,8 +29,9 @@ class XrViewOrigin {
 public:
     XrViewChoice choose(World& world) const;
     // 화면 카메라가 씬 리그의 머리면 그 리그의 높이 모드를, 아니면 프로젝트 설정의 값을 XR 에 넣습니다(세션이 있을 때).
+    // access 가 있으면 앉은 자세 보정(Docs/Accessibility.md D7)을 바닥 기준 공간 원점에 더합니다.
     void applyRigSpace(XrSystem& xr, const XrViewChoice& view, const ProjectSettings& project,
-                       const ComfortSettings* comfort = nullptr) const;
+                       const ComfortSettings* comfort = nullptr, AccessibilityState* access = nullptr) const;
     // 원점을 카메라에 알립니다. xr 은 없어도 됩니다(세션이 있는지는 여기서 봄).
     void applyToCamera(const XrViewChoice& view, XrSystem* xr, World& world);
     // 세션이 끝났습니다. 다음 Play 에서 바닥을 다시 찾고 원점 안내를 다시 남깁니다.

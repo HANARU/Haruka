@@ -344,11 +344,14 @@ set(RUNTIME_SOURCES
     src/core/Profiler.cpp
     src/core/TraceRecorder.cpp
     src/core/UserSettings.cpp
+    src/core/Accessibility.cpp
+    src/core/Subtitles.cpp
     src/core/CrashHandler.cpp
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp
     src/components/RenderExtract.cpp
     src/components/StaticMeshComponent.cpp
+    src/components/SubtitlePanel.cpp
     src/components/AssetRebind.cpp
     src/audio/AudioComponent.cpp
     src/audio/ReverbZoneComponent.cpp
@@ -1098,6 +1101,17 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaSaveTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 접근성 테스트(Docs/Accessibility.md) -----------------------------------------------
+    # 자막 큐(시간 · 겹침 · 우선순위) · 자막 판 크기와 자리 · 글자 배율 레이아웃 · 비네트 세기 · 앉은 높이 · 손 바꾸기 · 색 보정 행렬 ·
+    # 설정 왕복을 창 · GPU 없이 검산합니다.
+    add_executable(HarukaAccessTest tests/AccessibilityTest.cpp)
+    target_link_libraries(HarukaAccessTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaAccessTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaAccessTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaAccessTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 오디오 버스 그래프 · 스냅숏 · 더킹 · 리미터 · 사운드 큐 테스트(Docs/Audio_Design.md 12절) --------------
     # 장치 없는 소리 엔진에서 출력을 당겨 더킹 곡선 · 리미터 피크 · 스냅숏 섞기 · 큐의 동시 재생 규칙과 시드를 숫자로 검산합니다.
     add_executable(HarukaAudioMixTest tests/AudioMixTest.cpp)
@@ -1200,6 +1214,10 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/audio/MiniaudioImpl.cpp
         src/audio/SteamAudioHrtf.cpp
         src/audio/AudioComponent.cpp
+        src/core/Subtitles.cpp
+        src/core/Accessibility.cpp
+        src/core/UserSettings.cpp
+        src/core/HText.cpp
         src/components/CameraComponent.cpp
         src/audio/ReverbZoneComponent.cpp
         src/physics/RigidBodyComponent.cpp
@@ -1271,6 +1289,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
         src/core/UserSettings.cpp
+        src/core/Accessibility.cpp
         src/scene/World.cpp
         src/scene/TimerManager.cpp
         src/scene/Actor.cpp
@@ -1337,6 +1356,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
         src/core/UserSettings.cpp
+        src/core/Accessibility.cpp
         src/scene/World.cpp
         src/scene/TimerManager.cpp
         src/scene/Actor.cpp
@@ -1382,6 +1402,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME async_loading        COMMAND HarukaLoadingTest)
     add_test(NAME asset_hot_reload     COMMAND HarukaHotReloadTest)
     add_test(NAME save_settings        COMMAND HarukaSaveTest)
+    add_test(NAME accessibility        COMMAND HarukaAccessTest)
     add_test(NAME gameplay_tools       COMMAND HarukaGameplayTest)
     add_test(NAME cpu_profiling        COMMAND HarukaProfilerTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)

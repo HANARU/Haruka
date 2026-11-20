@@ -932,6 +932,7 @@ void AudioSystem::tick(float dt) {
             } else {
                 ma_sound_start(&ac->voice_->sound);
             }
+            ac->emitSubtitle();   // 자막(Docs/Accessibility.md D3). 들리지 않게 시작해도 말은 시작됨
         } else {
             updateVirtual(*ac->voice_, *ac, pos, dt);
         }

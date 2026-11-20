@@ -246,6 +246,7 @@ UE식 용어 채택, **"명칭만" 결정**(내부 상대값, 물리 단위·노
 - ✅ **⑫ 오디오 버스 그래프 · 사운드 큐(2026-11-21)**: [Audio_Design.md](Audio_Design.md) 12절. 귀 확인 · 루프백 실측 · 에디터 버스 믹서 패널이 남음.
 - ✅ **⑥ 파티클 · VFX · 데칼(2026-11-20)**: [Particles_And_Decals.md](Particles_And_Decals.md). 텍스처 파일 · Sub UV · 메시 파티클 · 조명 받는 파티클 · 데칼 텍스처 · 에디터 미리보기 · Quest 오버드로 실측이 남음.
 - ✅ **⑩ 입력 확장(2026-11-21)**: [Input_Extensions.md](Input_Extensions.md). 실제 패드 연결 확인 · 패드 진동 · 패드 시선 · 재지정 UI 가 남음.
+- ✅ **⑭ 접근성(2026-11-21)**: [Accessibility.md](Accessibility.md). 헤드셋 확인(자막 위치 · 비네트 느낌 · 앉은 높이 · 왼손 이동) · 자막 깊이 무시 · 큰 대비 테마 · 게임 설정 화면이 남음.
 
 ---
 
