@@ -25,22 +25,23 @@ module geometry:  core, math
 module vfx:       core, math
 module physics:   core, math, scene, geometry
 module audio:     core, math, vfs, scene, physics
+module nav:       core, math, vfs, scene, geometry, physics
 module renderer:  core, math, vfs, memory, platform, ui, geometry, vfx
 module xr:        core, math, input, platform, renderer
 module assets:    core, math, vfs, geometry, scene, renderer
 
 # ── 컴포넌트: 장면 모델과 시스템을 잇는 층 ──
-module components: core, math, vfs, platform, input, ui, scene, geometry, vfx, physics, audio, renderer, xr, assets
+module components: core, math, vfs, platform, input, ui, scene, geometry, vfx, physics, nav, audio, renderer, xr, assets
 
 # ── 씬 파일: 씬 · 프리팹 읽기 · 쓰기(옛 v3 형식은 컴포넌트 형을 직접 앎, 2026-11-18 S7 에 assets 에서 옮김) ──
 module sceneio:   core, math, vfs, scene, geometry, vfx, physics, audio, assets, components
 
 # ── 조립: 엔진 루프 · 앞단 ──
-module runtime:   core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, audio, renderer, xr, assets, components, sceneio
-module game:      core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, audio, renderer, xr, assets, components, sceneio, runtime
-module editor:    core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, audio, renderer, xr, assets, components, sceneio, runtime
+module runtime:   core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, nav, audio, renderer, xr, assets, components, sceneio
+module game:      core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, nav, audio, renderer, xr, assets, components, sceneio, runtime
+module editor:    core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, nav, audio, renderer, xr, assets, components, sceneio, runtime
 module tools:     core, math, vfs, geometry, assets
-module main:      core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, audio, renderer, xr, assets, components, sceneio, runtime, game, editor, tools
+module main:      core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, nav, audio, renderer, xr, assets, components, sceneio, runtime, game, editor, tools
 
 # ── 허용 목록: 아직 고치지 않은 위반 ──
 # (S5d 완료로 허용 목록 0개)

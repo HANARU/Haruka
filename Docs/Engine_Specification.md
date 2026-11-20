@@ -69,7 +69,7 @@
 |---|---|
 | 소스 | `src/` 의 `.cpp` · `.hpp` 179 파일, 30,275 줄 |
 | 셰이더 | GLSL 20 파일(셰이더 19 + 공용 헤더 1), 841 줄(2026-11-02). 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 43개 실행 파일, 검사 3,512개(`ctest -C Release`, 2026-11-21 링크된 프리팹 뒤) |
+| 자동 테스트 | 44개 실행 파일, 검사 3,577개(`ctest -C Release`, 2026-11-21 내비게이션 · AI 뒤) |
 | 문서 | `Docs/` 활성 문서 28개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳤습니다. 같은 날 빛 · 그림자 조사 후속에서 DEF-148 을 고치고 DEF-158 ~ 161(4건)을 등재해 모두 고쳤습니다. 2026-11-02 헤드셋 확인에서 DEF-162 · 163, 마지막 점검에서 DEF-164 를 등재해 모두 고쳤습니다. 2026-11-06 검토 결함 묶음 DEF-130 ~ 147(18건)을 모두 고쳤고, 같은 날 임포트 검토에서 DEF-165(텍스처 밉맵)를, 공간 음향 조사에서 DEF-166(패닝 문서 오류)을 등재해 고쳐, 지금은 166건 중 해결 155 · 열림 5 · 보류 3 · 닫음 3 입니다. 그 뒤 DEF-167(보류, 2026-11-16)과 DEF-168 ~ 172(2026-11-17 ~ 18, 모두 해결)를 등재해 172건 중 해결 160 · 열림 5 · 보류 4 · 닫음 3 입니다 |
@@ -398,6 +398,13 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
   - `JointComponent`: fixed · hinge(각도 한계, 도) · slider(거리 한계, m) · distance(최소 · 최대 거리), 상대는 `HActorRef`(비면 월드). 앵커 · 축은
     소유 액터 로컬, 값 0 은 만든 순간의 자세. 어느 쪽 몸이든 지워지면 조인트도 지웁니다. 에디터는 앵커 · 축 · 한계를 선으로 그립니다.
   - 셰이프 캐스트 `PhysicsSystem::shapeCast`(구 · 상자 · 캡슐, 회전, 레이어 마스크, 무시 액터, 시작부터 겹치면 거리 0).
+- 내비게이션 · AI(2026-11-21, [Navigation_AI.md](Navigation_AI.md), recastnavigation 1.6.0 의 Recast · Detour):
+  - `NavMeshVolumeComponent` 가 범위(월드 축 정렬) · 에이전트 반경 · 높이 · 최대 경사 · 턱 높이 · 셀 크기와 `data`(`.hnav` 논리 경로)를 듭니다. 입력은 활성 액터의
+    Static 충돌체(트리거 제외)이고, 콘솔 `nav.build [경로]` 가 구워 디스크에 쓰고 곧바로 다시 읽습니다. 게임은 씬을 읽을 때 `.hnav` 를 읽기만 합니다.
+  - 월드 서비스 `NavSystem`: `findPath`(완전 · 부분 = 가장 가까운 닿는 점까지 · 없음) · `projectPoint` · `moveAlongSurface`, `nav.info`(최신 여부 · 에이전트 상태) · `nav.debug`(디버그 선).
+  - `NavAgentComponent`: 속도 · 회전 속도 · 도착 반경, 물리가 있으면 CharacterVirtual 로 이동(아니면 메시 위 미끄러짐), 에이전트끼리 분리 + 내다보기 회피,
+    경로 이탈 · 쫓는 액터 이동 때 다시 찾기, 막힘 2 초면 실패, 이벤트 버스 `NavMoveFinished`.
+  - `AIBrainComponent`: 대기 · 순찰(`patrolTag` 액터를 이름순) · 추적(`targetTag`, 감지 · 놓침 반경), 타이머 · 이벤트 버스, `AIStateChanged`.
 
 ### 4-8. 오디오 (miniaudio)
 
@@ -480,7 +487,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 43개, 검사 3,512개(2026-11-21).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 44개, 검사 3,577개(2026-11-21).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -497,6 +504,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `texture_compression` | 72 | 텍스처 압축([Texture_Compression.md](Texture_Compression.md)): KTX2 쓰기 · 읽기(단계 순서 · 정렬 · DFD) · 손상 14가지 거부, 형식 표 · 블록 크기 · 열쇠(화소 · 용도 · 크기), 장치 지원 판단(기능 꺼짐 · 선형 필터 없음 → RGBA8), 밉(Vulkan 크기 · sRGB 평균 · 노멀 정규화), 압축 → 풀기 PSNR 하한(BC7 · BC5 · ASTC 6x6 · 5x5, 두 채널 노멀 B = 0), 쿠킹 캐시(다시 압축 안 함 · 손상 다시 만듦), TexProbe 쿠킹 → 런타임 찾기 다섯 칸(다른 대상 · 손상 · 화소 바뀜이면 붙이지 않음) |
 | `particles_decals` | 90 | 파티클 · 데칼([Particles_And_Decals.md](Particles_And_Decals.md)): 결정적 시드(같은 시드 = 같은 비트 · reset · 구), 수명 제거 · 상한 · 비율 · 반복 안 함 · 반복 터뜨리기 · dt 상한, 수명 비율 곡선(보간 · 범위 · 글자 왕복 · 거절), 중력 · 감쇠 · 로컬/월드 · 회전한 원뿔, 월드 시간 배율 · stop · play · autoPlay, 정렬(먼 것부터 · 같은 거리 순서 · 이미터끼리 · 상한에서 먼 것부터 잘림 · 드로 합치기), 모양 아틀라스, 필드 왕복, 데칼 상자 · 모양 · 각도 · 추출, 확인 장면 `ParticleProbe.hscene` 두 번 같음 |
 | `physics_joints` | 55 | 물리 조인트 · 충돌 이벤트 · 레이어([Physics_Joints_And_Events.md](Physics_Joints_And_Events.md)): 레이어 표 해석 · `project.ini` 줄, 레이어로 무시한 쌍(통과 · 알림 0 · 질의 마스크), 접촉 시작 · 유지 · 끝(잠듦은 끝 아님), 트리거 들어감 · 나감(지나감 · 안에서 잠듦 · 잠든 몸 둘레에 생김 · 지우면 나감), 질의는 트리거를 맞추지 않음, 알림 안에서 삭제, 경첩 문 한계 · 상대 삭제, 슬라이더 · 거리 · 고정, 셰이프 캐스트(구 · 상자 · 캡슐 · 회전 · 마스크 · 무시 · 시작 겹침), 필드 왕복 · 디테일 칸, 확인 장면 `PhysicsJointProbe.hscene` |
+| `navigation` | 64 | 내비게이션 · AI([Navigation_AI.md](Navigation_AI.md)): 시험 지형(바닥 · 벽 · 18도 · 60도 경사 · 섬) 굽기 · 경로 길이 · 벽 돌기 · 부분 경로 · 없음 · 투영 · 표면 미끄러짐, 반경 · 경사 · 턱 설정 효과, 생성 시간, 결정성, `.hnav` 왕복 · 손상 거부, Static 충돌체만 입력, 에이전트(표면 · 캐릭터) 도착 · 이벤트 · 벽 통과 없음 · 경로 이탈 다시 찾기 · 도달 불가, 마주 오는 두 에이전트 회피, AI 순찰 · 대기 · 추적 · 놓침, 확인 장면(저장된 `.hnav` = 다시 구운 바이트, 600 프레임 뒤 Walker 가 목표 곁) |
 | `gameplay_tools` | 84 | 게임플레이 기본 도구([Gameplay_Tools.md](Gameplay_Tools.md)): 시간 배율 · 게임 시간, 타이머(정확한 틱 · 배율 · 반복 따라잡기 · 16 번 상한 · 주인 삭제 취소 · 콜백 안 취소 · 추가 · clear), 물리 뒤 틱, 태그(규칙 · 색인 캐시 · 씬 파일 왕복), 이벤트 버스(형별 · 순서 · 발행 중 해제 · 재발행 · 이동), CVar(등록 · 범위 · 보관 · 콜백 · 출처), 콘솔 명령(값 · help · list · reset · 따옴표 인자) |
 | `accessibility` | 111 | 접근성([Accessibility.md](Accessibility.md)): 자막 큐(자동 길이 · 같은 id 바꾸기 · 최대 줄 수 · 우선순위 밀어내기 · 기다림 버리기), 사운드 컴포넌트 자막 칸, 줄바꿈(폭 · … · 한글), 자막 판 크기 · 머리 고정 · 화면 아래 자리 · 켜기 · 다시 만들기, 3D UI 패널 글자 배율 레이아웃, 비네트 속도 → 세기 · 필터 · 모양 · 이동 컴포넌트 알림, 앉은 높이 · 다시 맞추기, 손 바꾸기(XR · 패드 스틱), 색 보정 행렬, 설정 왕복 |
 | `save_settings` | 89 | 저장 게임 · 사용자 설정([Save_And_Settings.md](Save_And_Settings.md)): 저장 파일 왕복(int64 · float 비트 · 줄바꿈 든 문자열 · vec3 · GUID), CRC 로 잘림 · 손상 거절, 형식 · 데이터 버전, 슬롯 이름 규칙, 다시 시작 왕복, `.bak`(잘린 본 파일 · 본 파일 없음 · 둘 다 손상), 남은 `.tmp`, 목록 · 지우기, 다시 읽은 씬의 GUID 참조, 설정 형 · 범위 · 바꾼 값만 쓰기 · 모르는 이름 보존 · BOM · UTF-16, 편안함 서비스 |
@@ -524,7 +532,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `headless_render` | 140 | 빈 스왑체인, 이미지별 세마포어(DEF-118), 표면 없는 창(Headless · Android), 명령줄(시작 씬 `--scene` · `--gpu` · `--settings-platform` · `--no-multiview` · `--capture-eye` · `--user-setting` · `--cvar` · `--console-at` · `--ui-console` 포함), 프레임 시간 분포 · 예산(`FramePacing.hpp`), 종료 코드 · 빈 화면, 파이프라인 캐시 파일의 잘림 · 손상 · 다른 장치 거르기(DEF-153), XR 세션 다시 열기 시각(DEF-155, `runtime/XrRecovery.hpp`) |
 | `hand_skinning` | 108 | glTF 스킨 읽기 · CPU 스키닝 · OpenXR 손 뼈대 규약 · 손 자세 컴포넌트 · 컨트롤러 → 손가락 굽힘 |
 | `math_common` | 84 | `src/math` 기본 도형 · 판정 · 허용 오차, 감쇠 · 스프링 · 이징, 곡선, PCG32 · Perlin · 블루 노이즈, One Euro · 속도 추정, 두 뼈 IK · 스윙-트위스트, 아핀 역행렬(2026-11-17) |
-| `architecture_deps` | 28 | 모듈 include 방향(`tests/ArchitectureRules.txt`): 규칙 파일 · 모든 모듈에 규칙 · 표에 순환 없음 · 모듈마다 허용 방향 안 · 허용 목록이 줄기만 함([Engine_Structure_Design.md](Engine_Structure_Design.md) 4절), 정적 시스템 포인터 0 · 전역 싱글턴 목록(S3, 8절) |
+| `architecture_deps` | 30 | 모듈 include 방향(`tests/ArchitectureRules.txt`): 규칙 파일 · 모든 모듈에 규칙 · 표에 순환 없음 · 모듈마다 허용 방향 안 · 허용 목록이 줄기만 함([Engine_Structure_Design.md](Engine_Structure_Design.md) 4절), 정적 시스템 포인터 0 · 전역 싱글턴 목록(S3, 8절) |
 | `vulkan_imports` | 11 | 실행 파일이 vulkan-1.dll 에서 1.0 · 1.1 코어와 표면 · 스왑체인 함수만 가져옴(PE 가져오기 표, Windows) |
 
 - 2026-10-14 이후 새로 만든 검사는 수정을 되돌리면 실패하는지 **변이로 확인**했습니다.
@@ -564,6 +572,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 게임 배포 형태 | Windows 는 2026-10-19 ~ 24 에 생겼습니다(게임 실행 파일 · 묶음 파일 · 배포 ZIP, DEF-12 해결). Android APK 는 개발용(디버그 서명)만 있고 묶음 파일을 아직 APK 안에서 읽지 않습니다. 게임 설정 화면(창 크기 · 전체 화면 · 소리 장치)도 없습니다 | [Packaging_Design.md](Packaging_Design.md) |
 | Linux · macOS | 빌드된 적 없음 | |
 | 게임플레이 기본 도구 · CVar | 2026-11-20 에 들어옴: 시간 배율 · 게임 시간(`World::setTimeScale` · `gameTime`), 타이머(`World::timers`), 태그(`Actor::addTag` · `World::actorsWithTag`), 이벤트 버스(`World::events`), 물리 뒤 틱(`ETickGroup::PostPhysics`), CVar · 콘솔 명령(`EngineContext::cvars`, ini · `--cvar` · 에디터 Output Log 콘솔 줄). 없는 것: 헤드셋 안 콘솔, 스크립트 계층 | [Gameplay_Tools.md](Gameplay_Tools.md) |
+| 내비게이션 · AI | 2026-11-21 에 들어옴: 미리 구운 내비 메시(`.hnav`) · 경로 질의 · 이동 컴포넌트 · 작은 AI 상태 기계([Navigation_AI.md](Navigation_AI.md)). 실행 중 타일 다시 만들기 · 동적 장애물 구멍 · 행동 트리 · 큰 군중은 없음 | [Navigation_AI.md](Navigation_AI.md) |
 | 저장 게임 · 사용자 설정 | 2026-11-20 에 들어옴: 저장 슬롯(`EngineContext::saves`, CRC · 이전 저장본 · 데이터 버전), 사용자 설정 층(`EngineContext::settings`, 소리 버스 · AO · 블룸 · 그림자 품질 · 키 재지정 · 편안함 · `game.*`). 없는 것: 게임 설정 화면, 해상도 배율 · vsync | [Save_And_Settings.md](Save_And_Settings.md) |
 | 비동기 에셋 로딩 | 2026-11-20 에 들어옴: 워커 스레드 읽기 · 프레임당 2 ms 업로드 · 대기 없는 텍스처 업로드 · 지연 해제 · 메가 버퍼 재사용 · 게임 씬 전환(`EngineContext::requestScene`). 없는 것: 큰 텍스처 나눠 올리기, XR 로딩 레이어, 에디터 씬 열기의 비동기화 | [Async_Loading.md](Async_Loading.md) · [Threading.md](Threading.md) |
 | Zero-Copy 로딩 | 이름만 남음. 캐시를 호스트 메모리로 읽은 뒤 업로드합니다 | |

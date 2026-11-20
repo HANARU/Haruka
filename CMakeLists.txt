@@ -150,6 +150,28 @@ FetchContent_MakeAvailable(nanosvg)
 add_library(haruka_nanosvg INTERFACE)
 target_include_directories(haruka_nanosvg SYSTEM INTERFACE ${nanosvg_SOURCE_DIR}/src)
 
+# ── recastnavigation (내비 메시 굽기 · 경로 찾기, 2026-11-21, Docs/Navigation_AI.md D1) ─────────────────────
+# zlib 라이선스. 판이 고정된 압축 파일을 SHA256 으로 확인해 받고, 저장소의 CMake(데모 · 시험 · 설치)는 쓰지 않습니다(SOURCE_SUBDIR 에
+# CMakeLists.txt 가 없으면 받기만 함). Recast(굽기) · Detour(질의) 소스만 정적 라이브러리로 묶어 데스크톱 · Android 엔진에 링크합니다.
+# DetourCrowd · DetourTileCache · DebugUtils 는 넣지 않습니다. Recast · Detour 형은 src/nav 의 .cpp 안에서만 씁니다.
+FetchContent_Declare(
+    recastnavigation
+    URL      https://github.com/recastnavigation/recastnavigation/archive/refs/tags/v1.6.0.tar.gz
+    URL_HASH SHA256=d48ca0121962fa0639502c0f56c4e3ae72f98e55d88727225444f500775c0074
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    SOURCE_SUBDIR _haruka_sources_only
+)
+FetchContent_MakeAvailable(recastnavigation)
+file(GLOB _haruka_recast_sources ${recastnavigation_SOURCE_DIR}/Recast/Source/*.cpp ${recastnavigation_SOURCE_DIR}/Detour/Source/*.cpp)
+add_library(haruka_recast STATIC ${_haruka_recast_sources})
+target_include_directories(haruka_recast SYSTEM PUBLIC
+    ${recastnavigation_SOURCE_DIR}/Recast/Include ${recastnavigation_SOURCE_DIR}/Detour/Include)
+if(MSVC)
+    target_compile_options(haruka_recast PRIVATE /W0 /utf-8)
+else()
+    target_compile_options(haruka_recast PRIVATE -w)
+endif()
+
 # ── 텍스처 인코더 (묶음 도구 전용, 2026-11-21, Docs/Texture_Compression.md D7) ─────────────────
 # 묶을 때 텍스처를 BC(PC) · ASTC(Android)로 압축합니다. HarukaPak 과 시험에만 링크하고, 게임 런타임 · Android 실행 파일에는
 # 넣지 않습니다(런타임은 미리 압축한 KTX2 만 읽음). 판이 고정된 압축 파일을 SHA256 으로 확인해 받고, 저장소의 CMake 는 쓰지
@@ -450,6 +472,13 @@ set(RUNTIME_SOURCES
     src/audio/MiniaudioImpl.cpp
     src/audio/SteamAudioHrtf.cpp
     src/physics/PhysicsSystem.cpp
+    src/nav/NavMeshBuild.cpp
+    src/nav/NavMesh.cpp
+    src/nav/NavGeometry.cpp
+    src/nav/NavSystem.cpp
+    src/nav/NavMeshVolumeComponent.cpp
+    src/nav/NavAgentComponent.cpp
+    src/nav/AIBrainComponent.cpp
     src/ui/slate/HPaintContext.cpp
     src/ui/slate/HFontAtlas.cpp
     src/ui/slate/HSlateRenderer.cpp
@@ -546,6 +575,7 @@ else()
         target_compile_definitions(HarukaRuntime PUBLIC HARUKA_PROFILER=0)
     endif()
     target_link_libraries(HarukaRuntime PUBLIC Vulkan::Vulkan glfw glm::glm tinygltf Jolt openxr_loader HarukaVfs meshoptimizer)
+    target_link_libraries(HarukaRuntime PRIVATE haruka_recast)   # 내비 메시(Docs/Navigation_AI.md D1)
     target_include_directories(HarukaRuntime PUBLIC ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
     if(WIN32)
         # 쓰기 루트(%LOCALAPPDATA%)를 구하는 SHGetKnownFolderPath · CoTaskMemFree(core/AppPaths.cpp).
@@ -692,6 +722,7 @@ string(REPLACE "<year> <copyright holders>"
 haruka_notice("OpenXR loader (MIT License, chosen from Apache-2.0 OR MIT)" "${_oxr}")
 haruka_notice_file("LZ4 library (BSD 2-Clause License)" ${lz4_SOURCE_DIR}/lib/LICENSE)
 haruka_notice_file("xxHash (BSD 2-Clause License)" ${xxhash_SOURCE_DIR}/LICENSE)
+haruka_notice_file("recastnavigation 1.6.0 (Recast · Detour) (zlib License)" ${recastnavigation_SOURCE_DIR}/License.txt)
 if(NOT ANDROID)
     haruka_notice_file("GLFW (zlib License)" ${glfw_SOURCE_DIR}/LICENSE.md)
 else()
@@ -1247,6 +1278,18 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaProfilerTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 내비게이션 · AI 테스트(Docs/Navigation_AI.md) ------------------------------------------------
+    # 시험 지형(바닥 · 벽 · 경사 · 섬)의 굽기 · 경로 길이 · 부분 경로 · 없음, 생성 시간, 결정성, .hnav 왕복 · 손상, 에이전트 이동 · 회피,
+    # AI 상태 기계, 확인 장면(NavProbe.hscene + 구운 NavProbe.hnav)을 창 · GPU 없이 봅니다.
+    add_executable(HarukaNavTest tests/NavigationTest.cpp)
+    target_link_libraries(HarukaNavTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaNavTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(HarukaNavTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(HarukaNavTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaNavTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 물리 조인트 · 충돌 이벤트 · 레이어 테스트(Docs/Physics_Joints_And_Events.md) ------------------
     # 레이어 표 · 무시한 쌍 · 트리거 들어감 · 나감 · 접촉 알림 · 알림 중 삭제 · 조인트 네 종류 · 상대 삭제 · 셰이프 캐스트 · 확인 장면을
     # 창 · GPU 없이 봅니다. 확인 장면을 저장소에서 읽도록 소스 경로를 넘깁니다.
@@ -1503,6 +1546,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
     add_test(NAME physics_joints       COMMAND HarukaJointTest)
+    add_test(NAME navigation           COMMAND HarukaNavTest)
     add_test(NAME particles_decals     COMMAND HarukaParticleTest)
     add_test(NAME texture_compression  COMMAND HarukaTexTest)
     add_test(NAME stereo_views         COMMAND HarukaStereoTest)

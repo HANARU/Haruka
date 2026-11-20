@@ -23,7 +23,7 @@
 | 8 | 물리 조인트 · 충돌 이벤트 | **2026-11-20 구현**: 충돌 레이어 표 · 트리거 · 접촉 알림 · 조인트 네 종류 · 셰이프 캐스트 | (남음) 조인트 모터 · 스프링 · 끊어짐, 레이어 표 편집 화면 | [Physics_Joints_And_Events.md](Physics_Joints_And_Events.md) |
 | 9 | 링크된 프리팹 | **2026-11-21 구현**: 씬 v7 · 프리팹 v6 인스턴스 블록(원본 경로 + 비교로 얻는 덮어쓰기), 결정적 GUID 파생, 추가 · 삭제, 다시 펼침(저장 · 원본에 적용 · 감시), 중첩 · 순환 거부, 에디터 표시 · 되돌리기 · 원본에 적용 · 링크 끊기 | (남음) 프리팹 변형 · 속성 칸 단위 표시 · 저장한 액터를 인스턴스로 바꾸기 · 창 확인 | [Linked_Prefabs.md](Linked_Prefabs.md) |
 | 10 | 입력 확장 | **2026-11-21 구현**: 데스크톱 게임패드(GLFW 표준 매핑) · 축 수정자(데드존 · 곡선 · 감도 · 반전) · 입력 컨텍스트(우선순위 · 소스 단위 소비) · 사용자 재지정(충돌 목록 · 바뀐 것만 저장) | (남음) 실제 패드 확인 · 패드 진동 · 패드 시선 · 재지정 UI | [Input_Extensions.md](Input_Extensions.md) |
-| 11 | 내비게이션 · AI | 없음 | 내비 메시 · 경로 찾기 · 상태 기계 | |
+| 11 | 내비게이션 · AI | **2026-11-21 구현**: Recast 굽기(Static 충돌체 입력 · 볼륨 · 에이전트 설정) · `.hnav` 미리 굽기(`nav.build`, 게임은 읽기만) · 월드 서비스 경로 질의(완전 · 부분 · 없음) · 이동 컴포넌트(CharacterVirtual · 회피 · 다시 찾기) · AI 상태 기계(대기 · 순찰 · 추적) | (남음) 창 확인 · 실행 중 타일 다시 만들기 · 동적 장애물 구멍 · 행동 트리 | [Navigation_AI.md](Navigation_AI.md) |
 | 12 | 오디오 버스 그래프 · 사운드 큐 | **2026-11-21 구현**: 버스마다 노드(부모 · 볼륨 · 음소거 · 미터), 스냅숏(우선순위 · 페이드), 신호 기준 더킹, 마스터 피크 리미터(기본 끔), 사운드 큐 `.hcue`(가중치 · 시드 · 피치 · 볼륨 · 동시 재생 상한 · 재시작 간격), CVar · 콘솔 | (남음) 에디터 버스 믹서 패널 · 믹스 정의 파일 · 버스 효과 · `ui` 버스 일시정지 제외 | [Audio_Design.md](Audio_Design.md) 12절 |
 | 13 | 에셋 핫리로드 · 가져오기 설정 | **2026-11-20 구현**: 에디터 폴더 감시 · 모델 · 의존 텍스처 · 씬 · import.ini 다시 읽기, `/Config/import.ini` 패턴 표(배율 · 자동 LOD · sRGB) | (남음) 오디오 · 프리팹 다시 읽기 · 다시 가져오기 메뉴 · 물리 형상 · 스킨 배율 · 압축 | [Asset_Hot_Reload.md](Asset_Hot_Reload.md) |
 | 14 | 접근성 | **2026-11-21 구현**: 자막(큐 · 머리 고정 · 화면 아래) · 글자 배율 · 이동 중 비네트 · 앉은 자세 보정 · 한 손 조작 · 색약 보정 | (남음) 헤드셋 확인 · 자막 깊이 무시 · 큰 대비 테마 · 설정 화면 | [Accessibility.md](Accessibility.md) |
@@ -176,6 +176,13 @@
 - **부족한 점:** 내비 메시 생성 · 경로 찾기(Recast · Detour), 간단한 상태 기계 또는 행동 트리.
 - **의존 관계:** 애니메이션(1위)의 상태 기계 구조를 AI 에도 쓸 수 있습니다. 물리 정적 메시를 입력으로 씁니다.
 - **검증 체크리스트:** 시험 지형에서 경로 길이 · 도달, 동적 장애물 회피, 생성 시간.
+- **진행(2026-11-21):** [Navigation_AI.md](Navigation_AI.md) 의 [필수] 체크리스트를 모두 채웠습니다.
+  - [x] 내비 메시 생성(Static 충돌체 → Recast, 볼륨 컴포넌트의 반경 · 높이 · 경사 · 턱), `.hnav` 미리 굽기 · 게임은 읽기만 · 묶음 포함
+  - [x] 경로 찾기 API(월드 서비스 `NavSystem`: 완전 · 부분 · 없음, 투영, 표면 미끄러짐)
+  - [x] 이동 컴포넌트(속도 · 회전 · 도착 반경, CharacterVirtual, 간단한 회피 = 분리 + 내다보기)
+  - [x] AI 상태 기계(대기 · 순찰 · 추적, 타이머 · 이벤트 버스)
+  - [x] 시험 `navigation`(경로 길이 · 도달 · 도달 불가 · 생성 시간 · 결정성 · 왕복) · 확인 장면 `NavProbe` 창 없는 실행
+  - [x] 내비 메시 디버그 선(`nav.debug`, 선택) / [ ] 실행 중 타일 다시 만들기(선택, 남음)
 
 ### 3-12. 오디오 버스 그래프 · 사운드 큐 (12위)
 
@@ -220,6 +227,7 @@
 
 | 날짜 | 후보 | 상태 |
 |---|---|---|
+| 2026-11-21 | 11 내비게이션 · AI | 끝([Navigation_AI.md](Navigation_AI.md)): recastnavigation 1.6.0(Recast · Detour, URL + SHA256, `haruka_recast`), 새 모듈 `src/nav`(nav: core · math · vfs · scene · geometry · physics), Static 충돌체 → 월드 삼각형 → Recast solo 메시 → Detour 타일, `.hnav`(머리 + 입력 해시 + 타일, 같은 입력 = 같은 바이트), `NavMeshVolumeComponent`(범위 · 에이전트 설정 · `data`) · 콘솔 `nav.build` · `nav.info` · `nav.debug`, 월드 서비스 `NavSystem`(완전 · 부분 · 없음, 투영, 표면 미끄러짐), `NavAgentComponent`(CharacterVirtual 또는 표면, 분리 + 내다보기 회피, 경로 이탈 · 쫓는 대상 다시 찾기, 막힘, `NavMoveFinished`), `AIBrainComponent`(대기 · 순찰 · 추적, 타이머 · 이벤트 버스, `AIStateChanged`). 시험 `navigation` 64, 검사 3,512 → 3,577, 기준 PNG 같음, UI 덤프 새 기준 b_10(컴포넌트 추가 버튼 3개 · 새 샘플 장면). 확인 장면 `NavProbe` 창 없는 실행 600 프레임 뒤 Walker 가 목표 곁. 남음: 창 확인 · 실행 중 타일 다시 만들기 · 동적 장애물 구멍 · 행동 트리 |
 | 2026-11-21 | 9 링크된 프리팹 | 끝([Linked_Prefabs.md](Linked_Prefabs.md)): 씬 v7 · 프리팹 v6 인스턴스 블록(`PREFAB:` 원본 경로 · 루트 GUID · `OVERRIDE:<짝> <경로>=<값>` · `REMOVE:` · `MEMBER_GUID:`), 안의 액터 GUID = `derive(루트, 원본 GUID)`(다시 펼쳐도 같아 밖의 참조가 유지됨), 덮어쓰기는 저장할 때 원본(에디터 캐시 서비스 `PrefabSourceCache` 의 글)과 비교해 다른 값만, 추가 · 지운 컴포넌트 · 지운 액터 · 더한 액터(`PARENT_GUID`) · 안에서 부모 바꿈(`@PARENT`), 다시 펼침 `PrefabManager::refreshInstances`(실행 번호 · 더한 액터 · 선택 유지, Save as Prefab · 원본에 적용 · 파일 감시), 중첩 2단 왕복 · 순환 거부, Undo 스냅숏 · 붙여넣기는 링크 줄이 붙은 전체 형식, 아웃라이너 `Prefab` 표시 · 디테일 PREFAB 섹션(되돌리기 · 원본에 적용 · 링크 끊기). 시험 `prefab_links` 72, 검사 3,440 → 3,512, 기준 PNG 같음, UI 덤프 새 기준 b_09(샘플 장면 · 프리팹 추가로 콘텐츠 목록 3장면 + 새 장면). 남음: 프리팹 변형 · 속성 칸 단위 표시 · 창 확인 |
 | 2026-11-21 | 7 텍스처 압축 | 끝([Texture_Compression.md](Texture_Compression.md)): HarukaPak 이 묶는 모델을 런타임과 같은 glTF 로더로 읽어 텍스처를 KTX2 로 압축(색 BC7 sRGB / ASTC 6x6, 노멀 BC5 / ASTC 5x5 RG01 + 셰이더 Z 복원, 선형 BC7 / ASTC 6x6, 밉 미리 생성)하고 `textures/<대상>/<열쇠>.ktx2` 로 함께 넣습니다(Windows = bc, Android = astc, 최종 화소 XXH3 열쇠 캐시). 엔진은 워커에서 KTX2 를 붙이고, 그 실행의 대상이 쓰는 압축 기능만 켜며, 형식을 샘플링할 수 없으면 RGBA8 원본으로 올립니다. 압축은 묶은 창 게임의 auto 또는 `--texture-compression` 으로만 켜져 기준 PNG 그대로. 외부 라이브러리 astc-encoder 5.7.1 · bc7enc_rdo(HarukaPak · 시험 전용). TexProbe 4장 3.33 MB → BC 25% · ASTC 13.3%, TextureProbe PNG PSNR 40.05 dB. 시험 72 검사 + 장치 계획 4 |
 | 2026-11-21 | 14 접근성 | 끝([Accessibility.md](Accessibility.md)): 자막 큐 `SubtitleQueue`(최대 줄 수 · 우선순위 · 같은 id · 글자 수 표시 시간) 와 표시 `SubtitlePanel`(3D UI 패널 경로, XR 머리 고정 시선 아래 · 데스크톱 화면 아래, 배경 불투명도 · 크기), `AudioComponent` 자막 칸 · 콘솔 `subtitle.say`, 글자 배율 `access.textScale`(패널 트리 다시 만듦), 후처리 비네트 `comfort.vignette`(이동 컴포넌트가 속도를 알림) · 색약 보정 `access.colorFilter`, 앉은 자세 `comfort.seated` · `comfort.standingHeight` · `comfort.recenterSeated`, 한 손 조작 `access.hand`(스틱 맞바꿈 · 텔레포트 손), 시험 `accessibility` 111. 검사 3,253 → 3,364, 기준 PNG · UI 덤프 같음. 남음: 헤드셋 확인 · 자막 깊이 무시 · 큰 대비 테마 · 설정 화면 |

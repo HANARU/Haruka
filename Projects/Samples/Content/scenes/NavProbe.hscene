@@ -1,0 +1,232 @@
+# Haruka Scene v7
+# Navigation and AI check (2026-11-21, Docs/Navigation_AI.md N5). Press Play: Walker (Nav Agent + AI Brain) patrols the
+# actors tagged NavGoal in name order. NavGoalA is on the raised platform behind the wall, so Walker walks around the
+# wall end and up the ramp. The nav mesh is baked into NavProbe.hnav (console: nav.build); nav.debug 1 draws it.
+# The navigation test loads this scene and checks the baked file and where Walker is after 600 frames.
+ACTOR:Sun
+GUID:4e61760000000001
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:LightComponent
+enabled=1
+type=directional
+color=1 1 1
+intensity=3
+attenuationRadius=10
+innerConeAngle=15
+outerConeAngle=30
+direction=0.37139067 0.74278134 0.557086
+useTemperature=0
+temperatureK=6500
+castShadows=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Camera
+GUID:4e61760000000002
+POS:0 11 17
+ROT:-35 0 0
+QUAT:-0.300706 0 0 0.953717
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:CameraComponent
+enabled=1
+fovY=60
+zNear=0.05
+zFar=200
+primary=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Floor
+GUID:4e61760000000003
+POS:0 -0.1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:20 0.2 20
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=checker
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:Wall
+GUID:4e61760000000004
+POS:0 1 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.4 2 16
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color 8C6A4AFF 0 0.7
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:Platform
+GUID:4e61760000000005
+POS:7.5 0.5 -7.5
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:3 1 3
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:Ramp
+GUID:4e61760000000006
+POS:4.5 0.45 -7.5
+ROT:0 0 18.4349
+QUAT:0 0 0.160182 0.987087
+SCALE:3.2 0.1 2
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:NavVolume
+GUID:4e61760000000007
+POS:0 1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:NavMeshVolumeComponent
+enabled=1
+halfExtent=10 3 10
+agentRadius=0.3
+agentHeight=1.8
+maxSlope=45
+maxClimb=0.35
+cellSize=0.1
+cellHeight=0.05
+data=/Game/scenes/NavProbe.hnav
+END_COMPONENT
+END_ACTOR
+ACTOR:NavGoalA
+GUID:4e61760000000008
+POS:7.5 1 -7.5
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.3 0.05 0.3
+ACTIVE:1
+TAGS:NavGoal
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color E0B040FF 0 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:NavGoalB
+GUID:4e61760000000009
+POS:-5 0 5
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.3 0.05 0.3
+ACTIVE:1
+TAGS:NavGoal
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color E0B040FF 0 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:Walker
+GUID:4e6176000000000a
+POS:-3 0 4
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:NavAgentComponent
+enabled=1
+speed=3.5
+angularSpeed=540
+arrivalRadius=0.3
+radius=0.3
+height=1.8
+useCharacter=1
+avoidance=1
+allowPartial=1
+repathInterval=0.5
+END_COMPONENT
+COMPONENT:AIBrainComponent
+enabled=1
+patrolTag=NavGoal
+sightRadius=6
+loseRadius=9
+waitTime=30
+senseInterval=0.2
+END_COMPONENT
+END_ACTOR
+ACTOR:WalkerBody
+GUID:4e6176000000000b
+POS:0 0.9 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.6 1.8 0.6
+ACTIVE:1
+PARENT:9
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color 4D73D9FF 0 0.5
+END_COMPONENT
+END_ACTOR

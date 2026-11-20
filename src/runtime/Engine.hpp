@@ -8,6 +8,7 @@
 #include "../components/SubtitlePanel.hpp"
 #include "../core/CVar.hpp"
 #include "../core/TraceRecorder.hpp"
+#include "../nav/NavSystem.hpp"
 #include "IEngineFrontend.hpp"
 #include "EngineOptions.hpp"
 #include "FrameStats.hpp"
@@ -84,6 +85,7 @@ private:
     AccessibilityState                   access_;
     SubtitleQueue                        subtitles_;
     SubtitlePanel                        subtitlePanel_;
+    NavSystem                            nav_;                // 내비게이션 월드 서비스(Docs/Navigation_AI.md D7)
     std::string                          accessLogged_;
     CVarRegistry::CVar*                  cvVignetteDebug_ = nullptr;   // comfort.vignetteDebug(비네트 모양 확인용)
     std::unique_ptr<SaveStore>           saves_;              // <쓰기 루트>/Saves

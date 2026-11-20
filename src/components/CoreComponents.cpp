@@ -16,6 +16,9 @@
 #include "UIPanelComponent.hpp"
 #include "ParticleSystemComponent.hpp"
 #include "DecalComponent.hpp"
+#include "../nav/NavMeshVolumeComponent.hpp"
+#include "../nav/NavAgentComponent.hpp"
+#include "../nav/AIBrainComponent.hpp"
 
 void registerCoreComponents() {
     auto& r = ComponentRegistry::get();
@@ -38,6 +41,10 @@ void registerCoreComponents() {
     // 파티클 · 데칼(2026-11-20, Docs/Particles_And_Decals.md)
     if (!r.find("ParticleSystemComponent")) r.registerType<ParticleSystemComponent>("ParticleSystemComponent", "Particle System");
     if (!r.find("DecalComponent"))       r.registerType<DecalComponent>      ("DecalComponent",       "Decal");
+    // 내비게이션 · AI(2026-11-21, Docs/Navigation_AI.md)
+    if (!r.find("NavMeshVolumeComponent")) r.registerType<NavMeshVolumeComponent>("NavMeshVolumeComponent", "Nav Mesh Volume");
+    if (!r.find("NavAgentComponent"))    r.registerType<NavAgentComponent>   ("NavAgentComponent",    "Nav Agent");
+    if (!r.find("AIBrainComponent"))     r.registerType<AIBrainComponent>    ("AIBrainComponent",     "AI Brain");
     // 3D UI 패널 P1b(2026-11-16, Spatial_Representation_Design 6단계)
     if (!r.find("UIPanelComponent"))     r.registerType<UIPanelComponent>    ("UIPanelComponent",     "UI Panel");
 }

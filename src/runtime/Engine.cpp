@@ -489,6 +489,10 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     world_.setService<SubtitleQueue>(&subtitles_);     // 자막 큐(D3): 소리 · 게임 코드가 줄을 넣음
     world_.setService<SubtitlePanel>(&subtitlePanel_); // 자막 표시(D4): 추출이 패널 목록 끝에 더함
     world_.setService<CVarRegistry>(&cvars_);
+    // 내비게이션(Docs/Navigation_AI.md D4 · D7): 경로 질의 서비스, 콘솔 nav.build · nav.info · nav.debug
+    nav_.setWorld(&world_);
+    world_.setService<NavSystem>(&nav_);
+    nav_.registerCommands(cvars_);
     applyLiveUserSettings(true);
 
     // 앞단(에디터 또는 게임).
@@ -952,6 +956,7 @@ void Engine::tickFrame(FrameState& f) {
     // 비웁니다. 예전에는 에디터만 비워, 에디터가 없거나(게임 실행 파일) 최소화로 에디터 tick 을 건너뛰면 선이
     // 끝없이 쌓였습니다(2026-10-19).
     hdebug::lines().clear();
+    nav_.drawDebug();   // nav.debug 가 켜졌을 때만 선을 더함(에디터 뷰포트가 그림)
     HInputSystem::get().update(f.dt, *window_, frontend_->isTextInputActive());
     if (f.playing) {
         {
