@@ -41,6 +41,7 @@
 | [Object_References.md](Object_References.md) | 참조 체계(2026-11-19): 액터 고유 ID(GUID) · 액터 참조 `HActorRef` · 복제 · 프리팹의 GUID 정책, 에셋 참조 색인 · 끊긴 참조 검사 · 참조를 고치며 옮기기. 체크리스트와 결과 |
 | [Crash_Reporting.md](Crash_Reporting.md) | 크래시 보고 · 검사 매크로(2026-11-19): `HCHECK` · `HENSURE` · `HCHECK_SLOW`, Windows 예외 필터 · 미니덤프(도우미 스레드), Android 시그널 보고서, Release PDB, `--debug-crash`. 체크리스트와 결과 |
 | [Engine_Foundation_Gaps.md](Engine_Foundation_Gaps.md) | 엔진 기반 공백 감사(2026-11-20): 필수인데 부족한 기능 14 후보(애니메이션 · 비동기 로딩 · 저장 · 게임플레이 도구 · CVar · 계측 · VFX · 텍스처 압축 · 조인트 · 프리팹 · 입력 · 내비 · 오디오 · 핫리로드 · 접근성)의 현재 상태 · 부족한 점 · 의존 · 우선순위 · 검증 체크리스트 |
+| [CPU_Profiling.md](CPU_Profiling.md) | CPU 구간 계측 · 추적 파일(2026-11-20, 기반 공백 5위): `HPROF_SCOPE` · 스레드별 기록 · 컴파일 스위치 `HARUKA_PROFILER` · Chrome `trace.json`(`--trace` · `--trace-frames` · 콘솔 `trace.start` · `trace.stop`) · FrameTimings 와 측정 지점 공유. 체크리스트와 결과 |
 | [Gameplay_Tools.md](Gameplay_Tools.md) | 게임플레이 기본 도구 · CVar · 콘솔(2026-11-20, 기반 공백 4위): 시간 배율 · 게임 시간 · 타이머 · 태그 색인 · 이벤트 버스 · 물리 뒤 틱 · CVar(ini · `--cvar` · 콘솔) · 에디터 Output Log 콘솔 줄 · `--console-at`. 체크리스트와 결과 |
 | [Save_And_Settings.md](Save_And_Settings.md) | 저장 게임 · 사용자 설정(2026-11-20, 기반 공백 3위): 저장 파일 형식(CRC-32 · 데이터 버전) · 슬롯(임시 파일 · 디스크 내보내기 · 이전 저장본) · 사용자 설정 층(바꾼 값만, 소리 · 그래픽 · 입력 · 편안함 · game.*) · `--user-setting`. 체크리스트와 결과 |
 | [Async_Loading.md](Async_Loading.md) | 비동기 로딩 · 레벨 전환 · 언로드(2026-11-20, 기반 공백 2위): 워커 스레드 읽기 · 프레임 예산 업로드 · 대기 없는 업로드 · 지연 해제 · 메가 버퍼 구간 할당자 · 게임 씬 전환 · `--switch-scene`. 체크리스트와 결과 |

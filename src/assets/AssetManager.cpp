@@ -1,5 +1,6 @@
 #include "AssetManager.hpp"
 #include "AssetLog.hpp"
+#include "../core/Profiler.hpp"
 #include "../vfs/LogicalPath.hpp"
 #include "../geometry/PrimitiveLog.hpp"
 #include "GltfLoader.hpp"
@@ -77,6 +78,7 @@ size_t AssetManager::pendingLoads() const {
 
 float AssetManager::pump(float budgetMs) {
     if (!streamer_) return 0.f;
+    HPROF_SCOPE("Asset.Pump");
     using Clock = std::chrono::steady_clock;
     const auto t0 = Clock::now();
     float used = 0.f;

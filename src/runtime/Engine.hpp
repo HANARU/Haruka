@@ -4,6 +4,7 @@
 #include "../core/ProjectSettings.hpp"
 #include "../core/UserSettings.hpp"
 #include "../core/CVar.hpp"
+#include "../core/TraceRecorder.hpp"
 #include "IEngineFrontend.hpp"
 #include "EngineOptions.hpp"
 #include "FrameStats.hpp"
@@ -68,6 +69,8 @@ private:
     CVarRegistry::CVar*                  cvTimeScale_  = nullptr;   // time.scale
     CVarRegistry::CVar*                  cvMaxDt_      = nullptr;   // time.maxDt
     CVarRegistry::CVar*                  cvDebugLines_ = nullptr;   // debug.lines
+    // CPU 추적 파일(2026-11-20, Docs/CPU_Profiling.md D6): --trace · --trace-frames · trace.start · trace.stop.
+    TraceRecorder                        trace_;
     void applyLiveUserSettings(bool startup);
     void applyUserInput(bool startup);
     void updateUserSettings();

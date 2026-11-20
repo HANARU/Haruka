@@ -2,6 +2,7 @@
 #include "LightingCalibration.hpp"
 #include "SkyIbl.hpp"
 #include "../core/AppPaths.hpp"
+#include "../core/Profiler.hpp"
 #include "../ui/slate/HSlateRenderer.hpp"
 #include "../geometry/MeshSource.hpp"
 #define GLM_ENABLE_EXPERIMENTAL
@@ -336,6 +337,7 @@ static glm::vec3 skyColor(glm::vec3 dir) {
 using hibl::cubeDir;   // 큐브맵 면 · UV → 월드 방향(SkyIbl.hpp)
 
 void Renderer::generateIBLCubemaps() {
+    HPROF_SCOPE("IBL.Bake");
     // ── Irradiance: 32×32 per face, 1 mip ────────────────────────────────────
     constexpr uint32_t kIrrSize = 32;
     constexpr uint32_t kPrefSize = 64;
@@ -391,6 +393,7 @@ void Renderer::generateIBLCubemaps() {
     // 면 하나를 스레드 하나가 맡습니다(2026-11-18, 성능 안정화 1-3). 면마다 쓰는 자리가 겹치지 않고 계산이 결정적이라 결과는
     // 한 스레드와 비트까지 같습니다. 데이터 배치는 밉 우선 · 면 다음(아래 올리기 영역과 같은 순서)입니다.
     auto prefilterFace = [&](int face) {
+        HPROF_SCOPE("IBL.PrefilterFace");
         VkDeviceSize mipBase = 0;
         for (uint32_t mip = 0; mip < kPrefMips; mip++) {
             const float    roughness = (float)mip / (kPrefMips - 1);
@@ -422,7 +425,11 @@ void Renderer::generateIBLCubemaps() {
     {
         std::vector<std::thread> workers;
         workers.reserve(5);
-        for (int face = 1; face < 6; ++face) workers.emplace_back(prefilterFace, face);
+        for (int face = 1; face < 6; ++face)
+            workers.emplace_back([&prefilterFace, face] {
+                HPROF_THREAD_NAME("IBL face " + std::to_string(face));
+                prefilterFace(face);
+            });
         prefilterFace(0);
         for (auto& t : workers) t.join();
     }

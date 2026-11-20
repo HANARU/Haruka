@@ -215,6 +215,17 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (colon == std::string::npos || colon + 1 >= v.size() || !parseUint(v.substr(0, colon), frame)) unknown.push_back(a);
             else o.consoleAt.push_back({ frame, v.substr(colon + 1) });
         }
+        else if (valueOf(a, "--trace", v)) {
+            if (!v.empty()) o.tracePath = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--trace-frames", v)) {
+            const size_t dash = v.find('-');
+            uint32_t from = 0, to = 0;
+            if (dash == std::string::npos || !parseUint(v.substr(0, dash), from) || !parseUint(v.substr(dash + 1), to) || from >= to)
+                unknown.push_back(a);
+            else { o.traceFrom = from; o.traceTo = to; }
+        }
         else if (valueOf(a, "--user-setting-at", v)) {
             const size_t colon = v.find(':'), eq = v.find('=');
             uint32_t frame = 0;

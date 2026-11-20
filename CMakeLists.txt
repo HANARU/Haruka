@@ -6,6 +6,9 @@ project(HarukaEngine VERSION 0.1.0 LANGUAGES C CXX)
 option(HARUKA_BUILD_SAMPLES "Build the bundled Samples project" ${PROJECT_IS_TOP_LEVEL})
 option(HARUKA_BUILD_TESTS   "Build Haruka unit tests"           ${PROJECT_IS_TOP_LEVEL})
 option(HARUKA_PACKAGE_GAME  "Enable CPack Windows ZIP packaging for Samples" ${PROJECT_IS_TOP_LEVEL})
+# CPU 구간 계측 스코프(HPROF_SCOPE, Docs/CPU_Profiling.md D2). 끄면 매크로가 비어 비용이 없습니다. 기본은 모든 구성에서 켬
+# (Quest 실측은 Release 로 하므로). 기록은 --trace · trace.start 로 켤 때만 합니다.
+option(HARUKA_PROFILER      "Compile CPU profiling scopes (HPROF_SCOPE)" ON)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -337,6 +340,8 @@ set(RUNTIME_SOURCES
     src/core/AssetRefs.cpp
     src/core/SaveGame.cpp
     src/core/CVar.cpp
+    src/core/Profiler.cpp
+    src/core/TraceRecorder.cpp
     src/core/UserSettings.cpp
     src/core/CrashHandler.cpp
     src/components/CameraComponent.cpp
@@ -479,6 +484,9 @@ else()
         src/xr/XrSystem.cpp
     )
     add_library(HarukaRuntime STATIC ${RUNTIME_SOURCES})
+    if(NOT HARUKA_PROFILER)
+        target_compile_definitions(HarukaRuntime PUBLIC HARUKA_PROFILER=0)
+    endif()
     target_link_libraries(HarukaRuntime PUBLIC Vulkan::Vulkan glfw glm::glm tinygltf Jolt openxr_loader HarukaVfs meshoptimizer)
     target_include_directories(HarukaRuntime PUBLIC ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
     if(WIN32)
@@ -1085,6 +1093,17 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaGameplayTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- CPU 구간 계측 테스트(Docs/CPU_Profiling.md) --------------------------------
+    # 중첩 · 스레드 구분 · 시작 / 멈춤 · 상한 · Chrome trace JSON(다시 읽어 검사) · 끈 번역 단위(ProfilerOffTest.cpp, 매크로 비용 0) ·
+    # FrameTimings 공유 측정 지점 · 추적 경로 규칙을 창 · GPU 없이 봅니다.
+    add_executable(HarukaProfilerTest tests/ProfilerTest.cpp tests/ProfilerOffTest.cpp)
+    target_link_libraries(HarukaProfilerTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaProfilerTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaProfilerTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaProfilerTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     add_executable(HarukaLoadingTest tests/LoadingTest.cpp)
     target_link_libraries(HarukaLoadingTest PRIVATE HarukaRuntime)
     target_include_directories(HarukaLoadingTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -1123,6 +1142,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/audio/ReverbZoneComponent.cpp
         src/physics/RigidBodyComponent.cpp
         src/physics/PhysicsSystem.cpp
+        src/core/Profiler.cpp
         src/scene/World.cpp
         src/scene/TimerManager.cpp
         src/scene/Actor.cpp
@@ -1177,6 +1197,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_executable(HarukaPhysicsTest
         tests/PhysicsTest.cpp
         src/physics/PhysicsSystem.cpp
+        src/core/Profiler.cpp
         src/physics/RigidBodyComponent.cpp
         src/components/XrComponents.cpp
         src/components/CameraComponent.cpp
@@ -1244,6 +1265,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/components/XrComponents.cpp
         src/physics/RigidBodyComponent.cpp
         src/physics/PhysicsSystem.cpp
+        src/core/Profiler.cpp
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
         src/scene/World.cpp
@@ -1291,6 +1313,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME async_loading        COMMAND HarukaLoadingTest)
     add_test(NAME save_settings        COMMAND HarukaSaveTest)
     add_test(NAME gameplay_tools       COMMAND HarukaGameplayTest)
+    add_test(NAME cpu_profiling        COMMAND HarukaProfilerTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)

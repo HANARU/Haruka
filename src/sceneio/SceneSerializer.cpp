@@ -1,6 +1,7 @@
 #include "SceneSerializer.hpp"
 #include "../scene/SceneLog.hpp"
 #include "../core/TextFloat.hpp"
+#include "../core/Profiler.hpp"
 #include "TransformText.hpp"
 #include "GuidRemap.hpp"
 #include "../assets/AssetManager.hpp"
@@ -322,6 +323,7 @@ std::string SceneSerializer::writeActorSet(const std::vector<const Actor*>& acto
 
 std::vector<Actor*> SceneSerializer::readScene(const std::string& source, World& world, AssetManager& assets,
                                                GuidPolicy guids) {
+    HPROF_SCOPE("Scene.Read");
     // Fresh: 세트 안 GUID 를 새로 주고 세트 안을 가리키는 참조를 바꾼 글을 읽습니다(GuidRemap.hpp).
     const std::string text = guids == GuidPolicy::Fresh
         ? hguid::remapFresh(source, [&world](HGuid g) { return world.findByGuid(g) != nullptr; })

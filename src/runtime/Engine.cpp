@@ -35,6 +35,7 @@
 #include "XrSessionController.hpp"
 #include "XrViewOrigin.hpp"
 #include "../core/FrameTimings.hpp"
+#include "../core/Profiler.hpp"
 #include "stb_image_write.h"   // 구현은 GltfLoader.cpp(STB_IMAGE_WRITE_IMPLEMENTATION)
 
 #ifdef ANDROID
@@ -149,6 +150,10 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     frontend_ = std::move(frontend);
     policy_   = frontend_->policy();
     options_  = options;
+    // CPU 추적(Docs/CPU_Profiling.md D6): --trace 만 있으면 여기서 시작해 시작 · IBL 굽기 · 첫 씬 읽기까지 담습니다.
+    HPROF_THREAD_NAME("Main");
+    trace_.configure(options_.tracePath, options_.traceFrom, options_.traceTo);
+    HPROF_SCOPE("Engine.Startup");
 
     // 기본 컴포넌트 타입을 씬을 읽기 전에 등록합니다(DEF-22). 씬 · 프리팹의 COMPONENT 블록과 에디터의
     // 컴포넌트 추가 버튼이 이 등록을 씁니다.
@@ -305,7 +310,10 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     if (options.headless && policy_.allowHeadless) window_ = std::make_unique<HeadlessWindow>();
     else                                           window_ = std::make_unique<GlfwWindow>(options.windowW, options.windowH, "Haruka Engine", options.hiddenWindow);
 #endif
-    window_->init();
+    {
+        HPROF_SCOPE("Startup.Window");
+        window_->init();
+    }
     headless_ = !window_->providesSurface();
 
     // XR 은 렌더러보다 먼저입니다. OpenXR 이 헤드셋이 연결된 GPU 를 고르고 Vulkan 인스턴스 · 장치를
@@ -315,6 +323,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     if (xrWanted_ && !options.xr.has_value())
         HLOG(LogEngine, Log) << "XR requested by the project setting xr.startInVr (" << ProjectSettings::kPath << ")";
     if (xrWanted_) {
+        HPROF_SCOPE("Startup.Xr");
         xr_ = std::make_unique<XrSystem>();
         if (!xr_->init(options.platform)) xr_.reset();
     }
@@ -372,7 +381,10 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
                                      ? std::string(" + ") + UserSettings::kPath : std::string())
                              << ")";
     }
-    renderer_->init(window_.get(), xr_.get());
+    {
+        HPROF_SCOPE("Startup.Renderer");   // Vulkan 장치 · 파이프라인 · IBL 굽기
+        renderer_->init(window_.get(), xr_.get());
+    }
     if (xr_) {
         // 세션은 Play 때 만듭니다(syncXrWithPlay). 인스턴스는 쓸 수 없어도 남겨 둡니다. 렌더러의 Vulkan
         // 인스턴스 · 장치를 그것으로 만들었을 수 있어서, 엔진이 끝날 때 렌더러 다음에 지웁니다.
@@ -415,6 +427,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
     // 동적 모듈: 표준 세트(Audio, Physics). 각자 월드를 참조합니다. noAudio(Quest 첫 실행)면 소리 장치를 열지 않습니다.
     if (options.noAudio) { HLOG(LogEngine, Log) << "Audio output is off for this run"; }
+    HPROF_SCOPE("Startup.Modules");   // 소리 · 물리 · 게임 모듈 · 앞단 · 첫 씬(아래 Startup.FirstScene)
     auto* audio   = modules_.registerModule(std::make_unique<AudioSystem>(options.noAudio));
     audio->setWorld(&world_);
     audio->setListenerSelector(CameraComponent::activeOwnerIn);   // 청취자 = 화면 카메라의 액터(2026-11-18 S7)
@@ -465,7 +478,10 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // 처음 열 씬은 앞단이 정합니다. 에디터는 마지막으로 연 씬(없으면 프로젝트 시작 씬), 게임 실행 파일은 프로젝트 시작
     // 씬입니다. 예전에는 게임 모듈이 코드에 박힌 시작 씬을 읽어, 에디터가 지금 열린 파일을 몰랐습니다.
     // --scene 이 있으면 그 씬이 시작 씬입니다(시험 장면 캡처, 2026-11-16).
-    frontend_->openInitialScene(options_.scenePath.empty() ? project_.startScene : options_.scenePath);
+    {
+        HPROF_SCOPE("Startup.FirstScene");
+        frontend_->openInitialScene(options_.scenePath.empty() ? project_.startScene : options_.scenePath);
+    }
     // 게임 모듈까지 등록을 마쳤으니, 명령줄 · ini 로 들어왔는데 끝내 등록되지 않은 CVar 이름을 알리고 첫 변경 콜백을 부릅니다.
     for (const std::string& n : cvars_.pendingNames())
         HLOG(LogEngine, Warning) << "CVar '" << n << "' was set (command line or cvars.ini) but nothing registered it";
@@ -522,6 +538,7 @@ void Engine::setupCVars() {
                                    [](const CVarRegistry::CVar& v) {
                                        HLOG(LogEngine, Log) << "Debug lines: " << (v.asBool() ? "on" : "off") << " (cvar debug.lines)";
                                    });
+    trace_.registerCommands(cvars_);   // trace.start · trace.stop(Docs/CPU_Profiling.md D6)
     cvars_.addCommand("scene", "scene <path>: switch to a scene in the background (game executable only)",
                       [this](const std::vector<std::string>& args) -> std::string {
                           if (args.size() != 1) return "usage: scene /Game/scenes/Name.hscene";
@@ -743,6 +760,7 @@ int Engine::run() {
     loop.timeLimitSec = options_.timeoutSec > 0.f ? options_.timeoutSec : (options_.frames > 0 ? 60.f : 0.f);
     stats_.startLoop();
     while (true) {
+        HPROF_SCOPE("Frame");
         FrameState f;
         if (!beginLoop(f)) break;
         streamAssets();
@@ -760,6 +778,7 @@ int Engine::run() {
 
 // 1. 창 닫기 요청은 앞단에 묻습니다. 에디터는 저장하지 않은 씬이 있으면 확인 창을 띄우고 닫기를 미루고, 게임은 바로 끝냅니다.
 bool Engine::beginLoop(FrameState& f) {
+    HPROF_SCOPE("Engine.BeginLoop");
     IWindow& win = *window_;
     if (win.shouldClose()) {
         if (frontend_->requestClose()) return false;
@@ -784,6 +803,7 @@ bool Engine::beginLoop(FrameState& f) {
 // 보일 예상 시각의 자세로 읽어 틱에 넘깁니다. Play 상태는 앞 프레임의 에디터 입력이 바꾸므로, 여기서 세션을 맞추면 진행 중인
 // XR 프레임이 없습니다.
 void Engine::beginXrFrame(FrameState& f) {
+    HPROF_SCOPE("Engine.BeginXrFrame");
     xrSession_->syncWithPlay(frontend_->isPlaying() || frontend_->isPaused());
     xrSession_->pollWithoutSession();
     xrSession_->retryIfDue();
@@ -797,6 +817,7 @@ void Engine::beginXrFrame(FrameState& f) {
 // 3. 화면 카메라의 XR 원점과 소리 청취자. 청취자는 XR 세션이 입력을 받는 동안 헤드셋 자세를 따릅니다. 카메라는 XR 원점(위치 + 요)일
 // 뿐이라, 넘기지 않으면 고개를 돌려도 소리의 좌우가 바뀌지 않습니다. 손 자세와 같은 기준(원점 × 자세)입니다.
 void Engine::applyViewPose(FrameState& f) {
+    HPROF_SCOPE("Engine.ViewPose");
     viewOrigin_->applyToCamera(f.view, xr_.get(), world_);
     if (audio_) {
         const HXrInputState& xr  = HInputSystem::get().xr();
@@ -811,6 +832,7 @@ void Engine::applyViewPose(FrameState& f) {
 
 // 4. 프레임 시간 · 창 크기 · 마우스. 오른쪽 버튼을 뷰포트 안에서 누르면 카메라 모드(커서 잡기)입니다.
 void Engine::readDesktopInput(FrameState& f, LoopState& loop) {
+    HPROF_SCOPE("Engine.DesktopInput");
     IWindow& win = *window_;
     const auto now = LoopState::Clock::now();
     f.dt      = std::chrono::duration<float>(now - loop.prev).count();
@@ -837,6 +859,7 @@ void Engine::readDesktopInput(FrameState& f, LoopState& loop) {
 // 5. Play 상태 전이. 게임 실행 파일은 헤드셋이 입력 초점을 잃으면(벗음 · 시스템 메뉴) 멈춥니다(2026-10-19, Meta VRC.Quest.Functional.2).
 // 에디터의 Pause 와 같은 경로(월드 · 모듈 tick 정지, 소리 그룹 일시정지)이고, 초점이 돌아오면 이어서 갑니다.
 void Engine::updatePlayState(FrameState& f, LoopState& loop) {
+    HPROF_SCOPE("Engine.PlayState");
     IEngineFrontend& front = *frontend_;
     const bool focusLost = policy_.pauseOnXrFocusLoss && xr_ && xr_->hasSession() && !HInputSystem::get().xr().focused;
     if (focusLost != xrFocusPaused_) {
@@ -868,8 +891,12 @@ void Engine::updatePlayState(FrameState& f, LoopState& loop) {
 // 1-b. 백그라운드에서 읽은 모델을 프레임마다 정한 예산만큼 올리고(비동기 로딩 D2, Unity 기본 2 ms 와 같은 값), 준비된 씬 전환을
 // 바꿉니다(D6). 이번 프레임의 시점(카메라 · 리그 포인터)을 고르기 전에 해야, 바꾸며 지운 액터를 가리키지 않습니다.
 void Engine::streamAssets() {
+    HPROF_SCOPE("Engine.StreamAssets");
     if (assets_) assets_->pump(kUploadBudgetMs);
-    frontend_->updateSceneTransition();
+    {
+        HPROF_SCOPE("Engine.SceneTransition");
+        frontend_->updateSceneTransition();
+    }
     cvars_.dispatchChanges();   // 지난 프레임에 바뀐 CVar 의 콜백(콘솔 · 게임 코드, D6)
     updateUserSettings();
 }
@@ -877,7 +904,10 @@ void Engine::streamAssets() {
 // 6. 틱. 앞단(에디터 UI) → 디버그 선 비우기 → 입력 → 월드 · 게임 · 모듈 → 따라오는 패널 → 월드 UI 포인터.
 void Engine::tickFrame(FrameState& f) {
     ScopedCpuTimer t(gFrameTimings().tick);
-    if (!f.minimized) frontend_->tick(f.dt);
+    if (!f.minimized) {
+        HPROF_SCOPE("Frontend.Tick");
+        frontend_->tick(f.dt);
+    }
     // 디버그 선은 한 프레임용입니다. 에디터는 tick 에서 앞 프레임의 선을 가져가 그리므로, 그 뒤 · 월드 틱 전에
     // 비웁니다. 예전에는 에디터만 비워, 에디터가 없거나(게임 실행 파일) 최소화로 에디터 tick 을 건너뛰면 선이
     // 끝없이 쌓였습니다(2026-10-19).
@@ -893,7 +923,10 @@ void Engine::tickFrame(FrameState& f) {
             ScopedCpuTimer tm(gFrameTimings().modules);
             modules_.tickAll(world_.lastDt());
         }
-        world_.tickPostPhysics();   // 물리 뒤 컴포넌트(D5). 없으면 훑지 않음
+        {
+            HPROF_SCOPE("World.TickPostPhysics");
+            world_.tickPostPhysics();   // 물리 뒤 컴포넌트(D5). 없으면 훑지 않음
+        }
         if (cvDebugLines_ && !cvDebugLines_->asBool()) hdebug::lines().clear();   // debug.lines 0: 이번 틱의 디버그 선을 버림
     }
     // 머리를 따라오는 패널(3D UI 구간 7)을 먼저 옮기고, 그 자세로 포인터가 가리킵니다.
@@ -902,6 +935,7 @@ void Engine::tickFrame(FrameState& f) {
     // 마우스는 XR 세션이 없을 때만, 창 없는 실행(--headless)에는 실제 마우스가 없어 끕니다(좌표 0,0 의 호버가
     // 캡처를 바꾸지 않게). XR 은 세션이 입력을 받는 동안 두 손 컨트롤러로 가리킵니다.
     {
+        HPROF_SCOPE("WorldUi.Pointers");
         const bool xrLiveNow = xr_ && xr_->hasSession();
         WorldUiDriver::PointerInput pin;
         pin.mouseActive = f.playing && !f.minimized && !headless_ && !xrLiveNow;
@@ -925,8 +959,12 @@ void Engine::frontendInput(FrameState& f) {
 // 합성 눈(--synthetic-eyes)은 XR 세션 대신 렌더러가 만든 이미지에 같은 경로로 그립니다. 눈은 스테레오 흉내와 같은
 // 두 평행한 눈이고, 원점은 XR 과 같습니다(씬 리그면 리그 액터 + 눈높이, 아니면 카메라 위치 + 요).
 void Engine::renderFrame(FrameState& f) {
+    HPROF_SCOPE("Engine.Render");
     Renderer& renderer = *renderer_;
-    extractRenderScene(world_, sceneInput_);
+    {
+        HPROF_SCOPE("Engine.ExtractScene");
+        extractRenderScene(world_, sceneInput_);
+    }
     if (f.xrBegun) {
         XrFrameTarget target;
         bool acquired = false;
@@ -964,7 +1002,9 @@ void Engine::renderFrame(FrameState& f) {
 
 // 9. 루프 끝: 자동 실행 끝내기 · FPS 제목 · 프레임 통계 · 최소화 중 쉼.
 void Engine::endLoop(FrameState& f, LoopState& loop) {
+    HPROF_SCOPE("Engine.EndLoop");
     IWindow& win = *window_;
+    trace_.onFrameDrawn(drawnFrames_);   // --trace-frames(Docs/CPU_Profiling.md D6)
     // 개발 스위치(크래시 보고 D5): 세 프레임을 그린 뒤 한 번 일으킵니다. throw 는 main 이 잡아 보고서를 쓰고, ensure 는 계속 돕니다.
     // 개발 스위치(비동기 로딩 L3): 정한 프레임을 그린 뒤 씬 전환을 요청합니다.
     while (switchNext_ < options_.switchScenes.size() && drawnFrames_ >= options_.switchScenes[switchNext_].second) {
@@ -1027,6 +1067,7 @@ void Engine::endLoop(FrameState& f, LoopState& loop) {
 uint32_t Engine::validationErrorCount() { return Renderer::validationErrorCount(); }
 
 int Engine::finishRun() {
+    trace_.finish();   // 루프가 끝났으니 기록 중인 추적을 씁니다(D6)
     if (!hopt::isAutomated(options_)) return hopt::kExitOk;
 
     bool blank = false;

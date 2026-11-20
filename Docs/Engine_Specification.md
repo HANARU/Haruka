@@ -69,7 +69,7 @@
 |---|---|
 | 소스 | `src/` 의 `.cpp` · `.hpp` 179 파일, 30,275 줄 |
 | 셰이더 | GLSL 20 파일(셰이더 19 + 공용 헤더 1), 841 줄(2026-11-02). 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 35개 실행 파일, 검사 2,802개(`ctest -C Release`, 2026-11-20 게임플레이 도구 뒤) |
+| 자동 테스트 | 36개 실행 파일, 검사 2,885개(`ctest -C Release`, 2026-11-20 CPU 구간 계측 뒤) |
 | 문서 | `Docs/` 활성 문서 28개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳤습니다. 같은 날 빛 · 그림자 조사 후속에서 DEF-148 을 고치고 DEF-158 ~ 161(4건)을 등재해 모두 고쳤습니다. 2026-11-02 헤드셋 확인에서 DEF-162 · 163, 마지막 점검에서 DEF-164 를 등재해 모두 고쳤습니다. 2026-11-06 검토 결함 묶음 DEF-130 ~ 147(18건)을 모두 고쳤고, 같은 날 임포트 검토에서 DEF-165(텍스처 밉맵)를, 공간 음향 조사에서 DEF-166(패닝 문서 오류)을 등재해 고쳐, 지금은 166건 중 해결 155 · 열림 5 · 보류 3 · 닫음 3 입니다. 그 뒤 DEF-167(보류, 2026-11-16)과 DEF-168 ~ 172(2026-11-17 ~ 18, 모두 해결)를 등재해 172건 중 해결 160 · 열림 5 · 보류 4 · 닫음 3 입니다 |
@@ -165,7 +165,7 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | 디렉터리 | 파일 · 줄 | 내용 |
 |---|---|---|
 | `src/`(루트) | 2 · 306 | `main.cpp`(진입점: 실행 파일의 앞단을 만들어 쓰기 루트를 정하고, 콘솔 없이 직접 실행할 때 C stdio 출력을 `Logs/stdout.txt` 로 돌린 뒤 `Engine` 을 만들고 돌림. 에디터 · 게임 실행 파일이 함께 씀), `AndroidMain.cpp`(Android `android_main`) |
-| `src/core/` | 18 · 1,850 | 기반: `HLog`, `EngineSettings`, 값 해석(`FieldParse.hpp`), 프로젝트 설정(`ProjectSettings.hpp`), 실행 폴더 · 쓰기 루트(`AppPaths`), 원자적 저장(`FileUtil.hpp`), 디버그 선(`DebugDraw.hpp`), 에셋 루트(`ProjectPaths.hpp`), 계측(`FrameTimings` · `FramePacing`), `Transform`, 모듈 인터페이스(`IEngineModule`) |
+| `src/core/` | 18 · 1,850 | 기반: `HLog`, `EngineSettings`, 값 해석(`FieldParse.hpp`), 프로젝트 설정(`ProjectSettings.hpp`), 실행 폴더 · 쓰기 루트(`AppPaths`), 원자적 저장(`FileUtil.hpp`), 디버그 선(`DebugDraw.hpp`), 에셋 루트(`ProjectPaths.hpp`), 계측(`FrameTimings` · `FramePacing`, CPU 구간 기록 `Profiler` · 추적 파일 `TraceRecorder`), `Transform`, 모듈 인터페이스(`IEngineModule`) |
 | `src/scene/` | 11 · 949 | 장면 모델: `World`(월드 단위 서비스 포함) · `Actor` · `Component`, 컴포넌트 필드 · `ComponentRegistry` · 리플렉션(`Reflect.hpp`) |
 | `src/runtime/` | 18 · 1,936 | 조립: `Engine`(프레임 단계), 실행 옵션, 엔진 앞단 인터페이스(`IEngineFrontend.hpp`), 게임 모듈 인터페이스, `ModuleManager`, XR 세션 제어 · 다시 열기 · 원점, 월드 UI 포인터, 프레임 통계, 셰이더 묶음 짝 확인 |
 | `src/sceneio/` | 8 · 860 | 씬 · 프리팹 직렬화(`SceneSerializer` · `PrefabManager`), 컴포넌트 블록 직렬화, 회전 글자 표현 |
@@ -278,7 +278,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 리플렉션 | 디테일 패널용 속성 기술자(`Reflect.hpp`), 단위 종류(거리 · 크기 · 각도 · 비율)별 드래그 스텝 |
 | 로그 | 카테고리별 기록 수준(Off · Error · Warning · Log · Verbose), `Config/log_levels.txt` 로 덮어쓰기, UTF-8 파일 `Logs/HarukaEngine.log`(줄마다 flush), 어느 스레드에서나 안전 |
 | 상한 설정 | `Config/engine.ini`: `render.maxDrawRows`(기본 16384, 1024 ~ 131072) · `render.maxLights`(256, 1 ~ 4096) · `physics.maxBodies`(4096, 256 ~ 65536). 시작할 때 한 번 읽고, 범위 밖 · 깨진 값은 경고 |
-| 계측 | CPU 구간 타이머(폴링 · 틱 · 입력 · 기록 · 제출 · 표시 등)와 GPU 타임스탬프(Shadow · Main · AO · Bloom · Tonemap · UI) |
+| 계측 | CPU 구간 타이머(폴링 · 틱 · 입력 · 기록 · 제출 · 표시 등)와 GPU 타임스탬프(Shadow · Main · AO · Bloom · Tonemap · UI). 2026-11-20 부터 이름 붙인 중첩 스코프 `HPROF_SCOPE` · `HPROF_FUNCTION` 을 스레드별로 기록해 Chrome `trace.json`(쓰기 루트 `Traces/`)으로 씁니다: `--trace=<파일>` · `--trace-frames=<a>-<b>` · 콘솔 `trace.start` · `trace.stop`, 컴파일 스위치 `HARUKA_PROFILER`(기본 켬, 기록하지 않을 때 스코프 하나 약 1 ns). [CPU_Profiling.md](CPU_Profiling.md) |
 
 ### 4-3. 메모리
 
@@ -446,7 +446,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 35개, 검사 2,802개(2026-11-20).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 36개, 검사 2,885개(2026-11-20).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -457,6 +457,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `log_category` | 61 | 로그 카테고리 |
 | `text_system` | 121 | 글자 체계([Text_System.md](Text_System.md)): UTF-8 읽기 · 고치기, 글자(grapheme) · 단어 경계, 한글 NFC, ASCII 대소문자 무시, 편집 상태, 입력 처리기(가짜 창 · 클립보드 · 자동 반복 · IME 조합 · 후보 창 자리), HText(번역 · 낡은 번역 · 층 · 서식 · 숫자), .po 읽기, HTEXT 모으기 · 한국어 표가 소스 키를 모두 덮음, 씬 이름 |
 | `object_refs` | 98 | 참조 체계([Object_References.md](Object_References.md)): 액터 GUID(형식 · 겹침 · World 색인), 액터 참조(지우면 끊기고 되살리면 이어짐), 씬 v6 GUID 왕복 · 옛 파일 · 겹친 GUID, Fresh 정책(프리팹 두 번 꺼내기 · 복제한 쌍 · 밖 참조 · 등록되지 않은 컴포넌트 · CRLF), Undo · Play 뒤 참조, 디테일 액터 참조 칸 · 고르기 목록, 에셋 참조 색인(옛 assets/ 형식 · ini · glTF uri) · 끊긴 참조 · 옮기기(파일 · 폴더 · 거절 · 바이트 보존 · 되돌리기 · 코드 경고), 샘플 프로젝트에 끊긴 참조 없음, 샘플 LookAtComponent |
+| `cpu_profiling` | 85 | CPU 구간 계측([CPU_Profiling.md](CPU_Profiling.md)): 중첩 스코프(순서 · 포함), 스레드 구분(끝난 스레드 수집 · 이름), 시작 · 멈춤 · 상한(버린 수), Chrome trace JSON(작은 파서로 다시 읽기 · 이스케이프 · 마이크로초 표기 · 정렬), 끈 번역 단위(`constexpr` · 이벤트 0), FrameTimings 공유 측정 지점, 추적 경로 규칙 · 기록기 · 콘솔 명령 · `--trace-frames`, 스코프 비용 |
 | `gameplay_tools` | 84 | 게임플레이 기본 도구([Gameplay_Tools.md](Gameplay_Tools.md)): 시간 배율 · 게임 시간, 타이머(정확한 틱 · 배율 · 반복 따라잡기 · 16 번 상한 · 주인 삭제 취소 · 콜백 안 취소 · 추가 · clear), 물리 뒤 틱, 태그(규칙 · 색인 캐시 · 씬 파일 왕복), 이벤트 버스(형별 · 순서 · 발행 중 해제 · 재발행 · 이동), CVar(등록 · 범위 · 보관 · 콜백 · 출처), 콘솔 명령(값 · help · list · reset · 따옴표 인자) |
 | `save_settings` | 89 | 저장 게임 · 사용자 설정([Save_And_Settings.md](Save_And_Settings.md)): 저장 파일 왕복(int64 · float 비트 · 줄바꿈 든 문자열 · vec3 · GUID), CRC 로 잘림 · 손상 거절, 형식 · 데이터 버전, 슬롯 이름 규칙, 다시 시작 왕복, `.bak`(잘린 본 파일 · 본 파일 없음 · 둘 다 손상), 남은 `.tmp`, 목록 · 지우기, 다시 읽은 씬의 GUID 참조, 설정 형 · 범위 · 바꾼 값만 쓰기 · 모르는 이름 보존 · BOM · UTF-16, 편안함 서비스 |
 | `async_loading` | 30 | 비동기 로딩([Async_Loading.md](Async_Loading.md)): 메가 버퍼 구간 할당자(첫 맞춤 · 이웃 합치기 · 겹침 거절 · 무작위 1만 번), 백그라운드 모델 읽기(워커 결과 = 동기 결과, 중복 요청 · 실패 · 동시 디코드 · waitFor · 멈춤), 씬의 모델 참조 모으기 |

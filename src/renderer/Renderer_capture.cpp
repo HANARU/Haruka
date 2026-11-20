@@ -9,6 +9,7 @@
 #include "Renderer.hpp"
 #include "SkyIbl.hpp"
 #include "RendererLog.hpp"
+#include "../core/Profiler.hpp"
 #include "../math/Projection.hpp"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -62,6 +63,7 @@ void Renderer::updateReflectionCapture(const RenderSceneInput& scene) {
 }
 
 void Renderer::performReflectionCapture(const RenderSceneInput& scene, const glm::vec3& pos) {
+    HPROF_SCOPE("ReflectionCapture.Bake");
     const auto t0 = std::chrono::steady_clock::now();
     vkDeviceWaitIdle(device);
     const uint32_t fi   = frameIdx;
@@ -187,6 +189,7 @@ void Renderer::performReflectionCapture(const RenderSceneInput& scene, const glm
     // 면 하나를 스레드 하나가 맡습니다(6개). 면마다 쓰는 자리가 겹치지 않고 계산이 결정적이라 결과는 한 스레드와 같습니다.
     // 데이터 배치는 밉 우선 · 면 다음(아래 올리기 영역과 같은 순서)입니다.
     auto prefilterFace = [&](int face) {
+        HPROF_SCOPE("ReflectionCapture.PrefilterFace");
         VkDeviceSize mipBase = 0;
         for (uint32_t mip = 0; mip < kCapturePrefMips; ++mip) {
             const float    rough = (float)mip / (float)(kCapturePrefMips - 1);
@@ -208,7 +211,11 @@ void Renderer::performReflectionCapture(const RenderSceneInput& scene, const glm
     {
         std::vector<std::thread> workers;
         workers.reserve(5);
-        for (int face = 1; face < 6; ++face) workers.emplace_back(prefilterFace, face);
+        for (int face = 1; face < 6; ++face)
+            workers.emplace_back([&prefilterFace, face] {
+                HPROF_THREAD_NAME("Capture face " + std::to_string(face));
+                prefilterFace(face);
+            });
         prefilterFace(0);
         for (auto& t : workers) t.join();
     }

@@ -1,5 +1,6 @@
 #pragma once
 #include "../core/IEngineModule.hpp"
+#include "../core/Profiler.hpp"
 #include <memory>
 #include <typeindex>
 #include <unordered_map>
@@ -26,7 +27,10 @@ public:
     }
 
     void tickAll(float dt) {
-        for (auto* m : order_) m->tick(dt);
+        for (auto* m : order_) {
+            HPROF_SCOPE(m->name());   // 모듈 이름(정적 글, Docs/CPU_Profiling.md D8)
+            m->tick(dt);
+        }
     }
 
     void beginPlayAll() {

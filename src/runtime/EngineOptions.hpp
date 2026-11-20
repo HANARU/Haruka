@@ -80,6 +80,10 @@ struct EngineOptions {
     // --console-at=<프레임>:<명령> (여러 번) : 그 프레임을 그린 뒤 콘솔 명령을 실행(창 없는 콘솔 확인, D9).
     struct TimedCommand { uint32_t frame = 0; std::string command; };
     std::vector<TimedCommand> consoleAt;
+    // --trace=<파일> : CPU 추적 파일(Chrome trace.json)을 쓰기 루트의 Traces/ 아래에 씀(Docs/CPU_Profiling.md D6). 엔진 시작부터 끝까지.
+    // --trace-frames=<a>-<b> : 프레임 a 를 그린 뒤 시작해 b 를 그린 뒤 멈추고 씀(--trace 와 함께, a < b).
+    std::string tracePath;
+    uint32_t    traceFrom = 0, traceTo = 0;
     std::string uiAssetActions;          // --ui-asset-actions=<logical path> : 에셋 대화상자 열기(참조 체계 A-5, 에디터 전용)
     bool        uiActorPicker = false;   // --ui-actor-picker : 선택한 액터의 첫 액터 참조 칸의 고르기 목록 열기(R-7, 에디터 전용)
     // --ui-move-asset=<from>|<to> : 첫 프레임 뒤 에셋을 옮김(참조 체계 A-5, 에디터 전용). 프로젝트 파일을 실제로 옮기므로

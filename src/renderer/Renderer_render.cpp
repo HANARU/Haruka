@@ -815,10 +815,13 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
     // 는 메인 패스와 공유하는 transform SSBO 의 유효한 행이라 그대로 그려진다. 카메라 밖·
     // 라이트 안의 캐스터도 여기 포함되므로 카메라를 돌려도 그림자가 사라지지 않는다.
     // 캐스터 라이트가 있으면 목록이 비어도 맵을 비워 기록한다(앞 프레임 그림자가 남지 않게).
-    shadow_.record(cmd,
-        { frames_.frameSet(fi), frames_.sceneSet(fi), frames_.transformSet(fi),
-          scene_.vertexBuffer(), scene_.indexBuffer() },
-        view.shadowDraws, view.rowFlags, shadowCasterSlot_ >= 0);
+    {
+        HPROF_SCOPE("Renderer.RecordShadow");
+        shadow_.record(cmd,
+            { frames_.frameSet(fi), frames_.sceneSet(fi), frames_.transformSet(fi),
+              scene_.vertexBuffer(), scene_.indexBuffer() },
+            view.shadowDraws, view.rowFlags, shadowCasterSlot_ >= 0);
+    }
 
     // Timestamp 1: after shadow
     if (timestampPool_)
@@ -912,6 +915,7 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
     // XR 은 오른쪽 눈을 먼저 그립니다. 중간 타깃에 왼쪽 눈이 남아 있어야 아래에서 그것을 에디터
     // 뷰포트에 비출 수 있습니다.
     for (uint32_t k = 0; k < viewCount_; ++k) {
+        HPROF_SCOPE("Renderer.RecordView");   // 눈 하나: 메인 · AO · Bloom · 톤매핑
         const uint32_t v      = xrFrame ? viewCount_ - 1 - k : k;
         const uint32_t layer  = geometry_.layerFor(v);   // 이 눈의 장면 타깃 층
         const uint32_t tsBase = fi * TS + 2 + kTsPerView * k;
@@ -1060,8 +1064,7 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS)
         throw std::runtime_error("Failed to record command buffer!");
-    ft.record.add(std::chrono::duration<float, std::milli>(
-                      std::chrono::steady_clock::now() - recordT0).count());
+    ft.record.addSpan(recordT0, std::chrono::steady_clock::now());
 
     // ── Submit ────────────────────────────────────────────────────────────────
     // 데스크톱을 건너뛴 XR 프레임은 받은 스왑체인 이미지가 없어 기다릴 것도 알릴 것도 없습니다. 이미지별 세마포어는 데스크톱을

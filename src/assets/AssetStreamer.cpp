@@ -2,6 +2,7 @@
 #include "AssetLog.hpp"
 #include "GassetCache.hpp"
 #include "GltfLoader.hpp"
+#include "../core/Profiler.hpp"
 
 #include <exception>
 
@@ -95,6 +96,7 @@ bool AssetStreamer::decode(const std::string& path, std::vector<MeshSourceData>&
 }
 
 void AssetStreamer::run() {
+    HPROF_THREAD_NAME("AssetWorker");
     for (;;) {
         std::string path;
         {
@@ -107,7 +109,10 @@ void AssetStreamer::run() {
         }
         Result r;
         r.path = path;
-        r.ok = decode(path, r.meshes, r.error);
+        {
+            HPROF_SCOPE("Asset.Decode");
+            r.ok = decode(path, r.meshes, r.error);
+        }
         {
             std::lock_guard<std::mutex> lk(mu_);
             states_[path] = State::Done;

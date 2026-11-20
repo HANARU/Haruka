@@ -240,7 +240,8 @@ UE식 용어 채택, **"명칭만" 결정**(내부 상대값, 물리 단위·노
 - ✅ **② 비동기 로딩(2026-11-20)**: [Async_Loading.md](Async_Loading.md). 헤드셋 확인 · 텍스처 나눠 올리기 · XR 로딩 레이어가 남음.
 - ✅ **③ 저장 게임 · 사용자 설정(2026-11-20)**: [Save_And_Settings.md](Save_And_Settings.md). 헤드셋 확인 · 게임 설정 화면이 남음.
 - ✅ **④ 게임플레이 기본 도구 · CVar · 콘솔(2026-11-20)**: [Gameplay_Tools.md](Gameplay_Tools.md). 헤드셋 안 콘솔 · 스크립트 계층이 남음.
-- 다음: ⑤ CPU 구간 계측.
+- ✅ **⑤ CPU 구간 계측(2026-11-20)**: [CPU_Profiling.md](CPU_Profiling.md). 에디터 CPU 스코프 표 · Android 추적 파일 꺼내기 · 헤드셋 실측이 남음.
+- 다음: ⑥ 파티클 · VFX.
 
 ---
 
