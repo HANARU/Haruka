@@ -6,6 +6,7 @@
 #include "GltfLoader.hpp"
 #include "GassetCache.hpp"
 #include "AssetStreamer.hpp"
+#include "AssetReload.hpp"
 #include "Skin.hpp"
 #include "../renderer/Renderer.hpp"
 #include "../renderer/Vertex.hpp"
@@ -42,20 +43,24 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
     // 원본은 정식 논리 경로(/Game/...)로 가상 파일 시스템에서 열고, 캐시 표 열쇠도 정식 경로로 통일합니다.
     // 백그라운드에서 같은 경로를 읽는 중이면 그 결과를 기다려 씁니다(두 번 읽지 않음, 비동기 로딩 D2).
     std::vector<MeshSourceData> meshes;
+    std::vector<std::string>    deps;
     AssetStreamer::Result r;
     bool ok = false;
     std::string err;
+    const ImportSettings settings = importSettingsFor(key);
     if (streamer_ && streamer_->waitFor(key, r)) {
         ok = r.ok;
         meshes = std::move(r.meshes);
+        deps   = std::move(r.deps);
         err = r.error;
     } else {
-        ok = AssetStreamer::decode(key, meshes, err);
+        ok = AssetStreamer::decode(key, settings, meshes, err, &deps);
     }
     if (!ok) {
         HLOG(LogAsset, Error) << "Load failed (" << path << "): " << err << " -> using defaultCube";
         meshes = { GltfLoader::defaultCube() };
     }
+    noteModel(key, settings.hash(), std::move(deps));
     return uploadModel(key, path, meshes);
 }
 
@@ -64,7 +69,7 @@ bool AssetManager::requestLoad(const std::string& path) {
     if (cache.count(key)) return true;
     if (streamWorkers_ <= 0) { loadAll(key); return true; }
     if (!streamer_) streamer_ = std::make_unique<AssetStreamer>(streamWorkers_);
-    streamer_->request(key);
+    streamer_->request(key, importSettingsFor(key));
     return false;
 }
 
@@ -91,6 +96,8 @@ float AssetManager::pump(float budgetMs) {
                 HLOG(LogAsset, Error) << "Load failed (" << r.path << "): " << r.error << " -> using defaultCube";
                 r.meshes = { GltfLoader::defaultCube() };
             }
+            // 설정 해시는 요청할 때의 표로 정했습니다. 그 사이 표가 바뀌었으면 다음 reloadForSettingsChange 가 맞춥니다.
+            noteModel(r.path, importSettingsFor(r.path).hash(), std::move(r.deps));
             uploadModel(r.path, r.path, r.meshes);
         }
         used = std::chrono::duration<float, std::milli>(Clock::now() - t0).count();
@@ -104,6 +111,7 @@ size_t AssetManager::releaseUnused(const std::unordered_set<std::string>& keep) 
         const bool isPrim = it->first.rfind("@prim/", 0) == 0;
         if (isPrim || keep.count(it->first)) { ++it; continue; }
         freePairs(it->second, false);
+        modelInfo_.erase(it->first);
         it = cache.erase(it);
         ++n;
     }
@@ -210,6 +218,78 @@ std::vector<AssetPair> AssetManager::uploadModel(const std::string& key, const s
     }
     cache[key] = pairs;
     return pairs;
+}
+
+void AssetManager::noteModel(const std::string& key, uint64_t settingsHash, std::vector<std::string> deps) {
+    ModelInfo& mi   = modelInfo_[key];
+    mi.settingsHash = settingsHash;
+    mi.deps         = std::move(deps);
+}
+
+bool AssetManager::reloadModel(const std::string& path, const RebindFn& rebind, ReloadStats* stats) {
+    const std::string key = hvfs::toCanonical(path);
+    if (key.rfind("@prim/", 0) == 0) return false;
+    auto it = cache.find(key);
+    if (it == cache.end()) return false;
+    HPROF_SCOPE("Asset.Reload");
+
+    const ImportSettings settings = importSettingsFor(key);
+    std::vector<MeshSourceData> meshes;
+    std::vector<std::string>    deps;
+    std::string err;
+    if (!AssetStreamer::decode(key, settings, meshes, err, &deps)) {
+        // 제작 도구가 쓰는 도중이거나 깨진 파일: 옛 모델을 그대로 둡니다(다음 저장에 다시 알림이 옴).
+        HLOG(LogAsset, Error) << "Reload failed (" << key << "): " << err << " -> keeping the previous version";
+        return false;
+    }
+    std::vector<AssetPair> oldPairs = std::move(it->second);
+    cache.erase(it);
+    noteModel(key, settings.hash(), std::move(deps));
+    std::vector<AssetPair> fresh = uploadModel(key, key, meshes);
+    if (rebind) rebind(key, fresh);
+
+    const hreload::RetireList rl = hreload::retireList(oldPairs, fresh);
+    for (MeshHandle* m : rl.meshes)        renderer->freeMesh(m);
+    for (MaterialHandle* m : rl.materials) renderer->freeMaterial(m);
+    if (stats) {
+        ++stats->models;
+        stats->meshesRetired    += rl.meshes.size();
+        stats->materialsRetired += rl.materials.size();
+    }
+    return true;
+}
+
+std::vector<std::string> AssetManager::modelsUsing(const std::string& path) const {
+    const std::string canon = hvfs::toCanonical(path);
+    std::vector<std::string> out;
+    for (const auto& [key, info] : modelInfo_) {
+        if (!cache.count(key)) continue;
+        if (key == canon || std::find(info.deps.begin(), info.deps.end(), canon) != info.deps.end()) out.push_back(key);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+std::vector<std::string> AssetManager::reloadForSettingsChange(const RebindFn& rebind, ReloadStats* stats) {
+    std::vector<std::string> keys;
+    for (const auto& [key, info] : modelInfo_)
+        if (cache.count(key) && importSettingsFor(key).hash() != info.settingsHash) keys.push_back(key);
+    std::sort(keys.begin(), keys.end());
+    std::vector<std::string> done;
+    for (const auto& k : keys)
+        if (reloadModel(k, rebind, stats)) done.push_back(k);
+    return done;
+}
+
+std::vector<std::string> AssetManager::reloadStale(const RebindFn& rebind, ReloadStats* stats) {
+    std::vector<std::string> keys;
+    for (const auto& [key, info] : modelInfo_)
+        if (cache.count(key) && !GassetCache::isValid(key, importSettingsFor(key).hash(), nullptr)) keys.push_back(key);
+    std::sort(keys.begin(), keys.end());
+    std::vector<std::string> done;
+    for (const auto& k : keys)
+        if (reloadModel(k, rebind, stats)) done.push_back(k);
+    return done;
 }
 
 AssetPair AssetManager::load(const std::string& path) {
@@ -341,6 +421,7 @@ void AssetManager::clear() {
         freePairs(pairs, key.rfind("@prim/", 0) == 0);
     }
     cache.clear();
+    modelInfo_.clear();
 
     for (auto& [key, m] : primMaterials) renderer->freeMaterial(m);
     primMaterials.clear();

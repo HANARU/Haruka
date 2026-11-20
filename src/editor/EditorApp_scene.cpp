@@ -126,6 +126,7 @@ void EditorApp::openScene(const std::string& logicalPath) {
     deserializeWorld(text);
     cmdStack_.clear();
     doc_.reset(logicalPath, cmdStack_.stateToken());
+    sceneDiskHash_ = sceneTextHash(text);
     lastScene_ = logicalPath;
     saveEditorState();
     bottomDirty_ = true;
@@ -225,10 +226,12 @@ void EditorApp::openSceneDialog() {
 // ── 저장 ─────────────────────────────────────────────────────────────────────────
 bool EditorApp::writeSceneTo(const std::string& logicalPath) {
     std::string err;
-    if (!hfile::writeAtomic(hproj::resolve(logicalPath), serializeWorld(), &err)) {
+    const std::string text = serializeWorld();
+    if (!hfile::writeAtomic(hproj::resolve(logicalPath), text, &err)) {
         HLOG(LogEditorScene, Error) << "Save failed: " << err;
         return false;
     }
+    sceneDiskHash_ = sceneTextHash(text);   // 이 저장이 부르는 감시 알림은 무시(핫리로드 D7)
     doc_.markSaved(logicalPath, cmdStack_.stateToken());
     lastScene_ = logicalPath;
     saveEditorState();

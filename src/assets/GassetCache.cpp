@@ -31,8 +31,10 @@ static constexpr uint32_t kMagic   = 0x47415354u; // "GAST"
 //     (타깃 수 u32 · 기본 무게 f32[] · 위치 차이 수 u32 · f32[] · 노멀 차이 수 u32 · f32[], A5-1).
 // 11: 내용 형식은 10 과 같고, 인덱스(본 · LOD)가 이미 정점 캐시 순서입니다(가져올 때 정렬, 2026-11-20 비동기 로딩). 10 이하
 //     캐시는 정렬 전 인덱스라 다시 만듭니다.
-static constexpr uint32_t kVersion = 11u;
-// 머리: magic(4) version(4) mtime(8) size(8) hash(8) meshCount(4)
+// 12: hash 다음에 가져오기 설정 해시(u64)와 의존 파일 목록(u32 개수, 각 논리 경로 · 크기 u64 · 수정 시각 u64 · 내용 해시 u64)을 둡니다
+//     (2026-11-20, Docs/Asset_Hot_Reload.md D4 · D8). 11 이하 캐시는 .gltf 의 바깥 텍스처가 바뀌어도 그대로 쓰였습니다(DEF-174).
+static constexpr uint32_t kVersion = 12u;
+// 머리: magic(4) version(4) mtime(8) size(8) hash(8) settingsHash(8) deps meshCount(4)
 static constexpr std::streamoff kMtimeOffset = 8;
 
 // 원본 정보는 가상 파일 시스템에서 얻습니다. 묶음 안이면 목차의 크기 · 내용 해시를 그대로 쓰고(파일을 읽지 않음),
@@ -69,10 +71,24 @@ std::string GassetCache::cachePath(const std::string& srcPath) {
 // 쓰고, 다르면 내용 해시를 비교해 같으면 캐시를 쓰고 기록한 수정 시각을 새 값으로 고쳐 다음부터는 해시를 다시 계산하지
 // 않습니다. 예전에는 수정 시각만 비교해, 빌드가 에셋을 실행 폴더로 복사하며 시각을 바꿀 때마다 GLTF 를 다시 읽었습니다
 // (DEF-105). Godot 의 가져오기도 수정 시각이 다르면 내용 해시(md5)로 다시 확인합니다.
-bool GassetCache::isValid(const std::string& srcPath) {
+// 의존 파일(.gltf 옆의 .bin · 이미지)도 원본과 같은 규칙으로 봅니다(DEF-174). 의존 파일의 시각만 바뀐 경우는 기록을 고치지 않고
+// 매번 내용 해시를 계산합니다(드문 일이고 머리를 다시 쓰려면 위치를 따로 셈해야 함).
+static bool depUnchanged(const std::string& path, uint64_t size, uint64_t mtime, uint64_t hash) {
+    hvfs::Stat st;
+    if (!hvfs::stat(path, st) || st.size != size) return false;
+    if (st.inPack) return st.contentHash == hash;
+    if (st.mtime == mtime) return true;
+    return sourceHash(path, st) == hash;
+}
+
+bool GassetCache::isValid(const std::string& srcPath) { return isValid(srcPath, ImportSettings{}.hash(), nullptr); }
+
+bool GassetCache::isValid(const std::string& srcPath, uint64_t settingsHash, std::vector<std::string>* depsOut) {
+    if (depsOut) depsOut->clear();
     std::string cp = cachePath(srcPath);
     if (!fs::exists(cp)) return false;
-    uint64_t mtime = 0, size = 0, hash = 0;
+    uint64_t mtime = 0, size = 0, hash = 0, storedSettings = 0;
+    std::vector<std::string> deps;
     {
         std::ifstream f(cp, std::ios::binary);
         if (!f) return false;
@@ -83,9 +99,27 @@ bool GassetCache::isValid(const std::string& srcPath) {
         f.read(reinterpret_cast<char*>(&size),    8);
         f.read(reinterpret_cast<char*>(&hash),    8);
         if (!f || magic != kMagic || version != kVersion) return false;
+        f.read(reinterpret_cast<char*>(&storedSettings), 8);
+        uint32_t depCount = 0;
+        f.read(reinterpret_cast<char*>(&depCount), 4);
+        if (!f || storedSettings != settingsHash || depCount > 4096) return false;
+        for (uint32_t i = 0; i < depCount; ++i) {
+            uint32_t len = 0;
+            f.read(reinterpret_cast<char*>(&len), 4);
+            if (!f || len > 4096) return false;
+            std::string dp(len, '\0');
+            f.read(dp.data(), len);
+            uint64_t dSize = 0, dMtime = 0, dHash = 0;
+            f.read(reinterpret_cast<char*>(&dSize),  8);
+            f.read(reinterpret_cast<char*>(&dMtime), 8);
+            f.read(reinterpret_cast<char*>(&dHash),  8);
+            if (!f || !depUnchanged(dp, dSize, dMtime, dHash)) return false;
+            deps.push_back(std::move(dp));
+        }
     }
     hvfs::Stat st;
     if (!hvfs::stat(srcPath, st) || size != st.size) return false;
+    if (depsOut) *depsOut = deps;
     if (st.inPack) return hash == st.contentHash;
     if (mtime == st.mtime) return true;
     if (hash != sourceHash(srcPath, st)) return false;
@@ -165,6 +199,11 @@ static void wSkin(std::ofstream& f, const SkinSourceData* s) {
 }
 
 void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceData>& meshes) {
+    save(srcPath, meshes, ImportSettings{}.hash(), {});
+}
+
+void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceData>& meshes, uint64_t settingsHash,
+                       const std::vector<std::string>& deps) {
     std::error_code dirEc;
     fs::create_directories(cacheDirStorage(), dirEc);
     std::string cp  = cachePath(srcPath);
@@ -181,6 +220,16 @@ void GassetCache::save(const std::string& srcPath, const std::vector<MeshSourceD
         wU64(f, st.mtime);
         wU64(f, st.size);
         wU64(f, sourceHash(srcPath, st));
+        wU64(f, settingsHash);   // 버전 12
+        wU32(f, (uint32_t)deps.size());
+        for (const auto& d : deps) {
+            hvfs::Stat ds;
+            hvfs::stat(d, ds);
+            wStr(f, d);
+            wU64(f, ds.size);
+            wU64(f, ds.mtime);
+            wU64(f, sourceHash(d, ds));
+        }
         wU32(f, (uint32_t)meshes.size());
 
         for (const auto& m : meshes) {
@@ -329,6 +378,10 @@ std::vector<MeshSourceData> GassetCache::load(const std::string& srcPath) {
     if (!f) throw std::runtime_error("GassetCache: cannot open " + cp);
 
     rU32(f); rU32(f); rU64(f); rU64(f); rU64(f);   // skip magic, version, mtime, size, hash
+    rU64(f);                                         // settingsHash(버전 12)
+    const uint32_t depCount = rU32(f);
+    if (!f || depCount > 4096) throw std::runtime_error("GassetCache: corrupted header in " + cp);
+    for (uint32_t i = 0; i < depCount; ++i) { rStr(f); rU64(f); rU64(f); rU64(f); }
     uint32_t meshCount = rU32(f);
 
     std::vector<MeshSourceData> result;

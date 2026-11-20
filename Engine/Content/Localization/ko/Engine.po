@@ -124,6 +124,22 @@ msgctxt "Editor.Dialog,Replace.Message"
 msgid "{0} already exists.\nReplace it?"
 msgstr "{0} 이(가) 이미 있습니다.\n바꿀까요?"
 
+msgctxt "Editor.Dialog,Reload.Title"
+msgid "Scene Changed on Disk"
+msgstr "씬 파일이 바뀜"
+
+msgctxt "Editor.Dialog,Reload.Message"
+msgid "{0} was changed outside the editor.\nReload it?"
+msgstr "{0} 이(가) 에디터 밖에서 바뀌었습니다.\n다시 열까요?"
+
+msgctxt "Editor.Dialog,Button.Reload"
+msgid "Reload"
+msgstr "다시 열기"
+
+msgctxt "Editor.Dialog,Button.Keep"
+msgid "Keep Current"
+msgstr "그대로 두기"
+
 #: src/editor/EditorApp_scene.cpp:284
 msgctxt "Editor.Dialog,Replace.Title"
 msgid "Replace Scene"

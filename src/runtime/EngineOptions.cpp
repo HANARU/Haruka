@@ -215,6 +215,13 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (colon == std::string::npos || colon + 1 >= v.size() || !parseUint(v.substr(0, colon), frame)) unknown.push_back(a);
             else o.consoleAt.push_back({ frame, v.substr(colon + 1) });
         }
+        else if (valueOf(a, "--touch-asset-at", v)) {
+            const size_t colon = v.find(':');
+            uint32_t frame = 0;
+            if (colon == std::string::npos || colon + 1 >= v.size() || !parseUint(v.substr(0, colon), frame)) unknown.push_back(a);
+            else o.touchAssetAt.push_back({ frame, v.substr(colon + 1) });
+        }
+        else if (a == "--auto-reload-scene") o.autoReloadScene = true;
         else if (valueOf(a, "--trace", v)) {
             if (!v.empty()) o.tracePath = v;
             else unknown.push_back(a);

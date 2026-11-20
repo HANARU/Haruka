@@ -1,11 +1,13 @@
 #pragma once
 #include "../geometry/MeshSource.hpp"
+#include "ImportSettings.hpp"
+#include <cstdint>
 #include <string>
 #include <vector>
 
 // Binary cache for pre-processed GLTF mesh data.
 // Eliminates repeated GLTF parsing on startup.
-// Format: magic(u32) version(u32) srcMtime(u64) srcSize(u64) srcHash(u64) meshCount(u32) [mesh entries...]
+// Format: magic(u32) version(u32) srcMtime(u64) srcSize(u64) srcHash(u64) settingsHash(u64) deps meshCount(u32) [mesh entries...]
 // Valid when size matches and either mtime or the content hash matches (DEF-105).
 // Cache files live in the cache directory keyed by a stable hash of the logical source path (2026-10-24).
 // srcPath 는 논리 경로("assets/models/model.glb")이고 원본은 가상 파일 시스템(vfs/Vfs.hpp)으로 찾습니다. 원본이 묶음
@@ -16,9 +18,13 @@
 namespace GassetCache {
     void                      setDirectory(const std::string& dir);
     const std::string&        directory();
-    bool                      isValid(const std::string& srcPath);
+    bool                      isValid(const std::string& srcPath);   // 기본 가져오기 설정
+    // 가져오기 설정 해시가 같고 원본 · 의존 파일이 그대로면 유효(2026-11-20, Docs/Asset_Hot_Reload.md D4). 유효하면 depsOut 에 의존 파일.
+    bool                      isValid(const std::string& srcPath, uint64_t settingsHash, std::vector<std::string>* depsOut);
     std::vector<MeshSourceData> load(const std::string& srcPath);
     void                      save(const std::string& srcPath,
-                                   const std::vector<MeshSourceData>& meshes);
+                                   const std::vector<MeshSourceData>& meshes);   // 기본 가져오기 설정, 의존 파일 없음
+    void                      save(const std::string& srcPath, const std::vector<MeshSourceData>& meshes,
+                                   uint64_t settingsHash, const std::vector<std::string>& deps);
     std::string               cachePath(const std::string& srcPath);
 }

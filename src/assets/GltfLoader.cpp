@@ -9,6 +9,7 @@
 #include "Animation.hpp"
 #include "../geometry/MeshLod.hpp"
 #include "../geometry/MeshOptimize.hpp"
+#include "../vfs/LogicalPath.hpp"
 #include "../vfs/PakFormat.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "../vfs/Vfs.hpp"
@@ -586,14 +587,18 @@ static std::shared_ptr<SkinSourceData> readSkin(const tinygltf::Model& model, in
 // 묶음 밖)는 빈 문자열로 거부합니다. 접은 결과는 논리 경로 규칙(hpak::normalizePath)을 통과해야 합니다. 그래야 tinygltf 가
 // 함께 시도하는 "./" + uri 후보가 "./C:/..." 같은 드라이브 문자 uri 를 절대 경로로 바꿔 마운트를 우회해 디스크에서 읽지
 // 못합니다(2026-10-31 검토). 그런 파일은 묶음에 들어가지 않아 다른 PC 에서만 빠집니다.
+// 가상 경로("/Game/models/a.gltf")면 맨 앞 '/' 와 마운트 이름(Game)을 지킵니다. 예전에는 '/' 를 빈 구성요소로 버려 "Game/models/a.bin"
+// 을 찾았고, 씬이 쓰는 정식 경로로 연 .gltf 는 바깥 .bin · 텍스처를 하나도 찾지 못했습니다(DEF-175). 마운트 이름 위로 올라가는
+// '..'("/Game/../Config/...")는 다른 마운트로 넘어가므로 거부합니다.
 static std::string foldLogicalPath(const std::string& p) {
     std::vector<std::string> parts;
+    const bool rooted = !p.empty() && (p[0] == '/' || p[0] == '\\');
     size_t i = 0;
     for (;;) {
         const size_t j = p.find_first_of("/\\", i);
         const std::string part = p.substr(i, j == std::string::npos ? std::string::npos : j - i);
         if (part == "..") {
-            if (parts.empty()) return {};
+            if (parts.empty() || (rooted && parts.size() == 1)) return {};
             parts.pop_back();
         } else if (!part.empty() && part != ".") {
             parts.push_back(part);
@@ -603,6 +608,7 @@ static std::string foldLogicalPath(const std::string& p) {
     }
     std::string out, norm;
     for (const auto& s : parts) { if (!out.empty()) out += '/'; out += s; }
+    if (rooted) out.insert(out.begin(), '/');
     return hpak::normalizePath(out, norm) ? norm : std::string();
 }
 
@@ -610,6 +616,7 @@ static std::string foldLogicalPath(const std::string& p) {
 // uri 가 절대 경로인지로 정하지 않습니다. 논리 경로의 glTF 가 가리키는 절대 uri 는 위 규칙으로 거부해야 하기 때문입니다.
 struct GltfFsContext {
     bool absoluteBase = false;
+    std::vector<std::string>* deps = nullptr;   // 읽은 바깥 파일(정식 논리 경로, 핫리로드 D4). null 이면 기록하지 않음
 };
 
 static tinygltf::FsCallbacks vfsCallbacks(const GltfFsContext* ctx) {
@@ -620,11 +627,16 @@ static tinygltf::FsCallbacks vfsCallbacks(const GltfFsContext* ctx) {
         const auto* c = static_cast<const GltfFsContext*>(user);
         return (c && c->absoluteBase) ? p : foldLogicalPath(p);
     };
-    cb.ReadWholeFile = [](std::vector<unsigned char>* out, std::string* err, const std::string& p, void*) {
+    cb.ReadWholeFile = [](std::vector<unsigned char>* out, std::string* err, const std::string& p, void* user) {
         std::vector<uint8_t> bytes;
         std::string e;
         if (!hvfs::readAll(p, bytes, &e)) { if (err) *err += e; return false; }
         out->assign(bytes.begin(), bytes.end());
+        const auto* c = static_cast<const GltfFsContext*>(user);
+        if (c && c->deps) {
+            std::string canon = hvfs::toCanonical(p);
+            if (std::find(c->deps->begin(), c->deps->end(), canon) == c->deps->end()) c->deps->push_back(std::move(canon));
+        }
         return true;
     };
     cb.WriteWholeFile = [](std::string* err, const std::string& p, const std::vector<unsigned char>&, void*) {
@@ -644,6 +656,25 @@ static tinygltf::FsCallbacks vfsCallbacks(const GltfFsContext* ctx) {
 // ─── loadAll ─────────────────────────────────────────────────────────────────
 
 std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
+    return loadAll(path, ImportSettings{}, nullptr);
+}
+
+// albedo · emissive 이미지가 선형 값으로 저장된 파일(가져오기 설정 srgb = false, 핫리로드 D8): GPU 형식은 SRGB 그대로 두고 바이트를
+// sRGB 로 인코딩해, 샘플 결과가 파일의 선형 값이 되게 합니다. 알파는 그대로입니다.
+static void encodeLinearImageToSrgb(TexSourceData& tex) {
+    if (!tex.hasData || tex.data.size() != (size_t)tex.w * (size_t)tex.h * 4) return;
+    uint8_t lut[256];
+    for (int i = 0; i < 256; ++i) lut[i] = toByte(linearToSrgb(i / 255.f));
+    for (size_t i = 0; i + 3 < tex.data.size(); i += 4) {
+        tex.data[i + 0] = lut[tex.data[i + 0]];
+        tex.data[i + 1] = lut[tex.data[i + 1]];
+        tex.data[i + 2] = lut[tex.data[i + 2]];
+    }
+}
+
+std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path, const ImportSettings& settings,
+                                                std::vector<std::string>* dependencies) {
+    if (dependencies) dependencies->clear();
     tinygltf::Model    model;
     tinygltf::TinyGLTF loader;
     std::string err, warn;
@@ -651,6 +682,7 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
     const std::string baseDir = slash == std::string::npos ? std::string() : path.substr(0, slash);
     // 절대 경로 판정은 가상 파일 시스템과 같은 기준(fs::path::is_absolute)으로 합니다.
     GltfFsContext fsCtx;
+    fsCtx.deps = dependencies;
     std::filesystem::path basePath;
     fsCtx.absoluteBase = hpak::pathFromUtf8(baseDir, basePath) && basePath.is_absolute();
     if (!loader.SetFsCallbacks(vfsCallbacks(&fsCtx), &err))
@@ -688,12 +720,15 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
 
     // Flatten node → mesh references with accumulated world transforms
     std::vector<NodeRef> refs;
-    for (int r : roots) flattenNodes(model, r, glm::mat4(1.f), refs);
+    // 가져오기 배율(핫리로드 D8)은 맨 위 변환에 곱해 정점 · 바운드 · LOD · 충돌이 모두 따라가게 합니다. 뼈대 스킨 메시는 노드 변환을
+    // 쓰지 않으므로(아래) 배율도 닿지 않습니다(관절 · 클립 이동값까지 바꿔야 해 남음, 아래에서 경고).
+    const glm::mat4 rootMat = glm::scale(glm::mat4(1.f), glm::vec3(settings.scale));
+    for (int r : roots) flattenNodes(model, r, rootMat, refs);
 
     // Fallback: if no scene hierarchy, use all meshes with identity
     if (refs.empty()) {
         for (int i = 0; i < (int)model.meshes.size(); ++i)
-            refs.push_back({ glm::mat4(1.f), i });
+            refs.push_back({ rootMat, i });
     }
 
     std::vector<MeshSourceData> result;
@@ -821,6 +856,10 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
                 d.metalRough = extractTexture(model, pbr.metallicRoughnessTexture.index);
                 d.ao         = extractTexture(model, mat.occlusionTexture.index);
                 d.emissive   = extractTexture(model, mat.emissiveTexture.index);
+                if (!settings.srgb) {
+                    encodeLinearImageToSrgb(d.albedo);
+                    encodeLinearImageToSrgb(d.emissive);
+                }
                 d.isBlend    = (mat.alphaMode == "BLEND");
                 d.doubleSided = mat.doubleSided;   // glTF 기본값 false. 소비자(그림자 · 컬링)는 아직 없음
                 // MASK · alphaCutoff(glTF 기본 0.5, tinygltf 도 같은 기본값). 소비자(컷아웃 그림자 · 프리패스)는 아직 없고,
@@ -894,7 +933,8 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
             }
 
             // 스킨 메시는 LOD 를 만들지 않습니다(O13).
-            if (!d.skin && !d.vertices.empty() && d.indices.size() >= hmesh::kLodMinTriangles * 3) {
+            // 가져오기 설정 autoLod = false 면 만들지 않습니다(핫리로드 D8).
+            if (settings.autoLod && !d.skin && !d.vertices.empty() && d.indices.size() >= hmesh::kLodMinTriangles * 3) {
                 glm::vec3 lo( std::numeric_limits<float>::max());
                 glm::vec3 hi(-std::numeric_limits<float>::max());
                 for (const auto& v : d.vertices) {
@@ -942,6 +982,14 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
 
     size_t totalV = 0, totalT = 0, skinned = 0;
     for (const auto& r : result) { totalV += r.vertices.size(); totalT += r.indices.size() / 3; skinned += r.skin ? 1 : 0; }
+    if (settings.scale != 1.f) {
+        size_t boned = 0;
+        for (const auto& r : result) boned += (r.skin && !r.skin->joints.empty()) ? 1 : 0;
+        if (boned > 0) {
+            HLOG(LogAsset, Warning) << path << ": import scale " << settings.scale << " is not applied to " << boned
+                                    << " skinned mesh(es) (joints and clips keep their size)";
+        }
+    }
     HLOG(LogAsset, Log) << "Loaded: " << path
                         << "  meshes=" << result.size()
                         << "  verts=" << totalV << "  tris=" << totalT

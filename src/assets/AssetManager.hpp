@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -7,6 +8,7 @@
 #include <vector>
 
 #include "../geometry/PrimitiveDesc.hpp"
+#include "ImportSettings.hpp"
 
 struct MeshHandle;
 struct MaterialHandle;
@@ -67,6 +69,27 @@ public:
     size_t releaseUnused(const std::unordered_set<std::string>& keep);
     size_t loadedModelCount() const;
 
+    // ── 가져오기 설정 · 다시 읽기 (2026-11-20, Docs/Asset_Hot_Reload.md) ─────────────────────────
+    // /Config/import.ini 의 표(D8). 바꾸면 다음에 읽는 모델부터 적용합니다(이미 올라간 모델은 reloadForSettingsChange).
+    void setImportSettings(ImportSettingsTable table) { importTable_ = std::move(table); }
+    const ImportSettingsTable& importSettings() const { return importTable_; }
+    ImportSettings importSettingsFor(const std::string& path) const { return importTable_.resolve(path); }
+
+    // 다시 읽은 모델의 새 핸들을 컴포넌트에 바꿔 끼우는 함수(D6, 보통 hreload::rebindModel). 옛 핸들은 이 함수가 돌아온 뒤 은퇴합니다.
+    using RebindFn = std::function<void(const std::string& key, const std::vector<AssetPair>& fresh)>;
+    struct ReloadStats {
+        size_t models = 0, meshesRetired = 0, materialsRetired = 0;
+    };
+    // 올라간 모델을 원본에서 다시 읽어 올립니다(D5, 메인 스레드 · 동기). 올라가 있지 않거나 절차 도형이면 false.
+    // 다시 읽기에 실패하면 옛 모델을 그대로 두고 false 입니다.
+    bool reloadModel(const std::string& path, const RebindFn& rebind, ReloadStats* stats = nullptr);
+    // 이 파일(모델 자체 또는 의존 파일 .bin · 이미지)을 쓰는 올라간 모델들(정식 경로, 이름순).
+    std::vector<std::string> modelsUsing(const std::string& path) const;
+    // 가져오기 설정 결과가 올릴 때와 달라진 모델을 다시 읽습니다(D8). 다시 읽은 모델 목록.
+    std::vector<std::string> reloadForSettingsChange(const RebindFn& rebind, ReloadStats* stats = nullptr);
+    // 캐시가 무효가 된(원본 · 의존 파일이 바뀐) 올라간 모델을 다시 읽습니다(감시 버퍼 넘침, D1).
+    std::vector<std::string> reloadStale(const RebindFn& rebind, ReloadStats* stats = nullptr);
+
     // ── 절차 도형 ────────────────────────────────────────────────────────────
     // 같은 desc 는 같은 핸들입니다. 무조건 생성하는 API 는 공개하지 않습니다.
     // 메가버퍼가 해제 없는 범프 할당자이므로, 재생성을 부를 수 있는 문을
@@ -96,6 +119,7 @@ public:
 
 private:
     std::vector<AssetPair> uploadModel(const std::string& key, const std::string& path, std::vector<MeshSourceData>& meshes);
+    void noteModel(const std::string& key, uint64_t settingsHash, std::vector<std::string> deps);
     void freePairs(std::vector<AssetPair>& pairs, bool isPrim);
 
     Renderer* renderer;
@@ -104,4 +128,7 @@ private:
     bool      autoLod_ = true;
     std::unordered_map<std::string, std::vector<AssetPair>> cache;
     std::unordered_map<std::string, MaterialHandle*>        primMaterials;
+    ImportSettingsTable importTable_;
+    struct ModelInfo { uint64_t settingsHash = 0; std::vector<std::string> deps; };
+    std::unordered_map<std::string, ModelInfo>              modelInfo_;   // 파일 모델만(D4 · D8)
 };

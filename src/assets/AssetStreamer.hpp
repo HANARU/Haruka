@@ -4,6 +4,7 @@
 // 합니다(Threading.md 규칙 1 ~ 3). 같은 경로를 다시 요청하면 앞 작업을 함께 씁니다.
 
 #include "../geometry/MeshSource.hpp"
+#include "ImportSettings.hpp"
 
 #include <condition_variable>
 #include <cstddef>
@@ -23,6 +24,7 @@ public:
         bool                        ok = false;
         std::vector<MeshSourceData> meshes;   // ok 가 아니면 비어 있음(부르는 쪽이 기본 상자를 씀)
         std::string                 error;
+        std::vector<std::string>    deps;     // 읽은 바깥 파일(핫리로드 D4)
     };
 
     explicit AssetStreamer(int workers);
@@ -31,7 +33,7 @@ public:
     AssetStreamer& operator=(const AssetStreamer&) = delete;
 
     // 정식 논리 경로를 요청합니다. 이미 대기 · 읽는 중 · 끝난 결과가 있으면 false(새 작업 없음).
-    bool  request(const std::string& path);
+    bool  request(const std::string& path, const ImportSettings& settings = {});
     State state(const std::string& path) const;
     // 끝난 결과를 꺼냅니다(꺼낸 것은 표에서 사라짐). max 개까지.
     std::vector<Result> takeFinished(size_t max = (size_t)-1);
@@ -43,6 +45,9 @@ public:
 
     // 모델 하나를 읽습니다(워커 · 동기 경로 공용): 캐시가 맞으면 캐시, 아니면 glTF 를 읽고 캐시에 씁니다. 실패하면 false.
     static bool decode(const std::string& path, std::vector<MeshSourceData>& out, std::string& error);
+    // 가져오기 설정을 적용하고(캐시 키에 설정 해시), deps 가 있으면 의존 파일(.gltf 옆의 .bin · 이미지)을 채웁니다(핫리로드 D4 · D8).
+    static bool decode(const std::string& path, const ImportSettings& settings, std::vector<MeshSourceData>& out,
+                       std::string& error, std::vector<std::string>* deps);
 
 private:
     void run();
@@ -50,7 +55,8 @@ private:
     mutable std::mutex                       mu_;
     std::condition_variable                  cv_;      // 새 작업 · 멈춤 → 워커
     std::condition_variable                  doneCv_;  // 작업 끝남 → waitFor
-    std::deque<std::string>                  queue_;   // mu_
+    struct Job { std::string path; ImportSettings settings; };
+    std::deque<Job>                          queue_;   // mu_
     std::unordered_map<std::string, State>   states_;  // mu_
     std::unordered_map<std::string, Result>  done_;    // mu_
     bool                                     stop_ = false;   // mu_

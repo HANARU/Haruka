@@ -16,19 +16,19 @@ AssetStreamer::~AssetStreamer() {
     {
         std::lock_guard<std::mutex> lk(mu_);
         stop_ = true;
-        for (const std::string& p : queue_) states_.erase(p);
+        for (const Job& j : queue_) states_.erase(j.path);
         queue_.clear();
     }
     cv_.notify_all();
     for (std::thread& t : threads_) if (t.joinable()) t.join();
 }
 
-bool AssetStreamer::request(const std::string& path) {
+bool AssetStreamer::request(const std::string& path, const ImportSettings& settings) {
     {
         std::lock_guard<std::mutex> lk(mu_);
         if (stop_ || states_.count(path)) return false;
         states_[path] = State::Queued;
-        queue_.push_back(path);
+        queue_.push_back({ path, settings });
     }
     cv_.notify_one();
     return true;
@@ -76,8 +76,16 @@ size_t AssetStreamer::pending() const {
 }
 
 bool AssetStreamer::decode(const std::string& path, std::vector<MeshSourceData>& out, std::string& error) {
+    return decode(path, ImportSettings{}, out, error, nullptr);
+}
+
+bool AssetStreamer::decode(const std::string& path, const ImportSettings& settings, std::vector<MeshSourceData>& out,
+                           std::string& error, std::vector<std::string>* deps) {
+    std::vector<std::string> localDeps;
+    std::vector<std::string>& d = deps ? *deps : localDeps;
     try {
-        if (GassetCache::isValid(path)) {
+        const uint64_t sh = settings.hash();
+        if (GassetCache::isValid(path, sh, &d)) {
             try {
                 out = GassetCache::load(path);
                 return true;
@@ -85,8 +93,8 @@ bool AssetStreamer::decode(const std::string& path, std::vector<MeshSourceData>&
                 HLOG(LogAsset, Warning) << "Cache corrupted (" << path << "): " << cacheEx.what() << " -> reloading from source";
             }
         }
-        out = GltfLoader::loadAll(path);
-        GassetCache::save(path, out);
+        out = GltfLoader::loadAll(path, settings, &d);
+        GassetCache::save(path, out, sh, d);
         return true;
     } catch (const std::exception& e) {
         error = e.what();
@@ -98,12 +106,14 @@ bool AssetStreamer::decode(const std::string& path, std::vector<MeshSourceData>&
 void AssetStreamer::run() {
     HPROF_THREAD_NAME("AssetWorker");
     for (;;) {
-        std::string path;
+        std::string    path;
+        ImportSettings settings;
         {
             std::unique_lock<std::mutex> lk(mu_);
             cv_.wait(lk, [&] { return stop_ || !queue_.empty(); });
             if (stop_ && queue_.empty()) return;
-            path = std::move(queue_.front());
+            path     = std::move(queue_.front().path);
+            settings = queue_.front().settings;
             queue_.pop_front();
             states_[path] = State::Loading;
         }
@@ -111,7 +121,7 @@ void AssetStreamer::run() {
         r.path = path;
         {
             HPROF_SCOPE("Asset.Decode");
-            r.ok = decode(path, r.meshes, r.error);
+            r.ok = decode(path, settings, r.meshes, r.error, &r.deps);
         }
         {
             std::lock_guard<std::mutex> lk(mu_);

@@ -242,6 +242,7 @@ UE식 용어 채택, **"명칭만" 결정**(내부 상대값, 물리 단위·노
 - ✅ **④ 게임플레이 기본 도구 · CVar · 콘솔(2026-11-20)**: [Gameplay_Tools.md](Gameplay_Tools.md). 헤드셋 안 콘솔 · 스크립트 계층이 남음.
 - ✅ **⑤ CPU 구간 계측(2026-11-20)**: [CPU_Profiling.md](CPU_Profiling.md). 에디터 CPU 스코프 표 · Android 추적 파일 꺼내기 · 헤드셋 실측이 남음.
 - ✅ **⑧ 물리 조인트 · 충돌 이벤트 · 레이어(2026-11-20)**: [Physics_Joints_And_Events.md](Physics_Joints_And_Events.md). 조인트 모터 · 스프링 · 끊어짐, 레이어 표 편집 화면, 에디터 표시 창 확인이 남음.
+- ✅ **⑬ 에셋 핫리로드 · 가져오기 설정(2026-11-20)**: [Asset_Hot_Reload.md](Asset_Hot_Reload.md). 창 · 대화상자 실기 확인, 오디오 다시 읽기 · 콘텐츠 브라우저 "다시 가져오기" 메뉴 · 프리팹 · 물리 충돌 형상 다시 만들기 · 스킨 메시 배율 · 텍스처 압축 설정이 남음.
 - ✅ **⑥ 파티클 · VFX · 데칼(2026-11-20)**: [Particles_And_Decals.md](Particles_And_Decals.md). 텍스처 파일 · Sub UV · 메시 파티클 · 조명 받는 파티클 · 데칼 텍스처 · 에디터 미리보기 · Quest 오버드로 실측이 남음.
 
 ---

@@ -21,6 +21,8 @@
 #include "SceneDocument.hpp"
 #include "EditTools.hpp"
 #include "HotReloader.hpp"
+#include "AssetWatcher.hpp"
+#include "../assets/AssetChangeQueue.hpp"
 #include "../core/HDelegate.hpp"
 #include "../runtime/IEngineFrontend.hpp"
 #include "ComponentVisualizers.hpp"
@@ -127,6 +129,22 @@ private:
     HSlateRenderer slateRenderer_;
     HCommandStack  cmdStack_;
     HotReloader    hotReloader_;
+
+    // ── 에셋 핫리로드 (2026-11-20, Docs/Asset_Hot_Reload.md, EditorApp_reload.cpp) ─────────────────
+    AssetWatcher              assetWatcher_;
+    hreload::AssetChangeQueue assetChanges_;
+    std::vector<std::pair<uint32_t, std::string>> touchAssetAt_;   // --touch-asset-at(D9)
+    size_t                    touchNext_       = 0;
+    uint32_t                  reloadFrame_     = 0;
+    bool                      autoReloadScene_ = false;            // --auto-reload-scene(D7)
+    uint64_t                  sceneDiskHash_   = 0;   // 연 씬을 마지막으로 읽거나 쓴 내용의 해시(에디터 자신의 저장 무시, D7)
+    void startAssetWatch();
+    void tickAssetReload();
+    size_t pumpAssetChanges();   // 감시자 → 모으기 → 처리. 처리한 경로 수
+    void processAssetChange(const std::string& path);
+    void onSceneFileChanged(const std::string& path);
+    void touchAssetAndWait(const std::string& path);
+    static uint64_t sceneTextHash(const std::string& text);
 
     // onActorDestroyed 구독 핸들. init 에서 붙이고 cleanup 에서 뗍니다. 이 구독이
     // 파괴되는 액터를 참조하는 커맨드 제거와 선택 포인터 무효화를 한곳에서 담당합니다.

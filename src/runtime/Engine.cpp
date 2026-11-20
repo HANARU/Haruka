@@ -419,6 +419,15 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
     assets_ = std::make_unique<AssetManager>(renderer_.get());
     assets_->setAutoLod(options_.autoLod);
+    // 가져오기 설정(/Config/import.ini, Docs/Asset_Hot_Reload.md D8). 없으면 모두 기본값입니다(없다는 알림은 남기지 않음).
+    {
+        std::string text;
+        if (hvfs::readText(ImportSettingsTable::kPath, text)) {
+            std::vector<std::string> messages;
+            assets_->setImportSettings(ImportSettingsTable::parse(text, messages));
+            for (const auto& m : messages) HLOG(LogEngine, Warning) << ImportSettingsTable::kPath << ": " << m;
+        }
+    }
 #ifdef __ANDROID__
     assets_->setStreamWorkers(1);   // Quest: 렌더 · XR 스레드와 코어를 나눠 씀(비동기 로딩 D1)
 #else

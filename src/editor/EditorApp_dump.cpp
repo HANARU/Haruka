@@ -47,6 +47,11 @@ void EditorApp::setOptions(const EngineOptions& options) {
         }
     }
     dumpMode_           = !uiDumpPath_.empty() || !viewportDumpPath_.empty();
+    autoReloadScene_    = options.autoReloadScene;
+    touchAssetAt_.clear();
+    for (const auto& t : options.touchAssetAt) touchAssetAt_.push_back({ t.frame, t.command });
+    std::stable_sort(touchAssetAt_.begin(), touchAssetAt_.end(),
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
 }
 
 HTextEditState* EditorApp::focusedEdit() {

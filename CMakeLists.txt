@@ -349,6 +349,7 @@ set(RUNTIME_SOURCES
     src/components/LightComponent.cpp
     src/components/RenderExtract.cpp
     src/components/StaticMeshComponent.cpp
+    src/components/AssetRebind.cpp
     src/audio/AudioComponent.cpp
     src/audio/ReverbZoneComponent.cpp
     src/physics/RigidBodyComponent.cpp
@@ -389,6 +390,7 @@ set(RUNTIME_SOURCES
     src/assets/AssetManager.cpp
     src/assets/AssetStreamer.cpp
     src/assets/GassetCache.cpp
+    src/assets/ImportSettings.cpp
     src/assets/Skin.cpp
     src/assets/Animation.cpp
     src/assets/AnimStateMachine.cpp
@@ -430,6 +432,8 @@ set(EDITOR_SOURCES
     src/editor/EditorGizmo.cpp
     src/editor/ActorSnapshot.cpp
     src/editor/HotReloader.cpp
+    src/editor/AssetWatcher.cpp
+    src/editor/EditorApp_reload.cpp
     src/editor/EditorFrontend.cpp
 )
 set(GAME_SOURCES
@@ -846,6 +850,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_executable(HarukaAssetCacheTest
         tests/AssetCacheTest.cpp
         src/assets/GassetCache.cpp
+        src/assets/ImportSettings.cpp
         src/assets/Skin.cpp
         src/core/HLog.cpp
     )
@@ -1062,6 +1067,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/assets/AnimStateMachine.cpp
         src/assets/GltfLoader.cpp
         src/assets/GassetCache.cpp
+        src/assets/ImportSettings.cpp
         src/assets/Skin.cpp
         src/geometry/MeshLod.cpp
         src/components/AnimationComponent.cpp
@@ -1145,6 +1151,17 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     if(MSVC)
         target_compile_options(HarukaLoadingTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaLoadingTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
+    # -- 에셋 핫리로드 · 가져오기 설정 테스트(Docs/Asset_Hot_Reload.md) ------------
+    # import.ini 패턴 · 설정 해시, 바뀐 파일 모으기, 의존 텍스처가 바뀌면 캐시 무효(DEF-174), 다시 묶기, 옛 자원 은퇴 수, 임시 폴더 감시를
+    # 창 · GPU 없이 봅니다. 감시자는 에디터 소스라 직접 넣습니다.
+    add_executable(HarukaHotReloadTest tests/HotReloadTest.cpp src/editor/AssetWatcher.cpp)
+    target_link_libraries(HarukaHotReloadTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaHotReloadTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaHotReloadTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaHotReloadTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
     # -- 크래시 보고 테스트(Docs/Crash_Reporting.md) ---------------------------
@@ -1273,6 +1290,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_executable(HarukaGltfTest
         tests/GltfLoaderTest.cpp
         src/assets/GltfLoader.cpp
+        src/assets/ImportSettings.cpp
         src/assets/Animation.cpp
         src/assets/Skin.cpp
         src/geometry/MeshLod.cpp
@@ -1293,6 +1311,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/assets/GltfLoader.cpp
         src/assets/Animation.cpp
         src/assets/GassetCache.cpp
+        src/assets/ImportSettings.cpp
         src/assets/Skin.cpp
         src/geometry/MeshLod.cpp
         src/components/SkinnedMeshComponent.cpp
@@ -1348,6 +1367,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME crash_reports        COMMAND HarukaCrashTest)
     add_test(NAME animation            COMMAND HarukaAnimTest)
     add_test(NAME async_loading        COMMAND HarukaLoadingTest)
+    add_test(NAME asset_hot_reload     COMMAND HarukaHotReloadTest)
     add_test(NAME save_settings        COMMAND HarukaSaveTest)
     add_test(NAME gameplay_tools       COMMAND HarukaGameplayTest)
     add_test(NAME cpu_profiling        COMMAND HarukaProfilerTest)

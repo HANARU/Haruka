@@ -80,6 +80,11 @@ struct EngineOptions {
     // --console-at=<프레임>:<명령> (여러 번) : 그 프레임을 그린 뒤 콘솔 명령을 실행(창 없는 콘솔 확인, D9).
     struct TimedCommand { uint32_t frame = 0; std::string command; };
     std::vector<TimedCommand> consoleAt;
+    // --touch-asset-at=<프레임>:<논리 경로> (여러 번, 에디터) : 그 프레임에 파일의 수정 시각만 지금으로 바꾸고 감시자가 알림을 받아
+    // 다시 읽을 때까지 최대 3 초 기다림(창 없는 핫리로드 확인, Docs/Asset_Hot_Reload.md D9).
+    std::vector<TimedCommand> touchAssetAt;
+    // --auto-reload-scene (에디터) : 열린 씬 파일이 밖에서 바뀌면 묻지 않고 다시 엶(D7, 덤프 · 자동 확인용).
+    bool autoReloadScene = false;
     // --trace=<파일> : CPU 추적 파일(Chrome trace.json)을 쓰기 루트의 Traces/ 아래에 씀(Docs/CPU_Profiling.md D6). 엔진 시작부터 끝까지.
     // --trace-frames=<a>-<b> : 프레임 a 를 그린 뒤 시작해 b 를 그린 뒤 멈추고 씀(--trace 와 함께, a < b).
     std::string tracePath;

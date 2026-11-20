@@ -126,6 +126,7 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
 
     renderer.setUIRenderer(&slateRenderer_);
     hotReloader_.start(happ::inExeDir("shaders").string(), renderer);
+    startAssetWatch();
     HLOG(LogEditor, Log) << "Ready. Press Play to run game simulation.";
 }
 
@@ -252,6 +253,7 @@ void EditorApp::cleanup() {
     if (ctx_.world) ctx_.world->onActorDestroyed.remove(actorDestroyedSub_);
     viewport_.cleanup(ctx_.world);
     hotReloader_.stop();
+    assetWatcher_.stop();
     slateRenderer_.cleanup();
 }
 
@@ -343,6 +345,7 @@ void EditorApp::tick(float dt) {
 
     if (hotReloader_.reloadPending() && ctx_.renderer)
         ctx_.renderer->reloadPipelines();
+    tickAssetReload();
 
     tickStats();
 
