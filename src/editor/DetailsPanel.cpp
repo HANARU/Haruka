@@ -8,6 +8,10 @@
 #include "../scene/ComponentRegistry.hpp"
 #include "../sceneio/PrefabManager.hpp"
 #include "../sceneio/PrefabRules.hpp"
+#include "../sceneio/PrefabLink.hpp"
+#include "PrefabCommands.hpp"
+#include "../core/FileUtil.hpp"
+#include "../core/ProjectPaths.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/gtc/quaternion.hpp>
 
@@ -207,6 +211,10 @@ void DetailsPanel::rebuild() {
     list_->addSlot(HNew(SBorder)->background(EditorUiKit::kBorder), SVerticalBox::ESizeRule::Fixed, 1.f);
 
     Actor& sel = *deps_.ctx->selected;
+    overrides_.clear();
+    if (hprefablink::instanceRootOf(&sel))
+        overrides_ = hprefablink::overridePathsOf(sel, hprefablink::loaderFor(deps_.ctx->world));
+    buildPrefabSection(sel);
     buildTransformSection(sel);
     buildComponentsSection(sel);
     buildAddComponentSection(sel);
@@ -254,7 +262,11 @@ void DetailsPanel::buildTransformSection(Actor& sel) {
             SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
     };
 
-    txBody->addSlot(deps_.ui->sectionHeader("LOCATION", EditorUiKit::kTextDim), SVerticalBox::ESizeRule::Fixed, s(22.f));
+    // 프리팹 인스턴스에서 덮어쓴 값은 머리 글자 색으로 알립니다(D9).
+    const glm::vec4 posHdr = overridden("POS") ? EditorTheme::prefabOverride : EditorUiKit::kTextDim;
+    const glm::vec4 rotHdr = (overridden("ROT") || overridden("QUAT")) ? EditorTheme::prefabOverride : EditorUiKit::kTextDim;
+    const glm::vec4 sclHdr = overridden("SCALE") ? EditorTheme::prefabOverride : EditorUiKit::kTextDim;
+    txBody->addSlot(deps_.ui->sectionHeader("LOCATION", posHdr), SVerticalBox::ESizeRule::Fixed, s(22.f));
     // 성분별 세터는 값을 읽어 한 성분만 바꾸고 세터로 되돌려 넣습니다(필드 직접 쓰기 불가).
     auto posSetter = [selPtr, others](int axis) {
         return [selPtr, others, axis](float v) {
@@ -267,7 +279,7 @@ void DetailsPanel::buildTransformSection(Actor& sel) {
     addTxRow("Z", kBlue,  [selPtr]{ return selPtr->transform().position().z; }, posSetter(2), 0.01f, ENumberUnit::Offset);
     txBody->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
 
-    txBody->addSlot(deps_.ui->sectionHeader("ROTATION", EditorUiKit::kTextDim), SVerticalBox::ESizeRule::Fixed, s(22.f));
+    txBody->addSlot(deps_.ui->sectionHeader("ROTATION", rotHdr), SVerticalBox::ESizeRule::Fixed, s(22.f));
     // 다른 액터는 자기 오일러 각에서 그 성분만 바꿉니다.
     auto setEuler = [this, selPtr, others](int axis, float v) {
         (*deps_.cachedEuler)[axis] = v;
@@ -283,7 +295,7 @@ void DetailsPanel::buildTransformSection(Actor& sel) {
     addTxRow("Z", kBlue,  [this]{ return deps_.cachedEuler->z; }, [setEuler](float v){ setEuler(2, v); }, 0.5f, ENumberUnit::Angle);
     txBody->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(4.f));
 
-    txBody->addSlot(deps_.ui->sectionHeader("SCALE", EditorUiKit::kTextDim), SVerticalBox::ESizeRule::Fixed, s(22.f));
+    txBody->addSlot(deps_.ui->sectionHeader("SCALE", sclHdr), SVerticalBox::ESizeRule::Fixed, s(22.f));
     auto sclSetter = [selPtr, others](int axis) {
         return [selPtr, others, axis](float v) {
             for (Actor* a : others) { glm::vec3 s2 = a->transform().scale(); s2[axis] = v; a->setLocalScale(s2); }
@@ -336,7 +348,9 @@ void DetailsPanel::buildComponentHeader(Actor& sel, Component& comp) {
                 HNew(SHorizontalBox)
                     ->addSlot(
                         HNew(STextBlock)->text(comp.typeName())->fontSize(s(12.f))
-                            ->color(EditorUiKit::kTextHdr)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                            ->color(overridden(std::string(comp.typeName()) + "[" + std::to_string(hcmd::ordinalOf(sel, &comp)) + "]")
+                                        ? EditorTheme::prefabOverride : EditorUiKit::kTextHdr)
+                            ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
                         SHorizontalBox::ESizeRule::Fill)
                     ->addSlot(enBox, SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space16))
                     ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space4))
@@ -516,8 +530,117 @@ void DetailsPanel::buildSavePrefabRow(Actor& sel) {
                                              return;
                                          }
                                          std::string p = std::string(PrefabManager::kDir) + "/" + selPtr->name + PrefabManager::kExt;
-                                         PrefabManager::save(selPtr, p);
-                                         if (deps_.onPrefabSaved) deps_.onPrefabSaved();
+                                         std::string text;
+                                         if (PrefabManager::save(selPtr, p, &text) && deps_.onPrefabWritten) deps_.onPrefabWritten(p, text);
                                      })),
         SVerticalBox::ESizeRule::Fixed, s(EditorTheme::tabH));
+}
+
+bool DetailsPanel::overridden(const std::string& prefix) const {
+    for (const auto& o : overrides_)
+        if (o.compare(0, prefix.size(), prefix) == 0) return true;
+    return false;
+}
+
+void DetailsPanel::buildPrefabSection(Actor& sel) {
+    Actor* root = hprefablink::instanceRootOf(&sel);
+    const bool missing = !sel.prefabLink.source.empty() && !sel.prefabLink.raw.empty();
+    if (!root && !missing) return;
+    if (!root) root = &sel;
+    World* world = deps_.ctx->world;
+    Actor* selPtr = &sel;
+    const std::string source = root->prefabLink.source;
+
+    list_->addSlot(deps_.ui->sectionHeader("PREFAB", EditorTheme::prefabInstance), SVerticalBox::ESizeRule::Fixed, s(22.f));
+    auto line = [&](const std::string& text, glm::vec4 col) {
+        list_->addSlot(
+            HNew(SBorder)->background(EditorTheme::transparent)->padding({s(EditorTheme::space12), 0.f})
+                ->content(HNew(STextBlock)->text(text)->fontSize(s(12.f))->color(col)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)),
+            SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
+    };
+    line(missing ? HText::format(HTEXT("Editor.Details", "Prefab.Missing", "Missing: {0}"), { source }).toString()
+                 : HText::format(HTEXT("Editor.Details", "Prefab.Source", "Instance of {0}"), { source }).toString(),
+         missing ? EditorTheme::error : EditorUiKit::kTextBody);
+    if (missing) {
+        line(HTEXT("Editor.Details", "Prefab.MissingKept", "Overrides are kept as written").toString(), EditorUiKit::kTextDim);
+        return;
+    }
+    line(selPtr == root
+             ? HText::format(HTEXT("Editor.Details", "Prefab.RootOverrides", "Root, {0} overridden value(s)"), { std::to_string(overrides_.size()) }).toString()
+             : HText::format(HTEXT("Editor.Details", "Prefab.Overrides", "{0} overridden value(s)"), { std::to_string(overrides_.size()) }).toString(),
+         overrides_.empty() ? EditorUiKit::kTextDim : EditorTheme::prefabOverride);
+
+    // 되돌리기: 이 액터의 값을 원본 값으로(루트는 이름 · 트랜스폼을 지킴, Unity 와 같음). Undo 가능.
+    auto revert = [this, world, selPtr, root] {
+        std::string base;
+        if (!hprefablink::baselineBlock(*selPtr, hprefablink::loaderFor(world), base)) return;
+        if (selPtr == root) {
+            std::vector<hprefablink::TBlock> b = hprefablink::parseBlocks(base);
+            std::vector<hprefablink::TBlock> cur = hprefablink::parseBlocks(hprefablink::actorBlock(*selPtr));
+            if (b.empty() || cur.empty()) return;
+            b[0].name = cur[0].name;
+            for (const char* k : { "POS", "ROT", "QUAT", "SCALE" }) {
+                for (auto& kv : b[0].props)
+                    if (kv.first == k)
+                        for (const auto& ckv : cur[0].props)
+                            if (ckv.first == k) kv.second = ckv.second;
+            }
+            base = hprefablink::writeBlocks(b);
+        }
+        auto cmd = std::make_unique<ActorStateCmd>(*world, *selPtr, hprefablink::actorBlock(*selPtr), base,
+                                                   ComponentLoadContext{ deps_.ctx->assets },
+                                                   [this] { dirty_ = true; if (deps_.onPrefabLinksChanged) deps_.onPrefabLinksChanged(); });
+        cmd->redo();
+        deps_.cmdStack->push(std::move(cmd));
+    };
+    // 원본에 적용: 이 액터의 덮어쓰기를 원본 프리팹 글에 넣고 저장 → 인스턴스를 다시 펼침(파일 동작이라 Undo 하지 않음).
+    auto apply = [this, world, selPtr, root, source] {
+        const hprefablink::Loader load = hprefablink::loaderFor(world);
+        std::vector<std::string> lines = hprefablink::overrideLinesOf(*selPtr, load);
+        if (selPtr == root) {
+            // 루트의 이름 · 트랜스폼은 인스턴스마다 다른 값이라 원본에 넣지 않습니다(Unity 의 Apply All 과 같음).
+            const std::string pre = "OVERRIDE:" + selPtr->prefabLink.pair.toString() + " ";
+            lines.erase(std::remove_if(lines.begin(), lines.end(), [&](const std::string& l) {
+                            if (l.rfind(pre, 0) != 0) return false;
+                            const std::string path = l.substr(pre.size(), l.find('=') - pre.size());
+                            return path == "POS" || path == "ROT" || path == "QUAT" || path == "SCALE" || path == "NAME";
+                        }),
+                        lines.end());
+        }
+        if (lines.empty()) return;
+        std::string text;
+        if (!load(source, text)) return;
+        std::vector<std::string> errors;
+        const int n = hprefablink::applyToSourceText(text, source, lines, load, &errors);
+        if (n <= 0) return;
+        std::string err;
+        if (!hfile::writeAtomic(hproj::resolve(source), text, &err)) {
+            if (deps_.logCat) { HLOG(*deps_.logCat, Error) << "Apply to prefab: cannot write " << source << " (" << err << ")"; }
+            return;
+        }
+        if (deps_.logCat) { HLOG(*deps_.logCat, Log) << "Applied " << n << " override(s) to " << source; }
+        if (deps_.onPrefabWritten) deps_.onPrefabWritten(source, text);
+    };
+    // 링크 끊기: 인스턴스 전체를 보통 액터로(Undo 가능).
+    auto unlink = [this, world, root] {
+        auto cmd = std::make_unique<PrefabUnlinkCmd>(*world, *root,
+                                                     [this] { dirty_ = true; if (deps_.onPrefabLinksChanged) deps_.onPrefabLinksChanged(); });
+        cmd->redo();
+        deps_.cmdStack->push(std::move(cmd));
+    };
+    auto btn = [&](const std::string& label, std::function<void()> fn) {
+        return deps_.ui->textButton(label, 12.f, EditorUiKit::kTextBody, {7.f, 3.f}, EditorTheme::ctlNormal, EditorTheme::ctlHover,
+                                    std::move(fn));
+    };
+    list_->addSlot(
+        HNew(SBorder)->background(EditorTheme::transparent)->padding({s(EditorTheme::space8), 0.f})
+            ->content(HNew(SHorizontalBox)
+                ->addSlot(btn(HTEXT("Editor.Details", "Prefab.Revert", "Revert").toString(), revert), SHorizontalBox::ESizeRule::Fill)
+                ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space4))
+                ->addSlot(btn(HTEXT("Editor.Details", "Prefab.Apply", "Apply").toString(), apply), SHorizontalBox::ESizeRule::Fill)
+                ->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, s(EditorTheme::space4))
+                ->addSlot(btn(HTEXT("Editor.Details", "Prefab.Unlink", "Unlink").toString(), unlink), SHorizontalBox::ESizeRule::Fill)),
+        SVerticalBox::ESizeRule::Fixed, s(EditorTheme::tabH));
+    list_->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(EditorTheme::space4));
+    list_->addSlot(HNew(SBorder)->background(EditorUiKit::kBorder), SVerticalBox::ESizeRule::Fixed, 1.f);
 }

@@ -4,6 +4,7 @@
 #include "../core/Profiler.hpp"
 #include "TransformText.hpp"
 #include "GuidRemap.hpp"
+#include "PrefabLink.hpp"
 #include "../assets/AssetManager.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/World.hpp"
@@ -30,7 +31,7 @@ static glm::vec3 parseVec3(const std::string& s) {
 static std::string F(float v) { return floatToText(v); }
 
 // ── writeActor ─────────────────────────────────────────────────────────────────
-void SceneSerializer::writeActor(std::ostream& os, const Actor* actor, int parentIndex) {
+void SceneSerializer::writeActor(std::ostream& os, const Actor* actor, int parentIndex, bool links, HGuid parentGuid) {
     const glm::vec3 pos   = actor->transform().position();
     const glm::quat rot   = actor->transform().rotation();
     const glm::vec3 euler = transform_text::quatToEulerDeg(rot);
@@ -51,6 +52,14 @@ void SceneSerializer::writeActor(std::ostream& os, const Actor* actor, int paren
     }
     if (parentIndex >= 0)
         os << "PARENT:" << parentIndex << "\n";
+    if (parentGuid.valid())
+        os << "PARENT_GUID:" << parentGuid.toString() << "\n";
+    if (links) {
+        const Actor::PrefabLink& l = actor->prefabLink;
+        if (!l.source.empty()) os << "PREFAB_SOURCE:" << l.source << "\n";
+        if (l.pair.valid())    os << "PREFAB_PAIR:" << l.pair.toString() << "\n";
+        for (const auto& r : l.raw) os << "PREFAB_RAW:" << r << "\n";
+    }
 
     // 컴포넌트는 등록된 타입마다 COMPONENT 블록으로 씁니다(v4, DEF-22). 예전에는 다섯 종을 여기서
     // LIGHT: · CAMERA: · RIGID: 같은 줄로 손으로 썼고, 새 컴포넌트는 저장할 수 없었습니다.
@@ -90,6 +99,9 @@ bool SceneSerializer::parseLine(const std::string& key, const std::string& val, 
         }
     }
     else if (key == "PARENT")     { std::istringstream ss(val); ss >> d.parentIndex; }
+    else if (key == "PREFAB_SOURCE") { d.prefabSource = val; }
+    else if (key == "PREFAB_PAIR")   { HGuid::parse(val, d.prefabPair); }
+    else if (key == "PREFAB_RAW")    { d.prefabRaw.push_back(val); }
     else if (key == "MODEL")      { d.model = val; }
     else if (key == "MESH_IDX")   { std::istringstream ss(val); ss >> d.meshIndex; }
     else if (key == "MESH_STATE") { std::istringstream ss(val); ss >> d.meshVisible >> d.meshEnabled; }
@@ -177,6 +189,9 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
     // 가 처음부터 비활성 기준으로 판정하므로 불필요한 onEnable→onDisable 이 없습니다.
     // (부모는 여기서 알 수 없어 호출자가 나중에 attachTo 로 배선합니다.)
     a->setActive(d.active != 0);
+    a->prefabLink.source = d.prefabSource;
+    a->prefabLink.pair   = d.prefabPair;
+    a->prefabLink.raw    = d.prefabRaw;
     for (const std::string& t : d.tags) {
         if (!a->addTag(t) && !Actor::validTag(t)) {
             HLOG(LogScene, Warning) << "actor '" << d.name << "': bad tag '" << t << "' skipped";
@@ -307,7 +322,8 @@ std::string SceneSerializer::writeScene(const World& world, const Actor* skip) {
             if (it != indexOf.end()) parentIdx[i] = it->second;
         }
     }
-    return std::string(kSceneHeader) + "\n" + writeActorSet(set, parentIdx);
+    // 프리팹 인스턴스는 인스턴스 블록 + 원본과 다른 값만(Docs/Linked_Prefabs.md D1).
+    return std::string(kSceneHeader) + "\n" + hprefablink::writeCompact(set, parentIdx, hprefablink::loaderFor(&world));
 }
 
 std::string SceneSerializer::writeActorSet(const std::vector<const Actor*>& actors,
@@ -324,10 +340,14 @@ std::string SceneSerializer::writeActorSet(const std::vector<const Actor*>& acto
 std::vector<Actor*> SceneSerializer::readScene(const std::string& source, World& world, AssetManager& assets,
                                                GuidPolicy guids) {
     HPROF_SCOPE("Scene.Read");
-    // Fresh: 세트 안 GUID 를 새로 주고 세트 안을 가리키는 참조를 바꾼 글을 읽습니다(GuidRemap.hpp).
-    const std::string text = guids == GuidPolicy::Fresh
-        ? hguid::remapFresh(source, [&world](HGuid g) { return world.findByGuid(g) != nullptr; })
+    // 프리팹 인스턴스 블록을 먼저 펼칩니다(원본 + 덮어쓰기, Docs/Linked_Prefabs.md D7).
+    std::string text = hprefablink::needsExpand(source)
+        ? hprefablink::expandText(source, hprefablink::loaderFor(&world))
         : source;
+    // Fresh: 세트 안 GUID 를 새로 주고 세트 안을 가리키는 참조를 바꾼 글을 읽습니다(GuidRemap.hpp). 세트 안 프리팹 인스턴스의
+    // 소속 액터는 새 루트 GUID 에서 파생한 값입니다(D3).
+    if (guids == GuidPolicy::Fresh)
+        text = hguid::remapWith(text, hprefablink::freshMapping(text, [&world](HGuid g) { return world.findByGuid(g) != nullptr; }));
     // 직렬화 순서대로 블록마다 정확히 한 슬롯을 만듭니다(스폰 실패 시 nullptr 자리표시자).
     // writeScene 이 액터마다 위치 인덱스를 매기므로, 이름 빈 블록 등으로 스폰이
     // 실패해도 슬롯을 예약해야 그 뒤 PARENT 인덱스가 밀리지 않습니다. 부모 배선은 전부

@@ -442,6 +442,7 @@ set(RUNTIME_SOURCES
     src/assets/AnimStateMachine.cpp
     src/sceneio/PrefabManager.cpp
     src/sceneio/SceneSerializer.cpp
+    src/sceneio/PrefabLink.cpp
     src/sceneio/ComponentSerializer.cpp
     src/audio/AudioSystem.cpp
     src/audio/AudioMix.cpp
@@ -1125,6 +1126,20 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaRefTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 링크된 프리팹 테스트(2026-11-21, Docs/Linked_Prefabs.md) -----------------
+    # 인스턴스 블록 펼치기 · 결정적 GUID · 비교로 얻는 덮어쓰기 · 다시 펼침 · 중첩 2단 왕복 · 순환 거부 · 추가 · 삭제 · 링크 끊기 ·
+    # 되돌리기 · 원본에 적용 · 옛 씬 · 프리팹을 창 · GPU 없이 검산합니다(메시 없는 액터만, 프리팹 글은 캐시 서비스에 넣음).
+    add_executable(HarukaPrefabTest
+        tests/PrefabLinkTest.cpp
+        src/editor/ActorSnapshot.cpp
+    )
+    target_link_libraries(HarukaPrefabTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaPrefabTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaPrefabTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaPrefabTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 애니메이션 테스트(2026-11-20, Docs/Animation_System.md) ------------------
     # 트랙 샘플링 · 자세 섞기 · glTF 클립 가져오기 · 캐시 v10 · 재생기(크로스페이드 · 가산 · 이벤트 · 루트 모션) · 상태 기계를
     # 화면 없이 검산합니다. 시험 모델 Projects/Samples/Content/models/anim/TestArm.glb 를 가상 파일 시스템으로 읽습니다.
@@ -1474,6 +1489,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME log_category         COMMAND HarukaLogTest)
     add_test(NAME text_system          COMMAND HarukaTextTest)
     add_test(NAME object_refs          COMMAND HarukaRefTest)
+    add_test(NAME prefab_links         COMMAND HarukaPrefabTest)
     add_test(NAME crash_reports        COMMAND HarukaCrashTest)
     add_test(NAME animation            COMMAND HarukaAnimTest)
     add_test(NAME async_loading        COMMAND HarukaLoadingTest)

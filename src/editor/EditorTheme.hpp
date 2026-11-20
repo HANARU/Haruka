@@ -116,6 +116,9 @@ inline constexpr glm::vec4 badgeScene    = axisZ;
 inline constexpr glm::vec4 badgeModel    = accentHover;
 inline constexpr glm::vec4 badgeAudio    = warn;
 inline constexpr glm::vec4 badgePrefab   = axisY;
+// 링크된 프리팹(Docs/Linked_Prefabs.md D9): 아웃라이너의 인스턴스 이름 · 디테일의 덮어쓴 값 머리.
+inline constexpr glm::vec4 prefabInstance = badgePrefab;
+inline constexpr glm::vec4 prefabOverride = accentHover;
 inline constexpr glm::vec4 logCategory   = srgb(0x8CA6C8);   // 로그 카테고리 열
 
 // ── D2 모서리 · 테두리 · 그림자 토큰 (1x 기준 px, UI 배율 s() 를 곱해 사용) ────

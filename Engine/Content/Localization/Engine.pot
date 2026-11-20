@@ -8,22 +8,62 @@ msgctxt "Editor.Content,Tip.AssetActions"
 msgid "References, rename and move"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:131
+#: src/editor/DetailsPanel.cpp:135
 msgctxt "Editor.Details,ActorRef.Missing"
 msgid "(missing)"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:130
+#: src/editor/DetailsPanel.cpp:134
 msgctxt "Editor.Details,ActorRef.None"
 msgid "None"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:327
+#: src/editor/DetailsPanel.cpp:640
+msgctxt "Editor.Details,Prefab.Apply"
+msgid "Apply"
+msgstr ""
+
+#: src/editor/DetailsPanel.cpp:561
+msgctxt "Editor.Details,Prefab.Missing"
+msgid "Missing: {0}"
+msgstr ""
+
+#: src/editor/DetailsPanel.cpp:565
+msgctxt "Editor.Details,Prefab.MissingKept"
+msgid "Overrides are kept as written"
+msgstr ""
+
+#: src/editor/DetailsPanel.cpp:570
+msgctxt "Editor.Details,Prefab.Overrides"
+msgid "{0} overridden value(s)"
+msgstr ""
+
+#: src/editor/DetailsPanel.cpp:638
+msgctxt "Editor.Details,Prefab.Revert"
+msgid "Revert"
+msgstr ""
+
+#: src/editor/DetailsPanel.cpp:569
+msgctxt "Editor.Details,Prefab.RootOverrides"
+msgid "Root, {0} overridden value(s)"
+msgstr ""
+
+#: src/editor/DetailsPanel.cpp:562
+msgctxt "Editor.Details,Prefab.Source"
+msgid "Instance of {0}"
+msgstr ""
+
+#: src/editor/DetailsPanel.cpp:642
+msgctxt "Editor.Details,Prefab.Unlink"
+msgid "Unlink"
+msgstr ""
+
+#: src/editor/DetailsPanel.cpp:339
 msgctxt "Editor.Details,Tip.Enable"
 msgid "Enable/Disable Component"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:331
+#: src/editor/DetailsPanel.cpp:343
 msgctxt "Editor.Details,Tip.Remove"
 msgid "Remove Component"
 msgstr ""
@@ -63,7 +103,7 @@ msgctxt "Editor.Dialog,Button.DontSave"
 msgid "Don't Save"
 msgstr ""
 
-#: src/editor/EditorApp_reload.cpp:138
+#: src/editor/EditorApp_reload.cpp:150
 msgctxt "Editor.Dialog,Button.Keep"
 msgid "Keep Current"
 msgstr ""
@@ -73,7 +113,7 @@ msgctxt "Editor.Dialog,Button.Move"
 msgid "Move"
 msgstr ""
 
-#: src/editor/EditorApp_reload.cpp:137
+#: src/editor/EditorApp_reload.cpp:149
 msgctxt "Editor.Dialog,Button.Reload"
 msgid "Reload"
 msgstr ""
@@ -128,12 +168,12 @@ msgctxt "Editor.Dialog,PickActor.Message"
 msgid "Choose the actor this field points to.\nNow: {0}"
 msgstr ""
 
-#: src/editor/EditorApp_reload.cpp:135
+#: src/editor/EditorApp_reload.cpp:147
 msgctxt "Editor.Dialog,Reload.Message"
 msgid "{0} was changed outside the editor.\nReload it?"
 msgstr ""
 
-#: src/editor/EditorApp_reload.cpp:134
+#: src/editor/EditorApp_reload.cpp:146
 msgctxt "Editor.Dialog,Reload.Title"
 msgid "Scene Changed on Disk"
 msgstr ""
@@ -178,7 +218,7 @@ msgctxt "Editor.Dialog,Verb.NewScene"
 msgid "creating a new scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:224
+#: src/editor/EditorApp.cpp:231
 msgctxt "Editor.Dialog,Verb.OpenAnother"
 msgid "opening another scene"
 msgstr ""
@@ -188,147 +228,147 @@ msgctxt "Editor.Dock,Tip.CloseTab"
 msgid "Close Tab"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:607
+#: src/editor/EditorApp.cpp:621
 msgctxt "Editor.Menu,Actor"
 msgid "Actor"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:608
+#: src/editor/EditorApp.cpp:622
 msgctxt "Editor.Menu,Actor.AddEmpty"
 msgid "Add Empty"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:615
+#: src/editor/EditorApp.cpp:629
 msgctxt "Editor.Menu,Actor.AttachToPrev"
 msgid "Attach To Prev Selected"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:623
+#: src/editor/EditorApp.cpp:637
 msgctxt "Editor.Menu,Actor.Detach"
 msgid "Detach Selected"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:590
+#: src/editor/EditorApp.cpp:604
 msgctxt "Editor.Menu,Edit"
 msgid "Edit"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:605
+#: src/editor/EditorApp.cpp:619
 msgctxt "Editor.Menu,Edit.AudioOutput"
 msgid "Audio Output..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:593
+#: src/editor/EditorApp.cpp:607
 msgctxt "Editor.Menu,Edit.Copy"
 msgid "Copy"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:596
+#: src/editor/EditorApp.cpp:610
 msgctxt "Editor.Menu,Edit.Delete"
 msgid "Delete"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:595
+#: src/editor/EditorApp.cpp:609
 msgctxt "Editor.Menu,Edit.Duplicate"
 msgid "Duplicate"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:597
+#: src/editor/EditorApp.cpp:611
 msgctxt "Editor.Menu,Edit.FrameSelected"
 msgid "Frame Selected"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:599
+#: src/editor/EditorApp.cpp:613
 msgctxt "Editor.Menu,Edit.GizmoSize"
 msgid "Gizmo Size (S/M/L)"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:594
+#: src/editor/EditorApp.cpp:608
 msgctxt "Editor.Menu,Edit.Paste"
 msgid "Paste"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:592
+#: src/editor/EditorApp.cpp:606
 msgctxt "Editor.Menu,Edit.Redo"
 msgid "Redo"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:591
+#: src/editor/EditorApp.cpp:605
 msgctxt "Editor.Menu,Edit.Undo"
 msgid "Undo"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:584
+#: src/editor/EditorApp.cpp:598
 msgctxt "Editor.Menu,File"
 msgid "File"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:585
+#: src/editor/EditorApp.cpp:599
 msgctxt "Editor.Menu,File.NewScene"
 msgid "New Scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:586
+#: src/editor/EditorApp.cpp:600
 msgctxt "Editor.Menu,File.OpenScene"
 msgid "Open Scene..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:587
+#: src/editor/EditorApp.cpp:601
 msgctxt "Editor.Menu,File.SaveScene"
 msgid "Save Scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:588
+#: src/editor/EditorApp.cpp:602
 msgctxt "Editor.Menu,File.SaveSceneAs"
 msgid "Save Scene As..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:638
+#: src/editor/EditorApp.cpp:652
 msgctxt "Editor.Menu,View"
 msgid "View"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:634
+#: src/editor/EditorApp.cpp:648
 msgctxt "Editor.Menu,View.Language"
 msgid "Language"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:629
+#: src/editor/EditorApp.cpp:643
 msgctxt "Editor.Menu,View.ResetLayout"
 msgid "Reset Layout"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:649
+#: src/editor/EditorApp.cpp:663
 msgctxt "Editor.Menu,Window"
 msgid "Window"
 msgstr ""
 
-#: src/editor/OutlinerPanel.cpp:437
+#: src/editor/OutlinerPanel.cpp:446
 msgctxt "Editor.Outliner,AddEmpty"
 msgid "Add Empty"
 msgstr ""
 
-#: src/editor/OutlinerPanel.cpp:26
+#: src/editor/OutlinerPanel.cpp:27
 msgctxt "Editor.Outliner,SearchHint"
 msgid "Search..."
 msgstr ""
 
-#: src/editor/OutlinerPanel.cpp:342
+#: src/editor/OutlinerPanel.cpp:351
 msgctxt "Editor.Outliner,Tip.Collapse"
 msgid "Collapse Children"
 msgstr ""
 
-#: src/editor/OutlinerPanel.cpp:418
+#: src/editor/OutlinerPanel.cpp:427
 msgctxt "Editor.Outliner,Tip.Delete"
 msgid "Delete Actor"
 msgstr ""
 
-#: src/editor/OutlinerPanel.cpp:343
+#: src/editor/OutlinerPanel.cpp:352
 msgctxt "Editor.Outliner,Tip.Expand"
 msgid "Expand Children"
 msgstr ""
 
-#: src/editor/OutlinerPanel.cpp:379
+#: src/editor/OutlinerPanel.cpp:388
 msgctxt "Editor.Outliner,Tip.Visibility"
 msgid "Toggle Visibility"
 msgstr ""
@@ -343,37 +383,37 @@ msgctxt "Editor.OutputLog,SearchHint"
 msgid "Search log..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:516
+#: src/editor/EditorApp.cpp:530
 msgctxt "Editor.Panels,ContentBrowser"
 msgid "Content Browser"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:533
+#: src/editor/EditorApp.cpp:547
 msgctxt "Editor.Panels,ContentDrawer"
 msgid "Content Drawer"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:532
+#: src/editor/EditorApp.cpp:546
 msgctxt "Editor.Panels,Details"
 msgid "Details"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:518
+#: src/editor/EditorApp.cpp:532
 msgctxt "Editor.Panels,GpuStats"
 msgid "GPU Stats"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:530
+#: src/editor/EditorApp.cpp:544
 msgctxt "Editor.Panels,Outliner"
 msgid "Outliner"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:517
+#: src/editor/EditorApp.cpp:531
 msgctxt "Editor.Panels,OutputLog"
 msgid "Output Log"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:531
+#: src/editor/EditorApp.cpp:545
 msgctxt "Editor.Panels,Viewport"
 msgid "Viewport"
 msgstr ""

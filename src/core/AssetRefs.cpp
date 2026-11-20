@@ -111,6 +111,13 @@ void refsInLines(const std::string& file, const std::string& bytes, std::vector<
         while (ke > b && (bytes[ke - 1] == ' ' || bytes[ke - 1] == '\t')) --ke;
         const std::string key = bytes.substr(b, ke - b);
         if (key == "ACTOR" || key == "NAME" || key == "GUID") continue;
+        // 프리팹 덮어쓰기 "OVERRIDE:<짝> <경로>=<값>" 은 값이 '=' 뒤입니다(Docs/Linked_Prefabs.md D6).
+        if (key == "OVERRIDE") {
+            size_t eq = sep + 1;
+            while (eq < e && bytes[eq] != '=') ++eq;
+            if (eq >= e) continue;
+            sep = eq;
+        }
         size_t vb = sep + 1, ve = e;
         while (vb < ve && (bytes[vb] == ' ' || bytes[vb] == '\t')) ++vb;
         while (ve > vb && (bytes[ve - 1] == ' ' || bytes[ve - 1] == '\t')) --ve;

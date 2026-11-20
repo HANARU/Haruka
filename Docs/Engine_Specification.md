@@ -69,7 +69,7 @@
 |---|---|
 | 소스 | `src/` 의 `.cpp` · `.hpp` 179 파일, 30,275 줄 |
 | 셰이더 | GLSL 20 파일(셰이더 19 + 공용 헤더 1), 841 줄(2026-11-02). 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 42개 실행 파일, 검사 3,440개(`ctest -C Release`, 2026-11-21 텍스처 압축 뒤) |
+| 자동 테스트 | 43개 실행 파일, 검사 3,512개(`ctest -C Release`, 2026-11-21 링크된 프리팹 뒤) |
 | 문서 | `Docs/` 활성 문서 28개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳤습니다. 같은 날 빛 · 그림자 조사 후속에서 DEF-148 을 고치고 DEF-158 ~ 161(4건)을 등재해 모두 고쳤습니다. 2026-11-02 헤드셋 확인에서 DEF-162 · 163, 마지막 점검에서 DEF-164 를 등재해 모두 고쳤습니다. 2026-11-06 검토 결함 묶음 DEF-130 ~ 147(18건)을 모두 고쳤고, 같은 날 임포트 검토에서 DEF-165(텍스처 밉맵)를, 공간 음향 조사에서 DEF-166(패닝 문서 오류)을 등재해 고쳐, 지금은 166건 중 해결 155 · 열림 5 · 보류 3 · 닫음 3 입니다. 그 뒤 DEF-167(보류, 2026-11-16)과 DEF-168 ~ 172(2026-11-17 ~ 18, 모두 해결)를 등재해 172건 중 해결 160 · 열림 5 · 보류 4 · 닫음 3 입니다 |
@@ -168,7 +168,7 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | `src/core/` | 18 · 1,850 | 기반: `HLog`, `EngineSettings`, 값 해석(`FieldParse.hpp`), 프로젝트 설정(`ProjectSettings.hpp`), 실행 폴더 · 쓰기 루트(`AppPaths`), 원자적 저장(`FileUtil.hpp`), 디버그 선(`DebugDraw.hpp`), 에셋 루트(`ProjectPaths.hpp`), 계측(`FrameTimings` · `FramePacing`, CPU 구간 기록 `Profiler` · 추적 파일 `TraceRecorder`), `Transform`, 모듈 인터페이스(`IEngineModule`) |
 | `src/scene/` | 11 · 949 | 장면 모델: `World`(월드 단위 서비스 포함) · `Actor` · `Component`, 컴포넌트 필드 · `ComponentRegistry` · 리플렉션(`Reflect.hpp`) |
 | `src/runtime/` | 18 · 1,936 | 조립: `Engine`(프레임 단계), 실행 옵션, 엔진 앞단 인터페이스(`IEngineFrontend.hpp`), 게임 모듈 인터페이스, `ModuleManager`, XR 세션 제어 · 다시 열기 · 원점, 월드 UI 포인터, 프레임 통계, 셰이더 묶음 짝 확인 |
-| `src/sceneio/` | 8 · 860 | 씬 · 프리팹 직렬화(`SceneSerializer` · `PrefabManager`), 컴포넌트 블록 직렬화, 회전 글자 표현 |
+| `src/sceneio/` | 11 · 2,225 | 씬 · 프리팹 직렬화(`SceneSerializer` · `PrefabManager`), 컴포넌트 블록 직렬화, 회전 글자 표현 |
 | `src/renderer/` | 24 · 4,223 | `Renderer`(프레임 구성), `RenderContext`, `GpuScene`, `FrameResources`, 스왑체인, 인스턴싱 묶기 · 라이트 선택 · 절두체 컬링 헤더, 렌더 확장 |
 | `src/renderer/passes/` | 11 · 2,106 | Shadow · Geometry · AO · Bloom · Post 패스(`HPass` 수명주기) |
 | `src/memory/` | 2 · 388 | `HarukaAllocator`(1GB 단일 힙, 세 구역) |
@@ -357,7 +357,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | 절차 도형 | Box · Plane · Sphere · Cylinder · Cone · Capsule · Torus · Arrow · Icosphere 9종. 머티리얼은 체커 또는 단색(색 · 금속도 · 거칠기) |
 | 씬 형식 | 텍스트 `.hscene` v4. 액터마다 `POS` · `ROT`(오일러 각) · `QUAT`(정확한 회전) · `SCALE` · `ACTIVE` · `PARENT`, 컴포넌트마다 `COMPONENT:타입` … `END_COMPONENT` 블록에 `이름=값`. 실수는 다시 읽으면 같은 값이 되는 가장 짧은 십진수로 씀 |
 | 호환 | v3 이하 씬 · v1 · v2 프리팹을 계속 읽음. 등록되지 않은 컴포넌트 타입은 원문 그대로 보존해 다시 저장할 때 씀 |
-| 프리팹 | `.hprefab` v3, 서브트리(씬 블록, 첫 블록이 루트. 2026-10-15). 에디터에서 저장 · 콘텐츠 브라우저에서 꺼내기. v1 · v2 도 읽음 |
+| 프리팹 | `.hprefab` v3, 서브트리(씬 블록, 첫 블록이 루트. 2026-10-15). 에디터에서 저장 · 콘텐츠 브라우저에서 꺼내기. v1 · v2 도 읽음. **v6(2026-11-21)**: 꺼내면 링크된 인스턴스가 되고, 씬 v7 은 인스턴스를 `PREFAB:` 블록(원본 경로 + 원본과 다른 값만 적은 덮어쓰기)으로 저장합니다. 원본을 고치면 덮어쓰지 않은 값만 따라오고, 프리팹 안 프리팹(중첩) · 순환 거부 · 되돌리기 · 원본에 적용 · 링크 끊기가 됩니다([Linked_Prefabs.md](Linked_Prefabs.md)) |
 | 씬 파일 | 프로젝트 폴더의 `assets/scenes/` 아래 논리 경로로 열고 저장. 임시 파일에 쓴 뒤 바꾸는 원자적 저장(2026-10-15) |
 | 시작 씬 | `assets/project.ini` 의 `startScene`(기본 `assets/scenes/LightingProbe.hscene`, 라이팅 확인용 절차 도형 씬, v4). 에디터는 마지막에 연 씬을 먼저 엶 |
 | 추적 에셋 | 모델 1(`model.glb`), 시험 음원 3, 씬 2(`LightingProbe` · `XrDemo`), 프리팹 2(`AudioProbe` · `XrPlayer`), 프로젝트 설정 `project.ini` |
@@ -480,7 +480,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 42개, 검사 3,440개(2026-11-21).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 43개, 검사 3,512개(2026-11-21).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -491,6 +491,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `log_category` | 61 | 로그 카테고리 |
 | `text_system` | 121 | 글자 체계([Text_System.md](Text_System.md)): UTF-8 읽기 · 고치기, 글자(grapheme) · 단어 경계, 한글 NFC, ASCII 대소문자 무시, 편집 상태, 입력 처리기(가짜 창 · 클립보드 · 자동 반복 · IME 조합 · 후보 창 자리), HText(번역 · 낡은 번역 · 층 · 서식 · 숫자), .po 읽기, HTEXT 모으기 · 한국어 표가 소스 키를 모두 덮음, 씬 이름 |
 | `object_refs` | 98 | 참조 체계([Object_References.md](Object_References.md)): 액터 GUID(형식 · 겹침 · World 색인), 액터 참조(지우면 끊기고 되살리면 이어짐), 씬 v6 GUID 왕복 · 옛 파일 · 겹친 GUID, Fresh 정책(프리팹 두 번 꺼내기 · 복제한 쌍 · 밖 참조 · 등록되지 않은 컴포넌트 · CRLF), Undo · Play 뒤 참조, 디테일 액터 참조 칸 · 고르기 목록, 에셋 참조 색인(옛 assets/ 형식 · ini · glTF uri) · 끊긴 참조 · 옮기기(파일 · 폴더 · 거절 · 바이트 보존 · 되돌리기 · 코드 경고), 샘플 프로젝트에 끊긴 참조 없음, 샘플 LookAtComponent |
+| `prefab_links` | 72 | 링크된 프리팹([Linked_Prefabs.md](Linked_Prefabs.md)): 결정적 GUID 파생, 인스턴스 블록 펼치기(계층 · 짝 · 안 참조), 바꾸지 않은 인스턴스 = 블록만, 비교로 얻는 덮어쓰기 왕복, 원본이 바뀌면 덮어쓰지 않은 값만 따라옴(ID 유지), 추가 · 지운 컴포넌트 · 지운 액터 · 더한 액터 · 밖으로 옮김 · `@PARENT`, 중첩 2단 왕복 · 안쪽 원본 갱신 · 원본에 적용(중첩 · 보통 블록), 순환 거부 · 펼치지 못한 블록 보존 · 저장 거부, 되돌리기 · 링크 끊기 Undo · 삭제 되살리기 · 붙여넣기 · `MEMBER_GUID`, 옛 프리팹(GUID 없음) · v5 · v6 머리 줄, 에셋 참조(원본 경로 · 덮어쓰기 값) |
 | `cpu_profiling` | 85 | CPU 구간 계측([CPU_Profiling.md](CPU_Profiling.md)): 중첩 스코프(순서 · 포함), 스레드 구분(끝난 스레드 수집 · 이름), 시작 · 멈춤 · 상한(버린 수), Chrome trace JSON(작은 파서로 다시 읽기 · 이스케이프 · 마이크로초 표기 · 정렬), 끈 번역 단위(`constexpr` · 이벤트 0), FrameTimings 공유 측정 지점, 추적 경로 규칙 · 기록기 · 콘솔 명령 · `--trace-frames`, 스코프 비용 |
 | `asset_hot_reload` | 58 | 에셋 핫리로드 · 가져오기 설정([Asset_Hot_Reload.md](Asset_Hot_Reload.md)): import.ini 패턴(`*` · `**` · `?` · 대소문자) · 잘못된 줄 알림 · 뒤 절이 이김 · 설정 해시, 바뀐 파일 모으기(300 ms · 합치기 · 넘침) · 분류 · 프로젝트 상대 경로 변환, 바깥 파일 기록 · 의존 텍스처가 바뀌면 캐시 무효(DEF-174) · `/Game/` 경로의 `../` 바깥 파일(DEF-175) · 마운트 넘는 uri 거부, 배율 · 자동 LOD · sRGB 적용, 정적 · 스킨 메시 다시 묶기(meshIndex 줄임), 은퇴 목록(중복 · 새 핸들 · null 제외), 임시 폴더 감시, 명령줄 |
 | `texture_compression` | 72 | 텍스처 압축([Texture_Compression.md](Texture_Compression.md)): KTX2 쓰기 · 읽기(단계 순서 · 정렬 · DFD) · 손상 14가지 거부, 형식 표 · 블록 크기 · 열쇠(화소 · 용도 · 크기), 장치 지원 판단(기능 꺼짐 · 선형 필터 없음 → RGBA8), 밉(Vulkan 크기 · sRGB 평균 · 노멀 정규화), 압축 → 풀기 PSNR 하한(BC7 · BC5 · ASTC 6x6 · 5x5, 두 채널 노멀 B = 0), 쿠킹 캐시(다시 압축 안 함 · 손상 다시 만듦), TexProbe 쿠킹 → 런타임 찾기 다섯 칸(다른 대상 · 손상 · 화소 바뀜이면 붙이지 않음) |
@@ -510,7 +511,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `xr_input` | 109 | VR 입력, 키 · 마우스 축, 설정 줄 바인딩, 햅틱, 입력 확장([Input_Extensions.md](Input_Extensions.md)): 가짜 게임패드 버튼 · 축 · 해제 · 패드 선택 규칙, 데드존(원형 · 축별) · 곡선 · 감도 · 반전, 컨텍스트 소비 · `blockLower` · 우선순위, 재지정 · 충돌 · 저장 → 다시 읽기 왕복 · 기본값 되돌리기 |
 | `draw_batching` | 34 | 자동 인스턴싱 묶기 · 행 배정 |
 | `render_extensions` | 43 | 패스 레지스트리 · 확장 지점, 멀티뷰를 막는 확장 판정(2026-11-18), 텍스처 밉 사슬(DEF-165), 지연 삭제 대기열 |
-| `scene_components` | 74 | 컴포넌트 등록 · 씬 v4 값 · 회전 왕복, 라이트 발광 방향(액터 회전 -Z) · 옛 `direction` 접기, 씬 v6 · 프리팹 v5 머리 줄 |
+| `scene_components` | 74 | 컴포넌트 등록 · 씬 v4 값 · 회전 왕복, 라이트 발광 방향(액터 회전 -Z) · 옛 `direction` 접기, 씬 v7 · 프리팹 v5 머리 줄 |
 | `light_selection` | 45 | 라이트 선택 · 상한 설정 파일 |
 | `asset_cache` | 28 | glTF 캐시 유효성(옛 형식 v1 ~ 3 다시 만듦), 논리 경로 키의 안정성, 묶음 안 원본 판정, 에셋 논리 경로 해석 |
 | `scene_document` | 63 | 씬 변경 여부(Undo 상태 표지 · Play 고정), 원자적 저장(바이너리판 포함), 프로젝트 설정 읽기(XR 리그 높이 · 게임 VR 시작 · 품질 단계 · 플랫폼 접미사 포함), 손으로 만든 설정 파일의 인코딩(BOM · UTF-16 · UTF-32 거부, DEF-152) |

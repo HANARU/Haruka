@@ -1,6 +1,7 @@
 #include "OutlinerPanel.hpp"
 #include "../core/Utf8.hpp"
 #include "../ui/slate/widgets/SIcon.hpp"
+#include "../sceneio/PrefabLink.hpp"
 #include "EditorCommands.hpp"
 #include "../components/LightComponent.hpp"
 #include "../input/HInputSystem.hpp"
@@ -293,8 +294,16 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
 
     glm::vec4   typeCol;
     std::string typeStr = typeLabel(a, typeCol);
+    // 링크된 프리팹(Docs/Linked_Prefabs.md D9): 인스턴스 루트는 종류 칸에 "Prefab"(원본을 못 펼쳤으면 "Prefab?"), 소속 액터는 이름 색.
+    const bool prefabMember = hprefablink::instanceRootOf(a) != nullptr;
+    if (!a->prefabLink.source.empty()) {
+        const bool missing = !a->prefabLink.raw.empty();
+        typeStr = missing ? "Prefab?" : "Prefab";
+        typeCol = missing ? EditorTheme::error : EditorTheme::prefabInstance;
+    }
     const glm::vec4 nameCol = sel ? EditorTheme::textOnAccent
-                                  : (r.dimPath || r.dimOff) ? EditorTheme::textDisabled : EditorUiKit::kTextBody;
+                                  : (r.dimPath || r.dimOff) ? EditorTheme::textDisabled
+                                  : prefabMember ? EditorTheme::prefabInstance : EditorUiKit::kTextBody;
     std::shared_ptr<HWidget> nameWidget;
     if (ren) {
         // 이름 바꾸기 칸(글자 체계 T1): 커서 · 선택 · IME 조합 글을 제자리에 그립니다(예전에는 글 뒤에 '|' 를 붙임).

@@ -29,6 +29,46 @@ msgctxt "Editor.Details,Tip.Remove"
 msgid "Remove Component"
 msgstr "컴포넌트 제거"
 
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Prefab.Apply"
+msgid "Apply"
+msgstr "원본에 적용"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Prefab.Missing"
+msgid "Missing: {0}"
+msgstr "원본 없음: {0}"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Prefab.MissingKept"
+msgid "Overrides are kept as written"
+msgstr "덮어쓰기는 쓰인 그대로 보존됩니다"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Prefab.Overrides"
+msgid "{0} overridden value(s)"
+msgstr "덮어쓴 값 {0}개"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Prefab.Revert"
+msgid "Revert"
+msgstr "되돌리기"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Prefab.RootOverrides"
+msgid "Root, {0} overridden value(s)"
+msgstr "루트, 덮어쓴 값 {0}개"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Prefab.Source"
+msgid "Instance of {0}"
+msgstr "{0} 의 인스턴스"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Prefab.Unlink"
+msgid "Unlink"
+msgstr "링크 끊기"
+
 #: src/editor/EditorApp_scene.cpp:526
 msgctxt "Editor.Dialog,Asset.NoRefs"
 msgid "{0}\nNo scene, prefab or setting refers to it."

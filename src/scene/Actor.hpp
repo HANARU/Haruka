@@ -29,6 +29,19 @@ public:
     // World::assignGuid 로 파일 값을 넣습니다. id 는 실행 중 번호(Undo 커맨드가 씀)라 열 때마다 바뀌지만 guid 는 그대로입니다.
     HGuid guid() const { return guid_; }
 
+    // ── 프리팹 링크 (2026-11-21, Docs/Linked_Prefabs.md) ───────────────────────────
+    // 씬 · 프리팹 파일의 인스턴스 블록을 펼친 액터에 붙습니다. 저장할 때 원본과 비교해 다른 값만 덮어쓰기로 씁니다(D1).
+    //   source = 인스턴스 루트만: 원본 프리팹 경로. 비어 있으면 루트가 아님.
+    //   pair   = 인스턴스 소속 액터(루트 포함): 펼친 원본 안의 GUID(원본 액터와의 짝, D3).
+    //   raw    = 루트만: 펼치지 못한 인스턴스 블록(원본 없음 · 순환)의 줄. 다시 저장할 때 그대로 씁니다(D8).
+    struct PrefabLink {
+        std::string              source;
+        HGuid                    pair;
+        std::vector<std::string> raw;
+        bool empty() const { return source.empty() && !pair.valid() && raw.empty(); }
+    };
+    PrefabLink prefabLink;
+
     // 이 액터를 만든 월드(World::spawnActor 가 정함, 2026-11-18 S3). 컴포넌트가 월드 단위 서비스를 찾을 때 씁니다
     // (owner->world()->service<PhysicsSystem>() 등, World.hpp).
     World* world() const { return world_; }

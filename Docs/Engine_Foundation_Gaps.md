@@ -21,7 +21,7 @@
 | 6 | 파티클 · VFX · 데칼 | **2026-11-20 구현**: CPU 이미터(결정적 시드) · 빌보드 인스턴싱(가산 · 알파, 이미터끼리 + 이미터 안 정렬) · 포워드 상자 데칼 | (남음) 텍스처 파일 · Sub UV · 메시 파티클 · 조명 받는 파티클 · 데칼 텍스처 · 에디터 미리보기, Quest 오버드로 실측 | [Particles_And_Decals.md](Particles_And_Decals.md) |
 | 7 | 텍스처 압축 | **2026-11-21 구현**: 묶을 때 BC(PC) · ASTC(Android) KTX2 압축(밉 미리 생성 · 내용 열쇠 캐시), 런타임 KTX2 읽기 · 장치 지원 확인 · RGBA8 원본 대체, 블릿 없는 단계별 업로드, 텍스처 메모리 로그 | (남음) 헤드셋 ASTC 실행 · 가져오기 설정의 텍스처별 압축 · 에디터 압축 미리보기 | [Texture_Compression.md](Texture_Compression.md) |
 | 8 | 물리 조인트 · 충돌 이벤트 | **2026-11-20 구현**: 충돌 레이어 표 · 트리거 · 접촉 알림 · 조인트 네 종류 · 셰이프 캐스트 | (남음) 조인트 모터 · 스프링 · 끊어짐, 레이어 표 편집 화면 | [Physics_Joints_And_Events.md](Physics_Joints_And_Events.md) |
-| 9 | 링크된 프리팹 | 꺼내면 복사 | 인스턴스 링크 · 덮어쓰기 · 중첩 | |
+| 9 | 링크된 프리팹 | **2026-11-21 구현**: 씬 v7 · 프리팹 v6 인스턴스 블록(원본 경로 + 비교로 얻는 덮어쓰기), 결정적 GUID 파생, 추가 · 삭제, 다시 펼침(저장 · 원본에 적용 · 감시), 중첩 · 순환 거부, 에디터 표시 · 되돌리기 · 원본에 적용 · 링크 끊기 | (남음) 프리팹 변형 · 속성 칸 단위 표시 · 저장한 액터를 인스턴스로 바꾸기 · 창 확인 | [Linked_Prefabs.md](Linked_Prefabs.md) |
 | 10 | 입력 확장 | **2026-11-21 구현**: 데스크톱 게임패드(GLFW 표준 매핑) · 축 수정자(데드존 · 곡선 · 감도 · 반전) · 입력 컨텍스트(우선순위 · 소스 단위 소비) · 사용자 재지정(충돌 목록 · 바뀐 것만 저장) | (남음) 실제 패드 확인 · 패드 진동 · 패드 시선 · 재지정 UI | [Input_Extensions.md](Input_Extensions.md) |
 | 11 | 내비게이션 · AI | 없음 | 내비 메시 · 경로 찾기 · 상태 기계 | |
 | 12 | 오디오 버스 그래프 · 사운드 큐 | **2026-11-21 구현**: 버스마다 노드(부모 · 볼륨 · 음소거 · 미터), 스냅숏(우선순위 · 페이드), 신호 기준 더킹, 마스터 피크 리미터(기본 끔), 사운드 큐 `.hcue`(가중치 · 시드 · 피치 · 볼륨 · 동시 재생 상한 · 재시작 간격), CVar · 콘솔 | (남음) 에디터 버스 믹서 패널 · 믹스 정의 파일 · 버스 효과 · `ui` 버스 일시정지 제외 | [Audio_Design.md](Audio_Design.md) 12절 |
@@ -159,7 +159,8 @@
 - **현재 상태:** 프리팹 v5 를 꺼내면 복사합니다(GUID Fresh). 씬에 원본 링크가 남지 않습니다.
 - **부족한 점:** 인스턴스 링크, 속성 덮어쓰기 기록, 중첩 프리팹, 원본을 고치면 인스턴스에 퍼짐.
 - **의존 관계:** 참조 체계의 GUID · 에셋 참조 색인을 그대로 씁니다.
-- **검증 체크리스트:** 원본 값을 바꾸면 덮어쓰지 않은 인스턴스만 바뀜, 덮어쓴 값은 유지, 중첩 2단 왕복.
+- **검증 체크리스트:** ✅ 원본 값을 바꾸면 덮어쓰지 않은 인스턴스만 바뀜, ✅ 덮어쓴 값은 유지, ✅ 중첩 2단 왕복(2026-11-21,
+  [Linked_Prefabs.md](Linked_Prefabs.md)). 남은 것: 프리팹 변형 · 속성 칸 단위 표시 · 창 확인.
 
 ### 3-10. 입력 확장 (10위)
 
@@ -219,6 +220,7 @@
 
 | 날짜 | 후보 | 상태 |
 |---|---|---|
+| 2026-11-21 | 9 링크된 프리팹 | 끝([Linked_Prefabs.md](Linked_Prefabs.md)): 씬 v7 · 프리팹 v6 인스턴스 블록(`PREFAB:` 원본 경로 · 루트 GUID · `OVERRIDE:<짝> <경로>=<값>` · `REMOVE:` · `MEMBER_GUID:`), 안의 액터 GUID = `derive(루트, 원본 GUID)`(다시 펼쳐도 같아 밖의 참조가 유지됨), 덮어쓰기는 저장할 때 원본(에디터 캐시 서비스 `PrefabSourceCache` 의 글)과 비교해 다른 값만, 추가 · 지운 컴포넌트 · 지운 액터 · 더한 액터(`PARENT_GUID`) · 안에서 부모 바꿈(`@PARENT`), 다시 펼침 `PrefabManager::refreshInstances`(실행 번호 · 더한 액터 · 선택 유지, Save as Prefab · 원본에 적용 · 파일 감시), 중첩 2단 왕복 · 순환 거부, Undo 스냅숏 · 붙여넣기는 링크 줄이 붙은 전체 형식, 아웃라이너 `Prefab` 표시 · 디테일 PREFAB 섹션(되돌리기 · 원본에 적용 · 링크 끊기). 시험 `prefab_links` 72, 검사 3,440 → 3,512, 기준 PNG 같음, UI 덤프 새 기준 b_09(샘플 장면 · 프리팹 추가로 콘텐츠 목록 3장면 + 새 장면). 남음: 프리팹 변형 · 속성 칸 단위 표시 · 창 확인 |
 | 2026-11-21 | 7 텍스처 압축 | 끝([Texture_Compression.md](Texture_Compression.md)): HarukaPak 이 묶는 모델을 런타임과 같은 glTF 로더로 읽어 텍스처를 KTX2 로 압축(색 BC7 sRGB / ASTC 6x6, 노멀 BC5 / ASTC 5x5 RG01 + 셰이더 Z 복원, 선형 BC7 / ASTC 6x6, 밉 미리 생성)하고 `textures/<대상>/<열쇠>.ktx2` 로 함께 넣습니다(Windows = bc, Android = astc, 최종 화소 XXH3 열쇠 캐시). 엔진은 워커에서 KTX2 를 붙이고, 그 실행의 대상이 쓰는 압축 기능만 켜며, 형식을 샘플링할 수 없으면 RGBA8 원본으로 올립니다. 압축은 묶은 창 게임의 auto 또는 `--texture-compression` 으로만 켜져 기준 PNG 그대로. 외부 라이브러리 astc-encoder 5.7.1 · bc7enc_rdo(HarukaPak · 시험 전용). TexProbe 4장 3.33 MB → BC 25% · ASTC 13.3%, TextureProbe PNG PSNR 40.05 dB. 시험 72 검사 + 장치 계획 4 |
 | 2026-11-21 | 14 접근성 | 끝([Accessibility.md](Accessibility.md)): 자막 큐 `SubtitleQueue`(최대 줄 수 · 우선순위 · 같은 id · 글자 수 표시 시간) 와 표시 `SubtitlePanel`(3D UI 패널 경로, XR 머리 고정 시선 아래 · 데스크톱 화면 아래, 배경 불투명도 · 크기), `AudioComponent` 자막 칸 · 콘솔 `subtitle.say`, 글자 배율 `access.textScale`(패널 트리 다시 만듦), 후처리 비네트 `comfort.vignette`(이동 컴포넌트가 속도를 알림) · 색약 보정 `access.colorFilter`, 앉은 자세 `comfort.seated` · `comfort.standingHeight` · `comfort.recenterSeated`, 한 손 조작 `access.hand`(스틱 맞바꿈 · 텔레포트 손), 시험 `accessibility` 111. 검사 3,253 → 3,364, 기준 PNG · UI 덤프 같음. 남음: 헤드셋 확인 · 자막 깊이 무시 · 큰 대비 테마 · 설정 화면 |
 | 2026-11-21 | 10 입력 확장 | 끝([Input_Extensions.md](Input_Extensions.md)): 플랫폼 층 `HGamepadState` · `IWindow::readGamepad`(GLFW 표준 매핑, 쓰던 패드 유지 · 없으면 번호가 가장 작은 패드, 연결 · 해제 로그), `pad:` 동작 · 축 소스, `input.mod.*` 수정자(패드 기본 원형 데드존 0.15, XR 은 그대로), `input.context.*` 컨텍스트와 `pushContext` · `popContext`(위 컨텍스트가 매핑한 소스는 아래로 가지 않음, `blockLower`), `rebind` · `resetBinding` · `resetAllBindings` · 충돌 목록, 덮어쓰기 규칙을 `HInputSystem::applyUserOverrides` 로 옮김. 검사 3,175 → 3,253, 기준 PNG · UI 덤프 같음. 남음: 실제 패드 확인 · 패드 진동 · 패드 시선 · 재지정 UI |

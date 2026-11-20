@@ -247,6 +247,7 @@ UE식 용어 채택, **"명칭만" 결정**(내부 상대값, 물리 단위·노
 - ✅ **⑥ 파티클 · VFX · 데칼(2026-11-20)**: [Particles_And_Decals.md](Particles_And_Decals.md). 텍스처 파일 · Sub UV · 메시 파티클 · 조명 받는 파티클 · 데칼 텍스처 · 에디터 미리보기 · Quest 오버드로 실측이 남음.
 - ✅ **⑩ 입력 확장(2026-11-21)**: [Input_Extensions.md](Input_Extensions.md). 실제 패드 연결 확인 · 패드 진동 · 패드 시선 · 재지정 UI 가 남음.
 - ✅ **⑦ 텍스처 압축(2026-11-21)**: [Texture_Compression.md](Texture_Compression.md). 헤드셋 ASTC 실행 · 가져오기 설정의 텍스처별 압축 · 에디터 압축 미리보기가 남음.
+- ✅ **⑨ 링크된 프리팹(2026-11-21)**: [Linked_Prefabs.md](Linked_Prefabs.md). 프리팹 변형 · 속성 칸 단위 표시 · 저장한 액터를 인스턴스로 바꾸기 · 창 확인이 남음.
 - ✅ **⑭ 접근성(2026-11-21)**: [Accessibility.md](Accessibility.md). 헤드셋 확인(자막 위치 · 비네트 느낌 · 앉은 높이 · 왼손 이동) · 자막 깊이 무시 · 큰 대비 테마 · 게임 설정 화면이 남음.
 
 ---

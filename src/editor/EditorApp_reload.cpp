@@ -1,6 +1,7 @@
 // 에셋 핫리로드(2026-11-20, Docs/Asset_Hot_Reload.md): 프로젝트 폴더 감시 → 모으기 → 모델 · 의존 파일 · 씬 · 가져오기 설정 처리.
 #include "EditorApp.hpp"
 #include "../assets/AssetManager.hpp"
+#include "../sceneio/PrefabManager.hpp"
 #include "../components/AssetRebind.hpp"
 #include "../core/FileUtil.hpp"
 #include "../core/ProjectPaths.hpp"
@@ -69,6 +70,17 @@ void EditorApp::processAssetChange(const std::string& path) {
     const hreload::ChangeKind kind = hreload::classify(path);
 
     if (kind == hreload::ChangeKind::Scene) { onSceneFileChanged(path); return; }
+
+    if (kind == hreload::ChangeKind::Prefab) {
+        // 링크된 프리팹(Docs/Linked_Prefabs.md D7): 캐시와 글이 다를 때만 다시 펼칩니다. 에디터가 쓴 저장은 캐시를 먼저 바꾸므로 넘어갑니다.
+        contentPanel_.refreshPrefabs();
+        std::string text, cached;
+        if (!hvfs::readText(path, text)) return;
+        if (!prefabCache_.peek(path, &cached)) { HLOG(LogHotReload, Verbose) << "Prefab changed (not used): " << path; return; }
+        if (cached == text) return;
+        refreshPrefab(path, text);
+        return;
+    }
 
     if (kind == hreload::ChangeKind::ImportSettings) {
         std::string text;
@@ -167,4 +179,25 @@ void EditorApp::touchAssetAndWait(const std::string& logicalPath) {
     } else {
         HLOG(LogHotReload, Log) << "touch-asset: processed " << canon << " after " << (steadyMs() - start) << " ms";
     }
+}
+
+void EditorApp::refreshPrefab(const std::string& path, const std::string& text) {
+    if (!ctx_.world || !ctx_.assets) return;
+    std::vector<uint64_t> sel;
+    for (const Actor* a : ctx_.selection) if (a) sel.push_back(a->id);
+    const uint64_t primary = ctx_.selected ? ctx_.selected->id : 0;
+    const int n = PrefabManager::refreshInstances(*ctx_.world, *ctx_.assets, path, text);
+    if (n > 0) {
+        // 다시 펼친 액터는 새 객체지만 옛 실행 번호를 받으므로 같은 ID 로 다시 고릅니다.
+        ctx_.selection.clear();
+        ctx_.selected = nullptr;
+        for (uint64_t id : sel)
+            if (Actor* a = ctx_.world->findById(id)) ctx_.selection.push_back(a);
+        if (primary) ctx_.selected = ctx_.world->findById(primary);
+        if (!ctx_.selected && !ctx_.selection.empty()) ctx_.selected = ctx_.selection.back();
+        prevSelected2_ = nullptr;
+    }
+    outlinerPanel_.markDirty();
+    detailsPanel_.markDirty();
+    HLOG(LogHotReload, Log) << "Prefab " << path << ": " << n << " instance(s) rebuilt";
 }

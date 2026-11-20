@@ -73,6 +73,7 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
     ctx_.assets   = &assets;
     ctx_.renderer = &renderer;
     ctx_.window   = &window;
+    world.setService<hprefablink::PrefabSourceCache>(&prefabCache_);
 
     subscribeWorldEvents(world);
 
@@ -212,10 +213,16 @@ void EditorApp::initPanels() {
         [this] { return logPanel_.consoleField(); }
     });
     detailsPanel_.init({ &ui_, &ctx_, &cmdStack_, &cachedEuler_, &undoSnapshot_,
-                         &LogEditor, [this] { contentPanel_.refreshPrefabs(); rebuildBottomPanel(); },
+                         &LogEditor,
+                         [this](const std::string& path, const std::string& text) {
+                             refreshPrefab(path, text);
+                             contentPanel_.refreshPrefabs();
+                             rebuildBottomPanel();
+                         },
                          [this](const std::string& title, uint64_t current, std::function<void(uint64_t)> pick) {
                              openActorPicker(title, current, std::move(pick));
-                         } });
+                         },
+                         [this] { outlinerPanel_.markDirty(); } });
     contentPanel_.init({
         &ui_, &ctx_, &cmdStack_, &LogEditor,
         [this] { return doc_.path(); },
@@ -252,6 +259,8 @@ void EditorApp::cleanup() {
     // 월드가 에디터보다 오래 살 수 있으므로, this 를 캡처한 리스너를 먼저 뗍니다.
     if (ctx_.world) ctx_.world->onActorDestroyed.remove(actorDestroyedSub_);
     viewport_.cleanup(ctx_.world);
+    if (ctx_.world && ctx_.world->service<hprefablink::PrefabSourceCache>() == &prefabCache_)
+        ctx_.world->setService<hprefablink::PrefabSourceCache>(nullptr);
     hotReloader_.stop();
     assetWatcher_.stop();
     slateRenderer_.cleanup();
@@ -310,6 +319,11 @@ void EditorApp::tickSelectionSync(int actorCount) {
             outlinerPanel_.markDirty();
             if (!selChanged) detailsPanel_.markDirty();   // 주 선택이 바뀌면 아래에서 어차피 다시 만듭니다
         }
+    }
+    // 프리팹 인스턴스 안 액터를 고친 편집(커맨드)이 쌓이면 디테일의 덮어쓰기 표시를 다시 구합니다(Docs/Linked_Prefabs.md D9).
+    if (cmdStack_.stateToken() != prevCmdToken_) {
+        prevCmdToken_ = cmdStack_.stateToken();
+        if (ctx_.selected && hprefablink::instanceRootOf(ctx_.selected)) detailsPanel_.markDirty();
     }
 
     // 리네임 해제를 리빌드 **앞**으로 옮깁니다. 뒤에 두면 선택이 바뀌는 프레임에 새 행이

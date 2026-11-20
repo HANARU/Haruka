@@ -28,9 +28,12 @@ public:
         glm::vec3*            cachedEuler  = nullptr;
         Transform*            undoSnapshot = nullptr;
         HLogCategory*         logCat       = nullptr;
-        std::function<void()> onPrefabSaved;
+        // 프리팹 파일을 썼음(Save as Prefab · 원본에 적용): 경로 · 쓴 글. EditorApp 이 인스턴스를 다시 펼치고 목록을 갱신합니다.
+        std::function<void(const std::string&, const std::string&)> onPrefabWritten;
         // 액터 참조 칸(참조 체계 R-7)을 누르면 부릅니다: 제목 · 지금 값(GUID) · 고른 값을 받을 함수. EditorApp 이 목록 대화상자를 엽니다.
         std::function<void(const std::string&, uint64_t, std::function<void(uint64_t)>)> pickActor;
+        // 프리팹 링크가 바뀜(링크 끊기 · 되돌리기): 아웃라이너 표시를 다시 만듭니다.
+        std::function<void()> onPrefabLinksChanged;
     };
 
     void init(Deps deps);
@@ -56,6 +59,10 @@ private:
                             const std::vector<Component*>& peers);
     void buildAddComponentSection(Actor& sel);
     void buildSavePrefabRow(Actor& sel);
+    // 링크된 프리팹(Docs/Linked_Prefabs.md D9): 원본 · 덮어쓰기 수 · 되돌리기 · 원본에 적용 · 링크 끊기.
+    void buildPrefabSection(Actor& sel);
+    // 지금 고른 소속 액터에서 path 로 시작하는 덮어쓰기가 있는지(build 때 한 번 구함).
+    bool overridden(const std::string& prefix) const;
 
     void addNumRow(const char* lbl, glm::vec4 lc,
                    std::function<float()>     getter,
@@ -79,4 +86,5 @@ private:
     int    addCompWidthSig_ = -1;
     Actor* actor_           = nullptr;
     bool   txExpanded_      = true;
+    std::vector<std::string> overrides_;   // 고른 소속 액터의 덮어쓴 경로(build 때 구함)
 };

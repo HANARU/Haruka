@@ -1,0 +1,54 @@
+# Haruka Scene v7
+ACTOR:Sun
+POS:0 0 0
+ROT:-47.968887 33.69007 0
+QUAT:-0.389047 0.264763 0.117793955 0.87445277
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:LightComponent
+enabled=1
+type=directional
+color=1 1 1
+intensity=3
+attenuationRadius=10
+innerConeAngle=15
+outerConeAngle=30
+useTemperature=0
+temperatureK=6500
+castShadows=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Ground
+POS:0 -0.1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:20 0.2 20
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+PREFAB:/Game/prefabs/ProbeLamp.hprefab
+GUID:5072656661620101
+OVERRIDE:5072656661620001 POS=-1.5 0.5 0
+END_PREFAB
+PREFAB:/Game/prefabs/ProbeLamp.hprefab
+GUID:5072656661620102
+OVERRIDE:5072656661620001 NAME=ProbeLamp2
+OVERRIDE:5072656661620001 POS=1.5 0.5 0
+OVERRIDE:5072656661620002 NAME=ProbeLampLight2
+OVERRIDE:5072656661620002 LightComponent[0].intensity=5
+END_PREFAB

@@ -13,7 +13,7 @@
 
 namespace hreload {
 
-enum class ChangeKind { Model, Scene, ImportSettings, Other };
+enum class ChangeKind { Model, Scene, ImportSettings, Prefab, Other };
 
 // 확장자 · 경로로 분류합니다. Other 도 올라간 모델의 의존 파일(.bin · 이미지)일 수 있어, 부르는 쪽이 AssetManager 에 따로 묻습니다.
 inline ChangeKind classify(std::string_view canonicalPath) {
@@ -28,6 +28,7 @@ inline ChangeKind classify(std::string_view canonicalPath) {
     };
     if (endsWith(".glb") || endsWith(".gltf")) return ChangeKind::Model;
     if (endsWith(".hscene"))                   return ChangeKind::Scene;
+    if (endsWith(".hprefab"))                  return ChangeKind::Prefab;   // 링크된 프리팹(Docs/Linked_Prefabs.md D7)
     if (endsWith("/config/import.ini") && canonicalPath.rfind("/Config/", 0) == 0) return ChangeKind::ImportSettings;
     return ChangeKind::Other;
 }

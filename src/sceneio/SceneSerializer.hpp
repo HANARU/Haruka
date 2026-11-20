@@ -28,7 +28,8 @@ class AssetManager;
 class SceneSerializer {
 public:
     // v6(2026-11-19): 액터마다 GUID: 줄(참조 체계, Docs/Object_References.md). v5 이하는 GUID 없이 읽고 새 값을 줍니다.
-    static constexpr const char* kSceneHeader = "# Haruka Scene v6";
+    // v7(2026-11-21): 프리팹 인스턴스 블록(PREFAB: ~ END_PREFAB) · PARENT_GUID: 줄(Docs/Linked_Prefabs.md). v6 이하는 그대로 읽힙니다.
+    static constexpr const char* kSceneHeader = "# Haruka Scene v7";
 
     // 읽을 때 GUID 를 어떻게 다룰지(참조 체계 D4).
     //   Keep  = 파일 값을 지킴(씬 열기 · Play 되돌리기 · Undo 되살리기 · 게임 시작 씬). 이미 쓰는 값이면 새 값 + 경고.
@@ -45,6 +46,10 @@ public:
         bool        hasQuat     = false;
         int         active      = 1;   // 액터 activeSelf (기본 활성)
         std::vector<std::string> tags;    // TAGS:a,b (2026-11-20)
+        // 프리팹 링크(펼친 전체 형식 글의 PREFAB_SOURCE · PREFAB_PAIR · PREFAB_RAW 줄, Docs/Linked_Prefabs.md).
+        std::string              prefabSource;
+        HGuid                    prefabPair;
+        std::vector<std::string> prefabRaw;
         int         parentIndex = -1;  // 직렬화 순서상 부모 인덱스, 부모 없으면 -1
         // v4 의 COMPONENT 블록들(DEF-22).
         ComponentSerializer::BlockParser components;
@@ -95,7 +100,10 @@ public:
     // 트랜스폼(KEY:VAL 줄) + 부착된 모든 컴포넌트(COMPONENT 블록)를 기록 (이름 라인 제외).
     // parentIndex 가 0 이상이면 PARENT 라인을 기록합니다(직렬화 세트 안의 부모 인덱스).
     // 단일 액터를 저장하는 프리팹은 부모가 없으므로 기본값 -1 로 호출합니다.
-    static void writeActor(std::ostream& os, const Actor* actor, int parentIndex = -1);
+    // links 가 참이면 프리팹 링크 줄(PREFAB_SOURCE · PREFAB_PAIR · PREFAB_RAW)도 씁니다(Undo 스냅숏 · 붙여넣기의 전체 형식).
+    // parentGuid 가 있으면 PARENT_GUID 줄(부모가 프리팹 인스턴스 안 액터, 씬 v7).
+    static void writeActor(std::ostream& os, const Actor* actor, int parentIndex = -1, bool links = true,
+                           HGuid parentGuid = {});
 
     // key:value 한 줄을 data에 반영. 인식한 키면 true.
     // 이름 키(ACTOR/NAME)는 블록 구분 의미가 포맷마다 달라 여기서 다루지 않는다.
@@ -113,8 +121,10 @@ public:
     // 부모로 둔 자식은 부모 없이 기록된다.
     static std::string writeScene(const World& world, const Actor* skip = nullptr);
     // 액터 세트를 같은 블록 형식으로 씁니다(머리 줄 없음). parentIndex[i] 는 세트 안 부모의 인덱스(-1 = 없음).
-    // writeScene 과 에디터 생성 · 삭제 Undo 의 스냅샷(ActorSnapshot)이 함께 씁니다.
+    // 에디터 생성 · 삭제 Undo 의 스냅샷(ActorSnapshot) · 붙여넣기가 씁니다. 프리팹 인스턴스도 펼친 그대로 + 링크 줄("전체" 형식)이고,
+    // writeScene · 프리팹 저장은 인스턴스 블록 + 덮어쓰기로 씁니다(hprefablink::writeCompact).
     static std::string writeActorSet(const std::vector<const Actor*>& actors, const std::vector<int>& parentIndex);
+    // 프리팹 인스턴스 블록이 있으면 먼저 펼칩니다(월드의 PrefabSourceCache 서비스 또는 파일). 슬롯은 펼친 액터마다 하나입니다.
     // 블록마다 한 슬롯을 돌려준다(스폰 실패면 nullptr). 부모 배선까지 마친다. 기존 액터는
     // 건드리지 않으므로, 씬을 갈아 끼우려면 호출자가 먼저 비운다.
     static std::vector<Actor*> readScene(const std::string& text, World& world, AssetManager& assets,

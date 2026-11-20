@@ -40,6 +40,8 @@ inline bool isValidName(const std::string& name, std::string* why = nullptr) {
 }
 
 // v5(2026-11-19): 액터마다 GUID: 줄(참조 체계). 꺼낼 때는 언제나 새 GUID 를 줍니다(Fresh).
+// v6(2026-11-21): 안의 프리팹 인스턴스를 인스턴스 블록 + 덮어쓰기로 씀(Docs/Linked_Prefabs.md). 꺼내면 링크된 인스턴스.
+inline constexpr std::string_view kPrefabHeaderV6 = "# Haruka Prefab v6";
 inline constexpr std::string_view kPrefabHeaderV5 = "# Haruka Prefab v5";
 inline constexpr std::string_view kPrefabHeaderV4 = "# Haruka Prefab v4";
 inline constexpr std::string_view kPrefabHeaderV3 = "# Haruka Prefab v3";
@@ -59,7 +61,7 @@ inline bool stripBomAndDetectV3(std::string& text) {
         while (e > b && (text[e - 1] == '\r' || text[e - 1] == ' ' || text[e - 1] == '\t')) --e;
         if (b < e) {
             const std::string_view line(text.data() + b, e - b);
-            if (line == kPrefabHeaderV5 || line == kPrefabHeaderV4 || line == kPrefabHeaderV3) return true;
+            if (line == kPrefabHeaderV6 || line == kPrefabHeaderV5 || line == kPrefabHeaderV4 || line == kPrefabHeaderV3) return true;
             if (text[b] != '#') return false;   // 액터 줄(v1 · v2 의 NAME: 등)이 먼저 나옴
         }
         pos = eol + 1;

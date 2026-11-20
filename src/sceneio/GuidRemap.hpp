@@ -18,10 +18,11 @@
 
 namespace hguid {
 
+inline std::string remapWith(const std::string& text, const std::unordered_map<HGuid, HGuid>& remap);
+
 // inUse 가 참이면 그 값은 새 GUID 로 쓰지 않습니다(월드에 이미 있는 값). 바꾼 수를 *count 에.
 inline std::string remapFresh(const std::string& text, const std::function<bool(HGuid)>& inUse, int* count = nullptr) {
     constexpr std::string_view kGuidKey = "GUID:";
-    constexpr std::string_view kRef     = "actor:";
     auto lineView = [](const std::string& t, size_t b, size_t e) {
         std::string_view v(t.data() + b, e - b);
         if (!v.empty() && v.back() == '\r') v.remove_suffix(1);
@@ -45,6 +46,14 @@ inline std::string remapFresh(const std::string& text, const std::function<bool(
         pos = eol + 1;
     }
     if (count) *count = (int)remap.size();
+    return remapWith(text, remap);
+}
+
+// 주어진 표로 GUID: 줄과 actor: 토큰을 바꿉니다(표에 없는 값은 그대로). 링크된 프리팹의 Fresh 가 소속 액터를 파생 값으로
+// 맞출 때 씁니다(Docs/Linked_Prefabs.md D3).
+inline std::string remapWith(const std::string& text, const std::unordered_map<HGuid, HGuid>& remap) {
+    constexpr std::string_view kGuidKey = "GUID:";
+    constexpr std::string_view kRef     = "actor:";
     if (remap.empty()) return text;
 
     // 2) 다시 쓰기.

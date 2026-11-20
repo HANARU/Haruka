@@ -26,6 +26,7 @@
 #include "../core/HDelegate.hpp"
 #include "../runtime/IEngineFrontend.hpp"
 #include "ComponentVisualizers.hpp"
+#include "../sceneio/PrefabLink.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <algorithm>
@@ -128,6 +129,9 @@ private:
     EditorIcons    icons_;            // 글꼴 아틀라스가 가리키므로 slateRenderer_ 보다 먼저 선언(나중에 사라짐, D3)
     HSlateRenderer slateRenderer_;
     HCommandStack  cmdStack_;
+    // 읽은 프리팹 글(링크된 프리팹 D2). 월드 서비스로 붙여, 저장할 때 덮어쓰기를 구하는 기준이 됩니다.
+    hprefablink::PrefabSourceCache prefabCache_;
+    uint64_t prevCmdToken_ = 0;
     HotReloader    hotReloader_;
 
     // ── 에셋 핫리로드 (2026-11-20, Docs/Asset_Hot_Reload.md, EditorApp_reload.cpp) ─────────────────
@@ -335,6 +339,8 @@ private:
     void saveScene();                                     // 현재 파일에, 이름이 없으면 다른 이름으로
     void saveSceneAs(std::function<void()> then = {});    // then: 저장에 성공하면 이어서 할 일
     bool writeSceneTo(const std::string& logicalPath);
+    // 프리팹 파일이 바뀜(저장 · 원본에 적용 · 감시): 그 프리팹에 기대는 인스턴스를 다시 펼치고 선택을 ID 로 되살립니다(D7).
+    void refreshPrefab(const std::string& path, const std::string& text);
     // 저장하지 않은 변경이 있으면 저장 · 버리기 · 취소를 묻고, 취소가 아니면 action 을 합니다.
     void guardUnsaved(const HText& verb, std::function<void()> action);
     bool blockedDuringPlay(const char* what) const;
