@@ -1,4 +1,5 @@
 #include "Actor.hpp"
+#include "World.hpp"
 #include "SceneLog.hpp"
 #include "../math/Geometry.hpp"
 #include <algorithm>
@@ -196,4 +197,38 @@ void Actor::notifyDestroy() {
 void Actor::notifyTransformCommitted() {
     for (auto& c : components) c->onTransformCommitted();
     for (Actor* child : children_) child->notifyTransformCommitted();
+}
+
+// ── 태그 (2026-11-20, Docs/Gameplay_Tools.md D3) ─────────────────────────────────────
+bool Actor::validTag(std::string_view tag) {
+    if (tag.empty() || tag.size() > 64) return false;
+    for (char c : tag)
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-'))
+            return false;
+    return true;
+}
+
+bool Actor::hasTag(std::string_view tag) const {
+    return std::find(tags_.begin(), tags_.end(), tag) != tags_.end();
+}
+
+bool Actor::addTag(std::string_view tag) {
+    if (!validTag(tag) || hasTag(tag)) return false;
+    tags_.emplace_back(tag);
+    if (world_) world_->noteTagsChanged();
+    return true;
+}
+
+bool Actor::removeTag(std::string_view tag) {
+    auto it = std::find(tags_.begin(), tags_.end(), tag);
+    if (it == tags_.end()) return false;
+    tags_.erase(it);
+    if (world_) world_->noteTagsChanged();
+    return true;
+}
+
+void Actor::clearTags() {
+    if (tags_.empty()) return;
+    tags_.clear();
+    if (world_) world_->noteTagsChanged();
 }

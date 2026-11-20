@@ -99,9 +99,52 @@ OutputLogPanel::SearchField OutputLogPanel::searchField() {
     };
 }
 
+void OutputLogPanel::setConsole(std::function<std::string(const std::string&)> run, std::function<void()> clicked) {
+    consoleRun_     = std::move(run);
+    consoleClicked_ = std::move(clicked);
+}
+
+TextInputField OutputLogPanel::consoleField() {
+    TextInputField f{
+        consoleEdit_,
+        consoleFocused_,
+        [this](glm::vec2 p) { return consoleBox_ && consoleBox_->cachedGeometry().contains(p); },
+        [] {},
+    };
+    f.onCommit          = [this] { submitConsole(); };
+    f.keepFocusOnCommit = true;
+    f.onHistory         = [this](int dir) { stepHistory(dir); };
+    return f;
+}
+
+void OutputLogPanel::submitConsole() {
+    const std::string line = consoleEdit_.text;
+    consoleEdit_.setText("");
+    historyPos_ = -1;
+    if (line.find_first_not_of(" \t") == std::string::npos) return;
+    if (history_.empty() || history_.back() != line) history_.push_back(line);
+    if (history_.size() > 64) history_.erase(history_.begin());
+    if (consoleRun_) consoleRun_(line);
+    // 결과를 보도록 맨 아래로 갑니다.
+    anchorSeq_ = 0;
+    scrollReq_ = 0;
+    viewDirty_ = true;
+}
+
+void OutputLogPanel::stepHistory(int dir) {
+    if (history_.empty()) return;
+    if (historyPos_ < 0) historyPos_ = dir < 0 ? (int)history_.size() - 1 : -1;
+    else historyPos_ += dir;
+    if (historyPos_ >= (int)history_.size()) historyPos_ = -1;
+    if (historyPos_ < -1) historyPos_ = 0;
+    consoleEdit_.setText(historyPos_ < 0 ? std::string() : history_[(size_t)historyPos_]);
+    consoleEdit_.end(false);
+}
+
 void OutputLogPanel::releaseTab(bool tabActive) {
     rowsBox_.reset();
     searchBox_.reset();
+    consoleBox_.reset();
     catButton_.reset();
     if (!tabActive) closePopup();
 }
@@ -219,6 +262,25 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
                                   return true;
                               }),
                           VR::ESizeRule::Fill);
+    // 콘솔 줄(D9): 로그 아래에 명령 입력 칸(UE Output Log 의 Cmd 줄과 같은 자리).
+    consoleBox_ = HNew(SSearchBox);
+    consoleBox_
+        ->style(EditorUiKit::searchBoxStyle(u.s(1.f)))
+        ->icon(false)
+        ->placeholder(HTEXT("Editor.OutputLog", "ConsoleHint", "Enter console command (help)").toString())
+        ->edit(&consoleEdit_)
+        ->focused([this]() -> bool { return consoleFocused_; })
+        ->onClick([this] { if (consoleClicked_) consoleClicked_(); })
+        ->fontSize(u.s(12.f));
+    auto consoleRow = HNew(HR)
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(6.f))
+        ->addSlot(HNew(STextBlock)->text(">")->fontSize(u.s(12.f))->color(EditorUiKit::kTextBody)
+                      ->hAlign(EHAlign::Center)->vAlign(EVAlign::Center),
+                  HR::ESizeRule::Fixed, u.s(12.f))
+        ->addSlot(consoleBox_, HR::ESizeRule::Fill, 0.f, vpad)
+        ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(4.f));
+    bottomContent.addSlot(HNew(SBorder)->background(EditorUiKit::kBgHeader)->content(consoleRow),
+                          VR::ESizeRule::Fixed, u.s(26.f));
     rebuildRows();
 }
 

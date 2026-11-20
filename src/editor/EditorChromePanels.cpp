@@ -189,6 +189,7 @@ std::string StatusBarPanel::focusText() const {
         case EFocusTarget::Search:      return narrow_ ? "SEARCH" : "KBD: Search";
         case EFocusTarget::NumberField: return narrow_ ? "VALUE"  : "KBD: Value";
         case EFocusTarget::LogSearch:   return narrow_ ? "LOG"    : "KBD: Log Search";
+        case EFocusTarget::Console:     return narrow_ ? "CMD"    : "KBD: Console";
         default:                        return {};
     }
 }

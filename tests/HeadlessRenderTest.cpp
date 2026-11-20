@@ -139,6 +139,19 @@ int main() {
             o = parse({ bad }, u);
             check(o.userSettings.empty() && o.userSettingsAt.empty() && u.size() == 1, std::string(bad) + " → 거부");
         }
+        // CVar · 콘솔(Docs/Gameplay_Tools.md D7 · D9).
+        o = parse({ "--cvar=time.scale=0.5", "--console-at=10:list time.", "--ui-console=help", "--ui-console=time.scale 2",
+                    "--ui-console-recall=2" }, u);
+        check(u.empty() && o.cvars.size() == 1 && o.cvars[0].first == "time.scale" && o.cvars[0].second == "0.5"
+                  && o.consoleAt.size() == 1 && o.consoleAt[0].frame == 10 && o.consoleAt[0].command == "list time."
+                  && o.uiConsole.size() == 2 && o.uiConsole[1] == "time.scale 2" && o.uiConsoleRecall == 2,
+              "--cvar · --console-at · --ui-console(두 번) · --ui-console-recall");
+        for (const char* bad : { "--cvar=", "--cvar==1", "--cvar=time.scale", "--console-at=list", "--console-at=x:list", "--console-at=5:",
+                                 "--ui-console=", "--ui-console-recall=-1", "--ui-console-recall=99" }) {
+            o = parse({ bad }, u);
+            check(o.cvars.empty() && o.consoleAt.empty() && o.uiConsole.empty() && o.uiConsoleRecall == 0 && u.size() == 1,
+                  std::string(bad) + " → 거부");
+        }
         o = parse({ "--timeout=5" }, u);
         check(o.timeoutSec == 5.f && u.empty(), "--timeout=5");
         o = parse({ "--timeout=2.5" }, u);

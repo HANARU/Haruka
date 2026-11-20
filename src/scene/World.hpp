@@ -6,6 +6,9 @@
 #include <unordered_map>
 #include "Actor.hpp"
 #include "TweenSystem.hpp"
+#include "TimerManager.hpp"
+#include "EventBus.hpp"
+#include <string_view>
 #include "../core/HDelegate.hpp"
 
 class World {
@@ -15,7 +18,30 @@ public:
     // Destroys immediately if called outside tick, deferred if called during tick.
     void   destroyActor(Actor* actor);
 
+    // 받은 dt(실제 경과)에 시간 배율을 곱해 PrePhysics 컴포넌트 · 타이머 · 트윈을 진행합니다(D1). 일시정지는 부르지 않는 것입니다.
     void   tick(float dt);
+    // 모듈(물리 · 소리) 틱 뒤에 PostPhysics 컴포넌트를 tick 과 같은 dt 로 틱합니다(D5). 그런 컴포넌트가 없으면 훑지 않습니다.
+    void   tickPostPhysics();
+
+    // ── 게임 시간 (2026-11-20, Docs/Gameplay_Tools.md D1) ─────────────────────────────────────────────
+    // 시간 배율(0 ~ 100, 기본 1, UE TimeDilation · Unity timeScale). 0 이면 컴포넌트는 dt 0 으로 틱합니다(일시정지와 달리 틱은 돎).
+    float  timeScale() const { return timeScale_; }
+    void   setTimeScale(float s);
+    // 배율을 적용한 누적 게임 시간(초)과 마지막 틱의 dt. 엔진은 lastDt 를 게임 onTick 과 모듈에 줍니다.
+    double gameTime() const { return gameTime_; }
+    float  lastDt() const   { return lastDt_; }
+
+    // 타이머(D2): 게임 시간으로 세고, 주인 액터를 지우면 함께 취소합니다.
+    TimerManager&       timers()       { return timers_; }
+    const TimerManager& timers() const { return timers_; }
+    // 이벤트 버스(D4): 형으로 구독 · 발행합니다.
+    EventBus&           events()       { return events_; }
+
+    // 그 태그를 가진 액터(액터 순서, D3). 구조 버전 · 태그 버전이 같으면 지난 결과를 돌려줍니다(프레임마다 훑지 않음). 활성은 거르지
+    // 않습니다. 돌려준 목록을 도는 동안 액터를 만들거나 지우거나 태그를 바꾸지 마십시오.
+    const std::vector<Actor*>& actorsWithTag(std::string_view tag) const;
+    Actor* firstWithTag(std::string_view tag) const;
+    void   noteTagsChanged() { ++tagVersion_; }
 
     // Look up any actor by its unique ID (returns nullptr if not found / already destroyed).
     Actor* findById(uint64_t id) const;
@@ -83,7 +109,17 @@ public:
 private:
     // 액터보다 먼저 선언합니다(나중에 파괴). 액터를 지우는 중에 컴포넌트가 서비스를 찾을 수 있습니다(리그의 캐릭터 해제 등).
     std::unordered_map<std::type_index, void*> services_;
-    TweenSystem tweens_;
+    TweenSystem  tweens_;
+    TimerManager timers_;
+    EventBus     events_;
+    float        timeScale_ = 1.f;
+    double       gameTime_  = 0.0;
+    float        lastDt_    = 0.f;
+    uint64_t     tagVersion_ = 1;
+    mutable uint64_t tagCacheStructure_ = 0, tagCacheTags_ = 0;
+    mutable std::unordered_map<std::string, std::vector<Actor*>> tagCache_;
+    mutable uint64_t postPhysicsVersion_ = 0;   // 물리 뒤 컴포넌트가 있는지 본 구조 버전
+    mutable bool     anyPostPhysics_     = false;
 
     struct TypeListBase {
         virtual ~TypeListBase() = default;

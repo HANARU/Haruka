@@ -158,7 +158,7 @@ msgctxt "Editor.Dialog,Verb.NewScene"
 msgid "creating a new scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:221
+#: src/editor/EditorApp.cpp:223
 msgctxt "Editor.Dialog,Verb.OpenAnother"
 msgid "opening another scene"
 msgstr ""
@@ -168,117 +168,117 @@ msgctxt "Editor.Dock,Tip.CloseTab"
 msgid "Close Tab"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:591
+#: src/editor/EditorApp.cpp:604
 msgctxt "Editor.Menu,Actor"
 msgid "Actor"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:592
+#: src/editor/EditorApp.cpp:605
 msgctxt "Editor.Menu,Actor.AddEmpty"
 msgid "Add Empty"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:599
+#: src/editor/EditorApp.cpp:612
 msgctxt "Editor.Menu,Actor.AttachToPrev"
 msgid "Attach To Prev Selected"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:607
+#: src/editor/EditorApp.cpp:620
 msgctxt "Editor.Menu,Actor.Detach"
 msgid "Detach Selected"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:574
+#: src/editor/EditorApp.cpp:587
 msgctxt "Editor.Menu,Edit"
 msgid "Edit"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:589
+#: src/editor/EditorApp.cpp:602
 msgctxt "Editor.Menu,Edit.AudioOutput"
 msgid "Audio Output..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:577
+#: src/editor/EditorApp.cpp:590
 msgctxt "Editor.Menu,Edit.Copy"
 msgid "Copy"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:580
+#: src/editor/EditorApp.cpp:593
 msgctxt "Editor.Menu,Edit.Delete"
 msgid "Delete"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:579
+#: src/editor/EditorApp.cpp:592
 msgctxt "Editor.Menu,Edit.Duplicate"
 msgid "Duplicate"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:581
+#: src/editor/EditorApp.cpp:594
 msgctxt "Editor.Menu,Edit.FrameSelected"
 msgid "Frame Selected"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:583
+#: src/editor/EditorApp.cpp:596
 msgctxt "Editor.Menu,Edit.GizmoSize"
 msgid "Gizmo Size (S/M/L)"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:578
+#: src/editor/EditorApp.cpp:591
 msgctxt "Editor.Menu,Edit.Paste"
 msgid "Paste"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:576
+#: src/editor/EditorApp.cpp:589
 msgctxt "Editor.Menu,Edit.Redo"
 msgid "Redo"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:575
+#: src/editor/EditorApp.cpp:588
 msgctxt "Editor.Menu,Edit.Undo"
 msgid "Undo"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:568
+#: src/editor/EditorApp.cpp:581
 msgctxt "Editor.Menu,File"
 msgid "File"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:569
+#: src/editor/EditorApp.cpp:582
 msgctxt "Editor.Menu,File.NewScene"
 msgid "New Scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:570
+#: src/editor/EditorApp.cpp:583
 msgctxt "Editor.Menu,File.OpenScene"
 msgid "Open Scene..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:571
+#: src/editor/EditorApp.cpp:584
 msgctxt "Editor.Menu,File.SaveScene"
 msgid "Save Scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:572
+#: src/editor/EditorApp.cpp:585
 msgctxt "Editor.Menu,File.SaveSceneAs"
 msgid "Save Scene As..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:622
+#: src/editor/EditorApp.cpp:635
 msgctxt "Editor.Menu,View"
 msgid "View"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:618
+#: src/editor/EditorApp.cpp:631
 msgctxt "Editor.Menu,View.Language"
 msgid "Language"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:613
+#: src/editor/EditorApp.cpp:626
 msgctxt "Editor.Menu,View.ResetLayout"
 msgid "Reset Layout"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:633
+#: src/editor/EditorApp.cpp:646
 msgctxt "Editor.Menu,Window"
 msgid "Window"
 msgstr ""
@@ -313,42 +313,47 @@ msgctxt "Editor.Outliner,Tip.Visibility"
 msgid "Toggle Visibility"
 msgstr ""
 
-#: src/editor/OutputLogPanel.cpp:119
+#: src/editor/OutputLogPanel.cpp:270
+msgctxt "Editor.OutputLog,ConsoleHint"
+msgid "Enter console command (help)"
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp:162
 msgctxt "Editor.OutputLog,SearchHint"
 msgid "Search log..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:500
+#: src/editor/EditorApp.cpp:513
 msgctxt "Editor.Panels,ContentBrowser"
 msgid "Content Browser"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:517
+#: src/editor/EditorApp.cpp:530
 msgctxt "Editor.Panels,ContentDrawer"
 msgid "Content Drawer"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:516
+#: src/editor/EditorApp.cpp:529
 msgctxt "Editor.Panels,Details"
 msgid "Details"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:502
+#: src/editor/EditorApp.cpp:515
 msgctxt "Editor.Panels,GpuStats"
 msgid "GPU Stats"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:514
+#: src/editor/EditorApp.cpp:527
 msgctxt "Editor.Panels,Outliner"
 msgid "Outliner"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:501
+#: src/editor/EditorApp.cpp:514
 msgctxt "Editor.Panels,OutputLog"
 msgid "Output Log"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:515
+#: src/editor/EditorApp.cpp:528
 msgctxt "Editor.Panels,Viewport"
 msgid "Viewport"
 msgstr ""

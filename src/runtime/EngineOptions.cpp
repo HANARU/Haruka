@@ -96,6 +96,15 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (!v.empty()) o.uiBottomTab = v;
             else unknown.push_back(a);
         }
+        else if (valueOf(a, "--ui-console-recall", v)) {
+            uint32_t n = 0;
+            if (parseUint(v, n) && n <= 64) o.uiConsoleRecall = (int)n;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-console", v)) {
+            if (!v.empty()) o.uiConsole.push_back(v);
+            else unknown.push_back(a);
+        }
         else if (valueOf(a, "--ui-outliner-search", v)) {
             if (!v.empty()) o.uiOutlinerSearch = v;
             else unknown.push_back(a);
@@ -194,6 +203,17 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             const size_t eq = v.find('=');
             if (eq == std::string::npos || eq == 0) unknown.push_back(a);
             else o.userSettings.push_back({ v.substr(0, eq), v.substr(eq + 1) });
+        }
+        else if (valueOf(a, "--cvar", v)) {
+            const size_t eq = v.find('=');
+            if (eq == std::string::npos || eq == 0) unknown.push_back(a);
+            else o.cvars.push_back({ v.substr(0, eq), v.substr(eq + 1) });
+        }
+        else if (valueOf(a, "--console-at", v)) {
+            const size_t colon = v.find(':');
+            uint32_t frame = 0;
+            if (colon == std::string::npos || colon + 1 >= v.size() || !parseUint(v.substr(0, colon), frame)) unknown.push_back(a);
+            else o.consoleAt.push_back({ frame, v.substr(colon + 1) });
         }
         else if (valueOf(a, "--user-setting-at", v)) {
             const size_t colon = v.find(':'), eq = v.find('=');

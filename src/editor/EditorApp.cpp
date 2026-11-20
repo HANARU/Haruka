@@ -24,6 +24,7 @@
 #include "../input/HInputSystem.hpp"
 #include "../components/XrComponents.hpp"
 #include "../core/DebugDraw.hpp"
+#include "../core/CVar.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -137,7 +138,7 @@ void EditorApp::initPanels() {
             outlinerVisible_ = outlinerVis;
             const EFocusTarget f = currentFocus();
             if ((!outlinerVis && (f == EFocusTarget::Search || f == EFocusTarget::Rename)) ||
-                (!bottomVis   && f == EFocusTarget::LogSearch) ||
+                (!bottomVis   && (f == EFocusTarget::LogSearch || f == EFocusTarget::Console)) ||
                 (!detailsVis  && f == EFocusTarget::NumberField))
                 setTextFocus(EFocusTarget::None);
             if (!bottomVis) logPanel_.closePopup();
@@ -206,7 +207,8 @@ void EditorApp::initPanels() {
         [this] { return editDragActive(); },
         [this] { deleteSelection(); },
         [this] { copySelection(); },
-        [this] { pasteClipboard(); }
+        [this] { pasteClipboard(); },
+        [this] { return logPanel_.consoleField(); }
     });
     detailsPanel_.init({ &ui_, &ctx_, &cmdStack_, &cachedEuler_, &undoSnapshot_,
                          &LogEditor, [this] { contentPanel_.refreshPrefabs(); rebuildBottomPanel(); },
@@ -231,6 +233,17 @@ void EditorApp::initPanels() {
         setTextFocus(currentFocus() == EFocusTarget::LogSearch ? EFocusTarget::None
                                                                : EFocusTarget::LogSearch);
     });
+    // 콘솔 줄(Docs/Gameplay_Tools.md D9): 엔진의 CVar 레지스트리(월드 서비스)로 실행하고 결과는 Console 분류 로그로 남깁니다.
+    logPanel_.setConsole(
+        [this](const std::string& line) -> std::string {
+            CVarRegistry* cv = ctx_.world ? ctx_.world->service<CVarRegistry>() : nullptr;
+            if (!cv) {
+                HLOG(LogConsole, Warning) << "Console is not available (no CVar registry)";
+                return {};
+            }
+            return cv->executeLogged(line);
+        },
+        [this] { setTextFocus(EFocusTarget::Console); });
 }
 
 void EditorApp::cleanup() {
@@ -743,7 +756,8 @@ void EditorApp::rebuildBottomPanel() {
     // Output Log 탭에만 있는 위젯의 참조를 놓습니다. 다른 탭으로 가면 팝업을 닫고 로그 검색
     // 포커스도 풉니다. 풀지 않으면 보이지 않는 검색창으로 타이핑이 계속 들어갑니다.
     logPanel_.releaseTab(bottomTab_ == 1);
-    if (bottomTab_ != 1 && currentFocus() == EFocusTarget::LogSearch) setTextFocus(EFocusTarget::None);
+    if (bottomTab_ != 1 && (currentFocus() == EFocusTarget::LogSearch || currentFocus() == EFocusTarget::Console))
+        setTextFocus(EFocusTarget::None);
 
     if (bottomTab_ == 0)      contentPanel_.buildTab(*bottomContent_);
     else if (bottomTab_ == 1) logPanel_.buildTab(*bottomContent_);

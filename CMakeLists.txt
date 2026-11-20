@@ -329,12 +329,14 @@ set(RUNTIME_SOURCES
     src/runtime/EngineOptions.cpp
     src/runtime/ShaderManifest.cpp
     src/scene/World.cpp
+    src/scene/TimerManager.cpp
     src/scene/Actor.cpp
     src/scene/Component.cpp
     src/core/HLog.cpp
     src/core/HText.cpp
     src/core/AssetRefs.cpp
     src/core/SaveGame.cpp
+    src/core/CVar.cpp
     src/core/UserSettings.cpp
     src/core/CrashHandler.cpp
     src/components/CameraComponent.cpp
@@ -808,6 +810,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/assets/Skin.cpp
         src/geometry/PrimitiveDesc.cpp
         src/scene/World.cpp
+        src/scene/TimerManager.cpp
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp
@@ -945,6 +948,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         tests/EditorCommandTest.cpp
         src/editor/ActorSnapshot.cpp
         src/scene/World.cpp
+        src/scene/TimerManager.cpp
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp
@@ -973,6 +977,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         tests/ActorUndoTest.cpp
         src/editor/ActorSnapshot.cpp
         src/scene/World.cpp
+        src/scene/TimerManager.cpp
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp
@@ -1044,6 +1049,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/components/AnimationComponent.cpp
         src/components/SkinnedMeshComponent.cpp
         src/scene/World.cpp
+        src/scene/TimerManager.cpp
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp
@@ -1067,6 +1073,16 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     if(MSVC)
         target_compile_options(HarukaSaveTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaSaveTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
+    # -- 게임플레이 기본 도구 · CVar · 콘솔 테스트(Docs/Gameplay_Tools.md) --------------
+    # 게임 시간(배율) · 타이머 · 물리 뒤 틱 · 태그 · 이벤트 버스 · CVar · 콘솔 명령을 창 · GPU 없이 검산합니다.
+    add_executable(HarukaGameplayTest tests/GameplayTest.cpp)
+    target_link_libraries(HarukaGameplayTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaGameplayTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaGameplayTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaGameplayTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
     add_executable(HarukaLoadingTest tests/LoadingTest.cpp)
@@ -1108,6 +1124,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/physics/RigidBodyComponent.cpp
         src/physics/PhysicsSystem.cpp
         src/scene/World.cpp
+        src/scene/TimerManager.cpp
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp
@@ -1169,6 +1186,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
         src/scene/World.cpp
+        src/scene/TimerManager.cpp
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp
@@ -1229,6 +1247,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
         src/scene/World.cpp
+        src/scene/TimerManager.cpp
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp
@@ -1271,6 +1290,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME animation            COMMAND HarukaAnimTest)
     add_test(NAME async_loading        COMMAND HarukaLoadingTest)
     add_test(NAME save_settings        COMMAND HarukaSaveTest)
+    add_test(NAME gameplay_tools       COMMAND HarukaGameplayTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)

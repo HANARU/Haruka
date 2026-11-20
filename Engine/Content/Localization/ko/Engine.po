@@ -319,6 +319,11 @@ msgctxt "Editor.OutputLog,SearchHint"
 msgid "Search log..."
 msgstr "로그 검색..."
 
+#: src/editor/OutputLogPanel.cpp
+msgctxt "Editor.OutputLog,ConsoleHint"
+msgid "Enter console command (help)"
+msgstr "콘솔 명령 입력(help)"
+
 #: src/editor/EditorApp.cpp:500
 msgctxt "Editor.Panels,ContentBrowser"
 msgid "Content Browser"

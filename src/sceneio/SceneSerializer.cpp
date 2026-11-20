@@ -42,6 +42,12 @@ void SceneSerializer::writeActor(std::ostream& os, const Actor* actor, int paren
     os << "QUAT:"  << transform_text::quatText(rot) << "\n";
     os << "SCALE:" << F(scale.x) << " " << F(scale.y) << " " << F(scale.z) << "\n";
     os << "ACTIVE:" << (actor->activeSelf() ? 1 : 0) << "\n";
+    // 태그(2026-11-20, Docs/Gameplay_Tools.md D3): 있을 때만 씁니다(태그 없는 씬은 예전과 같은 글).
+    if (!actor->tags().empty()) {
+        os << "TAGS:";
+        for (size_t i = 0; i < actor->tags().size(); ++i) os << (i ? "," : "") << actor->tags()[i];
+        os << "\n";
+    }
     if (parentIndex >= 0)
         os << "PARENT:" << parentIndex << "\n";
 
@@ -70,6 +76,18 @@ bool SceneSerializer::parseLine(const std::string& key, const std::string& val, 
     else if (key == "QUAT")       { d.hasQuat = transform_text::parseQuat(val, d.quat); }
     else if (key == "SCALE")      { d.scale = parseVec3(val); }
     else if (key == "ACTIVE")     { std::istringstream ss(val); ss >> d.active; }
+    else if (key == "TAGS") {
+        size_t pos = 0;
+        while (pos <= val.size()) {
+            size_t comma = val.find(',', pos);
+            if (comma == std::string::npos) comma = val.size();
+            std::string t = val.substr(pos, comma - pos);
+            while (!t.empty() && (t.back() == ' ' || t.back() == '\r')) t.pop_back();
+            t.erase(0, t.find_first_not_of(' '));
+            if (!t.empty()) d.tags.push_back(t);
+            pos = comma + 1;
+        }
+    }
     else if (key == "PARENT")     { std::istringstream ss(val); ss >> d.parentIndex; }
     else if (key == "MODEL")      { d.model = val; }
     else if (key == "MESH_IDX")   { std::istringstream ss(val); ss >> d.meshIndex; }
@@ -158,6 +176,11 @@ Actor* SceneSerializer::spawn(const ActorData& d, World& world, AssetManager& as
     // 가 처음부터 비활성 기준으로 판정하므로 불필요한 onEnable→onDisable 이 없습니다.
     // (부모는 여기서 알 수 없어 호출자가 나중에 attachTo 로 배선합니다.)
     a->setActive(d.active != 0);
+    for (const std::string& t : d.tags) {
+        if (!a->addTag(t) && !Actor::validTag(t)) {
+            HLOG(LogScene, Warning) << "actor '" << d.name << "': bad tag '" << t << "' skipped";
+        }
+    }
     a->setLocalPosition(d.pos);
     a->setLocalRotation(transform_text::resolve(d.euler, d.hasQuat, d.quat));
     a->setLocalScale(d.scale);

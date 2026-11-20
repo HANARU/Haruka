@@ -1,5 +1,6 @@
 #include "World.hpp"
 #include <algorithm>
+#include <cmath>
 
 Actor* World::spawnActor(const std::string& name) {
     auto  actor  = std::make_unique<Actor>();
@@ -39,6 +40,8 @@ void World::destroyImmediate(Actor* actor) {
     if (owned == actors.end()) return;
 
     tweens_.cancelAll(actor);
+    timers_.cancelAll(actor);
+    if (!actor->tags().empty()) noteTagsChanged();
     onActorDestroyed.broadcast(actor);
     actor->notifyDestroy();
     idMap_.erase(actor->id);
@@ -64,13 +67,59 @@ void World::flushDestroyQueue() {
     for (Actor* a : queue) destroyImmediate(a);
 }
 
+void World::setTimeScale(float s) {
+    timeScale_ = std::isfinite(s) ? std::clamp(s, 0.f, 100.f) : 1.f;
+}
+
 void World::tick(float dt) {
+    // 배율 1 이면 dt 그대로입니다(1.0f 곱은 정확함, 예전과 같은 값).
+    const float sdt = dt * timeScale_;
+    lastDt_   = sdt;
+    gameTime_ += (double)sdt;
     ticking_ = true;
     for (auto& a : actors)
-        if (a->activeInHierarchy()) a->tick(dt);
-    tweens_.tick(dt);   // 액터 틱 뒤(콜백이 지운 액터는 아래에서 지움)
+        if (a->activeInHierarchy()) a->tick(sdt);
+    timers_.tick(gameTime_);   // 액터 틱 뒤, 트윈 앞
+    tweens_.tick(sdt);   // 액터 틱 뒤(콜백이 지운 액터는 아래에서 지움)
     ticking_ = false;
     flushDestroyQueue();
+}
+
+void World::tickPostPhysics() {
+    if (postPhysicsVersion_ != hcore::gStructureVersion) {
+        anyPostPhysics_ = false;
+        for (const auto& a : actors) {
+            for (const auto& c : a->getComponents())
+                if (c->tickGroup == ETickGroup::PostPhysics) { anyPostPhysics_ = true; break; }
+            if (anyPostPhysics_) break;
+        }
+        postPhysicsVersion_ = hcore::gStructureVersion;
+    }
+    if (!anyPostPhysics_) return;
+    ticking_ = true;
+    for (auto& a : actors)
+        if (a->activeInHierarchy()) a->tick(lastDt_, ETickGroup::PostPhysics);
+    ticking_ = false;
+    flushDestroyQueue();
+}
+
+const std::vector<Actor*>& World::actorsWithTag(std::string_view tag) const {
+    if (tagCacheStructure_ != hcore::gStructureVersion || tagCacheTags_ != tagVersion_) {
+        tagCache_.clear();
+        tagCacheStructure_ = hcore::gStructureVersion;
+        tagCacheTags_      = tagVersion_;
+    }
+    auto it = tagCache_.find(std::string(tag));
+    if (it != tagCache_.end()) return it->second;
+    std::vector<Actor*>& out = tagCache_[std::string(tag)];
+    for (const auto& a : actors)
+        if (a->hasTag(tag)) out.push_back(a.get());
+    return out;
+}
+
+Actor* World::firstWithTag(std::string_view tag) const {
+    const auto& v = actorsWithTag(tag);
+    return v.empty() ? nullptr : v.front();
 }
 
 Actor* World::findById(uint64_t id) const {

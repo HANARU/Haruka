@@ -60,6 +60,8 @@ struct EngineOptions {
     std::string uiBottomTab;             // --ui-bottom-tab=<name> : 첫 프레임 뒤 하단 탭 전환(에디터 전용)
     bool        uiLogCategories = false; // --ui-log-categories : 첫 프레임 뒤 로그 Categories 팝업 열기(에디터 전용)
     std::string uiOutlinerSearch;        // --ui-outliner-search=<text> : 아웃라이너 검색어(에디터 전용)
+    std::vector<std::string> uiConsole;  // --ui-console=<명령> (여러 번) : Output Log 콘솔 줄에서 실행(에디터 전용, Gameplay_Tools D9)
+    int         uiConsoleRecall = 0;     // --ui-console-recall=N : 그 뒤 위 화살표 N 번(콘솔 기록, 에디터 전용)
     std::string uiRename;                // --ui-rename=<actor> : 액터 이름 바꾸기 시작(에디터 전용)
     // --debug-crash=segv|stack|purecall|abort|terminate|throw|check|ensure : 몇 프레임 뒤 일부러 크래시(크래시 보고 D5,
     // Docs/Crash_Reporting.md). 크래시 보고서 확인용입니다.
@@ -73,6 +75,11 @@ struct EngineOptions {
     // --user-setting-at=<프레임>:<이름>=<값> (여러 번) : 그 프레임을 그린 뒤 실행 중에 바꿈(게임 코드가 바꾸는 것과 같은 길, S3-6 확인용).
     struct TimedUserSetting { uint32_t frame = 0; std::string name, value; };
     std::vector<TimedUserSetting> userSettingsAt;
+    // --cvar=<이름>=<값> (여러 번) : 시작할 때 CVar 를 바꿈(Config/cvars.ini 다음, Docs/Gameplay_Tools.md D7).
+    std::vector<std::pair<std::string, std::string>> cvars;
+    // --console-at=<프레임>:<명령> (여러 번) : 그 프레임을 그린 뒤 콘솔 명령을 실행(창 없는 콘솔 확인, D9).
+    struct TimedCommand { uint32_t frame = 0; std::string command; };
+    std::vector<TimedCommand> consoleAt;
     std::string uiAssetActions;          // --ui-asset-actions=<logical path> : 에셋 대화상자 열기(참조 체계 A-5, 에디터 전용)
     bool        uiActorPicker = false;   // --ui-actor-picker : 선택한 액터의 첫 액터 참조 칸의 고르기 목록 열기(R-7, 에디터 전용)
     // --ui-move-asset=<from>|<to> : 첫 프레임 뒤 에셋을 옮김(참조 체계 A-5, 에디터 전용). 프로젝트 파일을 실제로 옮기므로

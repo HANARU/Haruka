@@ -19,6 +19,8 @@ void EditorApp::setOptions(const EngineOptions& options) {
     uiBottomTab_        = options.uiBottomTab;
     uiLogCategories_    = options.uiLogCategories;
     uiOutlinerSearch_   = options.uiOutlinerSearch;
+    uiConsole_          = options.uiConsole;
+    uiConsoleRecall_    = options.uiConsoleRecall;
     uiRename_           = options.uiRename;
     uiAssetActions_     = options.uiAssetActions;
     uiActorPicker_      = options.uiActorPicker;
@@ -52,6 +54,7 @@ HTextEditState* EditorApp::focusedEdit() {
         case EFocusTarget::Rename:    return &outlinerPanel_.renameEdit();
         case EFocusTarget::Search:    return &outlinerPanel_.searchEdit();
         case EFocusTarget::LogSearch: return &logPanel_.searchField().edit;
+        case EFocusTarget::Console:   return &logPanel_.consoleEdit();
         case EFocusTarget::Dialog:    return &dialogEdit_;
         default:                      return nullptr;
     }
@@ -131,6 +134,19 @@ void EditorApp::applyDumpState() {
         logPanel_.openPopup();
     }
     if (!uiOutlinerSearch_.empty()) outlinerPanel_.setSearchText(uiOutlinerSearch_);
+    // 콘솔 줄 흉내(D9): Output Log 탭을 열고 명령을 차례로 Enter 한 것과 같이 실행한 뒤, 칸에 포커스를 둡니다. recall 은 위 화살표 횟수.
+    if (!uiConsole_.empty() || uiConsoleRecall_ > 0) {
+        if (bottomTab_ != 1) {
+            bottomTab_ = 1;
+            rebuildBottomPanel();
+        }
+        setTextFocus(EFocusTarget::Console);
+        for (const std::string& cmd : uiConsole_) {
+            logPanel_.consoleEdit().setText(cmd);
+            logPanel_.submitConsole();
+        }
+        for (int i = 0; i < uiConsoleRecall_; ++i) logPanel_.stepHistory(-1);
+    }
     if (!uiOutlinerCollapse_.empty() && ctx_.world) {
         for (const auto& ap : ctx_.world->getActors()) {
             if (ap && ap->name == uiOutlinerCollapse_) {

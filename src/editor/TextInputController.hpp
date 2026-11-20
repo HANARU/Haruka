@@ -8,7 +8,7 @@
 
 class IWindow;
 
-enum class EFocusTarget { None, Rename, Search, LogSearch, NumberField, Dialog };
+enum class EFocusTarget { None, Rename, Search, LogSearch, NumberField, Dialog, Console };
 
 // 텍스트 입력 칸의 공용 바인딩(S6d).
 // 아웃라이너 리네임 · 아웃라이너 검색 · 로그 검색이 같은 구조로 TextInputController 에 등록됩니다.
@@ -20,6 +20,8 @@ struct TextInputField {
     std::function<void()>          onChanged;
     std::function<bool()>          onBegin  = {};   // false 이면 진입을 취소합니다
     std::function<void()>          onCommit = {};   // Enter 확정 시 호출
+    bool                           keepFocusOnCommit = false;   // 콘솔: Enter 뒤에도 입력을 이어 감
+    std::function<void(int)>       onHistory = {};   // 위(-1) · 아래(+1) 화살표(콘솔 기록)
 };
 
 // 에디터 텍스트 입력 포커스 중재 및 키/문자 입력 처리기(S6d).
@@ -48,6 +50,7 @@ public:
         std::function<void()> onDeleteSelection;
         std::function<void()> onCopySelection;
         std::function<void()> onPasteClipboard;
+        std::function<TextInputField()> consoleField;   // Output Log 의 콘솔 줄(2026-11-20, Docs/Gameplay_Tools.md D9)
     };
 
     void init(Deps deps);
@@ -77,6 +80,8 @@ public:
         int  rightCount = 0;
         int  homeCount  = 0;
         int  endCount   = 0;
+        bool upEdge     = false;
+        bool downEdge   = false;
     };
     // 한 편집 칸에 글자 · 키 · 클립보드를 적용합니다(창 없이 시험 가능). 글이 바뀌었으면 참.
     static bool applyEdit(HTextEditState& st, const std::vector<unsigned int>& chars, const KeyEdges& k,
@@ -102,4 +107,6 @@ private:
     bool         prevADown_        = false;
     bool         prevXDown_        = false;
     bool         prevEscapeDown_   = false;
+    bool         prevUpDown_       = false;
+    bool         prevDownDown_     = false;
 };

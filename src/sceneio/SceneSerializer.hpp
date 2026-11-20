@@ -44,6 +44,7 @@ public:
         glm::quat   quat{ 1.f, 0.f, 0.f, 0.f };
         bool        hasQuat     = false;
         int         active      = 1;   // 액터 activeSelf (기본 활성)
+        std::vector<std::string> tags;    // TAGS:a,b (2026-11-20)
         int         parentIndex = -1;  // 직렬화 순서상 부모 인덱스, 부모 없으면 -1
         // v4 의 COMPONENT 블록들(DEF-22).
         ComponentSerializer::BlockParser components;

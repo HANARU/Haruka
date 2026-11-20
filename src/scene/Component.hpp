@@ -8,6 +8,11 @@ class Actor;
 class ComponentFieldWriter;
 struct ComponentLoadContext;
 
+// 틱 단계(2026-11-20, Docs/Gameplay_Tools.md D5). PrePhysics 는 월드 틱(물리 앞), PostPhysics 는 모듈(물리 · 소리) 틱 뒤의
+// World::tickPostPhysics 에서 틱합니다(UE TG_PrePhysics · TG_PostPhysics, Unity Update · LateUpdate 와 같은 자리). 물리 결과를 따라가는
+// 컴포넌트(카메라 · 붙여 따라가기)가 PostPhysics 를 씁니다.
+enum class ETickGroup : uint8_t { PrePhysics, PostPhysics };
+
 class Component {
 public:
     virtual ~Component() = default;
@@ -32,6 +37,9 @@ public:
     virtual void onEnable()         {}  // enabled_ transitions false→true
     virtual void onDisable()        {}  // enabled_ transitions true→false
     virtual void tick(float /*dt*/) {}
+
+    // 틱 단계. 바꾸려면 생성자에서 정하십시오(붙인 뒤에 바꾸면 다음 구조 변경 때까지 월드가 모를 수 있음).
+    ETickGroup tickGroup = ETickGroup::PrePhysics;
 
     virtual const char*           typeName()     const { return "Component"; }
     virtual std::vector<PropDesc> buildProps()         { return {}; }

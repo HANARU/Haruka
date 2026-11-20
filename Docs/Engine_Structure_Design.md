@@ -158,7 +158,7 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 범위 | 찾는 길 | 들어 있는 것 |
 |---|---|---|
 | 엔진 단위 | `EngineContext`(게임 모듈이 받음). 동적 모듈은 `ctx.modules.get<T>()` | 월드 · 에셋 · 창 · 모듈 · 렌더 확장 등록 · 컴포넌트 형 등록 |
-| 월드 단위 | `World::service<T>()`. 컴포넌트는 `owner->world()` 로 자기 월드를 찾음 | `PhysicsSystem`(startup ~ shutdown 사이), `ViewCameraOverride`(에디터) |
+| 월드 단위 | `World::service<T>()`. 컴포넌트는 `owner->world()` 로 자기 월드를 찾음 | `PhysicsSystem`(startup ~ shutdown 사이), `ViewCameraOverride`(에디터), `ComfortSettings` · `CVarRegistry`(2026-11-20, Engine 소유) |
 | 프로세스 전역 | `T::get()`, 정한 목록만 | `HInputSystem`(장치 입력은 프로세스에 하나), `ComponentRegistry`(컴포넌트 형 표) |
 
 Engine 이 직접 든 시스템 멤버(`physics_` · `audio_`)는 조립부 안의 배선이라 그대로 둡니다(바깥에 열지 않음). 월드 단위 서비스는

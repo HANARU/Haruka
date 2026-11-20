@@ -385,6 +385,8 @@ private:
     std::string uiBottomTab_;
     bool        uiLogCategories_ = false;
     std::string uiOutlinerSearch_;
+    std::vector<std::string> uiConsole_;   // --ui-console(여러 번)
+    int         uiConsoleRecall_ = 0;      // --ui-console-recall=N
     std::string uiRename_;
     std::string uiAssetActions_;          // --ui-asset-actions(참조 체계 A-5)
     bool        uiActorPicker_ = false;   // --ui-actor-picker(참조 체계 R-7)

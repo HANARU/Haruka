@@ -287,6 +287,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // 사용자 설정(쓰기 루트의 Config/user_settings.ini, 2026-11-20). 프로젝트 설정 위에 플레이어가 바꾼 값만 덮습니다.
     loadUserSettings();
     saves_ = std::make_unique<SaveStore>(happ::inWriteRoot("Saves"));
+    setupCVars();
 
     // 그리기 행 · 라이트 · 물리 바디 상한(DEF-10). 렌더러 · 물리를 만들기 전에 읽습니다.
     const EngineLimits limits = loadEngineLimits("Config/engine.ini");
@@ -426,6 +427,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     audio->setPhysics(physics);   // 소리 차폐 판정(2026-11-06, Audio_Design.md 9-4)
     // 편안함 설정은 월드 서비스로 둡니다(이동 컴포넌트 · 리그 높이가 읽음). 소리 크기와 함께 사용자 설정에서 적용합니다.
     world_.setService<ComfortSettings>(&comfort_);
+    world_.setService<CVarRegistry>(&cvars_);
     applyLiveUserSettings(true);
 
     // 앞단(에디터 또는 게임).
@@ -454,7 +456,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
     // 게임 모듈(씬 콘텐츠) + 프레임 컨텍스트.
     ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_, *renderer_,
-                                  ComponentRegistry::get(), userSettings_, *saves_, {} });
+                                  ComponentRegistry::get(), userSettings_, *saves_, cvars_, {} });
     ctx_->requestScene = [this](const std::string& path) { return frontend_->requestScene(path, false); };
     game_ = createGameModule();   // 링크한 게임 모듈(runtime/IGameModule.hpp)
     game_->onRegister();          // 씬 열기 전에 UIPanel 내용 · 게임 타입 등록
@@ -464,6 +466,10 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // 씬입니다. 예전에는 게임 모듈이 코드에 박힌 시작 씬을 읽어, 에디터가 지금 열린 파일을 몰랐습니다.
     // --scene 이 있으면 그 씬이 시작 씬입니다(시험 장면 캡처, 2026-11-16).
     frontend_->openInitialScene(options_.scenePath.empty() ? project_.startScene : options_.scenePath);
+    // 게임 모듈까지 등록을 마쳤으니, 명령줄 · ini 로 들어왔는데 끝내 등록되지 않은 CVar 이름을 알리고 첫 변경 콜백을 부릅니다.
+    for (const std::string& n : cvars_.pendingNames())
+        HLOG(LogEngine, Warning) << "CVar '" << n << "' was set (command line or cvars.ini) but nothing registered it";
+    cvars_.dispatchChanges();
     HLOG(LogEngine, Log) << "Startup: engine ready in " << stats_.msSinceBoot()
                          << " ms (window, renderer, IBL, modules, first scene)";
 }
@@ -480,6 +486,48 @@ Engine::~Engine() {
     if (xr_)       xr_->destroySession();
     if (renderer_) renderer_->cleanup();
     if (xr_)       xr_->shutdown();
+}
+
+// ── CVar (2026-11-20, Docs/Gameplay_Tools.md D6 ~ D8) ───────────────────────────────────────────────────
+void Engine::setupCVars() {
+    // 값 먼저: 쓰기 루트의 Config/cvars.ini, 그다음 --cvar(나중 것이 이김). 아직 등록되지 않은 이름은 레지스트리가 보관합니다.
+    {
+        const std::filesystem::path path = happ::inWriteRoot("Config/cvars.ini");
+        std::string text, why;
+        if (hfile::readConfigText(path, text, &why)) {
+            std::vector<std::string> messages;
+            cvars_.loadIni(text, messages);
+            for (const auto& m : messages) HLOG(LogEngine, Warning) << "Config/cvars.ini: " << m;
+            HLOG(LogEngine, Log) << "CVars read from Config/cvars.ini";
+        } else if (!why.empty()) {
+            HLOG(LogEngine, Warning) << "Config/cvars.ini: " << why;
+        }
+        for (const auto& [name, value] : options_.cvars) {
+            std::string w;
+            if (!cvars_.set(name, value, CVarRegistry::Source::CommandLine, &w)) {
+                HLOG(LogEngine, Warning) << "--cvar=" << name << "=" << value << ": " << w;
+            }
+        }
+    }
+    cvTimeScale_ = cvars_.addFloat("time.scale", 1.f, 0.f, 100.f, "World time scale (0 freezes game time, 1 = normal)",
+                                   [this](const CVarRegistry::CVar& v) {
+                                       world_.setTimeScale(v.asFloat());
+                                       HLOG(LogEngine, Log) << "Time scale: " << v.text() << " (cvar time.scale)";
+                                   });
+    cvMaxDt_ = cvars_.addFloat("time.maxDt", 0.05f, 0.005f, 0.25f, "Longest frame step in seconds (longer frames are slowed down)",
+                               [](const CVarRegistry::CVar& v) {
+                                   HLOG(LogEngine, Log) << "Max frame step: " << v.text() << " s (cvar time.maxDt)";
+                               });
+    cvDebugLines_ = cvars_.addBool("debug.lines", true, "Draw debug lines (hdebug) in the editor viewport",
+                                   [](const CVarRegistry::CVar& v) {
+                                       HLOG(LogEngine, Log) << "Debug lines: " << (v.asBool() ? "on" : "off") << " (cvar debug.lines)";
+                                   });
+    cvars_.addCommand("scene", "scene <path>: switch to a scene in the background (game executable only)",
+                      [this](const std::vector<std::string>& args) -> std::string {
+                          if (args.size() != 1) return "usage: scene /Game/scenes/Name.hscene";
+                          return frontend_->requestScene(args[0], false) ? "loading " + args[0]
+                                                                         : "cannot switch to " + args[0] + " here (game executable only)";
+                      });
 }
 
 // ── 사용자 설정 (2026-11-20, Docs/Save_And_Settings.md D6 ~ D10) ─────────────────────────────────────────
@@ -767,7 +815,7 @@ void Engine::readDesktopInput(FrameState& f, LoopState& loop) {
     const auto now = LoopState::Clock::now();
     f.dt      = std::chrono::duration<float>(now - loop.prev).count();
     loop.prev = now;
-    f.dt      = std::min(f.dt, 0.05f);
+    f.dt      = std::min(f.dt, cvMaxDt_ ? cvMaxDt_->asFloat() : 0.05f);   // time.maxDt(기본 0.05)
     if (options_.fixedDt > 0.f) f.dt = options_.fixedDt;   // 결정적 확인(애니메이션 D9)
     renderer_->advanceTime(f.dt);
 
@@ -806,6 +854,9 @@ void Engine::updatePlayState(FrameState& f, LoopState& loop) {
     if (!inGame && loop.prevInGame) {
         game_->onEndPlay();
         modules_.endPlayAll();
+        // Play 동안 건 타이머 · 바꾼 시간 배율을 남기지 않습니다(에디터는 같은 월드를 씀, D2).
+        world_.timers().clear();
+        world_.setTimeScale(cvTimeScale_ ? cvTimeScale_->asFloat() : 1.f);
     }
     // 일시정지는 시작·끝 처리 뒤에 알립니다. Pause 상태에서 곧바로 Stop 하면 끝 처리가
     // 먼저 사운드를 멈추므로, 뒤따르는 재개 통지가 남은 소리를 다시 들려주지 않습니다.
@@ -819,6 +870,7 @@ void Engine::updatePlayState(FrameState& f, LoopState& loop) {
 void Engine::streamAssets() {
     if (assets_) assets_->pump(kUploadBudgetMs);
     frontend_->updateSceneTransition();
+    cvars_.dispatchChanges();   // 지난 프레임에 바뀐 CVar 의 콜백(콘솔 · 게임 코드, D6)
     updateUserSettings();
 }
 
@@ -834,11 +886,15 @@ void Engine::tickFrame(FrameState& f) {
     if (f.playing) {
         {
             ScopedCpuTimer tw(gFrameTimings().worldTick);
-            world_.tick(f.dt);
-            game_->onTick(f.dt, *ctx_);
+            world_.tick(f.dt);                      // 시간 배율을 곱해 진행(Docs/Gameplay_Tools.md D1)
+            game_->onTick(world_.lastDt(), *ctx_);   // 배율 1 이면 f.dt 와 같음
         }
-        ScopedCpuTimer tm(gFrameTimings().modules);
-        modules_.tickAll(f.dt);
+        {
+            ScopedCpuTimer tm(gFrameTimings().modules);
+            modules_.tickAll(world_.lastDt());
+        }
+        world_.tickPostPhysics();   // 물리 뒤 컴포넌트(D5). 없으면 훑지 않음
+        if (cvDebugLines_ && !cvDebugLines_->asBool()) hdebug::lines().clear();   // debug.lines 0: 이번 틱의 디버그 선을 버림
     }
     // 머리를 따라오는 패널(3D UI 구간 7)을 먼저 옮기고, 그 자세로 포인터가 가리킵니다.
     if (f.playing) worldUi_.updateFollowPanels(world_, xr_ && xr_->hasSession(), f.dt);
@@ -917,6 +973,9 @@ void Engine::endLoop(FrameState& f, LoopState& loop) {
             HLOG(LogEngine, Warning) << "--switch-scene: " << sw.first << " was not accepted (game executable only)";
         }
     }
+    // 개발 스위치(게임플레이 도구 D9): 정한 프레임을 그린 뒤 콘솔 명령을 실행합니다(에디터 콘솔 줄과 같은 길).
+    for (; consoleNext_ < options_.consoleAt.size() && drawnFrames_ >= options_.consoleAt[consoleNext_].frame; ++consoleNext_)
+        cvars_.executeLogged(options_.consoleAt[consoleNext_].command);
     // 개발 스위치(저장 · 설정 S3-6): 정한 프레임을 그린 뒤 사용자 설정을 바꿉니다(다음 프레임 처음에 적용).
     for (; settingNext_ < options_.userSettingsAt.size() && drawnFrames_ >= options_.userSettingsAt[settingNext_].frame; ++settingNext_) {
         const auto& us = options_.userSettingsAt[settingNext_];

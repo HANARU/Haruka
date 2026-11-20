@@ -69,7 +69,7 @@
 |---|---|
 | 소스 | `src/` 의 `.cpp` · `.hpp` 179 파일, 30,275 줄 |
 | 셰이더 | GLSL 20 파일(셰이더 19 + 공용 헤더 1), 841 줄(2026-11-02). 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 34개 실행 파일, 검사 2,708개(`ctest -C Release`, 2026-11-20 저장 · 설정 뒤) |
+| 자동 테스트 | 35개 실행 파일, 검사 2,802개(`ctest -C Release`, 2026-11-20 게임플레이 도구 뒤) |
 | 문서 | `Docs/` 활성 문서 28개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳤습니다. 같은 날 빛 · 그림자 조사 후속에서 DEF-148 을 고치고 DEF-158 ~ 161(4건)을 등재해 모두 고쳤습니다. 2026-11-02 헤드셋 확인에서 DEF-162 · 163, 마지막 점검에서 DEF-164 를 등재해 모두 고쳤습니다. 2026-11-06 검토 결함 묶음 DEF-130 ~ 147(18건)을 모두 고쳤고, 같은 날 임포트 검토에서 DEF-165(텍스처 밉맵)를, 공간 음향 조사에서 DEF-166(패닝 문서 오류)을 등재해 고쳐, 지금은 166건 중 해결 155 · 열림 5 · 보류 3 · 닫음 3 입니다. 그 뒤 DEF-167(보류, 2026-11-16)과 DEF-168 ~ 172(2026-11-17 ~ 18, 모두 해결)를 등재해 172건 중 해결 160 · 열림 5 · 보류 4 · 닫음 3 입니다 |
@@ -446,7 +446,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 34개, 검사 2,708개(2026-11-20).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 35개, 검사 2,802개(2026-11-20).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -457,6 +457,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `log_category` | 61 | 로그 카테고리 |
 | `text_system` | 121 | 글자 체계([Text_System.md](Text_System.md)): UTF-8 읽기 · 고치기, 글자(grapheme) · 단어 경계, 한글 NFC, ASCII 대소문자 무시, 편집 상태, 입력 처리기(가짜 창 · 클립보드 · 자동 반복 · IME 조합 · 후보 창 자리), HText(번역 · 낡은 번역 · 층 · 서식 · 숫자), .po 읽기, HTEXT 모으기 · 한국어 표가 소스 키를 모두 덮음, 씬 이름 |
 | `object_refs` | 98 | 참조 체계([Object_References.md](Object_References.md)): 액터 GUID(형식 · 겹침 · World 색인), 액터 참조(지우면 끊기고 되살리면 이어짐), 씬 v6 GUID 왕복 · 옛 파일 · 겹친 GUID, Fresh 정책(프리팹 두 번 꺼내기 · 복제한 쌍 · 밖 참조 · 등록되지 않은 컴포넌트 · CRLF), Undo · Play 뒤 참조, 디테일 액터 참조 칸 · 고르기 목록, 에셋 참조 색인(옛 assets/ 형식 · ini · glTF uri) · 끊긴 참조 · 옮기기(파일 · 폴더 · 거절 · 바이트 보존 · 되돌리기 · 코드 경고), 샘플 프로젝트에 끊긴 참조 없음, 샘플 LookAtComponent |
+| `gameplay_tools` | 84 | 게임플레이 기본 도구([Gameplay_Tools.md](Gameplay_Tools.md)): 시간 배율 · 게임 시간, 타이머(정확한 틱 · 배율 · 반복 따라잡기 · 16 번 상한 · 주인 삭제 취소 · 콜백 안 취소 · 추가 · clear), 물리 뒤 틱, 태그(규칙 · 색인 캐시 · 씬 파일 왕복), 이벤트 버스(형별 · 순서 · 발행 중 해제 · 재발행 · 이동), CVar(등록 · 범위 · 보관 · 콜백 · 출처), 콘솔 명령(값 · help · list · reset · 따옴표 인자) |
 | `save_settings` | 89 | 저장 게임 · 사용자 설정([Save_And_Settings.md](Save_And_Settings.md)): 저장 파일 왕복(int64 · float 비트 · 줄바꿈 든 문자열 · vec3 · GUID), CRC 로 잘림 · 손상 거절, 형식 · 데이터 버전, 슬롯 이름 규칙, 다시 시작 왕복, `.bak`(잘린 본 파일 · 본 파일 없음 · 둘 다 손상), 남은 `.tmp`, 목록 · 지우기, 다시 읽은 씬의 GUID 참조, 설정 형 · 범위 · 바꾼 값만 쓰기 · 모르는 이름 보존 · BOM · UTF-16, 편안함 서비스 |
 | `async_loading` | 30 | 비동기 로딩([Async_Loading.md](Async_Loading.md)): 메가 버퍼 구간 할당자(첫 맞춤 · 이웃 합치기 · 겹침 거절 · 무작위 1만 번), 백그라운드 모델 읽기(워커 결과 = 동기 결과, 중복 요청 · 실패 · 동시 디코드 · waitFor · 멈춤), 씬의 모델 참조 모으기 |
 | `animation` | 103 | 애니메이션([Animation_System.md](Animation_System.md)): STEP · LINEAR(회전 slerp) · CUBICSPLINE 샘플링, 커서 탐색, 자세 섞기 · 가산, TRS 전역 행렬, TestArm.glb 클립 · 영향 8개 → 4개, 캐시 v10 왕복, 재생기(반복 · 한 번 · 거꾸로 · 크로스페이드 · 가산 · 이벤트 · 루트 모션 · 손 자세 충돌 · 저장 왕복 · 미리보기), 상태 기계, 모프 타깃(스킨 · 스킨 없는 메시), 트윈 |
@@ -478,7 +479,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `vulkan_baseline` | 84 | 장치 계획(1.1 · push descriptor · 멀티뷰 필수 · sync2 선택 · 창 없음), 기능 체인(멀티뷰 · sync2), KHR 이름만 묻는 함수 로드, 큐 계열, XR 런타임 범위 |
 | `barrier_compat` | 63 | sync2 → 1.0 배리어 변환표 · 엔진 값 전수 · 단계 합치기 · 거부 · KHR/1.0 기록 분기 |
 | `memory_types` | 25 | 핵심 힙 타입 선택(Quest Pro · ReBAR 유무 · 작은 UMA), 지연 할당 타입, 실패 문구 |
-| `headless_render` | 130 | 빈 스왑체인, 이미지별 세마포어(DEF-118), 표면 없는 창(Headless · Android), 명령줄(시작 씬 `--scene` · `--gpu` · `--settings-platform` · `--no-multiview` · `--capture-eye` · `--user-setting` 포함), 프레임 시간 분포 · 예산(`FramePacing.hpp`), 종료 코드 · 빈 화면, 파이프라인 캐시 파일의 잘림 · 손상 · 다른 장치 거르기(DEF-153), XR 세션 다시 열기 시각(DEF-155, `runtime/XrRecovery.hpp`) |
+| `headless_render` | 140 | 빈 스왑체인, 이미지별 세마포어(DEF-118), 표면 없는 창(Headless · Android), 명령줄(시작 씬 `--scene` · `--gpu` · `--settings-platform` · `--no-multiview` · `--capture-eye` · `--user-setting` · `--cvar` · `--console-at` · `--ui-console` 포함), 프레임 시간 분포 · 예산(`FramePacing.hpp`), 종료 코드 · 빈 화면, 파이프라인 캐시 파일의 잘림 · 손상 · 다른 장치 거르기(DEF-153), XR 세션 다시 열기 시각(DEF-155, `runtime/XrRecovery.hpp`) |
 | `hand_skinning` | 108 | glTF 스킨 읽기 · CPU 스키닝 · OpenXR 손 뼈대 규약 · 손 자세 컴포넌트 · 컨트롤러 → 손가락 굽힘 |
 | `math_common` | 84 | `src/math` 기본 도형 · 판정 · 허용 오차, 감쇠 · 스프링 · 이징, 곡선, PCG32 · Perlin · 블루 노이즈, One Euro · 속도 추정, 두 뼈 IK · 스윙-트위스트, 아핀 역행렬(2026-11-17) |
 | `architecture_deps` | 28 | 모듈 include 방향(`tests/ArchitectureRules.txt`): 규칙 파일 · 모든 모듈에 규칙 · 표에 순환 없음 · 모듈마다 허용 방향 안 · 허용 목록이 줄기만 함([Engine_Structure_Design.md](Engine_Structure_Design.md) 4절), 정적 시스템 포인터 0 · 전역 싱글턴 목록(S3, 8절) |
@@ -520,6 +521,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | Quest 단독 실행(Android) | APK 까지 만듦(2026-10-31): NDK 빌드(Gradle 없이) · `android_main` · 표면 없는 AndroidWindow · 공유 OpenXR 로더. 헤드셋 첫 실행이 남았고, 첫 실행은 묶음 파일을 `adb push` 로 넣고 소리를 끕니다([Packaging_Design.md](Packaging_Design.md) 7절) | DEF-08 |
 | 게임 배포 형태 | Windows 는 2026-10-19 ~ 24 에 생겼습니다(게임 실행 파일 · 묶음 파일 · 배포 ZIP, DEF-12 해결). Android APK 는 개발용(디버그 서명)만 있고 묶음 파일을 아직 APK 안에서 읽지 않습니다. 게임 설정 화면(창 크기 · 전체 화면 · 소리 장치)도 없습니다 | [Packaging_Design.md](Packaging_Design.md) |
 | Linux · macOS | 빌드된 적 없음 | |
+| 게임플레이 기본 도구 · CVar | 2026-11-20 에 들어옴: 시간 배율 · 게임 시간(`World::setTimeScale` · `gameTime`), 타이머(`World::timers`), 태그(`Actor::addTag` · `World::actorsWithTag`), 이벤트 버스(`World::events`), 물리 뒤 틱(`ETickGroup::PostPhysics`), CVar · 콘솔 명령(`EngineContext::cvars`, ini · `--cvar` · 에디터 Output Log 콘솔 줄). 없는 것: 헤드셋 안 콘솔, 스크립트 계층 | [Gameplay_Tools.md](Gameplay_Tools.md) |
 | 저장 게임 · 사용자 설정 | 2026-11-20 에 들어옴: 저장 슬롯(`EngineContext::saves`, CRC · 이전 저장본 · 데이터 버전), 사용자 설정 층(`EngineContext::settings`, 소리 버스 · AO · 블룸 · 그림자 품질 · 키 재지정 · 편안함 · `game.*`). 없는 것: 게임 설정 화면, 해상도 배율 · vsync | [Save_And_Settings.md](Save_And_Settings.md) |
 | 비동기 에셋 로딩 | 2026-11-20 에 들어옴: 워커 스레드 읽기 · 프레임당 2 ms 업로드 · 대기 없는 텍스처 업로드 · 지연 해제 · 메가 버퍼 재사용 · 게임 씬 전환(`EngineContext::requestScene`). 없는 것: 큰 텍스처 나눠 올리기, XR 로딩 레이어, 에디터 씬 열기의 비동기화 | [Async_Loading.md](Async_Loading.md) · [Threading.md](Threading.md) |
 | Zero-Copy 로딩 | 이름만 남음. 캐시를 호스트 메모리로 읽은 뒤 업로드합니다 | |

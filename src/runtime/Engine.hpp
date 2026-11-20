@@ -3,6 +3,7 @@
 #include "ModuleManager.hpp"
 #include "../core/ProjectSettings.hpp"
 #include "../core/UserSettings.hpp"
+#include "../core/CVar.hpp"
 #include "IEngineFrontend.hpp"
 #include "EngineOptions.hpp"
 #include "FrameStats.hpp"
@@ -61,6 +62,12 @@ private:
     // 시작할 때 user_settings.ini 를 읽고 --user-setting 을 덮어 저장합니다. 그래픽 품질 · 소리 · 입력 · 편안함을 모두 적용한 뒤,
     // 프레임 처음(streamAssets)에 변경 번호가 바뀌었으면 바로 적용 항목만 다시 적용하고, 마지막 변경 1 초 뒤 · 종료할 때 저장합니다.
     void loadUserSettings();
+    // CVar(2026-11-20, Docs/Gameplay_Tools.md D6 ~ D8): ini · --cvar 를 먼저 넣고 엔진 변수 · 명령을 등록합니다.
+    void setupCVars();
+    CVarRegistry                         cvars_;
+    CVarRegistry::CVar*                  cvTimeScale_  = nullptr;   // time.scale
+    CVarRegistry::CVar*                  cvMaxDt_      = nullptr;   // time.maxDt
+    CVarRegistry::CVar*                  cvDebugLines_ = nullptr;   // debug.lines
     void applyLiveUserSettings(bool startup);
     void applyUserInput(bool startup);
     void updateUserSettings();
@@ -115,6 +122,7 @@ private:
     bool          debugCrashDone_ = false;     // --debug-crash 를 한 번 일으켰는지
     size_t        switchNext_     = 0;         // --switch-scene 다음 항목
     size_t        settingNext_    = 0;         // --user-setting-at 다음 항목
+    size_t        consoleNext_    = 0;         // --console-at 다음 항목
     void          streamAssets();             // 프레임 처음: 업로드 예산 · 씬 전환(비동기 로딩)
     uint32_t      syntheticImage_ = 0;         // 다음에 그릴 합성 눈 이미지
     uint32_t      lastSynthetic_  = UINT32_MAX;   // 마지막으로 그린 합성 눈 이미지(캡처용)

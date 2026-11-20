@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <algorithm>
@@ -44,6 +45,16 @@ public:
     // 자신의 활성 플래그를 바꾸고, 실효가 뒤집히면 이 액터와 자식 서브트리의 컴포넌트
     // onEnable/onDisable 을 발화시킵니다. 정의는 Actor.cpp 에 있습니다.
     void setActive(bool v);
+
+    // ── 태그 (2026-11-20, Docs/Gameplay_Tools.md D3) ─────────────────────────────
+    // 종류로 찾을 때 씁니다(UE Actor Tags · Unity tag · Godot 그룹). 이름은 [A-Za-z0-9_.-], 대소문자를 가립니다. 찾기는
+    // World::actorsWithTag(색인). 씬 파일에는 태그가 있을 때만 TAGS: 줄을 씁니다.
+    const std::vector<std::string>& tags() const { return tags_; }
+    bool hasTag(std::string_view tag) const;
+    bool addTag(std::string_view tag);      // 틀린 이름 · 이미 있음이면 false
+    bool removeTag(std::string_view tag);   // 없었으면 false
+    void clearTags();
+    static bool validTag(std::string_view tag);
 
     // ── 로컬 트랜스폼 ────────────────────────────────────────────────────────
     // 읽기는 transform(), 쓰기는 아래 세터로만 합니다. transform_ 은 private 라
@@ -125,8 +136,10 @@ public:
         return removeComponent(it->get());
     }
 
-    void tick(float dt) {
-        for (auto& c : components) c->tickIfReady(dt);
+    // 그 틱 단계의 컴포넌트만 틱합니다(D5). 기본은 PrePhysics 입니다.
+    void tick(float dt, ETickGroup group = ETickGroup::PrePhysics) {
+        for (auto& c : components)
+            if (c->tickGroup == group) c->tickIfReady(dt);
     }
 
     // ── World-space transform (세대 스탬프 캐시, O2 2026-11-17) ─────────────────
@@ -193,4 +206,5 @@ private:
     Actor*              parent_   = nullptr;
     std::vector<Actor*> children_;
     bool                activeSelf_ = true;
+    std::vector<std::string> tags_;
 };

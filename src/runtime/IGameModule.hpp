@@ -11,6 +11,7 @@ class IRenderExtensionHost;
 class ComponentRegistry;
 class UserSettings;
 class SaveStore;
+class CVarRegistry;
 
 // ── EngineContext — subsystem references passed each frame ────────────────────
 struct EngineContext {
@@ -28,6 +29,8 @@ struct EngineContext {
     UserSettings&         settings;
     // 저장 게임 슬롯(<쓰기 루트>/Saves, core/SaveGame.hpp).
     SaveStore&            saves;
+    // 실행 중 변수 · 콘솔 명령(2026-11-20, Docs/Gameplay_Tools.md, core/CVar.hpp). onStart 에서 등록하십시오.
+    CVarRegistry&         cvars;
     // 씬 전환(2026-11-20, Docs/Async_Loading.md D6): 모델을 백그라운드로 읽는 동안 지금 씬을 계속 그리고, 다 되면 바꿉니다.
     // 게임 실행 파일만 지원합니다(에디터는 false). 씬 글을 읽지 못해도 false.
     std::function<bool(const std::string&)> requestScene;

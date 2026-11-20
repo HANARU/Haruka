@@ -43,6 +43,15 @@ public:
 
     // 텍스트 포커스 중재용 검색 칸 상태.
     SearchField searchField();
+    // 콘솔 줄(2026-11-20, Docs/Gameplay_Tools.md D9). run 은 명령 한 줄을 실행해 결과 글을 돌려주는 쪽(EditorApp 이 CVar 레지스트리로 연결),
+    // clicked 는 칸을 눌렀을 때(포커스 요청).
+    void        setConsole(std::function<std::string(const std::string&)> run, std::function<void()> clicked);
+    TextInputField consoleField();
+    bool        isConsoleFocused() const { return consoleFocused_; }
+    HTextEditState& consoleEdit() { return consoleEdit_; }
+    // 칸의 글을 실행하고 기록에 넣은 뒤 비웁니다(Enter, --ui-console).
+    void        submitConsole();
+    const std::vector<std::string>& consoleHistory() const { return history_; }
     bool        isSearchFocused() const { return searchFocused_; }
     bool        searchContains(glm::vec2 p) const;
 
@@ -68,6 +77,17 @@ private:
     std::set<std::string>    hiddenNames_;
     bool                     showVerb_[5]  = { false, true, true, true, true };
     HTextEditState           searchEdit_;   // 글자 체계 T1
+    HTextEditState           consoleEdit_;
+    bool                     consoleFocused_ = false;
+    std::vector<std::string> history_;
+    int                      historyPos_ = -1;   // -1 = 기록을 고르지 않음
+    std::function<std::string(const std::string&)> consoleRun_;
+    std::function<void()>    consoleClicked_;
+    std::shared_ptr<SSearchBox> consoleBox_;
+public:
+    // 콘솔 기록에서 위(-1) · 아래(+1)로 고릅니다(화살표 · --ui-console-recall).
+    void stepHistory(int dir);
+private:
     bool                     searchFocused_ = false;
     uint64_t                 clearedSeq_    = 0;
     std::string              errText_  = "E 0";
