@@ -69,7 +69,7 @@
 |---|---|
 | 소스 | `src/` 의 `.cpp` · `.hpp` 179 파일, 30,275 줄 |
 | 셰이더 | GLSL 20 파일(셰이더 19 + 공용 헤더 1), 841 줄(2026-11-02). 컴퓨트 셰이더 없음 |
-| 자동 테스트 | 36개 실행 파일, 검사 2,885개(`ctest -C Release`, 2026-11-20 CPU 구간 계측 뒤) |
+| 자동 테스트 | 37개 실행 파일, 검사 2,940개(`ctest -C Release`, 2026-11-20 물리 조인트 · 충돌 이벤트 뒤) |
 | 문서 | `Docs/` 활성 문서 28개(색인 `README.md` 제외, 이 문서 포함) + 아카이브 6개(외부 엔진 분석, 신뢰도 낮음) |
 | 커밋 | 44개. 기준 시점에는 17개가 원격에 없었으나, 2026-10-15 에 그 뒤 커밋까지 모두 원격에 올렸습니다 |
 | 결함 대장 | 기준 시점 109건 등재: 해결 94 · 열림 9 · 보류 3 · 닫음 3(자동 조작 환경의 착시). 그 뒤 DEF-110 · 111(2026-10-15)과 DEF-112 ~ 119(패키징 1단계, 2026-10-19 ~ 24)를 등재하고 DEF-12 를 해결했습니다. 2026-10-31 오류 검토에서 DEF-120 ~ 147(28건)을 등재하고 그중 8건(DEF-121 ~ 128)을 고쳤습니다. 같은 날 패키징 2단계에서 7건(DEF-04 · 06 · 42 · 97 · 103 · 118 · 120)을 고치고 DEF-148 을 등재했습니다. 2026-11-01 Android 오류 검출에서 DEF-149 ~ 157(9건)을 등재하고 모두 고쳤습니다. 같은 날 빛 · 그림자 조사 후속에서 DEF-148 을 고치고 DEF-158 ~ 161(4건)을 등재해 모두 고쳤습니다. 2026-11-02 헤드셋 확인에서 DEF-162 · 163, 마지막 점검에서 DEF-164 를 등재해 모두 고쳤습니다. 2026-11-06 검토 결함 묶음 DEF-130 ~ 147(18건)을 모두 고쳤고, 같은 날 임포트 검토에서 DEF-165(텍스처 밉맵)를, 공간 음향 조사에서 DEF-166(패닝 문서 오류)을 등재해 고쳐, 지금은 166건 중 해결 155 · 열림 5 · 보류 3 · 닫음 3 입니다. 그 뒤 DEF-167(보류, 2026-11-16)과 DEF-168 ~ 172(2026-11-17 ~ 18, 모두 해결)를 등재해 172건 중 해결 160 · 열림 5 · 보류 4 · 닫음 3 입니다 |
@@ -175,7 +175,7 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 | `src/assets/` | 10 · 1,669 | `AssetManager`, glTF 로더, `.gasset` 캐시, 스킨 |
 | `src/geometry/` | 5 · 1,321 | 절차 도형 기술자와 메시 생성기 |
 | `src/components/` | 24 · 3,316 | Light · Camera · StaticMesh · SkinnedMesh · HeightFog · ReflectionCapture · UIPanel · HandPose, XR 리그 · 추적 자세 · 이동 · 잡기(`XrComponents`), 기본 컴포넌트 등록 |
-| `src/physics/` | 4 · 1,352 | `PhysicsSystem`(Jolt), `RigidBodyComponent` |
+| `src/physics/` | 8 · 2,196 | `PhysicsSystem`(Jolt), `RigidBodyComponent`, `JointComponent`, 충돌 레이어 표(`PhysicsLayers.hpp`), 접촉 알림 형(`PhysicsEvents.hpp`) |
 | `src/audio/` | 15 · 3,106 | `AudioSystem`(miniaudio, 출력 장치 선택, 가상 파일 시스템 파일 콜백, 음원별 노드 사슬 · 차폐 · 공용 리버브 · HRTF 노드), 3D 감쇠 · 차폐 설정, 차폐 · 잔향 계산(`AudioOcclusion` · `AudioReverb`), verblib 설정, HRTF 인터페이스(`AudioHrtf`)와 Steam Audio 구현(`SteamAudioHrtf`, 라이브러리를 실행 중에 엶), `AudioComponent` · `ReverbZoneComponent` |
 | `src/input/` | 3 · 456 | `HInputSystem`(액션 · 축 바인딩, 키 · 마우스 축, 설정 줄 바인딩, 햅틱), XR 입력 상태 |
 | `src/xr/` | 2 · 894 | `XrSystem`(OpenXR 인스턴스 · 세션 · 스왑체인 · 입력 · 진동 · 바닥 기준 공간 · 세션을 잃은 이유) |
@@ -374,7 +374,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-7. 물리 (Jolt)
 
-- 고정 스텝 1/60 초(XR 중에는 헤드셋 주사율), 정적 · 동적 두 레이어, 바디 상한은 설정 파일.
+- 고정 스텝 1/60 초(XR 중에는 헤드셋 주사율), 바디 상한은 설정 파일.
 - 콜라이더 크기는 월드 스케일을 반영합니다. 구 · 캡슐은 균등 스케일만 지원(비균등이면 가장 큰 값으로 근사하고 경고). 얇은 상자는
   모서리 반경을 두께에 맞춰 줄이고, 만들 수 없는 크기는 경고 후 바디를 만들지 않습니다.
 - API: 힘 · 위치 지정 힘 · 토크 · 충격량 · 선속도 · 각속도 · 중력 설정, 레이캐스트, 구 겹침 질의, 바디 상태 조회, 마찰 · 반발 즉시 반영,
@@ -382,6 +382,17 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 - 바디는 Play 중 지연 생성되고, 끄면 지우며 주변 잠든 바디를 깨웁니다. 편집 확정 때만 다시 만듭니다.
 - 수학 보강(2026-11-17, [Math_Reinforcement.md](Math_Reinforcement.md)): 볼록 껍질 · 메시 충돌체(같은 액터의 메시 형상, 비균등 크기 정확,
   Mesh 는 Static · Kinematic 전용), 연속 충돌(`continuous`, 던진 물체는 자동), 던지기 속도 = 손 속도 평균 + ω × (질량 중심 − 손) + 리그 이동(DEF-168).
+- 조인트 · 충돌 이벤트 · 레이어(2026-11-20, [Physics_Joints_And_Events.md](Physics_Joints_And_Events.md)):
+  - 충돌 레이어 16 슬롯(0 = Default)과 쌍별 충돌 표. `project.ini` 의 `physics.layer.<1~15> = 이름` · `physics.ignore = 이름, 이름` 으로 적고,
+    기본은 모두 부딪힘(예전 동작). `RigidBodyComponent.layer`(씬 파일 `layer`, 디테일 칸은 레이어 이름 목록). 레이캐스트 · 겹침 · 스윕은 레이어 마스크를 받습니다.
+  - 트리거(`trigger`, Jolt 센서): 충돌 반응 없이 들어감 · 나감을 알리고 질의(레이캐스트 · 스윕 · 겹침 · 캐릭터 이동)에 맞지 않습니다. Static 트리거는
+    깨어 있는 키네마틱 센서로 만들어 잠든 몸도 봅니다.
+  - 접촉 알림(`contactEvents` 를 켠 몸): 시작 · 유지(틱마다 한 번) · 끝. 물리 스레드는 큐에만 넣고, 메인 스레드가 스텝마다 바디 쌍 단위로 세어 물리 틱 끝에
+    `RigidBodyComponent` 의 함수 칸(`onTriggerEnter` · `onTriggerExit` · `onContactBegin` · `onContactStay` · `onContactEnd`)과 이벤트 버스
+    `PhysicsContactEvent` 로 보냅니다. 몸이 잠들어 빠진 접촉은 끝이 아니고, 몸을 지우면 끝을 보냅니다(상대는 nullptr). 알림 안에서 액터를 지워도 됩니다.
+  - `JointComponent`: fixed · hinge(각도 한계, 도) · slider(거리 한계, m) · distance(최소 · 최대 거리), 상대는 `HActorRef`(비면 월드). 앵커 · 축은
+    소유 액터 로컬, 값 0 은 만든 순간의 자세. 어느 쪽 몸이든 지워지면 조인트도 지웁니다. 에디터는 앵커 · 축 · 한계를 선으로 그립니다.
+  - 셰이프 캐스트 `PhysicsSystem::shapeCast`(구 · 상자 · 캡슐, 회전, 레이어 마스크, 무시 액터, 시작부터 겹치면 거리 0).
 
 ### 4-8. 오디오 (miniaudio)
 
@@ -446,7 +457,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 ### 4-12. 품질 관리
 
-- **단위 테스트 36개, 검사 2,885개(2026-11-20).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
+- **단위 테스트 37개, 검사 2,940개(2026-11-20).** 외부 프레임워크 없이 자체 `check()` 로 만든 콘솔 실행 파일이며 그래픽 장치 없이 돕니다.
 
 | 테스트 | 검사 | 대상 |
 |---|---|---|
@@ -458,6 +469,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `text_system` | 121 | 글자 체계([Text_System.md](Text_System.md)): UTF-8 읽기 · 고치기, 글자(grapheme) · 단어 경계, 한글 NFC, ASCII 대소문자 무시, 편집 상태, 입력 처리기(가짜 창 · 클립보드 · 자동 반복 · IME 조합 · 후보 창 자리), HText(번역 · 낡은 번역 · 층 · 서식 · 숫자), .po 읽기, HTEXT 모으기 · 한국어 표가 소스 키를 모두 덮음, 씬 이름 |
 | `object_refs` | 98 | 참조 체계([Object_References.md](Object_References.md)): 액터 GUID(형식 · 겹침 · World 색인), 액터 참조(지우면 끊기고 되살리면 이어짐), 씬 v6 GUID 왕복 · 옛 파일 · 겹친 GUID, Fresh 정책(프리팹 두 번 꺼내기 · 복제한 쌍 · 밖 참조 · 등록되지 않은 컴포넌트 · CRLF), Undo · Play 뒤 참조, 디테일 액터 참조 칸 · 고르기 목록, 에셋 참조 색인(옛 assets/ 형식 · ini · glTF uri) · 끊긴 참조 · 옮기기(파일 · 폴더 · 거절 · 바이트 보존 · 되돌리기 · 코드 경고), 샘플 프로젝트에 끊긴 참조 없음, 샘플 LookAtComponent |
 | `cpu_profiling` | 85 | CPU 구간 계측([CPU_Profiling.md](CPU_Profiling.md)): 중첩 스코프(순서 · 포함), 스레드 구분(끝난 스레드 수집 · 이름), 시작 · 멈춤 · 상한(버린 수), Chrome trace JSON(작은 파서로 다시 읽기 · 이스케이프 · 마이크로초 표기 · 정렬), 끈 번역 단위(`constexpr` · 이벤트 0), FrameTimings 공유 측정 지점, 추적 경로 규칙 · 기록기 · 콘솔 명령 · `--trace-frames`, 스코프 비용 |
+| `physics_joints` | 55 | 물리 조인트 · 충돌 이벤트 · 레이어([Physics_Joints_And_Events.md](Physics_Joints_And_Events.md)): 레이어 표 해석 · `project.ini` 줄, 레이어로 무시한 쌍(통과 · 알림 0 · 질의 마스크), 접촉 시작 · 유지 · 끝(잠듦은 끝 아님), 트리거 들어감 · 나감(지나감 · 안에서 잠듦 · 잠든 몸 둘레에 생김 · 지우면 나감), 질의는 트리거를 맞추지 않음, 알림 안에서 삭제, 경첩 문 한계 · 상대 삭제, 슬라이더 · 거리 · 고정, 셰이프 캐스트(구 · 상자 · 캡슐 · 회전 · 마스크 · 무시 · 시작 겹침), 필드 왕복 · 디테일 칸, 확인 장면 `PhysicsJointProbe.hscene` |
 | `gameplay_tools` | 84 | 게임플레이 기본 도구([Gameplay_Tools.md](Gameplay_Tools.md)): 시간 배율 · 게임 시간, 타이머(정확한 틱 · 배율 · 반복 따라잡기 · 16 번 상한 · 주인 삭제 취소 · 콜백 안 취소 · 추가 · clear), 물리 뒤 틱, 태그(규칙 · 색인 캐시 · 씬 파일 왕복), 이벤트 버스(형별 · 순서 · 발행 중 해제 · 재발행 · 이동), CVar(등록 · 범위 · 보관 · 콜백 · 출처), 콘솔 명령(값 · help · list · reset · 따옴표 인자) |
 | `save_settings` | 89 | 저장 게임 · 사용자 설정([Save_And_Settings.md](Save_And_Settings.md)): 저장 파일 왕복(int64 · float 비트 · 줄바꿈 든 문자열 · vec3 · GUID), CRC 로 잘림 · 손상 거절, 형식 · 데이터 버전, 슬롯 이름 규칙, 다시 시작 왕복, `.bak`(잘린 본 파일 · 본 파일 없음 · 둘 다 손상), 남은 `.tmp`, 목록 · 지우기, 다시 읽은 씬의 GUID 참조, 설정 형 · 범위 · 바꾼 값만 쓰기 · 모르는 이름 보존 · BOM · UTF-16, 편안함 서비스 |
 | `async_loading` | 30 | 비동기 로딩([Async_Loading.md](Async_Loading.md)): 메가 버퍼 구간 할당자(첫 맞춤 · 이웃 합치기 · 겹침 거절 · 무작위 1만 번), 백그라운드 모델 읽기(워커 결과 = 동기 결과, 중복 요청 · 실패 · 동시 디코드 · waitFor · 멈춤), 씬의 모델 참조 모으기 |
@@ -550,7 +562,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 | 항목 | 현재 상태 |
 |---|---|
-| 조인트 · 컨스트레인트 | 없음 |
+| 조인트 · 컨스트레인트 | 2026-11-20 에 들어옴: `JointComponent`(fixed · hinge · slider · distance, 한계), 충돌 레이어 표, 트리거 · 접촉 알림, 셰이프 캐스트. 없는 것: 조인트 모터 · 스프링 · 끊어짐 힘, 6자유도 조인트, 레이어 표 편집 화면 |
 | VR 상호작용 | 그립 잡기 · 던지기 · 속도 추적 잡기 · 자동 맞춤 쥐기 · 텔레포트(오른 스틱) · 벽에 막히는 이동(캐릭터 컨트롤러, `RigLocomotion.collide`)이 있음(2026-11-17). 레이 포인터 잡기 · 두 손 잡기는 없음 |
 | 버스 볼륨 저장 · 한 번 재생의 차폐 · HRTF | 없음. 스트리밍 · 보이스 예산 · 버스와 마스터 볼륨(API) · 도플러 · 공기 흡수 · 지향성 콘은 있음(2026-11-17) |
 | 오디오 입력(마이크) · 패키징된 빌드의 장치 선택 화면 | 없음. 출력 장치 API 는 있음(2026-10-16) |

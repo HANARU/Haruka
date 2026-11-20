@@ -3,6 +3,8 @@
 #include "../scene/World.hpp"
 #include "../scene/Actor.hpp"
 #include "RigidBodyComponent.hpp"
+#include "JointComponent.hpp"
+#include "PhysicsEvents.hpp"
 #include "../geometry/CollisionMesh.hpp"
 
 // Jolt headers
@@ -30,6 +32,12 @@
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Body/BodyFilter.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
+#include <Jolt/Physics/Constraints/FixedConstraint.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/SliderConstraint.h>
+#include <Jolt/Physics/Constraints/DistanceConstraint.h>
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
@@ -37,16 +45,23 @@
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 #include <thread>
+#include <unordered_set>
 #include "../core/HLog.hpp"
 
 static constinit HLogCategory LogPhysics{ "Physics", ELogVerbosity::Log };
 
 // ── Layer definitions ─────────────────────────────────────────────────────────
+// Jolt 오브젝트 레이어 = 사용자 레이어(PhysicsLayerTable 슬롯) × 2 + 움직이는 몸이면 1(2026-11-20, Physics_Joints_And_Events D1).
+// 넓은 단계 레이어는 예전처럼 정적 · 움직임 둘입니다. 정적끼리는 부딪히지 않고, 나머지 쌍은 레이어 표를 따릅니다. 표가 기본(모두
+// 부딪힘)이면 예전 STATIC · DYNAMIC 두 레이어와 같은 판정입니다.
 namespace Layers {
-    static constexpr JPH::ObjectLayer STATIC  = 0;
-    static constexpr JPH::ObjectLayer DYNAMIC = 1;
-    static constexpr JPH::uint        NUM     = 2;
+    inline JPH::ObjectLayer make(int userLayer, bool moving) {
+        return (JPH::ObjectLayer)(std::clamp(userLayer, 0, PhysicsLayerTable::kCount - 1) * 2 + (moving ? 1 : 0));
+    }
+    inline bool moving(JPH::ObjectLayer l) { return (l & 1u) != 0; }
+    inline int  user(JPH::ObjectLayer l)   { return (int)(l >> 1); }
 }
 
 namespace BPLayers {
@@ -59,7 +74,7 @@ class BPLayerInterface final : public JPH::BroadPhaseLayerInterface {
 public:
     JPH::uint GetNumBroadPhaseLayers() const override { return BPLayers::NUM; }
     JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer l) const override {
-        return l == Layers::STATIC ? BPLayers::STATIC : BPLayers::DYNAMIC;
+        return Layers::moving(l) ? BPLayers::DYNAMIC : BPLayers::STATIC;
     }
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
     const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer l) const override {
@@ -71,19 +86,64 @@ public:
 class ObjVsBPFilter final : public JPH::ObjectVsBroadPhaseLayerFilter {
 public:
     bool ShouldCollide(JPH::ObjectLayer obj, JPH::BroadPhaseLayer bp) const override {
-        if (obj == Layers::STATIC)  return (JPH::uint8)bp == (JPH::uint8)BPLayers::DYNAMIC;
-        if (obj == Layers::DYNAMIC) return true;
-        return false;
+        if (!Layers::moving(obj)) return (JPH::uint8)bp == (JPH::uint8)BPLayers::DYNAMIC;
+        return true;
     }
 };
 
 class ObjLayerPairFilter final : public JPH::ObjectLayerPairFilter {
 public:
+    const PhysicsLayerTable* table = nullptr;   // PhysicsSystem::layers_ (스텝 동안 바뀌지 않음)
     bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override {
-        if (a == Layers::STATIC)  return b == Layers::DYNAMIC;
-        if (a == Layers::DYNAMIC) return true;
-        return false;
+        if (!Layers::moving(a) && !Layers::moving(b)) return false;
+        return !table || table->collides(Layers::user(a), Layers::user(b));
     }
+};
+
+// 질의(레이캐스트 · 스윕 · 겹침)의 레이어 마스크.
+class LayerMaskFilter final : public JPH::ObjectLayerFilter {
+public:
+    explicit LayerMaskFilter(uint16_t mask) : mask_(mask) {}
+    bool ShouldCollide(JPH::ObjectLayer l) const override { return (mask_ >> Layers::user(l)) & 1u; }
+private:
+    uint16_t mask_;
+};
+
+// ── 접촉 큐(D4) ───────────────────────────────────────────────────────────────
+// Jolt 는 접촉 콜백을 물리 작업 스레드에서 바디를 잠근 채 부릅니다. 여기서는 큐에만 넣고, 메인 스레드가 스텝마다 비웁니다.
+struct RawContact {
+    bool      added = true;
+    uint32_t  body1 = 0, body2 = 0;   // Jolt 가 body1 < body2 로 정렬해 줌
+    uint64_t  sub   = 0;              // 하위 셰이프 쌍
+    uint64_t  actor1 = 0, actor2 = 0;
+    bool      trigger = false;
+    glm::vec3 point{ 0.f }, normal{ 0.f };   // normal: body1 → body2
+};
+struct ContactPair {
+    uint32_t  body1 = 0, body2 = 0;
+    uint64_t  actor1 = 0, actor2 = 0;
+    bool      trigger = false;
+    bool      dormant = false;        // 몸이 잠들어 접촉이 빠짐(끝으로 치지 않음)
+    bool      begunThisTick = false;
+    glm::vec3 point{ 0.f }, normal{ 0.f };
+    std::unordered_set<uint64_t> subs;
+};
+struct PendingContact {
+    EContactPhase phase = EContactPhase::Begin;
+    bool      trigger = false;
+    uint64_t  actor1 = 0, actor2 = 0;
+    glm::vec3 point{ 0.f }, normal{ 0.f };
+};
+inline uint64_t pairKey(uint32_t a, uint32_t b) {
+    return a < b ? ((uint64_t)a << 32) | b : ((uint64_t)b << 32) | a;
+}
+
+struct JoltImpl;
+class ContactQueue final : public JPH::ContactListener {
+public:
+    JoltImpl* impl = nullptr;
+    void OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings&) override;
+    void OnContactRemoved(const JPH::SubShapeIDPair& pair) override;
 };
 
 // ── JoltImpl ──────────────────────────────────────────────────────────────────
@@ -91,6 +151,30 @@ struct JoltImpl {
     BPLayerInterface                        bpLayerInterface;
     ObjVsBPFilter                           objVsBpFilter;
     ObjLayerPairFilter                      objLayerPairFilter;
+    // 접촉 알림(D4). notifyBodies · pairs 는 메인 스레드만 바꾸고, 스텝 동안 물리 스레드는 읽기만 합니다.
+    ContactQueue                            contactQueue;
+    std::mutex                              contactMutex;
+    std::vector<RawContact>                 rawContacts;
+    std::unordered_set<uint32_t>            notifyBodies;   // contactEvents 를 켠 몸
+    std::unordered_map<uint64_t, ContactPair> pairs;
+    std::vector<PendingContact>             pending;
+    // 조인트(D5). 핸들 → 제약. 몸보다 먼저 지워야 합니다.
+    struct Joint {
+        JPH::Ref<JPH::TwoBodyConstraint> c;
+        uint32_t   body1 = 0, body2 = 0;   // body2 = 0xFFFFFFFF 이면 월드
+        EJointType type  = EJointType::Hinge;
+        JPH::Vec3  local1 = JPH::Vec3::sZero(), local2 = JPH::Vec3::sZero();   // 거리 조인트 끝점(질량 중심 공간, 월드면 월드 점)
+    };
+    std::unordered_map<uint32_t, Joint>     joints;
+    uint32_t                                nextJoint = 1;
+    void removeJointsOf(uint32_t body) {
+        for (auto it = joints.begin(); it != joints.end();) {
+            if (it->second.body1 == body || it->second.body2 == body) {
+                physics->RemoveConstraint(it->second.c);
+                it = joints.erase(it);
+            } else ++it;
+        }
+    }
     std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
     std::unique_ptr<JPH::JobSystemThreadPool> jobSystem;
     std::unique_ptr<JPH::PhysicsSystem>     physics;
@@ -99,6 +183,38 @@ struct JoltImpl {
     std::unordered_map<uint32_t, Character> characters;
     uint32_t                                nextCharacter = 1;
 };
+
+void ContactQueue::OnContactAdded(const JPH::Body& b1, const JPH::Body& b2, const JPH::ContactManifold& m, JPH::ContactSettings&) {
+    const bool trigger = b1.IsSensor() || b2.IsSensor();
+    const uint32_t id1 = b1.GetID().GetIndexAndSequenceNumber(), id2 = b2.GetID().GetIndexAndSequenceNumber();
+    if (!trigger && !impl->notifyBodies.count(id1) && !impl->notifyBodies.count(id2)) return;
+    RawContact c;
+    c.added   = true;
+    c.body1   = id1;
+    c.body2   = id2;
+    c.sub     = ((uint64_t)m.mSubShapeID1.GetValue() << 32) | m.mSubShapeID2.GetValue();
+    c.actor1  = b1.GetUserData();
+    c.actor2  = b2.GetUserData();
+    c.trigger = trigger;
+    const JPH::RVec3 p = m.GetWorldSpaceContactPointOn1(0);
+    c.point   = { (float)p.GetX(), (float)p.GetY(), (float)p.GetZ() };
+    c.normal  = { m.mWorldSpaceNormal.GetX(), m.mWorldSpaceNormal.GetY(), m.mWorldSpaceNormal.GetZ() };
+    std::lock_guard<std::mutex> lock(impl->contactMutex);
+    impl->rawContacts.push_back(c);
+}
+
+void ContactQueue::OnContactRemoved(const JPH::SubShapeIDPair& pair) {
+    const uint32_t id1 = pair.GetBody1ID().GetIndexAndSequenceNumber(), id2 = pair.GetBody2ID().GetIndexAndSequenceNumber();
+    // 세는 쌍만 넣습니다(pairs 는 스텝 동안 바뀌지 않음). 같은 스텝에 처음 생긴 쌍의 하위 셰이프가 빠지는 일은 없습니다.
+    if (!impl->pairs.count(pairKey(id1, id2))) return;
+    RawContact c;
+    c.added = false;
+    c.body1 = id1;
+    c.body2 = id2;
+    c.sub   = ((uint64_t)pair.GetSubShapeID1().GetValue() << 32) | pair.GetSubShapeID2().GetValue();
+    std::lock_guard<std::mutex> lock(impl->contactMutex);
+    impl->rawContacts.push_back(c);
+}
 
 static constexpr JPH::uint kBodyMutexes    = 0;     // auto-detect
 // 콜라이더 반지름 · 반변의 최솟값(스케일 적용 뒤). 이보다 작으면 바디를 만들지 않고 알립니다(DEF-107).
@@ -122,9 +238,12 @@ void PhysicsSystem::startup() {
         (int)std::thread::hardware_concurrency() - 1);
 
     impl_->physics = std::make_unique<JPH::PhysicsSystem>();
+    impl_->objLayerPairFilter.table = &layers_;
     impl_->physics->Init((JPH::uint)maxBodies_, kBodyMutexes, kMaxBodyPairs, kMaxConstraints,
         impl_->bpLayerInterface, impl_->objVsBpFilter, impl_->objLayerPairFilter);
     impl_->physics->SetGravity(JPH::Vec3(0.f, -9.81f, 0.f));
+    impl_->contactQueue.impl = impl_.get();
+    impl_->physics->SetContactListener(&impl_->contactQueue);
 
     if (world_) world_->setService<PhysicsSystem>(this);
     HLOG(LogPhysics, Log) << "Jolt initialized";
@@ -139,6 +258,14 @@ void PhysicsSystem::setWorld(World* w) {
 void PhysicsSystem::shutdown() {
     if (!impl_) return;
 
+    // 조인트를 몸보다 먼저 지웁니다(Jolt 규칙, D5).
+    for (auto& [h, j] : impl_->joints) impl_->physics->RemoveConstraint(j.c);
+    impl_->joints.clear();
+    if (world_) {
+        for (auto& ap : world_->getActors())
+            for (auto& c : ap->getComponents())
+                if (auto* jc = dynamic_cast<JointComponent*>(c.get())) { jc->handle_ = 0; jc->physSys_ = nullptr; }
+    }
     if (world_) {
         auto& bi = impl_->physics->GetBodyInterface();
         for (auto& ap : world_->getActors()) {
@@ -153,6 +280,7 @@ void PhysicsSystem::shutdown() {
     }
 
     impl_->characters.clear();
+    impl_->physics->SetContactListener(nullptr);
     if (world_ && world_->service<PhysicsSystem>() == this) world_->setService<PhysicsSystem>(nullptr);
     impl_.reset();
     JPH::UnregisterTypes();
@@ -182,6 +310,16 @@ void PhysicsSystem::removeBody(uint32_t id) {
     auto& bi = impl_->physics->GetBodyInterface();
     frameForces_.erase(id);
     impulseBudget_.erase(id);
+    impl_->notifyBodies.erase(id);
+    // 이 몸의 조인트를 먼저 지우고(Jolt 규칙), 이 몸의 접촉 쌍은 끝 · 나감을 보냅니다(D4 · D5, UE 와 같음).
+    impl_->removeJointsOf(id);
+    for (auto it = impl_->pairs.begin(); it != impl_->pairs.end();) {
+        const ContactPair& cp = it->second;
+        if (cp.body1 == id || cp.body2 == id) {
+            impl_->pending.push_back({ EContactPhase::End, cp.trigger, cp.actor1, cp.actor2, cp.point, cp.normal });
+            it = impl_->pairs.erase(it);
+        } else ++it;
+    }
     if (!bi.IsAdded(jid)) return;
     // 지우기 전에 차지하던 영역을 기억했다가, 지운 뒤 그 영역에 닿는 바디를 깨웁니다.
     // 그러지 않으면 바닥을 끈 뒤에도 그 위에서 잠든 상자가 공중에 그대로 남습니다(DEF-80).
@@ -190,6 +328,21 @@ void PhysicsSystem::removeBody(uint32_t id) {
     bi.DestroyBody(jid);
     bounds.ExpandBy(JPH::Vec3::sReplicate(0.05f));
     bi.ActivateBodiesInAABox(bounds, JPH::BroadPhaseLayerFilter(), JPH::ObjectLayerFilter());
+}
+
+void PhysicsSystem::setLayer(uint32_t id, int layer) {
+    if (!impl_ || id == 0xFFFFFFFFu) return;
+    auto& bi = impl_->physics->GetBodyInterface();
+    const JPH::BodyID jid(id);
+    if (!bi.IsAdded(jid)) return;
+    const bool moving = bi.GetMotionType(jid) != JPH::EMotionType::Static;
+    bi.SetObjectLayer(jid, Layers::make(layer, moving));
+}
+
+void PhysicsSystem::setContactEvents(uint32_t id, bool on) {
+    if (!impl_ || id == 0xFFFFFFFFu) return;
+    if (on) impl_->notifyBodies.insert(id);
+    else    impl_->notifyBodies.erase(id);
 }
 
 void PhysicsSystem::setMaterial(uint32_t id, float friction, float restitution) {
@@ -340,6 +493,7 @@ class IgnoreActorsFilter final : public JPH::BodyFilter {
 public:
     explicit IgnoreActorsFilter(std::span<Actor* const> ignore) : ignore_(ignore) {}
     bool ShouldCollideLocked(const JPH::Body& body) const override {
+        if (body.IsSensor()) return false;   // 트리거는 질의에 맞지 않음(D3)
         const uint64_t id = body.GetUserData();
         for (const Actor* a : ignore_)
             if (a && a->id == id) return false;
@@ -351,7 +505,7 @@ private:
 } // namespace
 
 bool PhysicsSystem::raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDistance,
-                            RaycastHit& out, std::span<Actor* const> ignore) const {
+                            RaycastHit& out, std::span<Actor* const> ignore, uint16_t layerMask) const {
     out = {};
     if (!impl_ || !world_ || maxDistance <= 0.f) return false;
     const float len = glm::length(dir);
@@ -361,7 +515,8 @@ bool PhysicsSystem::raycast(const glm::vec3& origin, const glm::vec3& dir, float
     JPH::RayCastResult hit;
     // 빈 목록이어도 같은 필터를 넘깁니다. Jolt 는 후보 바디마다 어차피 잠그고 필터를 부르므로 비용은 가상 호출 하나입니다.
     const IgnoreActorsFilter filter(ignore);
-    if (!impl_->physics->GetNarrowPhaseQuery().CastRay(ray, hit, {}, {}, filter)) return false;
+    const LayerMaskFilter    layers(layerMask);
+    if (!impl_->physics->GetNarrowPhaseQuery().CastRay(ray, hit, {}, layers, filter)) return false;
 
     out.distance = hit.mFraction * maxDistance;
     out.point    = origin + d * out.distance;
@@ -479,15 +634,17 @@ float PhysicsSystem::capsulePenetration(uint32_t body, const glm::vec3& a, const
     return depth;
 }
 
-void PhysicsSystem::overlapSphere(const glm::vec3& center, float radius, std::vector<Actor*>& out) const {
+void PhysicsSystem::overlapSphere(const glm::vec3& center, float radius, std::vector<Actor*>& out, uint16_t layerMask) const {
     out.clear();
     if (!impl_ || !world_ || radius <= 0.f) return;
     JPH::SphereShape sphere(radius);
     sphere.SetEmbedded();   // 스택에 둔 셰이프라 참조 수로 지우지 않게 합니다
     JPH::CollideShapeSettings settings;
     JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> hits;
+    const IgnoreActorsFilter noTriggers({});
+    const LayerMaskFilter    layers(layerMask);
     impl_->physics->GetNarrowPhaseQuery().CollideShape(&sphere, JPH::Vec3::sReplicate(1.f),
-        JPH::RMat44::sTranslation(toJR(center)), settings, JPH::RVec3::sZero(), hits);
+        JPH::RMat44::sTranslation(toJR(center)), settings, JPH::RVec3::sZero(), hits, {}, layers, noTriggers);
     for (const auto& h : hits.mHits) {
         JPH::BodyLockRead lock(impl_->physics->GetBodyLockInterface(), h.mBodyID2);
         if (!lock.Succeeded()) continue;
@@ -659,14 +816,13 @@ void PhysicsSystem::tick(float dt) {
 
         // Motion type mapping
         JPH::EMotionType mt = JPH::EMotionType::Static;
-        JPH::ObjectLayer  ol = Layers::STATIC;
-        if (rb->motionType == EMotionType::Dynamic) {
-            mt = JPH::EMotionType::Dynamic;
-            ol = Layers::DYNAMIC;
-        } else if (rb->motionType == EMotionType::Kinematic) {
-            mt = JPH::EMotionType::Kinematic;
-            ol = Layers::DYNAMIC;
-        }
+        if (rb->motionType == EMotionType::Dynamic)        mt = JPH::EMotionType::Dynamic;
+        else if (rb->motionType == EMotionType::Kinematic) mt = JPH::EMotionType::Kinematic;
+        // Static 트리거는 깨어 있는 키네마틱 센서로 만듭니다. 정적 센서는 잠든 몸을 보지 못해, 트리거 안에서 상자가 잠들면 나감이
+        // 옵니다(Jolt Body::SetIsSensor 설명, D3). 움직이지는 않습니다(아래 키네마틱 따라가기는 motionType 이 Kinematic 인 것만).
+        const bool staticTrigger = rb->trigger && mt == JPH::EMotionType::Static;
+        if (staticTrigger) mt = JPH::EMotionType::Kinematic;
+        const JPH::ObjectLayer ol = Layers::make(rb->layer, mt != JPH::EMotionType::Static);
 
         glm::vec3 pos = a->worldPosition();
         glm::quat q   = a->worldRotation();
@@ -681,6 +837,8 @@ void PhysicsSystem::tick(float dt) {
         bcs.mRestitution = rb->restitution;
         bcs.mUserData    = a->id;   // 레이캐스트 · 겹침 질의에서 액터를 찾을 때 씁니다
         bcs.mMotionQuality = rb->continuous ? JPH::EMotionQuality::LinearCast : JPH::EMotionQuality::Discrete;
+        bcs.mIsSensor      = rb->trigger;
+        if (staticTrigger) bcs.mAllowSleeping = false;
         // Kinematic 으로 만든 바디도 질량을 지정해 둡니다. 잡기가 끝나 Dynamic 으로 바꾸면 그 질량을 씁니다(2026-10-15).
         if (mt != JPH::EMotionType::Static) {
             bcs.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
@@ -711,9 +869,14 @@ void PhysicsSystem::tick(float dt) {
         rb->createdHalf_   = rb->halfExtent;
         rb->createdMass_   = rb->mass;
         rb->createdCenter_ = rb->center;
+        rb->createdTrigger_ = rb->trigger;
+        if (rb->contactEvents) impl_->notifyBodies.insert(rb->bodyId_);
         rb->interpValid_   = false;
         rb->synced_        = false;   // 아직 물리가 액터에 쓴 적 없음
     }
+
+    // 양쪽 몸이 생긴 조인트를 만듭니다(D5).
+    createJoints();
 
     // ── 게임 코드가 옮긴 Dynamic 바디: 그 자리로 순간 이동, 속도 유지(DEF-19) ──────
     // 물리가 마지막으로 쓴 로컬 자세와 다르면 게임 코드(또는 에디터)가 옮긴 것입니다. 로컬로 비교하므로
@@ -800,6 +963,7 @@ void PhysicsSystem::tick(float dt) {
                 << " full; some contacts were ignored this step (warned once)";
         }
         accumulator_ -= step_;
+        processContacts();   // 이 스텝의 접촉을 쌍으로 셈(알림은 틱 끝에 보냄, D4)
     }
     // 스텝이 없던 틱의 충격량은 다음 틱의 스텝에 넣습니다.
     if (steps > 0) impulseBudget_.clear();
@@ -833,4 +997,297 @@ void PhysicsSystem::tick(float dt) {
         rb->syncedLocalRot_ = a->transform().rotation();
         rb->synced_         = true;
     }
+
+    // 접촉 · 트리거 알림(D4). 자세를 액터에 쓴 뒤 보내므로 받는 쪽이 이번 스텝의 자리를 봅니다.
+    dispatchContacts(steps > 0);
+}
+
+// ── 접촉 알림(D4) ─────────────────────────────────────────────────────────────
+void PhysicsSystem::processContacts() {
+    std::vector<RawContact> raw;
+    {
+        std::lock_guard<std::mutex> lock(impl_->contactMutex);
+        raw.swap(impl_->rawContacts);
+    }
+    const auto& bi = impl_->physics->GetBodyInterface();
+    // 잠든 몸(정적 몸은 잠들지 않은 것으로 봄). 잠들어서 빠진 접촉은 끝으로 치지 않습니다.
+    auto asleep = [&bi](uint32_t id) {
+        const JPH::BodyID j(id);
+        return bi.IsAdded(j) && bi.GetMotionType(j) != JPH::EMotionType::Static && !bi.IsActive(j);
+    };
+    // 한 스텝 안에서 같은 쌍의 다른 하위 셰이프가 빠지고 생길 수 있으므로 더하기를 먼저 셉니다(끝 → 시작이 잘못 나가지 않게).
+    for (const RawContact& c : raw) {
+        if (!c.added) continue;
+        auto [it, inserted] = impl_->pairs.try_emplace(pairKey(c.body1, c.body2));
+        ContactPair& cp = it->second;
+        if (inserted) {
+            cp.body1 = c.body1;   cp.body2 = c.body2;
+            cp.actor1 = c.actor1; cp.actor2 = c.actor2;
+            cp.trigger = c.trigger;
+            cp.point = c.point;   cp.normal = c.normal;
+            cp.begunThisTick = true;
+            impl_->pending.push_back({ EContactPhase::Begin, cp.trigger, cp.actor1, cp.actor2, cp.point, cp.normal });
+        }
+        cp.subs.insert(c.sub);
+        cp.dormant = false;
+    }
+    for (const RawContact& c : raw) {
+        if (c.added) continue;
+        auto it = impl_->pairs.find(pairKey(c.body1, c.body2));
+        if (it == impl_->pairs.end()) continue;
+        ContactPair& cp = it->second;
+        cp.subs.erase(c.sub);
+        if (!cp.subs.empty()) continue;
+        if (asleep(cp.body1) || asleep(cp.body2)) { cp.dormant = true; continue; }
+        impl_->pending.push_back({ EContactPhase::End, cp.trigger, cp.actor1, cp.actor2, cp.point, cp.normal });
+        impl_->pairs.erase(it);
+    }
+    // 잠들었던 쌍: 두 몸이 모두 깨었는데 이 스텝에 접촉이 다시 오지 않았으면 떨어진 것입니다.
+    for (auto it = impl_->pairs.begin(); it != impl_->pairs.end();) {
+        ContactPair& cp = it->second;
+        if (cp.dormant && cp.subs.empty() && !asleep(cp.body1) && !asleep(cp.body2)) {
+            impl_->pending.push_back({ EContactPhase::End, cp.trigger, cp.actor1, cp.actor2, cp.point, cp.normal });
+            it = impl_->pairs.erase(it);
+        } else ++it;
+    }
+}
+
+namespace {
+// 한쪽 몸의 컴포넌트 함수 칸에 보냅니다. 액터는 부를 때마다 id 로 다시 찾습니다(앞 알림이 지웠을 수 있음).
+void deliverContact(World& world, const PendingContact& e, bool first) {
+    const uint64_t selfId  = first ? e.actor1 : e.actor2;
+    const uint64_t otherId = first ? e.actor2 : e.actor1;
+    Actor* self = world.findById(selfId);
+    if (!self) return;
+    auto* rb = self->getComponent<RigidBodyComponent>();
+    if (!rb) return;
+    std::function<void(const PhysicsContact&)> fn;   // 사본으로 부름(안에서 컴포넌트가 지워져도 안전)
+    if (e.trigger) fn = e.phase == EContactPhase::Begin ? rb->onTriggerEnter
+                      : e.phase == EContactPhase::End   ? rb->onTriggerExit : nullptr;
+    else           fn = e.phase == EContactPhase::Begin ? rb->onContactBegin
+                      : e.phase == EContactPhase::Stay  ? rb->onContactStay : rb->onContactEnd;
+    if (!fn) return;
+    PhysicsContact c;
+    c.phase   = e.phase;
+    c.trigger = e.trigger;
+    c.other   = world.findById(otherId);
+    c.otherId = otherId;
+    c.point   = e.point;
+    c.normal  = first ? e.normal : -e.normal;
+    fn(c);
+}
+} // namespace
+
+void PhysicsSystem::dispatchContacts(bool stepped) {
+    // 유지(접촉만): 틱마다 한 번, 이번 틱에 시작한 쌍 · 잠든 쌍은 뺌.
+    for (auto& [key, cp] : impl_->pairs) {
+        if (stepped && !cp.trigger && !cp.dormant && !cp.begunThisTick && !cp.subs.empty())
+            impl_->pending.push_back({ EContactPhase::Stay, false, cp.actor1, cp.actor2, cp.point, cp.normal });
+        cp.begunThisTick = false;
+    }
+    if (impl_->pending.empty() || !world_) return;
+    std::vector<PendingContact> events;
+    events.swap(impl_->pending);   // 알림 안에서 몸을 지우면 그 끝 알림은 다음 틱에 갑니다
+    for (const PendingContact& e : events) {
+        PhysicsContactEvent ev;
+        ev.phase   = e.phase;
+        ev.trigger = e.trigger;
+        ev.aId     = e.actor1;
+        ev.bId     = e.actor2;
+        ev.a       = world_->findById(e.actor1);
+        ev.b       = world_->findById(e.actor2);
+        ev.point   = e.point;
+        ev.normal  = e.normal;
+        world_->events().publish(ev);
+        deliverContact(*world_, e, true);
+        deliverContact(*world_, e, false);
+    }
+}
+
+// ── 조인트(D5) ────────────────────────────────────────────────────────────────
+void PhysicsSystem::createJoints() {
+    auto& bi = impl_->physics->GetBodyInterface();
+    for (JointComponent* first : world_->componentsOf<JointComponent>()) {
+        Actor* a = first->owner;
+        if (!a) continue;
+        // 한 액터에 조인트가 여럿일 수 있습니다(사슬 고리 등). 형별 목록은 액터마다 첫 것만 주므로 그 액터의 것을 모두 봅니다.
+        for (const auto& comp : a->getComponents()) {
+            auto* j = dynamic_cast<JointComponent*>(comp.get());
+            if (!j) continue;
+            if (j->handle_ != 0 && impl_->joints.count(j->handle_)) continue;
+            j->handle_  = 0;   // 몸이 지워지며 함께 지워진 조인트
+            j->physSys_ = nullptr;
+            if (!j->isEnabled() || !a->activeInHierarchy()) continue;
+            auto* rb = a->getComponent<RigidBodyComponent>();
+            if (!rb || rb->bodyId_ == 0xFFFFFFFFu) continue;
+            Actor*   t      = nullptr;
+            uint32_t tBody  = 0xFFFFFFFFu;
+            if (j->target.isSet()) {
+                t = j->target.resolveFrom(a);
+                if (!t || t == a) continue;   // 상대를 찾지 못하면(지워짐 등) 기다림
+                auto* trb = t->getComponent<RigidBodyComponent>();
+                if (!trb || trb->bodyId_ == 0xFFFFFFFFu) continue;
+                tBody = trb->bodyId_;
+            }
+            const glm::vec3 pos = a->worldPosition();
+            const glm::quat rot = a->worldRotation();
+            const glm::vec3 anchorW = pos + rot * (j->anchor * a->worldScale());
+            glm::vec3 axisW = rot * j->axis;
+            axisW = glm::length(axisW) > 1e-6f ? glm::normalize(axisW) : glm::vec3(0.f, 1.f, 0.f);
+            const JPH::Vec3 axisJ = toJ(axisW);
+            const JPH::Vec3 normalJ = axisJ.GetNormalizedPerpendicular();
+            glm::vec3 otherW = j->connectedAnchor;   // 거리 조인트의 상대 쪽 점
+            if (t) otherW = t->worldPosition() + t->worldRotation() * (j->connectedAnchor * t->worldScale());
+
+            JPH::Ref<JPH::TwoBodyConstraintSettings> settings;
+            switch (j->type) {
+                case EJointType::Fixed: {
+                    auto* f = new JPH::FixedConstraintSettings();
+                    f->mAutoDetectPoint = true;
+                    settings = f;
+                    break;
+                }
+                case EJointType::Slider: {
+                    auto* sl = new JPH::SliderConstraintSettings();
+                    sl->mAutoDetectPoint = true;
+                    sl->mSliderAxis1 = sl->mSliderAxis2 = axisJ;
+                    sl->mNormalAxis1 = sl->mNormalAxis2 = normalJ;
+                    if (j->limits) {   // Jolt: 최소 ≤ 0 ≤ 최대(만든 자리가 0)
+                        sl->mLimitsMin = std::min(j->limitMin, 0.f);
+                        sl->mLimitsMax = std::max(j->limitMax, 0.f);
+                    }
+                    settings = sl;
+                    break;
+                }
+                case EJointType::Distance: {
+                    auto* d = new JPH::DistanceConstraintSettings();
+                    d->mPoint1 = toJR(otherW);    // 몸 1 = 상대(아래 CreateConstraint 순서)
+                    d->mPoint2 = toJR(anchorW);
+                    if (j->limits) {
+                        d->mMinDistance = std::max(0.f, std::min(j->limitMin, j->limitMax));
+                        d->mMaxDistance = std::max(0.f, std::max(j->limitMin, j->limitMax));
+                    }
+                    settings = d;
+                    break;
+                }
+                default: {
+                    auto* h = new JPH::HingeConstraintSettings();
+                    h->mPoint1 = h->mPoint2 = toJR(anchorW);
+                    h->mHingeAxis1 = h->mHingeAxis2 = axisJ;
+                    h->mNormalAxis1 = h->mNormalAxis2 = normalJ;
+                    if (j->limits) {   // Jolt: −π ≤ 최소 ≤ 0 ≤ 최대 ≤ π(만든 자세가 0)
+                        h->mLimitsMin = glm::radians(std::clamp(j->limitMin, -180.f, 0.f));
+                        h->mLimitsMax = glm::radians(std::clamp(j->limitMax, 0.f, 180.f));
+                    }
+                    settings = h;
+                    break;
+                }
+            }
+            // 몸 1 = 상대(없으면 월드), 몸 2 = 이 액터. Jolt 의 경첩 각도 · 슬라이더 위치는 몸 2 를 몸 1 에 대해 잰 값이라, 이 순서여야
+            // 한계와 currentValue 가 "이 액터가 상대에 대해" 돈 · 움직인 값이 됩니다(Unity HingeJoint.angle 과 같은 뜻).
+            JPH::TwoBodyConstraint* c = bi.CreateConstraint(settings, t ? JPH::BodyID(tBody) : JPH::BodyID(),
+                                                            JPH::BodyID(rb->bodyId_));
+            if (!c) continue;
+            impl_->physics->AddConstraint(c);
+            bi.ActivateConstraint(c);
+            JoltImpl::Joint rec;
+            rec.c     = c;
+            rec.body1 = rb->bodyId_;
+            rec.body2 = t ? tBody : 0xFFFFFFFFu;
+            rec.type  = j->type;
+            if (j->type == EJointType::Distance) {
+                // 지금 길이를 읽으려고 양 끝점을 몸의 질량 중심 공간으로 기억합니다(상대가 없으면 월드 점).
+                rec.local1 = JPH::Vec3(bi.GetCenterOfMassTransform(JPH::BodyID(rb->bodyId_)).Inversed() * toJR(anchorW));
+                rec.local2 = t ? JPH::Vec3(bi.GetCenterOfMassTransform(JPH::BodyID(tBody)).Inversed() * toJR(otherW))
+                               : toJ(otherW);
+            }
+            const uint32_t h = impl_->nextJoint++;
+            impl_->joints[h] = rec;
+            j->handle_  = h;
+            j->physSys_ = this;
+        }
+    }
+}
+
+void PhysicsSystem::removeJoint(uint32_t handle) {
+    if (!impl_) return;
+    auto it = impl_->joints.find(handle);
+    if (it == impl_->joints.end()) return;
+    impl_->physics->RemoveConstraint(it->second.c);
+    // 남은 몸을 깨웁니다(조인트가 받치던 문이 잠든 채 공중에 남지 않게).
+    auto& bi = impl_->physics->GetBodyInterface();
+    for (uint32_t b : { it->second.body1, it->second.body2 })
+        if (b != 0xFFFFFFFFu && bi.IsAdded(JPH::BodyID(b))) bi.ActivateBody(JPH::BodyID(b));
+    impl_->joints.erase(it);
+}
+
+bool PhysicsSystem::hasJoint(uint32_t handle) const {
+    return impl_ && impl_->joints.count(handle) != 0;
+}
+
+size_t PhysicsSystem::jointCount() const {
+    return impl_ ? impl_->joints.size() : 0;
+}
+
+float PhysicsSystem::jointValue(uint32_t handle) const {
+    if (!impl_) return 0.f;
+    auto it = impl_->joints.find(handle);
+    if (it == impl_->joints.end()) return 0.f;
+    const JoltImpl::Joint& j = it->second;
+    switch (j.type) {
+        case EJointType::Hinge:  return glm::degrees(static_cast<const JPH::HingeConstraint*>(j.c.GetPtr())->GetCurrentAngle());
+        case EJointType::Slider: return static_cast<const JPH::SliderConstraint*>(j.c.GetPtr())->GetCurrentPosition();
+        case EJointType::Distance: {
+            const auto& bi = impl_->physics->GetBodyInterface();
+            const JPH::RVec3 p1 = bi.GetCenterOfMassTransform(JPH::BodyID(j.body1)) * j.local1;
+            const JPH::RVec3 p2 = j.body2 != 0xFFFFFFFFu ? bi.GetCenterOfMassTransform(JPH::BodyID(j.body2)) * j.local2
+                                                          : JPH::RVec3(j.local2);
+            return (float)(p2 - p1).Length();
+        }
+        default: return 0.f;
+    }
+}
+
+// ── 셰이프 캐스트(D6) ─────────────────────────────────────────────────────────
+bool PhysicsSystem::shapeCast(const SweepShape& sh, const glm::vec3& start, const glm::quat& rotation, const glm::vec3& dir,
+                              float maxDistance, RaycastHit& out, uint16_t layerMask, std::span<Actor* const> ignore) const {
+    out = {};
+    if (!impl_ || !world_ || !(maxDistance > 0.f)) return false;
+    const float len = glm::length(dir);
+    if (len < 1e-8f) return false;
+    const glm::vec3 d = dir / len;
+    // 스택에 둔 셰이프라 참조 수로 지우지 않게 합니다(overlapSphere 와 같음).
+    const float r = std::max(sh.radius, kMinColliderHalf);
+    JPH::SphereShape  sphere(r);
+    JPH::CapsuleShape capsule(std::max(sh.halfHeight, kMinColliderHalf), r);
+    const JPH::Vec3   he(std::max(sh.halfExtent.x, kMinColliderHalf), std::max(sh.halfExtent.y, kMinColliderHalf),
+                         std::max(sh.halfExtent.z, kMinColliderHalf));
+    JPH::BoxShape     box(he, std::min(JPH::cDefaultConvexRadius, 0.5f * he.ReduceMin()));
+    sphere.SetEmbedded();
+    capsule.SetEmbedded();
+    box.SetEmbedded();
+    const JPH::Shape* shape = sh.kind == SweepShape::Kind::Box ? static_cast<const JPH::Shape*>(&box)
+                            : sh.kind == SweepShape::Kind::Capsule && sh.halfHeight > 0.f ? static_cast<const JPH::Shape*>(&capsule)
+                            : static_cast<const JPH::Shape*>(&sphere);
+    const glm::quat q = glm::normalize(rotation);
+    const JPH::RShapeCast cast(shape, JPH::Vec3::sReplicate(1.f),
+                               JPH::RMat44::sRotationTranslation(JPH::Quat(q.x, q.y, q.z, q.w), toJR(start)), toJ(d * maxDistance));
+    // 시작부터 겹친 볼록 몸도 거리 0 으로 맞춥니다(UE bStartPenetrating · Unity 와 같음). Jolt 기본은 움직이는 쪽이 뒷면이면
+    // (겹친 채 떨어지거나 나란히 움직이면) 건너뜁니다. 그때 법선은 가장 깊은 점에서 구합니다.
+    JPH::ShapeCastSettings settings;
+    settings.mBackFaceModeConvex = JPH::EBackFaceMode::CollideWithBackFaces;
+    settings.mReturnDeepestPoint = true;
+    JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> hit;
+    const IgnoreActorsFilter filter(ignore);
+    const LayerMaskFilter    layers(layerMask);
+    impl_->physics->GetNarrowPhaseQuery().CastShape(cast, settings, JPH::RVec3::sZero(), hit, {}, layers, filter);
+    if (!hit.HadHit()) return false;
+    const JPH::ShapeCastResult& h = hit.mHit;
+    out.distance = h.mFraction * maxDistance;
+    out.point    = toG(JPH::Vec3(h.mContactPointOn2));
+    const JPH::Vec3 axis = h.mPenetrationAxis;
+    out.normal   = axis.LengthSq() > 1e-12f ? -toG(axis.Normalized()) : -d;
+    JPH::BodyLockRead lock(impl_->physics->GetBodyLockInterface(), h.mBodyID2);
+    if (lock.Succeeded()) out.actor = world_->findById(lock.GetBody().GetUserData());
+    return true;
 }

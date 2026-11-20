@@ -11,6 +11,7 @@
 #include "../components/SkinnedMeshComponent.hpp"
 #include "../audio/ReverbZoneComponent.hpp"
 #include "../physics/RigidBodyComponent.hpp"
+#include "../physics/JointComponent.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <algorithm>
@@ -110,7 +111,8 @@ void drawReverbZone(const ReverbZoneComponent& c) {
 // 충돌체(상자 · 구 · 캡슐, 중심 오프셋 포함)
 void drawRigidBody(const RigidBodyComponent& c) {
     if (!c.owner) return;
-    const glm::vec4 col{ 0.3f, 1.f, 0.6f, 1.f };
+    // 트리거는 주황(2026-11-20, Physics_Joints_And_Events D3)
+    const glm::vec4 col = c.trigger ? glm::vec4(1.f, 0.6f, 0.2f, 1.f) : glm::vec4(0.3f, 1.f, 0.6f, 1.f);
     const glm::vec3 sc = glm::abs(c.owner->worldScale());
     const glm::mat4 rt = glm::translate(glm::mat4(1.f), c.owner->worldPosition()) * glm::mat4_cast(c.owner->worldRotation());
     const glm::vec3 off = c.center * c.owner->worldScale();
@@ -133,6 +135,54 @@ void drawRigidBody(const RigidBodyComponent& c) {
             break;
         }
         default: break;   // 볼록 껍질 · 메시는 메시 자체가 모양
+    }
+}
+
+// 조인트(2026-11-20, Physics_Joints_And_Events D5): 앵커 원, 축 선, 경첩 한계 부채꼴 · 슬라이더 범위 · 거리 조인트 줄 · 상대까지 선.
+// Play 전 자세 기준입니다(각도 0 = 지금 자세).
+void drawJoint(const JointComponent& c) {
+    if (!c.owner) return;
+    const Actor& a = *c.owner;
+    const glm::vec4 col{ 1.f, 0.4f, 0.9f, 1.f }, dim{ 1.f, 0.4f, 0.9f, 0.45f };
+    const glm::vec3 p = a.worldPosition() + a.worldRotation() * (c.anchor * a.worldScale());
+    glm::vec3 axis = a.worldRotation() * c.axis;
+    axis = glm::length(axis) > 1e-6f ? glm::normalize(axis) : glm::vec3(0.f, 1.f, 0.f);
+    const Actor* t = c.target.resolveFrom(&a);
+    hdebug::circle(p, axis, 0.05f, col, 12);
+    if (t) hdebug::line(p, t->worldPosition(), dim);
+    switch (c.type) {
+        case EJointType::Hinge: {
+            hdebug::line(p - axis * 0.3f, p + axis * 0.3f, col);
+            // 액터 중심 쪽(경첩에서 문으로)을 0 도로 보고 한계 사이를 부채꼴로 그립니다.
+            glm::vec3 arm = a.worldPosition() - p;
+            arm -= axis * glm::dot(arm, axis);
+            if (glm::length(arm) < 1e-4f) arm = std::abs(axis.y) < 0.9f ? glm::cross(axis, glm::vec3(0, 1, 0)) : glm::cross(axis, glm::vec3(1, 0, 0));
+            arm = glm::normalize(arm) * 0.4f;
+            const float lo = c.limits ? std::clamp(c.limitMin, -180.f, 0.f) : -180.f;
+            const float hi = c.limits ? std::clamp(c.limitMax, 0.f, 180.f) : 180.f;
+            glm::vec3 prev = p + glm::angleAxis(glm::radians(lo), axis) * arm;
+            hdebug::line(p, prev, col);
+            const int n = 16;
+            for (int i = 1; i <= n; ++i) {
+                const glm::vec3 q = p + glm::angleAxis(glm::radians(lo + (hi - lo) * float(i) / n), axis) * arm;
+                hdebug::line(prev, q, dim);
+                prev = q;
+            }
+            hdebug::line(p, prev, col);
+            break;
+        }
+        case EJointType::Slider: {
+            const float lo = c.limits ? std::min(c.limitMin, 0.f) : -0.5f, hi = c.limits ? std::max(c.limitMax, 0.f) : 0.5f;
+            hdebug::line(p + axis * lo, p + axis * hi, c.limits ? col : dim);
+            break;
+        }
+        case EJointType::Distance: {
+            const glm::vec3 q = t ? t->worldPosition() + t->worldRotation() * (c.connectedAnchor * t->worldScale()) : c.connectedAnchor;
+            hdebug::line(p, q, col);
+            hdebug::circle(q, axis, 0.04f, col, 12);
+            break;
+        }
+        default: break;   // 고정: 상대까지 선만
     }
 }
 
@@ -161,5 +211,6 @@ ComponentVisualizers::ComponentVisualizers() {
     add<ReflectionCaptureComponent>(iconOf({ 0.8f, 0.85f, 1.f, 1.f }, 6), drawReflectionCapture);
     add<ReverbZoneComponent>(iconOf({ 0.45f, 0.7f, 1.f, 1.f }, 4), drawReverbZone);
     add<RigidBodyComponent>(ComponentVisualizer{}, drawRigidBody);   // 아이콘 없음(메시가 잡힘)
+    add<JointComponent>(ComponentVisualizer{}, drawJoint);           // 아이콘 없음(메시가 잡힘), 2026-11-20
     add<SkinnedMeshComponent>(ComponentVisualizer{}, drawSkeleton);   // 아이콘 없음(메시가 잡힘), 2026-11-20
 }

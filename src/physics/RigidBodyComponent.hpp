@@ -4,8 +4,10 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include "../geometry/CollisionShape.hpp"   // EPhysicsShape · EMotionType · HalfExt(2026-11-18 S4 에 옮김)
+#include "PhysicsEvents.hpp"
 
 class PhysicsSystem;
 
@@ -30,6 +32,18 @@ public:
     // 헤드셋 주사율)보다 화면이 자주 그려질 때(데스크톱 165 Hz 창 등) 물체가 계단처럼 움직이지 않습니다. 대신 한 스텝만큼
     // 늦게 보입니다(Godot physics interpolation · Unity Rigidbody.interpolation 과 같은 방식). 물리 자체는 바뀌지 않습니다.
     bool          interpolate = false;
+    // 충돌 레이어(2026-11-20, Docs/Physics_Joints_And_Events.md D1 · D2): 프로젝트의 레이어 표(PhysicsLayerTable) 슬롯 번호 0 ~ 15.
+    // 0 = Default. 살아 있는 몸에 바로 씁니다.
+    int           layer       = 0;
+    // 트리거(센서, D3): 충돌 반응 없이 들어감 · 나감만 알립니다. 레이캐스트 · 스윕 · 겹침 · 캐릭터 이동에 맞지 않습니다.
+    // Static 트리거는 잠든 몸도 보도록 깨어 있는 키네마틱 센서로 만듭니다. 바꾸면 몸을 다시 만듭니다.
+    bool          trigger     = false;
+    // 일반 접촉 알림(D4): 두 몸 중 하나라도 켜면 시작 · 유지 · 끝을 보냅니다(UE bNotifyRigidBodyCollision 자리). 트리거는 언제나 알립니다.
+    bool          contactEvents = false;
+
+    // 알림 함수 칸(D4). 물리 틱 끝에 메인 스레드에서 부릅니다. 안에서 액터를 지워도 됩니다.
+    std::function<void(const PhysicsContact&)> onTriggerEnter, onTriggerExit;
+    std::function<void(const PhysicsContact&)> onContactBegin, onContactStay, onContactEnd;
 
     void onDestroy() override;
     void onDisable() override;              // 꺼지면 바디를 지웁니다(DEF-80)
@@ -89,6 +103,7 @@ public:
     EMotionType    createdMotion_ = EMotionType::Dynamic;
     HalfExt        createdHalf_;
     float          createdMass_   = 1.f;
+    bool           createdTrigger_ = false;
     glm::vec3      createdCenter_ { 0.f };
     // 렌더 보간 상태(P4): 마지막 스텝 앞 · 뒤의 바디 월드 자세. interpValid_ 가 거짓이면(새 바디 · 순간 이동) 앞 = 뒤.
     glm::vec3      interpPrevPos_ { 0.f }, interpCurPos_ { 0.f };

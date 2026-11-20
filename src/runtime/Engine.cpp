@@ -434,6 +434,12 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     audio_ = audio;
     auto physicsModule = std::make_unique<PhysicsSystem>();
     physicsModule->setMaxBodies(limits.maxBodies);   // startup 이 등록 안에서 일어나므로 그 전에
+    {
+        // 충돌 레이어 표(project.ini 의 physics. 줄, Docs/Physics_Joints_And_Events.md D1)
+        std::vector<std::string> messages;
+        physicsModule->setLayers(PhysicsLayerTable::parse(project_.physics, messages));
+        for (const auto& m : messages) HLOG(LogEngine, Warning) << ProjectSettings::kPath << ": " << m;
+    }
     auto* physics = modules_.registerModule(std::move(physicsModule));
     physics->setWorld(&world_);
     physics_ = physics;

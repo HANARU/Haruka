@@ -351,6 +351,7 @@ set(RUNTIME_SOURCES
     src/audio/AudioComponent.cpp
     src/audio/ReverbZoneComponent.cpp
     src/physics/RigidBodyComponent.cpp
+    src/physics/JointComponent.cpp
     src/components/CoreComponents.cpp
     src/components/XrComponents.cpp
     src/components/SkinnedMeshComponent.cpp
@@ -1104,6 +1105,18 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaProfilerTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 물리 조인트 · 충돌 이벤트 · 레이어 테스트(Docs/Physics_Joints_And_Events.md) ------------------
+    # 레이어 표 · 무시한 쌍 · 트리거 들어감 · 나감 · 접촉 알림 · 알림 중 삭제 · 조인트 네 종류 · 상대 삭제 · 셰이프 캐스트 · 확인 장면을
+    # 창 · GPU 없이 봅니다. 확인 장면을 저장소에서 읽도록 소스 경로를 넘깁니다.
+    add_executable(HarukaJointTest tests/PhysicsJointsTest.cpp)
+    target_link_libraries(HarukaJointTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaJointTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(HarukaJointTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(HarukaJointTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaJointTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     add_executable(HarukaLoadingTest tests/LoadingTest.cpp)
     target_link_libraries(HarukaLoadingTest PRIVATE HarukaRuntime)
     target_include_directories(HarukaLoadingTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -1141,6 +1154,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/components/CameraComponent.cpp
         src/audio/ReverbZoneComponent.cpp
         src/physics/RigidBodyComponent.cpp
+        src/physics/JointComponent.cpp
         src/physics/PhysicsSystem.cpp
         src/core/Profiler.cpp
         src/scene/World.cpp
@@ -1199,6 +1213,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/physics/PhysicsSystem.cpp
         src/core/Profiler.cpp
         src/physics/RigidBodyComponent.cpp
+        src/physics/JointComponent.cpp
         src/components/XrComponents.cpp
         src/components/CameraComponent.cpp
         src/components/HandPoseComponent.cpp
@@ -1264,6 +1279,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/components/CameraComponent.cpp
         src/components/XrComponents.cpp
         src/physics/RigidBodyComponent.cpp
+        src/physics/JointComponent.cpp
         src/physics/PhysicsSystem.cpp
         src/core/Profiler.cpp
         src/xr/GraspSolver.cpp
@@ -1317,6 +1333,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
+    add_test(NAME physics_joints       COMMAND HarukaJointTest)
     add_test(NAME stereo_views         COMMAND HarukaStereoTest)
     add_test(NAME math_common          COMMAND HarukaMathTest)
     add_test(NAME architecture_deps    COMMAND HarukaArchTest)

@@ -23,6 +23,8 @@ struct ProjectSettings {
     std::string startScene = "/Game/scenes/LightingProbe.hscene";
     // input. 으로 시작하는 줄(입력 바인딩)은 입력 시스템이 따로 해석합니다. 순서를 지켜 넘깁니다.
     std::vector<std::pair<std::string, std::string>> input;
+    // physics. 으로 시작하는 줄(충돌 레이어 이름 · 무시 쌍, 2026-11-20)은 물리 레이어 표(physics/PhysicsLayers.hpp)가 해석합니다.
+    std::vector<std::pair<std::string, std::string>> physics;
     // XR 리그 높이(2026-10-16). 리그가 없는 씬에서 엔진이 붙이는 보이지 않는 리그가 씁니다. 씬에 둔 리그는
     // 자기 컴포넌트 값을 씁니다.
     //   xr.height    = tracked | fixed   tracked: OpenXR 바닥 기준 공간으로 실제 키, fixed: 아래 눈높이로 고정
@@ -224,6 +226,9 @@ inline ProjectSettings parse(const std::string& text, std::vector<std::string>& 
         if (base.rfind("input.", 0) == 0) {
             if (!plat.empty()) messages.push_back("'" + key + "': input bindings cannot have a platform suffix; skipped");
             else               s.input.emplace_back(key, value);
+        } else if (base.rfind("physics.", 0) == 0) {
+            if (!plat.empty()) messages.push_back("'" + key + "': physics layer lines cannot have a platform suffix; skipped");
+            else               s.physics.emplace_back(key, value);
         } else if (plat.empty()) {
             apply(key, value);
         } else if (plat == platform) {

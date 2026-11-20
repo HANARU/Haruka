@@ -1,7 +1,9 @@
 #include "RigidBodyComponent.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include "PhysicsSystem.hpp"
+#include "PhysicsLayers.hpp"
 #include "../scene/Actor.hpp"
+#include "../scene/World.hpp"
 #include "../scene/Reflect.hpp"
 #include "../scene/ComponentFields.hpp"
 #include <algorithm>
@@ -87,7 +89,7 @@ void RigidBodyComponent::rebuildBody() {
 bool RigidBodyComponent::bodyParamsChanged() const {
     return shape != createdShape_ || motionType != createdMotion_ || mass != createdMass_ ||
            halfExtent.x != createdHalf_.x || halfExtent.y != createdHalf_.y ||
-           halfExtent.z != createdHalf_.z || center != createdCenter_;
+           halfExtent.z != createdHalf_.z || center != createdCenter_ || trigger != createdTrigger_;
 }
 
 // 편집을 확정할 때 바디를 다시 만듭니다. 기준은 "세터가 불렸는가" 가 아니라 "만들 때 쓴 값과
@@ -121,6 +123,13 @@ std::vector<PropDesc> RigidBodyComponent::buildProps() {
         if (p->bodyId_ != 0xFFFFFFFFu && p->physSys_)
             p->physSys_->setMaterial(p->bodyId_, p->friction, p->restitution);
     };
+    // 레이어 칸은 프로젝트의 레이어 이름을 보여 줍니다(D2). 물리 시스템이 없으면(시험 · 도구) 기본 이름입니다. 이름 글은 물리 시스템이
+    // 갖고 있으므로 프로퍼티보다 오래 삽니다(표는 시작 때 한 번 넣음).
+    static const PhysicsLayerTable kDefaultLayers;
+    const PhysicsSystem* ps = physSys_ ? physSys_ : (owner && owner->world() ? owner->world()->service<PhysicsSystem>() : nullptr);
+    const PhysicsLayerTable& layers = ps ? ps->layers() : kDefaultLayers;
+    std::vector<const char*> layerNames;
+    for (const auto& n : layers.names) layerNames.push_back(n.c_str());
 
     return {
         makePropEnum("Shape", {"Box", "Sphere", "Capsule", "Convex Hull", "Mesh"},
@@ -129,6 +138,15 @@ std::vector<PropDesc> RigidBodyComponent::buildProps() {
         makePropEnum("Motion", {"Static", "Dynamic", "Kinematic"},
             [p]{ return (int)p->motionType; },
             [p](int v){ p->motionType = (EMotionType)v; }),
+        makePropEnum("Layer", std::move(layerNames),
+            [p]{ return p->layer; },
+            [p](int v){ p->layer = std::clamp(v, 0, PhysicsLayerTable::kCount - 1); if (p->hasBody()) p->physSys_->setLayer(p->bodyId_, p->layer); }),
+        makePropToggle("Trigger",
+            [p]{ return p->trigger; },
+            [p](bool v){ p->trigger = v; }),   // 확정할 때 몸을 다시 만듦(onPropsCommitted)
+        makePropToggle("Contact Events",
+            [p]{ return p->contactEvents; },
+            [p](bool v){ p->contactEvents = v; if (p->hasBody()) p->physSys_->setContactEvents(p->bodyId_, v); }),
         makePropFloat("Friction",    PropColor::Neutral, 0.01f,
             [p]{ return p->friction; },
             [p, applyMaterial](float v){ p->friction = std::max(0.f, v); applyMaterial(); }, PropUnit::Ratio),
@@ -225,6 +243,9 @@ void RigidBodyComponent::writeFields(ComponentFieldWriter& w) const {
     if (continuous) w.b("continuous", true);   // 기본값이면 쓰지 않음(기존 씬 파일이 바뀌지 않게)
     if (center != glm::vec3(0.f)) w.v3("center", center);
     if (interpolate) w.b("interpolate", true);
+    if (layer != 0) w.i("layer", layer);   // 기본값은 쓰지 않음(옛 씬 파일이 바뀌지 않게, D2)
+    if (trigger) w.b("trigger", true);
+    if (contactEvents) w.b("contactEvents", true);
 }
 
 bool RigidBodyComponent::readField(const std::string& key, const std::string& value) {
@@ -236,6 +257,13 @@ bool RigidBodyComponent::readField(const std::string& key, const std::string& va
     else if (key == "mass")        ok = fieldparse::toFloat(value, mass);
     else if (key == "continuous")  ok = fieldparse::toBool(value, continuous);
     else if (key == "interpolate") ok = fieldparse::toBool(value, interpolate);
+    else if (key == "trigger")     ok = fieldparse::toBool(value, trigger);
+    else if (key == "contactEvents") ok = fieldparse::toBool(value, contactEvents);
+    else if (key == "layer") {
+        int l = 0;
+        ok = fieldparse::toInt(value, l) && PhysicsLayerTable::valid(l);
+        if (ok) layer = l;
+    }
     else if (key == "center") {
         glm::vec3 c;
         ok = fieldparse::toVec3(value, c) && std::isfinite(c.x) && std::isfinite(c.y) && std::isfinite(c.z);

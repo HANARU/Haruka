@@ -1,7 +1,9 @@
 #pragma once
 #include "../core/IEngineModule.hpp"
+#include "PhysicsLayers.hpp"
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -33,6 +35,14 @@ public:
     void     setMaxBodies(uint32_t n) { maxBodies_ = n; }
     uint32_t maxBodies() const        { return maxBodies_; }
     float stepRate() const { return 1.f / step_; }
+
+    // 충돌 레이어 표(2026-11-20, Docs/Physics_Joints_And_Events.md D1). 엔진이 startup 전에 project.ini 의 physics. 줄로 넣습니다.
+    // 몸을 만든 뒤에 바꾸면 이미 있는 몸의 레이어 쌍 판정은 다음 스텝부터 새 표를 따릅니다.
+    void                     setLayers(const PhysicsLayerTable& t) { layers_ = t; }
+    const PhysicsLayerTable& layers() const { return layers_; }
+    // 살아 있는 몸의 레이어(0 ~ 15)와 접촉 알림 켬을 바꿉니다(RigidBodyComponent 의 칸이 부름).
+    void setLayer(uint32_t body, int layer);
+    void setContactEvents(uint32_t body, bool on);
 
     // RigidBodyComponent 가 부릅니다(파괴·비활성·재생성). 지운 자리 주변의 잠든 바디를
     // 깨웁니다. Jolt 는 받치던 바디가 사라져도 그 위에서 잠든 바디를 깨우지 않습니다(DEF-80).
@@ -100,10 +110,35 @@ public:
     // ignore 에 든 액터의 바디는 건너뜁니다(2026-11-06). 소리 차폐가 음원 자신 · 청취자 리그의 충돌체를 빼는 데 씁니다.
     // 액터 단위이므로 자식 액터의 바디는 따로 넣어야 합니다. 볼록 셰이프 안에서 출발한 레이는 그 셰이프에 거리 0 으로
     // 맞으므로(Jolt 의 기본 동작), 출발점을 감싼 바디는 빼야 그 너머를 봅니다. nullptr 항목은 무시합니다.
+    // layerMask 는 맞출 레이어의 비트(PhysicsLayerTable::bit)입니다. 트리거는 맞추지 않습니다(D3).
     bool raycast(const glm::vec3& origin, const glm::vec3& dir, float maxDistance, RaycastHit& out,
-                 std::span<Actor* const> ignore = {}) const;
-    // 구와 겹치는 바디의 액터를 모읍니다(VR 손으로 잡을 물체 찾기). out 은 비우고 채웁니다.
-    void overlapSphere(const glm::vec3& center, float radius, std::vector<Actor*>& out) const;
+                 std::span<Actor* const> ignore = {}, uint16_t layerMask = PhysicsLayerTable::kAllMask) const;
+    // 구와 겹치는 바디의 액터를 모읍니다(VR 손으로 잡을 물체 찾기). out 은 비우고 채웁니다. 트리거는 빼냅니다.
+    void overlapSphere(const glm::vec3& center, float radius, std::vector<Actor*>& out,
+                       uint16_t layerMask = PhysicsLayerTable::kAllMask) const;
+
+    // ── 셰이프 캐스트(스윕, D6) ───────────────────────────────────────────────────────────────────────
+    // 모양을 start(중심) · rotation 자세에서 dir 방향으로 maxDistance 만큼 훑어 가장 가까운 첫 충돌을 찾습니다. 시작부터 겹치면 거리 0.
+    // 캡슐은 로컬 Y 축(충돌체 규약과 같음). 트리거 · ignore 액터의 몸 · layerMask 밖의 레이어는 건너뜁니다. out.normal 은 맞은 면에서 바깥.
+    struct SweepShape {
+        enum class Kind : uint8_t { Sphere, Box, Capsule } kind = Kind::Sphere;
+        glm::vec3 halfExtent{ 0.5f };   // Box
+        float     radius     = 0.5f;    // Sphere · Capsule
+        float     halfHeight = 0.5f;    // Capsule 원통부 반높이
+        static SweepShape sphere(float r)                  { SweepShape s; s.kind = Kind::Sphere;  s.radius = r; return s; }
+        static SweepShape box(const glm::vec3& he)         { SweepShape s; s.kind = Kind::Box;     s.halfExtent = he; return s; }
+        static SweepShape capsule(float r, float halfH)    { SweepShape s; s.kind = Kind::Capsule; s.radius = r; s.halfHeight = halfH; return s; }
+    };
+    bool shapeCast(const SweepShape& shape, const glm::vec3& start, const glm::quat& rotation, const glm::vec3& dir,
+                   float maxDistance, RaycastHit& out, uint16_t layerMask = PhysicsLayerTable::kAllMask,
+                   std::span<Actor* const> ignore = {}) const;
+
+    // ── 조인트(D5) ────────────────────────────────────────────────────────────────────────────────────
+    // JointComponent 는 물리 틱이 만듭니다. 핸들로 지우고 지금 값을 읽습니다(경첩 각도 도 · 슬라이더 위치 m · 거리 m).
+    void  removeJoint(uint32_t handle);
+    bool  hasJoint(uint32_t handle) const;
+    float jointValue(uint32_t handle) const;
+    size_t jointCount() const;
 
     // ── 바디 하나만 대상으로 하는 질의(손 쥐기 C, Hand_Grasp_Design 4-3) ──────────────────────────────
     // 다른 바디는 보지 않고 그 바디의 셰이프와만 판정합니다(Jolt TransformedShape). 쥐는 손의 마디가 잡은 물체에만 닿는지 볼 때 씁니다.
@@ -150,6 +185,10 @@ private:
     std::unordered_map<uint32_t, ForceTorque> frameForces_;
     std::unordered_map<uint32_t, ForceTorque> impulseBudget_;
     bool isDynamic(uint32_t id) const;
+    PhysicsLayerTable layers_;
+    void createJoints();
+    void processContacts();                // 접촉 큐를 비워 쌍을 셈(스텝마다), 알림 목록에 더함
+    void dispatchContacts(bool stepped);   // 물리 틱 끝: 유지 알림 · 보내기
     // 상한 진단(DEF-10). 바디 상한에 닿거나 접촉 버퍼가 넘치면 Jolt 는 아무 말이 없으므로
     // 처음 한 번만 알립니다.
     bool bodyCapWarned_     = false;

@@ -1,0 +1,317 @@
+# Haruka Scene v6
+# Physics joints and events check (2026-11-20, Docs/Physics_Joints_And_Events.md J5). Press Play:
+# Gate is a plank hinged to GatePost along Z with limits -60..0 degrees; gravity swings it down until it stops at -60.
+# Chain is four balls joined by distance joints, hanging from ChainAnchor. DropBox falls into TriggerZone (a static trigger)
+# and stays inside, so the zone reports one enter and no exit. The physics_joints test loads this scene and checks the poses.
+ACTOR:Sun
+GUID:9f1a2b3c00000001
+POS:0 0 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:LightComponent
+enabled=1
+type=directional
+color=1 1 1
+intensity=3
+attenuationRadius=10
+innerConeAngle=15
+outerConeAngle=30
+direction=0.37139067 0.74278134 0.557086
+useTemperature=0
+temperatureK=6500
+castShadows=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Ground
+GUID:9f1a2b3c00000002
+POS:0 -0.1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:20 0.2 20
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.6
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:GatePost
+GUID:9f1a2b3c00000003
+POS:-2.75 1 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.2 2 0.2
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color 6A4A2AFF 0 0.8
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.5
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:Gate
+GUID:9f1a2b3c00000004
+POS:-2 1.9 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 0.05 0.4
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color C08040FF 0 0.7
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=dynamic
+friction=0.5
+restitution=0.1
+mass=4
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+COMPONENT:JointComponent
+enabled=1
+type=hinge
+target=actor:9f1a2b3c00000003
+anchor=-0.5 0 0
+axis=0 0 1
+limits=1
+limitMin=-60
+limitMax=0
+END_COMPONENT
+END_ACTOR
+ACTOR:ChainAnchor
+GUID:9f1a2b3c00000010
+POS:0 2.5 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.1 0.1 0.1
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color 404040FF 1 0.4
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.5
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
+ACTOR:Link1
+GUID:9f1a2b3c00000011
+POS:0.2121 2.2879 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.16 0.16 0.16
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color A0A0A8FF 1 0.3
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=sphere
+motion=dynamic
+friction=0.5
+restitution=0.1
+mass=0.5
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+COMPONENT:JointComponent
+enabled=1
+type=distance
+target=actor:9f1a2b3c00000010
+anchor=0 0 0
+axis=0 1 0
+limits=0
+limitMin=0
+limitMax=0
+END_COMPONENT
+END_ACTOR
+ACTOR:Link2
+GUID:9f1a2b3c00000012
+POS:0.4243 2.0757 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.16 0.16 0.16
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color A0A0A8FF 1 0.3
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=sphere
+motion=dynamic
+friction=0.5
+restitution=0.1
+mass=0.5
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+COMPONENT:JointComponent
+enabled=1
+type=distance
+target=actor:9f1a2b3c00000011
+anchor=0 0 0
+axis=0 1 0
+limits=0
+limitMin=0
+limitMax=0
+END_COMPONENT
+END_ACTOR
+ACTOR:Link3
+GUID:9f1a2b3c00000013
+POS:0.6364 1.8636 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.16 0.16 0.16
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color A0A0A8FF 1 0.3
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=sphere
+motion=dynamic
+friction=0.5
+restitution=0.1
+mass=0.5
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+COMPONENT:JointComponent
+enabled=1
+type=distance
+target=actor:9f1a2b3c00000012
+anchor=0 0 0
+axis=0 1 0
+limits=0
+limitMin=0
+limitMax=0
+END_COMPONENT
+END_ACTOR
+ACTOR:Link4
+GUID:9f1a2b3c00000014
+POS:0.8485 1.6515 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.16 0.16 0.16
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=sphere|32x16|0|0.0000
+primMaterial=color A0A0A8FF 1 0.3
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=sphere
+motion=dynamic
+friction=0.5
+restitution=0.1
+mass=0.5
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+COMPONENT:JointComponent
+enabled=1
+type=distance
+target=actor:9f1a2b3c00000013
+anchor=0 0 0
+axis=0 1 0
+limits=0
+limitMin=0
+limitMax=0
+END_COMPONENT
+END_ACTOR
+ACTOR:TriggerZone
+GUID:9f1a2b3c00000020
+POS:2.5 0.5 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=1
+prim=box|0x0|0|0.0000
+primMaterial=color 40C0FF40 0 0.5
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=static
+friction=0.5
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+trigger=1
+END_COMPONENT
+END_ACTOR
+ACTOR:DropBox
+GUID:9f1a2b3c00000021
+POS:2.5 3 -2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:0.3 0.3 0.3
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color E04040FF 0 0.6
+END_COMPONENT
+COMPONENT:RigidBodyComponent
+enabled=1
+shape=box
+motion=dynamic
+friction=0.6
+restitution=0.1
+mass=1
+halfExtent=0.5 0.5 0.5
+END_COMPONENT
+END_ACTOR
