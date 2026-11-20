@@ -53,6 +53,7 @@ public:
     bool isTextInputEnabled() const override { return imeEnabled_; }
     bool getComposition(std::string& text, size_t& caretBytes) const override;
     void setTextInputRect(float x, float y, float w, float h) override;
+    bool readGamepad(HGamepadState& out) override;
 
 private:
     static void framebufferResizeCallback(GLFWwindow* w, int width, int height);
@@ -66,6 +67,7 @@ private:
     uint32_t height;
     std::string title;
     bool hidden_ = false;
+    int  padJid_ = -1;   // 지금 쓰는 게임패드의 GLFW 조이스틱 번호(D2), 없으면 -1
 
     GLFWwindow* window  = nullptr;
     bool        resized = false;

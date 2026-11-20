@@ -82,7 +82,6 @@ private:
     bool                                 settingsDirty_   = false;
     std::chrono::steady_clock::time_point settingsChangedAt_{};
     std::map<std::string, std::string>   restartApplied_;     // 시작할 때 쓴 다시 시작 항목의 값(바뀌면 한 번 알림)
-    std::map<std::string, std::string>   inputApplied_;       // 지금 적용한 사용자 입력 덮어쓰기
     std::string                          audioLogged_, postLogged_;   // 같은 값을 다시 알리지 않게
 
     // ── 메인 루프의 프레임 단계 (2026-11-18, 엔진 구조 안정화 S2) ──────────────────────────────────────

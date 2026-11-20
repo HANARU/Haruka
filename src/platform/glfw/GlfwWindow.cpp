@@ -478,3 +478,34 @@ void GlfwWindow::applyImeRect() {
     ImmReleaseContext(hwnd, himc);
 #endif
 }
+
+// ── 게임패드(2026-11-21, Docs/Input_Extensions.md D1 · D2) ─────────────────────────────────────────
+// GLFW 표준 매핑(SDL 게임 컨트롤러 DB)으로 읽습니다. 쓰던 패드가 붙어 있는 동안은 그대로, 빠지면 번호가 가장 작은 패드로 넘어갑니다.
+bool GlfwWindow::readGamepad(HGamepadState& out) {
+    out = {};
+    bool isPad[hgamepad::kMaxPads] = {};
+    for (int j = 0; j < hgamepad::kMaxPads; ++j) isPad[j] = glfwJoystickIsGamepad(GLFW_JOYSTICK_1 + j) == GLFW_TRUE;
+    const int jid = hgamepad::pick(padJid_, isPad);
+    if (jid != padJid_) {
+        if (padJid_ >= 0) HLOG(LogInput, Log) << "Gamepad " << padJid_ << " disconnected";
+        if (jid >= 0) {
+            const char* n = glfwGetGamepadName(GLFW_JOYSTICK_1 + jid);
+            HLOG(LogInput, Log) << "Gamepad " << jid << " connected: " << (n ? n : "(unnamed)");
+        }
+        padJid_ = jid;
+    }
+    if (jid < 0) return false;
+    GLFWgamepadstate st{};
+    if (glfwGetGamepadState(GLFW_JOYSTICK_1 + jid, &st) != GLFW_TRUE) return false;
+    out.connected = true;
+    if (const char* n = glfwGetGamepadName(GLFW_JOYSTICK_1 + jid)) out.name = n;
+    for (int b = 0; b < int(HPadButton::Count); ++b) out.buttons[b] = st.buttons[b] == GLFW_PRESS;
+    // 스틱 Y 는 위가 +, 트리거는 0 ~ 1 로 바꿉니다(Gamepad.hpp 값 규칙).
+    out.axes[int(HPadAxis::LeftX)]        = st.axes[GLFW_GAMEPAD_AXIS_LEFT_X];
+    out.axes[int(HPadAxis::LeftY)]        = -st.axes[GLFW_GAMEPAD_AXIS_LEFT_Y];
+    out.axes[int(HPadAxis::RightX)]       = st.axes[GLFW_GAMEPAD_AXIS_RIGHT_X];
+    out.axes[int(HPadAxis::RightY)]       = -st.axes[GLFW_GAMEPAD_AXIS_RIGHT_Y];
+    out.axes[int(HPadAxis::LeftTrigger)]  = (st.axes[GLFW_GAMEPAD_AXIS_LEFT_TRIGGER] + 1.f) * 0.5f;
+    out.axes[int(HPadAxis::RightTrigger)] = (st.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER] + 1.f) * 0.5f;
+    return true;
+}

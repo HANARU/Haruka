@@ -67,6 +67,8 @@ const std::vector<UserSettings::KeyInfo>& UserSettings::keys() {
         { "comfort.eyeHeight",     K::Float,  0.f, 2.5f,  {}, A::Live,    false, "Fixed eye height in meters (0 = scene value, else 0.5..2.5)" },
         { "input.action.",         K::Text,   0.f, 0.f,   {}, A::Live,    true,  "Action binding, same text as project.ini (none = unbound)" },
         { "input.axis.",           K::Text,   0.f, 0.f,   {}, A::Live,    true,  "Axis binding, same text as project.ini (none = unbound)" },
+        { "input.mod.",            K::Text,   0.f, 0.f,   {}, A::Live,    true,  "Axis modifiers: deadzone:0.2, axial, curve:2, sens:1.5, invert (none = defaults)" },
+        { "input.context.",        K::Text,   0.f, 0.f,   {}, A::Live,    true,  "Binding in a named input context: input.context.NAME.action|axis|mod.X" },
         { "game.",                 K::Text,   0.f, 0.f,   {}, A::Live,    true,  "Free values for the game" },
     };
     return k;

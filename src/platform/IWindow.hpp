@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include "../core/HLog.hpp"
+#include "Gamepad.hpp"
 
 // 키 입력 등 플랫폼 입력 로그. 키 이벤트는 Verbose 라 기본 기록 수준(Log)에서는 남지 않습니다.
 inline constinit HLogCategory LogInput{ "Input", ELogVerbosity::Log };
@@ -117,4 +118,8 @@ public:
     virtual bool getComposition(std::string& /*text*/, size_t& /*caretBytes*/) const { return false; }
     // 조합 · 후보 창을 놓을 커서 사각형(프레임 버퍼 픽셀, x · y · 폭 · 높이).
     virtual void setTextInputRect(float /*x*/, float /*y*/, float /*w*/, float /*h*/) {}
+
+    // ── 게임패드(2026-11-21, Docs/Input_Extensions.md D1 · D2) ───────────────────────────────────
+    // 쓰는 패드 하나의 지금 상태를 채웁니다. 패드가 없거나 이 창이 읽지 않으면(창 없음 · Android) 연결 없음 상태로 false.
+    virtual bool readGamepad(HGamepadState& out) { out = {}; return false; }
 };

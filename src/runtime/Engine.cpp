@@ -632,59 +632,15 @@ void Engine::applyLiveUserSettings(bool startup) {
     }
 }
 
-// 사용자 입력 덮어쓰기(input.action.* · input.axis.*). 같은 이름의 프로젝트 바인딩을 대신하고, 덮어쓰기를 지우면 프로젝트 바인딩으로
-// 돌아갑니다. 틀린 글은 알리고 프로젝트 바인딩을 둡니다. "none" 은 그 동작 · 축을 비웁니다.
+// 사용자 입력 덮어쓰기(input.action.* · input.axis.* · input.mod.* · input.context.*). 규칙(프로젝트 줄 위에 덮음, 지우면 되돌림,
+// 틀린 글은 알리고 프로젝트 줄 유지, none = 비움)은 HInputSystem::applyUserOverrides 에 있습니다(Docs/Input_Extensions.md D7).
 void Engine::applyUserInput(bool startup) {
-    HInputSystem& in = HInputSystem::get();
-    const auto& base = project_.input.empty() ? HInputSystem::defaultBindings() : project_.input;
-    auto projectLine = [&](const std::string& key) -> const std::string* {
-        for (const auto& [k, v] : base)
-            if (k == key) return &v;
-        return nullptr;
-    };
-    std::map<std::string, std::string> want;
-    for (const auto& [k, v] : userSettings_.values())
-        if (k.rfind("input.action.", 0) == 0 || k.rfind("input.axis.", 0) == 0) want[k] = v;
-    if (want == inputApplied_) return;
-    int applied = 0;
-    // 지운 덮어쓰기: 프로젝트 바인딩으로 돌립니다.
-    for (const auto& [k, v] : inputApplied_) {
-        if (want.count(k)) continue;
-        const bool isAction = k.rfind("input.action.", 0) == 0;
-        const std::string name = k.substr(isAction ? 13 : 11);
-        std::string err;
-        if (const std::string* p = projectLine(k)) in.applyBinding(k, *p, err);
-        else if (isAction) in.unbind(name);
-        else in.unbindAxis(name);
-    }
-    std::map<std::string, std::string> now;
-    for (const auto& [k, v] : want) {
-        const bool isAction = k.rfind("input.action.", 0) == 0;
-        const std::string name = k.substr(isAction ? 13 : 11);
-        if (v == "none") {
-            if (isAction) in.unbind(name);
-            else in.unbindAxis(name);
-            now[k] = v;
-            ++applied;
-            continue;
-        }
-        std::string err;
-        if (in.applyBinding(k, v, err)) {
-            now[k] = v;
-            ++applied;
-        } else {
-            HLOG(LogEngine, Warning) << UserSettings::kPath << ": " << k << " = " << v << ": " << err
-                                     << "; keeping the project binding";
-            std::string e2;
-            if (const std::string* p = projectLine(k)) in.applyBinding(k, *p, e2);
-            else if (isAction) in.unbind(name);   // 프로젝트 바인딩이 없으면 예전 덮어쓰기를 남기지 않음
-            else in.unbindAxis(name);
-        }
-    }
-    // 틀린 줄도 적용한 것으로 기억해, 바뀌기 전까지 프레임마다 다시 알리지 않습니다.
-    inputApplied_ = want;
-    if (applied > 0 || !startup) {
-        HLOG(LogEngine, Log) << "Input bindings: " << applied << " user override(s) (" << UserSettings::kPath << ")";
+    std::vector<std::string> warnings;
+    const HInputSystem::OverrideResult r = HInputSystem::get().applyUserOverrides(userSettings_, warnings);
+    for (const std::string& w : warnings)
+        HLOG(LogEngine, Warning) << UserSettings::kPath << ": " << w << "; keeping the project binding";
+    if (r.changed && (r.applied > 0 || !startup)) {
+        HLOG(LogEngine, Log) << "Input bindings: " << r.applied << " user override(s) (" << UserSettings::kPath << ")";
     }
 }
 
@@ -732,7 +688,7 @@ void Engine::setupInputBindings() {
         else HLOG(LogEngine, Warning) << ProjectSettings::kPath << ": " << key << " = " << value << ": " << err << "; skipped";
     }
     HLOG(LogEngine, Log) << "Input bindings: " << applied << (project_.input.empty() ? " (engine defaults)" : " (project settings)");
-    inputApplied_.clear();
+    in.setProjectLines(lines);   // 사용자 덮어쓰기 · 재지정의 기준(Docs/Input_Extensions.md D6)
     applyUserInput(true);
     // 컨트롤러 진동은 XR 모듈로 보냅니다(세션이 입력을 받는 동안만 실제로 울림).
     in.setHapticSink([this](int hand, float amplitude, float seconds) {

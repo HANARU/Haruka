@@ -59,7 +59,8 @@
   - 그래픽: `render.ao` · `render.bloom`(바로), `render.csmCascades`(1 | 2) · `render.shadowDistance`(8 ~ 200) · `render.contactShadows` ·
     `render.heightFog`(다시 시작). 프로젝트 값 위에 덮습니다.
   - 입력(바로): `input.action.<이름>` · `input.axis.<이름>`, project.ini 와 같은 글. 같은 이름의 프로젝트 바인딩을 대신하고, 틀린 글은
-    알리고 프로젝트 바인딩을 씁니다.
+    알리고 프로젝트 바인딩을 씁니다. 2026-11-21 부터 `input.mod.<축>`(수정자) · `input.context.<컨텍스트>.*` 도 받고, 이 규칙은
+    `HInputSystem::applyUserOverrides` 에 있습니다. 동작 하나의 키만 바꾸는 `rebind` 는 [Input_Extensions.md](Input_Extensions.md) D6.
   - 편안함(바로): `comfort.snapTurn`(0 = 씬 값, 5 ~ 180 도), `comfort.teleport`(scene | on | off), `comfort.height`(scene | tracked | fixed),
     `comfort.eyeHeight`(0 = 씬 값, 0.5 ~ 2.5 m). 씬 · 프로젝트 값보다 앞섭니다.
 - **D8 적용:** 엔진이 시작할 때 다시 시작 항목을 포함해 전부 적용하고, 그 뒤에는 설정의 변경 번호가 바뀐 프레임에 바로 적용 항목만

@@ -933,13 +933,11 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
 
     # -- VR 입력 테스트 -------------------------------------------------------
     # XR 모듈이 넣는 컨트롤러 상태가 축 · 디지털 액션으로 나오는지 검산합니다(DEF-20).
-    add_executable(HarukaInputTest
-        tests/InputTest.cpp
-        src/input/HInputSystem.cpp
-    )
-    target_link_libraries(HarukaInputTest PRIVATE glm::glm)
-    # IWindow.hpp 가 Vulkan 형(VkSurfaceKHR)을 쓰므로 헤더 경로만 둡니다(링크는 필요 없음).
-    target_include_directories(HarukaInputTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    # 게임패드 · 수정자 · 컨텍스트 · 재지정(2026-11-21, Docs/Input_Extensions.md)도 검산합니다. 재지정이 사용자 설정(core)을 쓰므로
+    # 런타임 라이브러리에 링크합니다.
+    add_executable(HarukaInputTest tests/InputTest.cpp)
+    target_link_libraries(HarukaInputTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaInputTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaInputTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaInputTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -1272,6 +1270,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/assets/Skin.cpp
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
+        src/core/UserSettings.cpp
         src/scene/World.cpp
         src/scene/TimerManager.cpp
         src/scene/Actor.cpp
@@ -1337,6 +1336,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/core/Profiler.cpp
         src/xr/GraspSolver.cpp
         src/input/HInputSystem.cpp
+        src/core/UserSettings.cpp
         src/scene/World.cpp
         src/scene/TimerManager.cpp
         src/scene/Actor.cpp

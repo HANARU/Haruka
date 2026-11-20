@@ -3,7 +3,7 @@
 //
 // 플레이어가 고른 값(소리 크기 · 그래픽 · 키 · 편안함)을 쓰기 루트의 Config/user_settings.ini 에 둡니다. 프로젝트 설정(project.ini)
 // 위에 **바꾼 값만** 덮는 층이라(UE GameUserSettings · Godot override.cfg), 프로젝트 기본값이 바뀌면 바꾸지 않은 값은 따라갑니다.
-// 알려진 이름은 형 · 범위 · 적용 시점이 정해져 있고 범위 밖은 잘라 알립니다. input.action.* · input.axis.* 는 project.ini 와 같은 글,
+// 알려진 이름은 형 · 범위 · 적용 시점이 정해져 있고 범위 밖은 잘라 알립니다. input.action.* · input.axis.* · input.mod.* · input.context.* 는 project.ini 와 같은 글(Docs/Input_Extensions.md),
 // game.* 는 게임이 자유롭게 씁니다. 모르는 이름은 알리되 버리지 않습니다(새 버전의 키를 옛 실행 파일이 지우지 않게).
 //
 // 엔진(runtime/Engine)이 시작할 때 모두 적용하고, 그 뒤에는 revision() 이 바뀐 프레임에 바로 적용 항목만 다시 적용합니다.
