@@ -23,8 +23,13 @@
 #include <memory>
 #include <vector>
 
+#include "../core/CVar.hpp"
 #include "../core/HLog.hpp"
+#include "../core/TextFloat.hpp"
 #include "../core/TextUtf.hpp"
+#include "../vfs/LogicalPath.hpp"
+
+#include <cstdio>
 
 static constinit HLogCategory LogAudio{ "Audio", ELogVerbosity::Log };
 
@@ -281,6 +286,59 @@ void hrtfProcess(ma_node* node, const float** in, ma_uint32* frameCountIn, float
 
 ma_node_vtable g_hrtfVtable = { hrtfProcess, nullptr, 1, 1, MA_NODE_FLAG_CONTINUOUS_PROCESSING | MA_NODE_FLAG_ALLOW_NULL_INPUT };
 
+// ── 버스 노드 · 마스터 리미터 (2026-11-21, Docs/Audio_Design.md 12절) ────────────────────────────────────────
+// 둘 다 MA_NODE_FLAG_PASSTHROUGH 노드입니다. miniaudio 가 입력을 출력 버퍼에 바로 섞어 넣은 뒤 콜백을 부르므로(in[0] == out[0]),
+// 콜백은 제자리에서 고치기만 합니다. 게인이 1 이고 리미터가 꺼져 있으면 아무것도 하지 않아, 버스 · 리미터를 쓰지 않는 동안의 출력은
+// 사운드가 월드 그룹에 바로 붙던 때와 바이트 단위로 같습니다(오디오 테스트 14절). 입력이 하나도 없으면(그 버스에 울리는 소리가 없음)
+// 콜백이 불리지 않고 0 프레임을 내므로 부모가 섞지 않습니다.
+struct BusNode {
+    ma_node_base base;
+    std::atomic<float> gain{ 1.f };   // 게임 스레드 → 오디오 스레드: 목표 게인
+    std::atomic<float> peak{ 0.f };   // 오디오 스레드 → 게임 스레드: 지난 읽기 뒤 출력 피크(게임 스레드가 0 으로 바꿔 읽음)
+    float cur = 1.f;                  // 오디오 스레드 전용: 지금 게인(블록 안에서 목표로 선형 보간)
+};
+
+void busProcess(ma_node* node, const float** /*in*/, ma_uint32* /*frameCountIn*/, float** out, ma_uint32* frameCountOut) {
+    auto* b = static_cast<BusNode*>(node);
+    float* io = out[0];
+    const ma_uint32 n  = *frameCountOut;
+    const ma_uint32 ch = ma_node_get_output_channels(node, 0);
+    if (!io || n == 0) return;
+    const float target = b->gain.load(std::memory_order_relaxed);
+    const float g0     = b->cur;
+    if (!(g0 == 1.f && target == 1.f)) {
+        const float step = (target - g0) / (float)n;
+        for (ma_uint32 i = 0; i < n; ++i) {
+            const float g = (i + 1 == n) ? target : g0 + step * (float)(i + 1);
+            for (ma_uint32 c = 0; c < ch; ++c) io[(size_t)i * ch + c] *= g;
+        }
+    }
+    b->cur = target;
+    float p = 0.f;
+    for (size_t k = 0, m = (size_t)n * ch; k < m; ++k) p = std::max(p, std::fabs(io[k]));
+    if (p > b->peak.load(std::memory_order_relaxed)) b->peak.store(p, std::memory_order_relaxed);
+}
+
+ma_node_vtable g_busVtable = { busProcess, nullptr, 1, 1, MA_NODE_FLAG_PASSTHROUGH };
+
+struct LimiterNode {
+    ma_node_base base;
+    std::atomic<bool>  enabled{ false };
+    std::atomic<float> ceiling{ 1.f };   // 선형, 마스터 볼륨으로 나눈 값(엔진 출력의 볼륨이 이 뒤에 곱해짐)
+    std::atomic<float> coef{ 1.f };      // hmix::limiterReleaseCoef
+    hmix::LimiterState st;               // 오디오 스레드 전용
+};
+
+void limiterProcess(ma_node* node, const float** /*in*/, ma_uint32* /*frameCountIn*/, float** out, ma_uint32* frameCountOut) {
+    auto* l = static_cast<LimiterNode*>(node);
+    if (!l->enabled.load(std::memory_order_relaxed)) { l->st.gain = 1.f; return; }
+    if (!out[0] || *frameCountOut == 0) return;
+    hmix::limitBlock(out[0], *frameCountOut, ma_node_get_output_channels(node, 0), l->ceiling.load(std::memory_order_relaxed),
+                     l->coef.load(std::memory_order_relaxed), l->st);
+}
+
+ma_node_vtable g_limiterVtable = { limiterProcess, nullptr, 1, 1, MA_NODE_FLAG_PASSTHROUGH };
+
 } // namespace
 
 struct AudioVoice {
@@ -314,6 +372,16 @@ struct AudioVoice {
     // 사운드 단계 4
     bool      budgetCulled = false;   // 보이스 예산 밖(지난 틱 순위): 가상화
     bool      coneSet      = false;   // 콘을 한 번이라도 넣었는지(끄면 기본으로 되돌림)
+
+    // 버스 · 큐(2026-11-21, 12절)
+    int         bus        = 0;       // 사슬의 끝이 붙은 버스
+    uint32_t    serial     = 0;       // 인스턴스 번호(playCue 가 돌려줌)
+    std::string cueKey;               // 큐에서 나왔으면 그 큐(AudioSystem::cues_ 의 열쇠)
+    int         cueVariant = -1;
+    float       cuePitch   = 1.f;
+    float       cueVolume  = 1.f;
+    bool        cueStarted = false;   // 이 보이스를 큐 인스턴스로 시작한 적이 있는지
+    bool        cueRestart = false;   // 다음 틱에 변형을 다시 뽑아 새 보이스로 냄(컴포넌트 play)
 };
 
 // ── 파일 읽기 (2026-10-24) ───────────────────────────────────────────────────────
@@ -478,6 +546,21 @@ bool openPreferred(OutputState& o, ma_engine* eng, const std::vector<std::string
 }
 } // namespace
 
+void AudioSystem::setWorld(World* w) {
+    if (world_ && world_->service<AudioSystem>() == this) world_->setService<AudioSystem>(nullptr);
+    world_ = w;
+    if (world_) world_->setService<AudioSystem>(this);
+}
+
+AudioSystem::AudioSystem(bool headless) : headless_(headless) {
+    // 표준 5버스(EAudioBus 순서, 부모 없음). 이름은 사용자 설정 키(audio.sfx 등) · 씬 파일의 bus 값과 같습니다.
+    for (int b = 0; b < kAudioBusCount; ++b) {
+        BusState st;
+        st.name = audioBusName((EAudioBus)b);
+        buses_.push_back(st);
+    }
+}
+
 std::vector<std::string> AudioSystem::outputCandidates(const std::string& overrideId, const std::string& requestedId) {
     std::vector<std::string> c;
     if (!overrideId.empty()) c.push_back(overrideId);
@@ -564,11 +647,36 @@ void AudioSystem::startup() {
             reverb_ = rv;
         }
     }
+    // 마스터 리미터(12절 D5): 만들어만 두고, 켜질 때만 월드 그룹과 엔진 출력 사이에 넣습니다(pushLimiter). 엔진 출력은 입력을
+    // 512 프레임씩 읽는데, 노드를 한 단 더 끼우면 월드 그룹이 [480, 32, …] 로 나뉘어 읽혀 보이스의 게인 보간 단위가 달라지고
+    // 출력이 1 ulp 쯤 달라집니다. 꺼진 동안은 예전과 같은 사슬이라 바이트 단위로 같습니다.
+    if (group_) {
+        auto* lim = new LimiterNode();
+        ma_node_config nc = ma_node_config_init();
+        nc.vtable = &g_limiterVtable;
+        const ma_uint32 ch = kChannels;
+        nc.pInputChannels  = &ch;
+        nc.pOutputChannels = &ch;
+        if (const ma_result r = ma_node_init(ma_engine_get_node_graph(eng), &nc, nullptr, &lim->base); r != MA_SUCCESS) {
+            HLOG(LogAudio, Error) << "limiter node init failed: " << ma_result_description(r) << "; the master limiter is unavailable";
+            delete lim;
+        } else {
+            limiter_ = lim;
+            pushLimiter();
+        }
+    }
+    // 버스 노드(12절 D1). miniaudio 는 새로 붙인 것을 입력 목록 맨 앞에 넣고, 맨 앞 입력만 출력 버퍼에 바로(한 번에) 읽고 나머지는
+    // 512 프레임 임시 버퍼로 나눠 읽습니다. 보이스의 게인 보간은 읽는 단위에 따라 달라지므로, 기본 버스(sfx, id 0)가 맨 앞이 되도록
+    // 큰 id 부터 만듭니다. 그래야 버스를 쓰지 않는 소리의 출력이 예전과 바이트 단위로 같습니다(오디오 테스트 14절). 부모는 createBusNode 가
+    // 먼저 만듭니다.
+    for (int b = (int)buses_.size() - 1; b >= 0; --b) createBusNode(b);
+    pushBusGains();
     HLOG(LogAudio, Log) << "miniaudio initialized (48 kHz stereo" << (headless_ ? ", no device" : "") << ")";
-    if (out) HLOG(LogAudio, Log) << "Audio output: " << out->activeName << (out->activeId.empty() ? " (system default)" : "");
+    if (out) { HLOG(LogAudio, Log) << "Audio output: " << out->activeName << (out->activeId.empty() ? " (system default)" : ""); }
 }
 
 void AudioSystem::shutdown() {
+    if (world_ && world_->service<AudioSystem>() == this) world_->setService<AudioSystem>(nullptr);
     if (!engine_) return;
     // 장치 콜백(오디오 스레드)이 엔진을 읽지 않도록 먼저 멈춥니다.
     OutputState* out = asOut(out_);
@@ -584,11 +692,19 @@ void AudioSystem::shutdown() {
         reverb_        = nullptr;
         reverbRunning_ = false;
     }
+    destroyBusNodes();   // 보이스 뒤 · 그룹 앞(버스 출력이 그룹에 붙음)
     if (group_) {
         ma_sound_group_uninit(asGroup(group_));
         delete asGroup(group_);
         group_ = nullptr;
     }
+    if (limiter_) {   // 그룹(켜져 있으면 리미터 입력에 붙음) 뒤
+        ma_node_uninit(&static_cast<LimiterNode*>(limiter_)->base, nullptr);
+        delete static_cast<LimiterNode*>(limiter_);
+        limiter_       = nullptr;
+        limiterRouted_ = false;
+    }
+    cues_.clear();
     ma_engine_uninit(asEngine(engine_));   // 장치는 엔진 것이 아니므로 아래에서 직접 닫습니다
     delete asEngine(engine_);
     engine_ = nullptr;
@@ -730,7 +846,7 @@ void AudioSystem::updateListener() {
 void AudioSystem::applySettings(AudioVoice& voice, const AudioComponent& ac) const {
     ma_sound* s = &voice.sound;
     const AudioAttenuationSettings& at = ac.attenuation;
-    ma_sound_set_volume(s, ac.volume * busVolume(ac.bus));   // 버스 볼륨(사운드 단계 4, 기본 1)
+    ma_sound_set_volume(s, ac.volume * voice.cueVolume);   // 버스 볼륨은 버스 노드가 곱함(12절 D2), 큐의 랜덤 볼륨
     ma_sound_set_looping(s, ac.loop ? MA_TRUE : MA_FALSE);
     ma_sound_set_spatialization_enabled(s, at.spatialize ? MA_TRUE : MA_FALSE);
     ma_sound_set_attenuation_model(s, (ma_attenuation_model)at.model);
@@ -742,6 +858,8 @@ void AudioSystem::applySettings(AudioVoice& voice, const AudioComponent& ac) con
 void AudioSystem::tick(float dt) {
     if (!engine_) return;
     checkOutput(dt);
+    clock_ += dt;
+    updateMix(dt);   // 버스 미터 · 스냅숏 · 더킹 → 버스 게인(12절)
     if (!world_) return;
     updateListener();
     // 청취자 속도(도플러, S1). 처음 틱은 속도 0.
@@ -758,8 +876,17 @@ void AudioSystem::tick(float dt) {
         if (!ac->isLive()) continue;
 
         bool created = false;
+        // 큐를 가리키는 컴포넌트를 다시 재생(play)하면 변형을 다시 뽑아 새 보이스로 냅니다(12절 D9).
+        bool restart = false;
+        if (ac->voice_ && ac->voice_->cueRestart) {
+            destroyVoice(ac->voice_);
+            ac->voice_ = nullptr;
+            restart    = true;
+        }
         if (!ac->voice_ && !ac->filePath.empty() && !ac->loadFailed_) {
-            if (AudioVoice* v = createVoice(ac->filePath.c_str(), ac->loop, ac->stream)) {
+            AudioVoice* v = isCuePath(ac->filePath) ? createCueVoice(*ac)
+                                                    : createVoice(ac->filePath.c_str(), ac->loop, ac->stream, (int)ac->bus);
+            if (v) {
                 ac->voice_    = v;
                 ac->audioSys_ = this;
                 created       = true;
@@ -768,13 +895,14 @@ void AudioSystem::tick(float dt) {
             }
         }
         if (!ac->voice_) continue;
+        routeVoice(*ac->voice_, componentBus(*ac, ac->voice_));   // 플레이 중에 bus 를 바꿔도 따라감
 
         const glm::vec3 pos = a->worldPosition();
         ma_sound_set_position(&ac->voice_->sound, pos.x, pos.y, pos.z);
         applySettings(*ac->voice_, *ac);
         // 최대 거리 밖 무음(silentBeyondMax): miniaudio 곡선에 배율을 곱해 최대 거리에서 0 이 되게 합니다.
         if (ac->attenuation.spatialize && ac->attenuation.silentBeyondMax)
-            ma_sound_set_volume(&ac->voice_->sound, ac->volume * busVolume(ac->bus) *
+            ma_sound_set_volume(&ac->voice_->sound, ac->volume * ac->voice_->cueVolume *
                                 hvirt::silenceFactor(ac->attenuation, glm::length(pos - listenerPos_)));
         // 지향성 콘(사운드 단계 4): 액터 앞쪽(-Z). 쓰지 않는 소리는 한 번도 부르지 않습니다(예전 출력 그대로).
         if (ac->cone.enabled() || ac->voice_->coneSet) {
@@ -792,7 +920,12 @@ void AudioSystem::tick(float dt) {
         updateHrtf(*ac->voice_, *ac, pos);
         // 위치 · 설정 · 첫 차폐 판정 · HRTF 사슬을 넣은 뒤에 시작해야 첫 소리가 원점에서 나거나 막힌 소리가 열린 채로 튀지 않습니다
         // (UE 의 비동기 트레이스는 첫 결과가 오기 전에 소리가 바뀌는 문제가 알려져 있음). 처음부터 들리지 않으면 가상으로 시작합니다.
-        if (created && ac->autoPlay) {
+        if (created && (ac->autoPlay || restart)) {
+            AudioVoice& cv = *ac->voice_;
+            if (!cv.cueKey.empty()) {   // 큐 인스턴스: 재시작 간격 · 동시 재생 상한(12절 D8). 거절되면 멈춘 채로 둠
+                auto it = cues_.find(cv.cueKey);
+                if (it == cues_.end() || !admitCue(it->second, &cv, false)) continue;
+            }
             if (hvirt::nextVirtual(false, audibleGain(*ac->voice_, *ac, pos))) {
                 ac->voice_->virtualized   = true;
                 ac->voice_->virtualCursor = 0.0;
@@ -813,17 +946,7 @@ void AudioSystem::tick(float dt) {
 void AudioSystem::setMasterVolume(float v) {
     masterVolume_ = std::clamp(std::isfinite(v) ? v : 1.f, 0.f, 2.f);
     if (engine_) ma_engine_set_volume(asEngine(engine_), masterVolume_);
-}
-
-void AudioSystem::setBusVolume(EAudioBus bus, float v) {
-    const int i = (int)bus;
-    if (i < 0 || i >= kAudioBusCount) return;
-    busVolume_[i] = std::clamp(std::isfinite(v) ? v : 1.f, 0.f, 2.f);
-}
-
-float AudioSystem::busVolume(EAudioBus bus) const {
-    const int i = (int)bus;
-    return (i >= 0 && i < kAudioBusCount) ? busVolume_[i] : 1.f;
+    pushLimiter();   // 리미터 한도는 마스터 볼륨 뒤 기준(12절 D5)
 }
 
 // 들리는 크기 순위로 예산 밖의 보이스를 표시합니다. 다음 틱의 updateVirtual 이 표시된 보이스를 가상화하고, 예산 안으로 돌아오면
@@ -839,12 +962,18 @@ void AudioSystem::applyBudget(std::vector<std::pair<AudioVoice*, float>>& audibl
 
 bool AudioSystem::playOneShot(const char* filePath, const glm::vec3& position, float volume, EAudioBus bus,
                               const AudioAttenuationSettings& attenuation) {
-    if (!engine_ || !filePath || !*filePath || oneShots_.size() >= kMaxOneShots) return false;
-    const float g = volume * busVolume(bus) *
+    return startOneShot(filePath, position, volume, (int)bus, attenuation, 1.f) != nullptr;
+}
+
+AudioVoice* AudioSystem::startOneShot(const char* filePath, const glm::vec3& position, float volume, int bus,
+                                      const AudioAttenuationSettings& attenuation, float pitch) {
+    if (!engine_ || !filePath || !*filePath || oneShots_.size() >= kMaxOneShots) return nullptr;
+    if (bus < 0 || bus >= (int)buses_.size()) bus = 0;
+    const float g = volume * busEffectiveGain(bus) *
                     (attenuation.spatialize ? hvirt::distanceGain(attenuation, glm::length(position - listenerPos_)) : 1.f);
-    if (g < hvirt::kVirtualGain) return false;   // 들리지 않을 소리는 만들지 않음
-    AudioVoice* v = createVoice(filePath, false, false);
-    if (!v) return false;
+    if (g < hvirt::kVirtualGain) return nullptr;   // 들리지 않을 소리는 만들지 않음
+    AudioVoice* v = createVoice(filePath, false, false, bus);
+    if (!v) return nullptr;
     ma_sound* s = &v->sound;
     ma_sound_set_position(s, position.x, position.y, position.z);
     ma_sound_set_spatialization_enabled(s, attenuation.spatialize ? MA_TRUE : MA_FALSE);
@@ -852,10 +981,12 @@ bool AudioSystem::playOneShot(const char* filePath, const glm::vec3& position, f
     ma_sound_set_min_distance(s, attenuation.minDistance);
     ma_sound_set_max_distance(s, attenuation.maxDistance);
     ma_sound_set_rolloff(s, attenuation.rolloff);
-    ma_sound_set_volume(s, volume * busVolume(bus));
+    ma_sound_set_volume(s, volume);   // 버스 볼륨은 버스 노드가 곱함(12절 D2)
+    if (pitch != 1.f) ma_sound_set_pitch(s, pitch);
+    v->cuePitch = pitch;
     ma_sound_start(s);
     oneShots_.push_back({ v, position, attenuation, volume, bus });
-    return true;
+    return v;
 }
 
 void AudioSystem::tickOneShots() {
@@ -867,8 +998,7 @@ void AudioSystem::tickOneShots() {
             oneShots_.pop_back();
             continue;
         }
-        ma_sound_set_volume(&o.voice->sound, o.volume * busVolume(o.bus));   // 버스 볼륨을 바꾸면 울리는 중에도 따라감
-        ++i;
+        ++i;   // 버스 볼륨은 버스 노드가 곱하므로 울리는 중에도 따라감
     }
 }
 
@@ -909,10 +1039,13 @@ void AudioSystem::onPauseChanged(bool paused) {
     paused_ = paused;
 }
 
-AudioVoice* AudioSystem::createVoice(const char* filePath, bool loop, bool stream) {
+AudioVoice* AudioSystem::createVoice(const char* filePath, bool loop, bool stream, int bus) {
     if (!engine_) return nullptr;
     ma_engine* eng = asEngine(engine_);
     auto v = std::make_unique<AudioVoice>();
+    v->bus    = (bus >= 0 && bus < (int)buses_.size()) ? bus : 0;
+    v->serial = ++instanceSerial_;
+    if (v->serial == 0) v->serial = ++instanceSerial_;   // 0 은 "못 냄"
 
     // 사슬의 끝부터 만듭니다. 필터를 월드 그룹(그룹이 없으면 엔진 출력)에 붙인 뒤 사운드를 필터에 붙입니다. 필터는 붙이는
     // 순간부터 그룹 입력 목록에 들어가므로, 예전에 사운드가 들어가던 자리 · 순서와 같습니다(섞는 순서가 같아야 합이 같음).
@@ -927,7 +1060,7 @@ AudioVoice* AudioSystem::createVoice(const char* filePath, bool loop, bool strea
         return nullptr;
     }
     v->filterOk = true;
-    if (const ma_result r = ma_node_attach_output_bus(&v->filter.base, 0, sinkNode(), 0); r != MA_SUCCESS) {
+    if (const ma_result r = ma_node_attach_output_bus(&v->filter.base, 0, busSink(v->bus), 0); r != MA_SUCCESS) {
         HLOG(LogAudio, Error) << "voice filter attach failed: " << ma_result_description(r);
         destroyVoice(v.release());
         return nullptr;
@@ -960,6 +1093,7 @@ AudioVoice* AudioSystem::createVoice(const char* filePath, bool loop, bool strea
 
 void AudioSystem::destroyVoice(AudioVoice* voice) {
     if (!voice) return;
+    forgetCueVoice(voice);
     // 사슬의 앞부터 풉니다. 사운드를 먼저 정리해야 필터 입력에서 떨어지고, 그 뒤 필터가 그룹에서 떨어집니다. 두 정리 모두
     // 오디오 스레드가 읽는 중이면 끝날 때까지 기다립니다(miniaudio 의 연결 잠금).
     if (voice->soundOk)  ma_sound_uninit(&voice->sound);
@@ -971,13 +1105,21 @@ void AudioSystem::destroyVoice(AudioVoice* voice) {
 void AudioSystem::playVoice(AudioVoice* voice) {
     // 가상 보이스는 이미 재생 중입니다(재생 중인 소리에 ma_sound_start 를 부른 것처럼 아무 일도 하지 않음). 들리게 되면
     // updateVirtual 이 이어 냅니다.
-    if (voice && !voice->virtualized) ma_sound_start(&voice->sound);
+    if (!voice || voice->virtualized) return;
+    if (!voice->cueKey.empty()) {
+        // 큐 보이스(12절 D9): 울리는 중이면 그대로. 처음 내는 보이스는 규칙을 보고 시작하고, 한 번 낸 보이스는 다음 틱에 변형을 다시 뽑음.
+        if (isVoicePlaying(voice)) return;
+        if (voice->cueStarted) { voice->cueRestart = true; return; }
+        auto it = cues_.find(voice->cueKey);
+        if (it == cues_.end() || !admitCue(it->second, voice, false)) return;
+    }
+    ma_sound_start(&voice->sound);
 }
 
 // ── 가상화 (S3) ───────────────────────────────────────────────────────────────
 float AudioSystem::audibleGain(const AudioVoice& v, const AudioComponent& ac, const glm::vec3& sourcePos) const {
     if (!ac.attenuation.spatialize) return 1.f;   // 2D 는 가상화하지 않음
-    float g = ac.volume * busVolume(ac.bus) * masterVolume_ *
+    float g = ac.volume * v.cueVolume * busEffectiveGain(v.bus) * masterVolume_ *
               hvirt::distanceGain(ac.attenuation, glm::length(sourcePos - listenerPos_));
     if (ac.occlusion.enabled) g *= hocc::gain(v.occl, ac.occlusion);
     if (ac.cone.enabled() && ac.owner) {
@@ -1036,6 +1178,7 @@ void AudioSystem::stopVoice(AudioVoice* voice) {
     ma_sound_seek_to_pcm_frame(&voice->sound, 0);
     voice->virtualized   = false;
     voice->virtualCursor = 0.0;
+    voice->cueRestart    = false;
     // 필터 상태를 비우고, 다음 틱에 차폐를 바로 다시 판정해 그 값으로 시작합니다(멈춘 동안 벽이 생기거나 사라졌을 수 있음).
     voice->filter.reset.store(true, std::memory_order_release);
     if (voice->hrtf) voice->hrtf->reset.store(true, std::memory_order_release);   // 지난 소리의 FIFO · 필터 꼬리를 비움
@@ -1106,7 +1249,7 @@ void AudioSystem::updateDoppler(AudioVoice& v, const AudioComponent& ac, const g
     const float factor = ac.attenuation.spatialize ? ac.propagation.dopplerFactor : 0.f;
     const float pitch  = hprop::dopplerPitch(listenerPos_, listenerVel_, sourcePos, v.velocity, factor);
     if (pitch != v.pitch) {   // 바뀔 때만 넣음(도플러를 쓰지 않는 소리는 한 번도 부르지 않음)
-        ma_sound_set_pitch(&v.sound, pitch);
+        ma_sound_set_pitch(&v.sound, pitch * v.cuePitch);   // 큐의 랜덤 피치와 곱함(12절 D9)
         v.pitch = pitch;
     }
 }
@@ -1207,6 +1350,7 @@ void AudioSystem::updateSend(AudioVoice& v, const AudioComponent& ac, const glm:
         const float att = hrev::attenuationGain(ac.attenuation, glm::length(sourcePos - listenerPos_));
         g = hrev::sendGain(ac.reverbSend, ac.reverbReach, att);
     }
+    if (g > 0.f) g *= busEffectiveGain(v.bus);   // 버스를 줄이거나 끄면 잔향도 따라감(12절 D2)
     v.filter.send.store(g, std::memory_order_relaxed);
 }
 
@@ -1280,7 +1424,7 @@ void AudioSystem::dropHrtfNodes() {
         if (!ac || !ac->voice_) continue;
         AudioVoice& v = *ac->voice_;
         if (v.hrtf) {
-            if (v.hrtfRouted) ma_node_attach_output_bus(&v.filter.base, 0, sinkNode(), 0);
+            if (v.hrtfRouted) ma_node_attach_output_bus(&v.filter.base, 0, busSink(v.bus), 0);
             ma_node_uninit(&v.hrtf->base, nullptr);   // 오디오 스레드가 읽는 중이면 끝날 때까지 기다림
             v.hrtf.reset();
             v.hrtfRenderer.reset();
@@ -1311,7 +1455,7 @@ bool AudioSystem::createHrtfNode(AudioVoice& v) {
     nc.pOutputChannels = &ch;
     if (const ma_result e = ma_node_init(ma_engine_get_node_graph(asEngine(engine_)), &nc, nullptr, &node->base); e != MA_SUCCESS)
         return fail(ma_result_description(e));
-    if (const ma_result e = ma_node_attach_output_bus(&node->base, 0, sinkNode(), 0); e != MA_SUCCESS) {
+    if (const ma_result e = ma_node_attach_output_bus(&node->base, 0, busSink(v.bus), 0); e != MA_SUCCESS) {
         ma_node_uninit(&node->base, nullptr);
         return fail(ma_result_description(e));
     }
@@ -1329,13 +1473,13 @@ void AudioSystem::updateHrtf(AudioVoice& v, const AudioComponent& ac, const glm:
         if (const ma_result e = ma_node_attach_output_bus(&v.filter.base, 0, &v.hrtf->base, 0); e == MA_SUCCESS) {
             v.hrtfRouted = true;
         } else {
-            ma_node_attach_output_bus(&v.filter.base, 0, sinkNode(), 0);   // 떼어진 채 남지 않게 그룹에 다시
+            ma_node_attach_output_bus(&v.filter.base, 0, busSink(v.bus), 0);   // 떼어진 채 남지 않게 버스에 다시
             if (!hrtfWarned_) { HLOG(LogAudio, Warning) << "HRTF attach failed: " << ma_result_description(e) << "; that sound keeps stereo panning"; }
             hrtfWarned_  = true;
             v.hrtfFailed = true;
         }
     } else if (!want && v.hrtfRouted) {
-        ma_node_attach_output_bus(&v.filter.base, 0, sinkNode(), 0);   // HRTF 노드는 입력이 끊겨 남은 꼬리만 내고 멈춤
+        ma_node_attach_output_bus(&v.filter.base, 0, busSink(v.bus), 0);   // HRTF 노드는 입력이 끊겨 남은 꼬리만 내고 멈춤
         v.hrtfRouted = false;
     }
     ma_sound_set_directional_attenuation_factor(&v.sound, v.hrtfRouted ? 0.f : 1.f);
@@ -1385,7 +1529,7 @@ float AudioSystem::segmentThickness(const glm::vec3& from, const glm::vec3& to) 
 
 bool AudioSystem::isVoicePlaying(const AudioVoice* voice) const {
     if (!voice) return false;
-    return voice->virtualized || ma_sound_is_playing(&voice->sound) == MA_TRUE;   // 가상 보이스도 재생 중
+    return voice->virtualized || voice->cueRestart || ma_sound_is_playing(&voice->sound) == MA_TRUE;   // 가상 · 큐 재시작 대기도 재생 중
 }
 
 bool AudioSystem::renderHeadless(float* outStereo, uint32_t frameCount) {
@@ -1393,4 +1537,505 @@ bool AudioSystem::renderHeadless(float* outStereo, uint32_t frameCount) {
     ma_uint64 read = 0;
     const ma_result r = ma_engine_read_pcm_frames(asEngine(engine_), outStereo, frameCount, &read);
     return r == MA_SUCCESS && read == frameCount;
+}
+
+// ── 버스 그래프 · 스냅숏 · 더킹 · 리미터 (2026-11-21, Docs/Audio_Design.md 12절) ──────────────────────────────────
+namespace {
+BusNode* asBus(void* p) { return static_cast<BusNode*>(p); }
+LimiterNode* asLimiter(void* p) { return static_cast<LimiterNode*>(p); }
+
+// 버스 이름: 소문자 · 숫자 · 밑줄(CVar 이름 audio.bus.<이름>.volume 에 그대로 들어감).
+bool validBusName(std::string_view n) {
+    if (n.empty() || n.size() > 24) return false;
+    for (char c : n)
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+    return true;
+}
+const std::string kNoName;
+} // namespace
+
+bool AudioSystem::createBusNode(int id) {
+    if (id < 0 || id >= (int)buses_.size()) return false;
+    if (buses_[id].node) return true;
+    if (!engine_) return false;
+    if (const int parent = buses_[id].parent; parent >= 0 && !buses_[parent].node) createBusNode(parent);
+    auto* b = new BusNode();
+    ma_node_config nc = ma_node_config_init();
+    nc.vtable = &g_busVtable;
+    const ma_uint32 ch = kChannels;
+    nc.pInputChannels  = &ch;
+    nc.pOutputChannels = &ch;
+    if (const ma_result r = ma_node_init(ma_engine_get_node_graph(asEngine(engine_)), &nc, nullptr, &b->base); r != MA_SUCCESS) {
+        HLOG(LogAudio, Error) << "audio bus '" << buses_[id].name << "' node init failed: " << ma_result_description(r)
+                              << " (its sounds go to the world group)";
+        delete b;
+        return false;
+    }
+    const int parent = buses_[id].parent;
+    void* to = (parent >= 0 && buses_[parent].node) ? buses_[parent].node : sinkNode();
+    if (const ma_result r = ma_node_attach_output_bus(&b->base, 0, to, 0); r != MA_SUCCESS) {
+        HLOG(LogAudio, Error) << "audio bus '" << buses_[id].name << "' attach failed: " << ma_result_description(r);
+        ma_node_uninit(&b->base, nullptr);
+        delete b;
+        return false;
+    }
+    b->cur = busGain(id);
+    b->gain.store(b->cur, std::memory_order_relaxed);
+    buses_[id].node = b;
+    return true;
+}
+
+void AudioSystem::destroyBusNodes() {
+    // 자식(큰 id)부터: 자식 출력이 부모 입력에 붙어 있음.
+    for (int i = (int)buses_.size() - 1; i >= 0; --i)
+        if (BusNode* b = asBus(buses_[i].node)) {
+            ma_node_uninit(&b->base, nullptr);
+            delete b;
+            buses_[i].node = nullptr;
+        }
+}
+
+void* AudioSystem::busSink(int bus) const {
+    if (bus >= 0 && bus < (int)buses_.size() && buses_[bus].node) return buses_[bus].node;
+    return sinkNode();
+}
+
+void AudioSystem::routeVoice(AudioVoice& v, int bus) {
+    if (bus < 0 || bus >= (int)buses_.size()) bus = 0;
+    if (v.bus == bus) return;
+    v.bus = bus;
+    if (v.hrtf) ma_node_attach_output_bus(&v.hrtf->base, 0, busSink(bus), 0);
+    if (v.filterOk && !v.hrtfRouted) ma_node_attach_output_bus(&v.filter.base, 0, busSink(bus), 0);
+}
+
+int AudioSystem::addBus(const std::string& name, const std::string& parent) {
+    if (!validBusName(name) || findBus(name) >= 0 || (int)buses_.size() >= kMaxBuses) {
+        HLOG(LogAudio, Warning) << "addBus('" << name << "'): bad or duplicate name, or too many buses (max " << kMaxBuses << ")";
+        return -1;
+    }
+    int p = -1;
+    if (!parent.empty() && (p = findBus(parent)) < 0) {
+        HLOG(LogAudio, Warning) << "addBus('" << name << "'): parent bus '" << parent << "' does not exist";
+        return -1;
+    }
+    BusState st;
+    st.name   = name;
+    st.parent = p;
+    buses_.push_back(st);
+    const int id = (int)buses_.size() - 1;
+    createBusNode(id);
+    pushBusGains();
+    if (cvars_) registerBusCVars(id);
+    return id;
+}
+
+int AudioSystem::findBus(std::string_view name) const {
+    for (int i = 0; i < (int)buses_.size(); ++i)
+        if (buses_[i].name == name) return i;
+    return -1;
+}
+
+const std::string& AudioSystem::busName(int id) const {
+    return (id >= 0 && id < (int)buses_.size()) ? buses_[id].name : kNoName;
+}
+int AudioSystem::busParent(int id) const {
+    return (id >= 0 && id < (int)buses_.size()) ? buses_[id].parent : -1;
+}
+
+void AudioSystem::setBusVolume(int id, float v) {
+    if (id < 0 || id >= (int)buses_.size()) return;
+    buses_[id].volume = std::clamp(std::isfinite(v) ? v : 1.f, 0.f, 2.f);
+    pushBusGains();
+}
+float AudioSystem::busVolume(int id) const {
+    return (id >= 0 && id < (int)buses_.size()) ? buses_[id].volume : 1.f;
+}
+void AudioSystem::setBusMuted(int id, bool muted) {
+    if (id < 0 || id >= (int)buses_.size()) return;
+    buses_[id].muted = muted;
+    pushBusGains();
+}
+bool AudioSystem::busMuted(int id) const {
+    return id >= 0 && id < (int)buses_.size() && (buses_[id].muted || buses_[id].cvarMuted);
+}
+
+float AudioSystem::busGain(int id) const {
+    if (id < 0 || id >= (int)buses_.size()) return 1.f;
+    const BusState& b = buses_[id];
+    if (b.muted || b.cvarMuted) return 0.f;
+    return b.volume * b.cvarVolume * b.snap * b.duck;
+}
+float AudioSystem::busEffectiveGain(int id) const {
+    float g = 1.f;
+    for (int i = id, guard = 0; i >= 0 && i < (int)buses_.size() && guard <= kMaxBuses; i = buses_[i].parent, ++guard) g *= busGain(i);
+    return g;
+}
+float AudioSystem::busPeak(int id) const         { return (id >= 0 && id < (int)buses_.size()) ? buses_[id].peak : 0.f; }
+float AudioSystem::busDuckGain(int id) const     { return (id >= 0 && id < (int)buses_.size()) ? buses_[id].duck : 1.f; }
+float AudioSystem::busSnapshotGain(int id) const { return (id >= 0 && id < (int)buses_.size()) ? buses_[id].snap : 1.f; }
+
+void AudioSystem::pushBusGains() {
+    for (int i = 0; i < (int)buses_.size(); ++i)
+        if (BusNode* b = asBus(buses_[i].node)) b->gain.store(busGain(i), std::memory_order_relaxed);
+}
+
+void AudioSystem::updateMix(float dt) {
+    // 미터: 지난 틱 동안 오디오 스레드가 남긴 피크를 읽고 0 으로(headless 면 renderHeadless 사이의 피크).
+    for (BusState& b : buses_) b.peak = b.node ? asBus(b.node)->peak.exchange(0.f, std::memory_order_acq_rel) : 0.f;
+    // 스냅숏(D3): 무게를 옮기고, 다 꺼진 것은 뺀 뒤 섞습니다.
+    for (size_t i = 0; i < activeSnaps_.size();) {
+        if (hmix::stepSnapshot(activeSnaps_[i], snapshots_[activeSnaps_[i].snapshot], dt)) activeSnaps_.erase(activeSnaps_.begin() + (long)i);
+        else ++i;
+    }
+    std::vector<float> snap(buses_.size(), 1.f);
+    if (!activeSnaps_.empty()) hmix::blendSnapshots(snapshots_, activeSnaps_, snap);
+    for (size_t i = 0; i < buses_.size(); ++i) {
+        buses_[i].snap = snap[i];
+        buses_[i].duck = 1.f;
+    }
+    // 더킹(D4): 원천 버스의 피크로 포락선을 옮기고 대상 버스에 곱합니다(같은 대상에 규칙이 여럿이면 곱함).
+    for (Duck& d : ducks_) buses_[d.rule.target].duck *= hmix::stepDuck(d.st, d.rule, buses_[d.rule.source].peak, dt);
+    pushBusGains();
+}
+
+bool AudioSystem::defineSnapshot(const hmix::Snapshot& s) {
+    if (s.name.empty()) return false;
+    for (const auto& [bus, vol] : s.volumes)
+        if (bus < 0 || bus >= (int)buses_.size() || !(vol >= 0.f && vol <= 2.f)) return false;
+    hmix::Snapshot c = s;
+    c.fadeIn  = std::clamp(std::isfinite(c.fadeIn) ? c.fadeIn : 0.f, 0.f, 60.f);
+    c.fadeOut = std::clamp(std::isfinite(c.fadeOut) ? c.fadeOut : 0.f, 0.f, 60.f);
+    for (hmix::Snapshot& old : snapshots_)
+        if (old.name == c.name) { old = c; return true; }
+    snapshots_.push_back(c);
+    return true;
+}
+
+bool AudioSystem::setSnapshotActive(const std::string& name, bool on) {
+    int idx = -1;
+    for (int i = 0; i < (int)snapshots_.size(); ++i)
+        if (snapshots_[i].name == name) idx = i;
+    if (idx < 0) return false;
+    hmix::ActiveSnapshot* a = nullptr;
+    for (hmix::ActiveSnapshot& x : activeSnaps_)
+        if (x.snapshot == idx) a = &x;
+    if (on) {
+        if (!a) {
+            activeSnaps_.push_back({ idx, 0.f, true, ++snapOrder_ });
+            a = &activeSnaps_.back();
+        }
+        a->on = true;
+    } else if (a) {
+        a->on = false;
+    } else {
+        return true;   // 이미 꺼져 있음
+    }
+    // 페이드 0 이면 다음 틱을 기다리지 않고 바로 적용합니다.
+    if (hmix::stepSnapshot(*a, snapshots_[idx], 0.f)) {
+        for (size_t i = 0; i < activeSnaps_.size(); ++i)
+            if (activeSnaps_[i].snapshot == idx) { activeSnaps_.erase(activeSnaps_.begin() + (long)i); break; }
+    }
+    std::vector<float> snap(buses_.size(), 1.f);
+    if (!activeSnaps_.empty()) hmix::blendSnapshots(snapshots_, activeSnaps_, snap);
+    for (size_t i = 0; i < buses_.size(); ++i) buses_[i].snap = snap[i];
+    pushBusGains();
+    return true;
+}
+
+bool AudioSystem::snapshotActive(const std::string& name) const {
+    for (const hmix::ActiveSnapshot& a : activeSnaps_)
+        if (snapshots_[a.snapshot].name == name) return a.on;
+    return false;
+}
+float AudioSystem::snapshotWeight(const std::string& name) const {
+    for (const hmix::ActiveSnapshot& a : activeSnaps_)
+        if (snapshots_[a.snapshot].name == name) return a.weight;
+    return 0.f;
+}
+
+int AudioSystem::addDuck(const hmix::DuckRule& rule) {
+    const int n = (int)buses_.size();
+    if (rule.source < 0 || rule.source >= n || rule.target < 0 || rule.target >= n || rule.source == rule.target) return -1;
+    Duck d;
+    d.rule = rule;
+    d.rule.amountDb = std::clamp(std::isfinite(rule.amountDb) ? rule.amountDb : 0.f, -96.f, 0.f);
+    d.rule.attack   = std::clamp(std::isfinite(rule.attack) ? rule.attack : 0.f, 0.f, 10.f);
+    d.rule.hold     = std::clamp(std::isfinite(rule.hold) ? rule.hold : 0.f, 0.f, 10.f);
+    d.rule.release  = std::clamp(std::isfinite(rule.release) ? rule.release : 0.f, 0.f, 10.f);
+    ducks_.push_back(d);
+    return (int)ducks_.size() - 1;
+}
+
+void AudioSystem::setLimiter(bool enabled, float ceilingDb, float releaseSec) {
+    limiterOn_        = enabled;
+    limiterCeilingDb_ = std::clamp(std::isfinite(ceilingDb) ? ceilingDb : -1.f, -30.f, 0.f);
+    limiterRelease_   = std::clamp(std::isfinite(releaseSec) ? releaseSec : 0.1f, 0.001f, 5.f);
+    pushLimiter();
+}
+
+void AudioSystem::pushLimiter() {
+    LimiterNode* l = asLimiter(limiter_);
+    if (!l || !group_ || !engine_) return;
+    // 엔진 출력의 볼륨(마스터)이 리미터 뒤에 곱해지므로 한도를 그만큼 나눠 넣습니다. 마스터 0 이면 어차피 무음.
+    const float ceiling = hdb::dbToGain(limiterCeilingDb_) / std::max(masterVolume_, 1e-4f);
+    l->ceiling.store(ceiling, std::memory_order_relaxed);
+    l->coef.store(hmix::limiterReleaseCoef(limiterRelease_, kSampleRate), std::memory_order_relaxed);
+    ma_node* endpoint = ma_engine_get_endpoint(asEngine(engine_));
+    if (limiterOn_ && !limiterRouted_) {
+        // 사슬에 넣기: 리미터 → 엔진 출력, 월드 그룹 → 리미터. 사슬 밖에 있던 동안은 오디오 스레드가 읽지 않으므로 상태를 여기서 비웁니다.
+        l->st.gain = 1.f;
+        l->enabled.store(true, std::memory_order_relaxed);
+        if (ma_node_attach_output_bus(&l->base, 0, endpoint, 0) != MA_SUCCESS ||
+            ma_node_attach_output_bus(asGroup(group_), 0, &l->base, 0) != MA_SUCCESS) {
+            HLOG(LogAudio, Error) << "limiter attach failed; the master limiter stays off";
+            ma_node_attach_output_bus(asGroup(group_), 0, endpoint, 0);
+            ma_node_detach_output_bus(&l->base, 0);
+            return;
+        }
+        limiterRouted_ = true;
+    } else if (!limiterOn_ && limiterRouted_) {
+        ma_node_attach_output_bus(asGroup(group_), 0, endpoint, 0);   // 예전 사슬로
+        ma_node_detach_output_bus(&l->base, 0);
+        l->enabled.store(false, std::memory_order_relaxed);
+        limiterRouted_ = false;
+    }
+}
+
+// ── 사운드 큐 (2026-11-21, 12절 D6 ~ D9) ────────────────────────────────────────────────────────────────
+bool AudioSystem::isCuePath(std::string_view p) {
+    static constexpr std::string_view ext = ".hcue";
+    if (p.size() < ext.size()) return false;
+    for (size_t i = 0; i < ext.size(); ++i) {
+        char c = p[p.size() - ext.size() + i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c != ext[i]) return false;
+    }
+    return true;
+}
+
+AudioSystem::CueState* AudioSystem::loadCue(const std::string& path) {
+    if (path.empty()) return nullptr;
+    auto [it, inserted] = cues_.try_emplace(path);
+    CueState& c = it->second;
+    if (!inserted) return c.ok ? &c : nullptr;   // 실패한 큐도 기억해 매번 읽지 않음
+    std::vector<uint8_t> data;
+    std::string err;
+    if (!hvfs::readAll(path.c_str(), data, &err)) {
+        HLOG(LogAudio, Warning) << "Sound cue not opened: " << err;
+        return nullptr;
+    }
+    std::vector<std::string> messages;
+    const size_t slash = path.find_last_of("/\\");
+    const std::string dir = slash == std::string::npos ? std::string() : path.substr(0, slash);
+    c.ok = hmix::parseCue(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()), dir, c.def, messages);
+    for (const std::string& m : messages) { HLOG(LogAudio, Warning) << path << ": " << m; }
+    if (c.ok && !c.def.bus.empty() && findBus(c.def.bus) < 0) {
+        HLOG(LogAudio, Warning) << path << ": unknown bus '" << c.def.bus << "' (using the sound's own bus)";
+    }
+    c.rng = c.def.hasSeed ? c.def.seed : hmix::fnv1a64(path);   // 기본 시드 = 경로 해시(실행마다 같은 순서, D7)
+    return c.ok ? &c : nullptr;
+}
+
+const hmix::SoundCue* AudioSystem::cue(const std::string& cuePath) {
+    CueState* c = loadCue(cuePath);
+    return c ? &c->def : nullptr;
+}
+
+bool AudioSystem::setCueSeed(const std::string& cuePath, uint64_t seed) {
+    CueState* c = loadCue(cuePath);
+    if (!c) return false;
+    c->rng = seed;
+    return true;
+}
+
+void AudioSystem::pruneCue(CueState& c) {
+    for (size_t i = 0; i < c.instances.size();) {
+        if (!isVoicePlaying(c.instances[i].voice)) c.instances.erase(c.instances.begin() + (long)i);
+        else ++i;
+    }
+}
+
+size_t AudioSystem::cueInstanceCount(const std::string& cuePath) {
+    CueState* c = loadCue(cuePath);
+    if (!c) return 0;
+    pruneCue(*c);
+    return c->instances.size();
+}
+
+bool AudioSystem::admitCue(CueState& c, AudioVoice* voice, bool oneShot) {
+    pruneCue(c);
+    if (c.def.minInterval > 0.f && clock_ - c.lastStart < (double)c.def.minInterval) return false;
+    if (c.def.maxInstances > 0 && (int)c.instances.size() >= c.def.maxInstances) {
+        if (c.def.overflow == hmix::ECueOverflow::RejectNew) return false;
+        // stopOldest: 가장 먼저 시작한 것부터 자리가 날 때까지 멈춥니다(같은 시각이면 먼저 넣은 것).
+        while (!c.instances.empty() && (int)c.instances.size() >= c.def.maxInstances) {
+            size_t oldest = 0;
+            for (size_t i = 1; i < c.instances.size(); ++i)
+                if (c.instances[i].start < c.instances[oldest].start) oldest = i;
+            const CueInstance inst = c.instances[oldest];
+            c.instances.erase(c.instances.begin() + (long)oldest);
+            if (inst.oneShot) {
+                for (size_t k = 0; k < oneShots_.size(); ++k)
+                    if (oneShots_[k].voice == inst.voice) {
+                        oneShots_[k] = oneShots_.back();
+                        oneShots_.pop_back();
+                        destroyVoice(inst.voice);
+                        break;
+                    }
+            } else {
+                stopVoice(inst.voice);
+            }
+        }
+    }
+    c.instances.push_back({ voice, clock_, oneShot });
+    c.lastStart       = clock_;
+    voice->cueStarted = true;
+    return true;
+}
+
+void AudioSystem::forgetCueVoice(AudioVoice* voice) {
+    if (!voice || voice->cueKey.empty()) return;
+    auto it = cues_.find(voice->cueKey);
+    if (it == cues_.end()) return;
+    auto& list = it->second.instances;
+    for (size_t i = 0; i < list.size();) {
+        if (list[i].voice == voice) list.erase(list.begin() + (long)i);
+        else ++i;
+    }
+}
+
+int AudioSystem::componentBus(const AudioComponent& ac, const AudioVoice* v) const {
+    // 큐의 bus 는 컴포넌트가 기본 버스(sfx)일 때만 씁니다(D9).
+    if (v && !v->cueKey.empty() && ac.bus == EAudioBus::Sfx) {
+        auto it = cues_.find(v->cueKey);
+        if (it != cues_.end() && !it->second.def.bus.empty()) {
+            const int b = findBus(it->second.def.bus);
+            if (b >= 0) return b;
+        }
+    }
+    return (int)ac.bus;
+}
+
+AudioVoice* AudioSystem::createCueVoice(const AudioComponent& ac) {
+    CueState* c = loadCue(ac.filePath);
+    if (!c) return nullptr;
+    const hmix::CuePick pick = hmix::pickCue(c->def, c->rng);
+    if (pick.variant < 0) return nullptr;
+    int bus = (int)ac.bus;
+    if (ac.bus == EAudioBus::Sfx && !c->def.bus.empty())
+        if (const int b = findBus(c->def.bus); b >= 0) bus = b;
+    AudioVoice* v = createVoice(c->def.variants[(size_t)pick.variant].path.c_str(), ac.loop, ac.stream, bus);
+    if (!v) return nullptr;
+    v->cueKey     = ac.filePath;
+    v->cueVariant = pick.variant;
+    v->cuePitch   = pick.pitch;
+    v->cueVolume  = pick.volume;
+    if (pick.pitch != 1.f) ma_sound_set_pitch(&v->sound, pick.pitch);
+    return v;
+}
+
+uint32_t AudioSystem::playCue(const std::string& cuePath, const glm::vec3& position, float volume,
+                              const AudioAttenuationSettings& attenuation) {
+    CueState* c = loadCue(cuePath);
+    if (!c || !engine_) return 0;
+    // 거절될 재생은 랜덤을 쓰지 않습니다(같은 시드 = 실제로 낸 소리의 같은 변형 순서).
+    pruneCue(*c);
+    if (c->def.minInterval > 0.f && clock_ - c->lastStart < (double)c->def.minInterval) return 0;
+    if (c->def.maxInstances > 0 && (int)c->instances.size() >= c->def.maxInstances &&
+        c->def.overflow == hmix::ECueOverflow::RejectNew)
+        return 0;
+    const hmix::CuePick pick = hmix::pickCue(c->def, c->rng);
+    if (pick.variant < 0) return 0;
+    int bus = 0;
+    if (!c->def.bus.empty())
+        if (const int b = findBus(c->def.bus); b >= 0) bus = b;
+    AudioVoice* v = startOneShot(c->def.variants[(size_t)pick.variant].path.c_str(), position, volume * pick.volume, bus,
+                                 attenuation, pick.pitch);
+    if (!v) return 0;
+    v->cueKey     = cuePath;
+    v->cueVariant = pick.variant;
+    v->cueVolume  = pick.volume;
+    admitCue(*c, v, true);   // 앞에서 거절 조건을 봤으므로 여기서는 stopOldest 만 일어남
+    return v->serial;
+}
+
+bool AudioSystem::oneShotPlaying(uint32_t instance) const {
+    if (instance == 0) return false;
+    for (const OneShot& o : oneShots_)
+        if (o.voice->serial == instance) return !ma_sound_at_end(&o.voice->sound);
+    return false;
+}
+
+int AudioSystem::voiceCueVariant(const AudioVoice* voice) const { return voice ? voice->cueVariant : -1; }
+float AudioSystem::voiceCuePitch(const AudioVoice* voice) const { return voice ? voice->cuePitch : 1.f; }
+float AudioSystem::voiceCueVolume(const AudioVoice* voice) const { return voice ? voice->cueVolume : 1.f; }
+
+// ── CVar · 콘솔 (12절 D10) ─────────────────────────────────────────────────────────────────────────────
+void AudioSystem::registerBusCVars(int id) {
+    if (!cvars_ || id < 0 || id >= (int)buses_.size()) return;
+    const std::string base = "audio.bus." + buses_[id].name;
+    cvars_->addFloat(base + ".volume", 1.f, 0.f, 2.f,
+                     "Debug volume multiplier for audio bus '" + buses_[id].name + "' (not saved; the player volume is a user setting)",
+                     [this, id](const CVarRegistry::CVar& v) {
+                         buses_[id].cvarVolume = v.asFloat();
+                         pushBusGains();
+                         HLOG(LogAudio, Log) << "Bus " << buses_[id].name << " debug volume: " << v.text();
+                     });
+    cvars_->addBool(base + ".mute", false, "Mute audio bus '" + buses_[id].name + "' (debug, not saved)",
+                    [this, id](const CVarRegistry::CVar& v) {
+                        buses_[id].cvarMuted = v.asBool();
+                        pushBusGains();
+                        HLOG(LogAudio, Log) << "Bus " << buses_[id].name << (v.asBool() ? " muted" : " unmuted");
+                    });
+}
+
+void AudioSystem::registerCVars(CVarRegistry& reg) {
+    cvars_ = &reg;
+    for (int b = 0; b < (int)buses_.size(); ++b) registerBusCVars(b);
+    reg.addBool("audio.limiter", limiterOn_, "Peak limiter on the final mix (off by default)",
+                [this](const CVarRegistry::CVar& v) {
+                    setLimiter(v.asBool(), limiterCeilingDb_, limiterRelease_);
+                    HLOG(LogAudio, Log) << "Master limiter " << (limiterOn_ ? "on" : "off") << " (ceiling "
+                                        << floatToText(limiterCeilingDb_) << " dBFS)";
+                });
+    reg.addFloat("audio.limiter.ceiling", limiterCeilingDb_, -30.f, 0.f, "Master limiter ceiling in dBFS",
+                 [this](const CVarRegistry::CVar& v) { setLimiter(limiterOn_, v.asFloat(), limiterRelease_); });
+    reg.addCommand("audio.snapshot", "audio.snapshot <name> [on|off]: turn a mix snapshot on or off (no state = show it)",
+                   [this](const std::vector<std::string>& args) -> std::string {
+                       if (args.empty()) {
+                           std::string t = "snapshots:";
+                           for (const hmix::Snapshot& s : snapshots_)
+                               t += " " + s.name + "(" + floatToText(snapshotWeight(s.name)) + ")";
+                           return snapshots_.empty() ? std::string("no snapshots defined") : t;
+                       }
+                       if (args.size() == 1) return args[0] + ": weight " + floatToText(snapshotWeight(args[0]));
+                       const bool on = args[1] == "on" || args[1] == "1" || args[1] == "true";
+                       if (!on && args[1] != "off" && args[1] != "0" && args[1] != "false") return "expected on or off";
+                       return setSnapshotActive(args[0], on) ? args[0] + (on ? " on" : " off") : "unknown snapshot '" + args[0] + "'";
+                   });
+    reg.addCommand("audio.cue", "audio.cue <path>: play a sound cue once at the listener (2D)",
+                   [this](const std::vector<std::string>& args) -> std::string {
+                       if (args.empty()) return "usage: audio.cue <path>";
+                       AudioAttenuationSettings at;
+                       at.spatialize = false;
+                       const uint32_t id = playCue(args[0], listenerPos_, 1.f, at);
+                       return id ? "played (instance " + std::to_string(id) + ")" : std::string("not played (see the log)");
+                   });
+    reg.addCommand("audio.buses", "audio.buses: bus volumes, gains and peaks",
+                   [this](const std::vector<std::string>&) { return busReport(); });
+}
+
+std::string AudioSystem::busReport() const {
+    std::string t = "bus        parent     volume  gain    peak dB  duck    snapshot";
+    for (int i = 0; i < (int)buses_.size(); ++i) {
+        const BusState& b = buses_[i];
+        char line[160];
+        std::snprintf(line, sizeof(line), "\n%-10s %-10s %-7.3f %-7.3f %-8.1f %-7.3f %-7.3f%s", b.name.c_str(),
+                      b.parent >= 0 ? buses_[b.parent].name.c_str() : "-", (double)b.volume, (double)busGain(i),
+                      (double)hdb::gainToDb(b.peak), (double)b.duck, (double)b.snap, busMuted(i) ? " muted" : "");
+        t += line;
+    }
+    t += "\nlimiter " + std::string(limiterOn_ ? "on" : "off") + " (ceiling " + floatToText(limiterCeilingDb_) + " dBFS), snapshots active "
+         + std::to_string(activeSnaps_.size()) + ", duck rules " + std::to_string(ducks_.size());
+    return t;
 }

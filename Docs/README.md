@@ -33,7 +33,7 @@
 | [Viewport_Render_Design.md](Viewport_Render_Design.md) | 뷰포트 렌더(renderExtent 분리)·좌표 단일화 |
 | [RendererRefactor.md](RendererRefactor.md) | 렌더러 구조: RenderContext·GpuScene·FrameResources·passes |
 | [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) | 절차 도형·라이팅 규약(단위·머티리얼) |
-| [Audio_Design.md](Audio_Design.md) | 오디오: 재생 규칙(일시정지·비활성), 청취자·3D 감쇠 설정, 씬 형식, 시험 음원 |
+| [Audio_Design.md](Audio_Design.md) | 오디오: 재생 규칙(일시정지·비활성), 청취자·3D 감쇠 설정, 씬 형식, 시험 음원, 공간 음향, 12절 버스 그래프 · 스냅숏 · 더킹 · 리미터 · 사운드 큐(2026-11-21) |
 | [Engine_Basics_Design.md](Engine_Basics_Design.md) | 엔진 기본 기능 보강(2026-10-15): 씬 관리 · 편집 기본기(ID 기반 Undo · 다중 선택 · 클립보드) · 플레이어 리그와 입력 · 잡기, 제안서 대조 결정 |
 | [Packaging_Design.md](Packaging_Design.md) | 패키징(2026-10-19 ~ 24, Windows · Android XR): 조사 요약, 1단계 결정, 런타임 분리(HarukaGame) · 실행 폴더 기준 경로와 쓰기 루트 · 배포 ZIP, 자체 묶음 파일 `.hpak` v1 · 가상 파일 시스템 · 묶음 도구 |
 | [Hand_Grasp_Design.md](Hand_Grasp_Design.md) | 손 쥐기(2026-11-07, A · B 단계 구현, 헤드셋 확인 대기): 조사 요약, 혼합형 결정(자동 맞춤 + 지정 자세), 스키닝 · OpenXR 26관절 손 뼈대 · 컨트롤러 손가락 · 볼록 껍질 충돌체 · 자동 맞춤의 단계별 설계, A · B 단계 결과 |

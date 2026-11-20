@@ -398,6 +398,7 @@ set(RUNTIME_SOURCES
     src/sceneio/SceneSerializer.cpp
     src/sceneio/ComponentSerializer.cpp
     src/audio/AudioSystem.cpp
+    src/audio/AudioMix.cpp
     src/audio/AudioAttenuation.cpp
     src/audio/MiniaudioImpl.cpp
     src/audio/SteamAudioHrtf.cpp
@@ -1099,6 +1100,16 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaSaveTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 오디오 버스 그래프 · 스냅숏 · 더킹 · 리미터 · 사운드 큐 테스트(Docs/Audio_Design.md 12절) --------------
+    # 장치 없는 소리 엔진에서 출력을 당겨 더킹 곡선 · 리미터 피크 · 스냅숏 섞기 · 큐의 동시 재생 규칙과 시드를 숫자로 검산합니다.
+    add_executable(HarukaAudioMixTest tests/AudioMixTest.cpp)
+    target_link_libraries(HarukaAudioMixTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaAudioMixTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaAudioMixTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaAudioMixTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 게임플레이 기본 도구 · CVar · 콘솔 테스트(Docs/Gameplay_Tools.md) --------------
     # 게임 시간(배율) · 타이머 · 물리 뒤 틱 · 태그 · 이벤트 버스 · CVar · 콘솔 명령을 창 · GPU 없이 검산합니다.
     add_executable(HarukaGameplayTest tests/GameplayTest.cpp)
@@ -1185,6 +1196,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_executable(HarukaAudioTest
         tests/AudioTest.cpp
         src/audio/AudioSystem.cpp
+        src/audio/AudioMix.cpp
+        src/core/CVar.cpp
         src/audio/AudioAttenuation.cpp
         src/audio/MiniaudioImpl.cpp
         src/audio/SteamAudioHrtf.cpp
@@ -1372,6 +1385,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME gameplay_tools       COMMAND HarukaGameplayTest)
     add_test(NAME cpu_profiling        COMMAND HarukaProfilerTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
+    add_test(NAME audio_mix            COMMAND HarukaAudioMixTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
     add_test(NAME physics_joints       COMMAND HarukaJointTest)

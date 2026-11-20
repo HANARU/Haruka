@@ -3,10 +3,13 @@
 #include "AudioReverb.hpp"
 #include "AudioHrtf.hpp"
 #include "AudioPropagation.hpp"
+#include "AudioMix.hpp"
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <glm/glm.hpp>
 
@@ -14,6 +17,7 @@ class World;
 class Actor;
 class AudioComponent;
 class PhysicsSystem;
+class CVarRegistry;
 // 소리 하나(보이스). ma_sound 와 그 뒤에 이어지는 Haruka 노드들을 묶은 것으로, 정의는 AudioSystem.cpp 에 있습니다
 // (miniaudio.h 는 .cpp 에서만 포함). AudioComponent 는 이 포인터만 들고 AudioSystem 의 함수로 다룹니다(2026-11-06).
 struct AudioVoice;
@@ -41,7 +45,7 @@ class AudioSystem : public IEngineModule {
 public:
     // headless 면 출력 장치 없이 엔진만 만들고, 출력은 renderHeadless 로 직접 당깁니다
     // (오디오 테스트·오프라인 처리용). Engine 은 기본값인 장치 모드로 만듭니다.
-    explicit AudioSystem(bool headless = false) : headless_(headless) {}
+    explicit AudioSystem(bool headless = false);
 
     void        startup()      override;
     void        shutdown()     override;
@@ -51,7 +55,8 @@ public:
     void        onPauseChanged(bool paused) override;
     const char* name() const   override { return "AudioSystem"; }
 
-    void setWorld(World* w) { world_ = w; }
+    // 월드를 정하고 그 월드의 서비스로 자신을 넣습니다(게임 코드: world.service<AudioSystem>(), 2026-11-21). shutdown 이 뺍니다.
+    void setWorld(World* w);
     bool isPaused() const   { return paused_; }
 
     // 차폐 판정에 쓰는 물리(2026-11-06). 없으면 차폐를 켠 소리도 열린 것으로 둡니다. 판정은 게임 스레드의 tick 에서
@@ -105,14 +110,68 @@ public:
     // 보이스를 만들어 월드 그룹에 붙이고, 정리합니다. 만들기에 실패하면 이유를 로그로 남기고 nullptr 를 돌려줍니다.
     // 사슬은 ma_sound → 보이스 필터 → (HRTF 노드) → 월드 그룹입니다(AudioSystem.cpp 의 "음원별 노드 사슬").
     // stream 이면 통째로 디코딩하지 않고 재생하며 풉니다(긴 음악, MA_SOUND_FLAG_STREAM).
-    AudioVoice* createVoice (const char* filePath, bool loop, bool stream = false);
+    AudioVoice* createVoice (const char* filePath, bool loop, bool stream = false, int bus = 0);
 
     // ── 사운드 단계 4(2026-11-17): 버스 · 마스터 볼륨 · 한 번 재생 · 보이스 예산 ──────────────────────────────
     // 마스터는 엔진 출력 전체(UI 소리 포함), 버스는 그 버스의 소리에 곱합니다. 0 ~ 2, 기본 1(예전 소리 그대로).
     void  setMasterVolume(float v);
     float masterVolume() const { return masterVolume_; }
-    void  setBusVolume(EAudioBus bus, float v);
-    float busVolume(EAudioBus bus) const;
+    void  setBusVolume(EAudioBus bus, float v) { setBusVolume((int)bus, v); }
+    float busVolume(EAudioBus bus) const       { return busVolume((int)bus); }
+
+    // ── 버스 그래프 · 스냅숏 · 더킹 · 리미터 · 사운드 큐 (2026-11-21, Docs/Audio_Design.md 12절) ─────────────────────
+    // 버스마다 노드가 하나 있고(D1) 사슬은 보이스 → 버스 → (부모 버스) → 월드 그룹 → 리미터 → 엔진 출력입니다. 표준 5버스는 id 0 ~ 4
+    // (EAudioBus 와 같음)이고 부모가 없습니다. 버스 게인 = 볼륨 × CVar 배율 × 스냅숏 × 더킹, 음소거면 0(D2). 게인이 1 인 버스는 소리를
+    // 건드리지 않습니다(바이트 동일).
+    static constexpr int kMaxBuses = 32;
+    int   addBus(const std::string& name, const std::string& parent = "");   // 새 id. 이름이 틀렸거나 · 있거나 · 부모가 없으면 -1
+    int   findBus(std::string_view name) const;                               // 없으면 -1
+    int   busCount() const { return (int)buses_.size(); }
+    const std::string& busName(int id) const;
+    int   busParent(int id) const;                                            // 없으면 -1(월드 그룹)
+    void  setBusVolume(int id, float v);                                      // 사용자 볼륨(설정 화면), 0 ~ 2
+    float busVolume(int id) const;
+    void  setBusMuted(int id, bool muted);
+    bool  busMuted(int id) const;
+    float busGain(int id) const;            // 이 버스 노드에 넣는 게인
+    float busEffectiveGain(int id) const;   // 부모까지 곱한 게인(들리는 크기 계산에 씀)
+    float busPeak(int id) const;            // 지난 틱 동안 버스 출력의 피크(더킹 · 콘솔용)
+    float busDuckGain(int id) const;        // 더킹이 이 버스에 곱하는 값(1 = 그대로)
+    float busSnapshotGain(int id) const;    // 스냅숏이 이 버스에 곱하는 값
+
+    // 스냅숏(D3). 같은 이름이면 바꿉니다. 볼륨 표의 버스 id 가 틀리면 false.
+    bool  defineSnapshot(const hmix::Snapshot& s);
+    bool  setSnapshotActive(const std::string& name, bool on);   // 없는 이름이면 false
+    bool  snapshotActive(const std::string& name) const;         // 켜져 있음(페이드 인 중 포함)
+    float snapshotWeight(const std::string& name) const;         // 0 ~ 1
+
+    // 더킹(D4). 규칙 번호를 돌려주고, 버스 id 가 틀리면 -1.
+    int   addDuck(const hmix::DuckRule& rule);
+    void  clearDucks() { ducks_.clear(); }
+
+    // 마스터 리미터(D5). 기본 끔. 한도는 최종 출력(마스터 볼륨 뒤) 기준 dBFS.
+    void  setLimiter(bool enabled, float ceilingDb = -1.f, float releaseSec = 0.1f);
+    bool  limiterEnabled() const   { return limiterOn_; }
+    float limiterCeilingDb() const { return limiterCeilingDb_; }
+
+    // 사운드 큐(D6 ~ D9). 위치에서 큐를 한 번 냅니다(한 번 재생과 같은 규칙에 큐의 변형 · 범위 · 동시 재생 규칙). 낸 인스턴스 번호를,
+    // 못 내면 0 을 돌려줍니다(큐를 못 읽음 · 재시작 간격 · rejectNew · 들리지 않음 · 한 번 재생 상한).
+    uint32_t playCue(const std::string& cuePath, const glm::vec3& position, float volume = 1.f,
+                     const AudioAttenuationSettings& attenuation = {});
+    bool     setCueSeed(const std::string& cuePath, uint64_t seed);   // 큐를 못 읽으면 false
+    size_t   cueInstanceCount(const std::string& cuePath);            // 지금 재생 중인 인스턴스 수
+    bool     oneShotPlaying(uint32_t instance) const;                 // playCue 가 돌려준 번호가 아직 울리는지
+    const hmix::SoundCue* cue(const std::string& cuePath);            // 읽은 큐(없으면 읽어 봄, 실패하면 nullptr)
+    static bool isCuePath(std::string_view path);                      // .hcue 로 끝나는지
+    // 보이스가 큐에서 뽑은 값(시험 · 디버그용). 큐가 아니면 -1 · 1 · 1.
+    int   voiceCueVariant(const AudioVoice* voice) const;
+    float voiceCuePitch(const AudioVoice* voice) const;
+    float voiceCueVolume(const AudioVoice* voice) const;
+    double clock() const { return clock_; }   // tick 의 dt 를 더한 시각(초, 일시정지 동안 멈춤)
+
+    // CVar · 콘솔 명령(D10). Engine 이 시작할 때 한 번 부릅니다. 그 뒤 addBus 한 버스도 CVar 가 생깁니다.
+    void registerCVars(CVarRegistry& reg);
+    std::string busReport() const;   // `audio.buses` 의 글
     // 한 번 재생: 위치에서 소리를 한 번 내고 끝나면 스스로 정리합니다(총소리 · 발소리 · 부딪힘). 엔진이 소유하므로 컴포넌트가
     // 필요 없습니다. 차폐 · HRTF · 잔향은 걸지 않습니다(짧은 효과음용). 들리지 않을 만큼 멀거나(−60 dB 아래) 동시에
     // kMaxOneShots 개가 이미 울리면 내지 않고 false. 월드 그룹에 붙어 일시정지를 따릅니다.
@@ -190,12 +249,69 @@ private:
 
     // 사운드 단계 4
     float    masterVolume_ = 1.f;
-    float    busVolume_[kAudioBusCount] = { 1.f, 1.f, 1.f, 1.f, 1.f };
     uint32_t voiceBudget_  = 64;
-    struct OneShot { AudioVoice* voice; glm::vec3 pos; AudioAttenuationSettings at; float volume; EAudioBus bus; };
+    struct OneShot { AudioVoice* voice; glm::vec3 pos; AudioAttenuationSettings at; float volume; int bus; };
     std::vector<OneShot> oneShots_;
     void tickOneShots();
     void releaseOneShots();
+    // 한 번 재생 공통(playOneShot · playCue). 낸 보이스, 못 내면 nullptr.
+    AudioVoice* startOneShot(const char* filePath, const glm::vec3& position, float volume, int bus,
+                             const AudioAttenuationSettings& attenuation, float pitch);
+
+    // 버스 그래프(12절)
+    struct BusState {
+        std::string name;
+        int   parent     = -1;
+        float volume     = 1.f;   // 사용자 볼륨(setBusVolume)
+        float cvarVolume = 1.f;   // audio.bus.<이름>.volume
+        bool  muted      = false;
+        bool  cvarMuted  = false;
+        float snap       = 1.f;   // 스냅숏 섞은 값
+        float duck       = 1.f;   // 더킹 값
+        float peak       = 0.f;   // 지난 틱의 출력 피크
+        void* node       = nullptr;   // .cpp 의 BusNode(엔진이 없으면 없음)
+    };
+    std::vector<BusState> buses_;
+    bool  createBusNode(int id);
+    void  destroyBusNodes();
+    void  pushBusGains();             // 게인을 노드에 넘김
+    void  updateMix(float dt);        // 미터 읽기 · 스냅숏 · 더킹 · 게인
+    void  registerBusCVars(int id);
+    void* busSink(int bus) const;     // 이 버스의 보이스가 붙는 노드(없으면 월드 그룹)
+    void  routeVoice(AudioVoice& v, int bus);   // 보이스 사슬의 끝을 다른 버스로 옮김
+    std::vector<hmix::Snapshot>       snapshots_;
+    std::vector<hmix::ActiveSnapshot> activeSnaps_;
+    uint64_t                          snapOrder_ = 0;
+    struct Duck { hmix::DuckRule rule; hmix::DuckState st; };
+    std::vector<Duck> ducks_;
+    void* limiter_          = nullptr;   // .cpp 의 LimiterNode
+    bool  limiterOn_        = false;
+    float limiterCeilingDb_ = -1.f;
+    float limiterRelease_   = 0.1f;
+    bool  limiterRouted_    = false;     // 리미터가 지금 사슬에 들어 있는지(켜져 있을 때만 넣음)
+    void  pushLimiter();
+    double clock_ = 0.0;
+    CVarRegistry* cvars_ = nullptr;
+    uint32_t instanceSerial_ = 0;
+
+    // 사운드 큐(12절 D6 ~ D9). 큐 파일 경로(정식 경로)마다 정의 · 랜덤 상태 · 재생 중 인스턴스.
+    struct CueInstance { AudioVoice* voice = nullptr; double start = 0.0; bool oneShot = false; };
+    struct CueState {
+        bool                     ok = false;
+        hmix::SoundCue           def;
+        uint64_t                 rng = 0;
+        double                   lastStart = -1e30;
+        std::vector<CueInstance> instances;
+    };
+    std::map<std::string, CueState> cues_;
+    CueState* loadCue(const std::string& cuePath);
+    // 시작해도 되는지 보고(재시작 간격 · 상한 · 넘을 때 규칙), 되면 인스턴스로 넣습니다.
+    bool admitCue(CueState& c, AudioVoice* voice, bool oneShot);
+    void pruneCue(CueState& c);
+    void forgetCueVoice(AudioVoice* voice);   // destroyVoice 가 부름
+    // 큐를 가리키는 컴포넌트의 보이스를 만듭니다(변형 뽑기). 큐를 못 읽으면 nullptr.
+    AudioVoice* createCueVoice(const AudioComponent& ac);
+    int   componentBus(const AudioComponent& ac, const AudioVoice* v) const;
     void applyBudget(std::vector<std::pair<AudioVoice*, float>>& audible);
 
     // 잔향(2026-11-06): 구역 고르기 · 매개변수 평활 · 리버브 시작과 멈춤, 소리마다 센드 양.
@@ -221,7 +337,7 @@ private:
     bool      hrtfWarned_  = false;   // 노드 만들기 실패 경고를 남겼는지
     glm::vec3 listenerFwd_{ 0.f, 0.f, -1.f };
     glm::vec3 listenerUp_ { 0.f, 1.f, 0.f };
-    void* sinkNode() const;   // 보이스 출력이 붙는 곳(월드 그룹, 없으면 엔진 출력)
+    void* sinkNode() const;   // 버스 노드가 붙는 곳(월드 그룹, 없으면 엔진 출력)
 
     // 컴포넌트 값(볼륨·Loop·3D 설정)을 사운드에 반영합니다. 매 틱 부르므로 플레이 중에
     // 디테일 패널에서 바꾼 값도 바로 적용됩니다.

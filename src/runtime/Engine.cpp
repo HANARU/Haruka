@@ -440,6 +440,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     auto* audio   = modules_.registerModule(std::make_unique<AudioSystem>(options.noAudio));
     audio->setWorld(&world_);
     audio->setListenerSelector(CameraComponent::activeOwnerIn);   // 청취자 = 화면 카메라의 액터(2026-11-18 S7)
+    audio->registerCVars(cvars_);   // audio.bus.<이름>.volume · .mute · audio.limiter · audio.snapshot 등(Audio_Design.md 12절)
     audio_ = audio;
     auto physicsModule = std::make_unique<PhysicsSystem>();
     physicsModule->setMaxBodies(limits.maxBodies);   // startup 이 등록 안에서 일어나므로 그 전에
