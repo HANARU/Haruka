@@ -158,11 +158,11 @@ public:
     // Asset upload — called by AssetManager (GpuScene으로 위임)
     MeshHandle* uploadMesh(const std::vector<Vertex>& verts,
                            const std::vector<uint32_t>& indices,
-                           const MeshBounds* precomputed = nullptr) {
-        return scene_.uploadMesh(verts, indices, precomputed);
+                           const MeshBounds* precomputed = nullptr, bool preOrdered = false) {
+        return scene_.uploadMesh(verts, indices, precomputed, preOrdered);
     }
-    MeshHandle* uploadLodIndices(const MeshHandle& base, const std::vector<uint32_t>& indices) {
-        return scene_.uploadLodIndices(base, indices);
+    MeshHandle* uploadLodIndices(const MeshHandle& base, const std::vector<uint32_t>& indices, bool preOrdered = false) {
+        return scene_.uploadLodIndices(base, indices, preOrdered);
     }
     GpuScene::MeshBudget meshBudget() const { return scene_.budget(); }
     MaterialHandle* uploadMaterial(
@@ -171,8 +171,11 @@ public:
         const TexSourceData& emissive) {
         return scene_.uploadMaterial(albedo, normalMap, metalRough, ao, emissive);
     }
-    void freeMesh(MeshHandle* h)         { scene_.freeMesh(h); }
-    void freeMaterial(MaterialHandle* h) { scene_.freeMaterial(h); }
+    // 지연 해제(비동기 로딩 D4): 그리던 프레임이 끝난 뒤(MAX_FRAMES 뒤) GpuScene 이 지웁니다.
+    void freeMesh(MeshHandle* h)         { scene_.retireMesh(h, frameNum_); }
+    void freeMaterial(MaterialHandle* h) { scene_.retireMaterial(h, frameNum_); }
+    size_t retiredResources() const { return scene_.retiredCount(); }
+    size_t pendingUploads() const   { return scene_.pendingUploads(); }
 
     IWindow* getWindow()     const { return window;     }
     VkDevice getDevice()     const { return device;     }

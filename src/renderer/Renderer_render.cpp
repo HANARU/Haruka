@@ -695,6 +695,9 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
     }
     // 이 슬롯을 마지막으로 쓴 제출(frameNum_ - MAX_FRAMES)이 끝났으니, 그 프레임까지만 쓰던 패널 텍스처를 지웁니다.
     panels_.beginFrame(frameNum_);
+    // 은퇴한 메시 · 머티리얼(비동기 로딩 D4)과 끝난 업로드의 스테이징도 같은 자리에서 놓습니다.
+    scene_.collectRetired(frameNum_, MAX_FRAMES);
+    scene_.collectUploads(false);
     // 반사 캡처: 캡처 컴포넌트가 새로 생기거나 옮겨지면 이 자리에서 장치를 멈추고 6면을 찍습니다(드묾).
     {
         ScopedCpuTimer t(ft.reflCapture);

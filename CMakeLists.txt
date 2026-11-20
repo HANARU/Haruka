@@ -321,6 +321,7 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets/cache)
 set(RUNTIME_SOURCES
     src/core/AppPaths.cpp
     src/runtime/Engine.cpp
+    src/runtime/SceneTransition.cpp
     src/runtime/FrameStats.cpp
     src/runtime/WorldUiDriver.cpp
     src/runtime/XrSessionController.cpp
@@ -371,6 +372,7 @@ set(RUNTIME_SOURCES
     src/geometry/MeshLod.cpp
     src/assets/GltfLoader.cpp
     src/assets/AssetManager.cpp
+    src/assets/AssetStreamer.cpp
     src/assets/GassetCache.cpp
     src/assets/Skin.cpp
     src/assets/Animation.cpp
@@ -1052,6 +1054,18 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaAnimTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 비동기 로딩 테스트(2026-11-20, Docs/Async_Loading.md) -------------------
+    # 메가 버퍼 구간 할당자 · 백그라운드 모델 읽기(워커 스레드 · 중복 요청 · 실패 · 동시 요청 · 동기 결과와 같음) · 씬의 모델 참조
+    # 모으기를 GPU 없이 검산합니다. 씬 · 에셋 코드를 그대로 쓰려고 엔진 정적 라이브러리를 링크합니다.
+    add_executable(HarukaLoadingTest tests/LoadingTest.cpp)
+    target_link_libraries(HarukaLoadingTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaLoadingTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(HarukaLoadingTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(HarukaLoadingTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaLoadingTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 크래시 보고 테스트(Docs/Crash_Reporting.md) ---------------------------
     # 자기 자신을 자식 프로세스로 띄워 종류마다 일부러 크래시시키고, 보고서 폴더 · crash.txt · crash.dmp · 다음 실행 알림 · 보관 수를 봅니다.
     add_executable(HarukaCrashTest
@@ -1243,6 +1257,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME object_refs          COMMAND HarukaRefTest)
     add_test(NAME crash_reports        COMMAND HarukaCrashTest)
     add_test(NAME animation            COMMAND HarukaAnimTest)
+    add_test(NAME async_loading        COMMAND HarukaLoadingTest)
     add_test(NAME audio_system         COMMAND HarukaAudioTest)
     add_test(NAME slate_input          COMMAND HarukaSlateTest)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)

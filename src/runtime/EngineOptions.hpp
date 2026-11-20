@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 // 실행 옵션(명령줄). main() 이 채워 Engine 에 넘깁니다. 해석 규칙은 EngineOptions.cpp 이고, 창 없이 시험합니다
@@ -63,6 +64,10 @@ struct EngineOptions {
     // --debug-crash=segv|stack|purecall|abort|terminate|throw|check|ensure : 몇 프레임 뒤 일부러 크래시(크래시 보고 D5,
     // Docs/Crash_Reporting.md). 크래시 보고서 확인용입니다.
     std::string debugCrash;
+    // --switch-scene=<씬>@<프레임>[,<씬>@<프레임>...] : 그 프레임을 그린 뒤 씬 전환을 요청(비동기 로딩 L3, 게임만).
+    // --switch-sync : 전환을 미리 읽기 없이 동기로(비교용).
+    std::vector<std::pair<std::string, uint32_t>> switchScenes;
+    bool        switchSync = false;
     std::string uiAssetActions;          // --ui-asset-actions=<logical path> : 에셋 대화상자 열기(참조 체계 A-5, 에디터 전용)
     bool        uiActorPicker = false;   // --ui-actor-picker : 선택한 액터의 첫 액터 참조 칸의 고르기 목록 열기(R-7, 에디터 전용)
     // --ui-move-asset=<from>|<to> : 첫 프레임 뒤 에셋을 옮김(참조 체계 A-5, 에디터 전용). 프로젝트 파일을 실제로 옮기므로

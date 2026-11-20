@@ -174,6 +174,22 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (valueOf(a, "--timeout", v)) {
             if (!parsePositiveFloat(v, o.timeoutSec)) unknown.push_back(a);
         }
+        else if (valueOf(a, "--switch-scene", v)) {
+            bool good = !v.empty();
+            size_t start = 0;
+            while (good && start <= v.size()) {
+                const size_t comma = v.find(',', start);
+                const std::string item = v.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+                const size_t at = item.rfind('@');
+                uint32_t frame = 0;
+                if (at == std::string::npos || at == 0 || !parseUint(item.substr(at + 1), frame)) { good = false; break; }
+                o.switchScenes.push_back({ item.substr(0, at), frame });
+                if (comma == std::string::npos) break;
+                start = comma + 1;
+            }
+            if (!good) { o.switchScenes.clear(); unknown.push_back(a); }
+        }
+        else if (a == "--switch-sync") o.switchSync = true;
         else if (valueOf(a, "--fixed-dt", v)) {
             if (!parsePositiveFloat(v, o.fixedDt) || o.fixedDt > 0.05f) unknown.push_back(a);
         }

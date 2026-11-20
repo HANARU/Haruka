@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "../geometry/PrimitiveDesc.hpp"
@@ -12,7 +13,9 @@ struct MaterialHandle;
 struct MeshSourceVertex;
 struct SkinSourceData;
 struct CollisionMesh;
+struct MeshSourceData;
 class  Renderer;
+class  AssetStreamer;
 
 struct AssetPair {
     MeshHandle*     mesh      = nullptr;
@@ -37,8 +40,8 @@ struct AssetPair {
 
 class AssetManager {
 public:
-    explicit AssetManager(Renderer* r) : renderer(r) {}
-    ~AssetManager() { clear(); }
+    explicit AssetManager(Renderer* r);
+    ~AssetManager();
 
     void setAutoLod(bool on) { autoLod_ = on; }
     bool autoLod() const     { return autoLod_; }
@@ -49,6 +52,20 @@ public:
 
     // Convenience: returns loadAll()[0], or an empty AssetPair on failure.
     AssetPair load(const std::string& path);
+
+    // ── 비동기 읽기 (2026-11-20, Docs/Async_Loading.md D1 · D2) ─────────────────────────────
+    // 워커 스레드 수를 정합니다(처음 requestLoad 전에, 기본 2 · Android 1). 0 이면 비동기 요청도 동기로 읽습니다.
+    void   setStreamWorkers(int n) { streamWorkers_ = n; }
+    // 백그라운드 읽기를 요청합니다. 이미 올라가 있으면 true(바로 쓸 수 있음), 아니면 false(요청함 · 진행 중).
+    bool   requestLoad(const std::string& path);
+    bool   isReady(const std::string& path) const;
+    size_t pendingLoads() const;   // 요청했지만 아직 올리지 않은 것(읽는 중 + 올리기 대기)
+    // 메인 스레드: 끝난 결과를 budgetMs 안에서 올립니다(모델 단위라 하나는 넘을 수 있음). 쓴 시간(ms)을 돌려줍니다.
+    float  pump(float budgetMs);
+    // 이 경로들(정식 논리 경로)이 아닌 파일 모델을 해제합니다(절차 도형 · 그 머티리얼은 남김). 해제한 모델 수.
+    // 해제한 핸들을 쓰는 컴포넌트가 없어야 합니다(씬을 바꾼 뒤). GPU 자원은 렌더러가 프레임이 끝난 뒤 지웁니다.
+    size_t releaseUnused(const std::unordered_set<std::string>& keep);
+    size_t loadedModelCount() const;
 
     // ── 절차 도형 ────────────────────────────────────────────────────────────
     // 같은 desc 는 같은 핸들입니다. 무조건 생성하는 API 는 공개하지 않습니다.
@@ -78,7 +95,12 @@ public:
     void clear();
 
 private:
+    std::vector<AssetPair> uploadModel(const std::string& key, const std::string& path, std::vector<MeshSourceData>& meshes);
+    void freePairs(std::vector<AssetPair>& pairs, bool isPrim);
+
     Renderer* renderer;
+    int       streamWorkers_ = 2;
+    std::unique_ptr<AssetStreamer> streamer_;
     bool      autoLod_ = true;
     std::unordered_map<std::string, std::vector<AssetPair>> cache;
     std::unordered_map<std::string, MaterialHandle*>        primMaterials;

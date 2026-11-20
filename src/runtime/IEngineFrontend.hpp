@@ -50,6 +50,10 @@ public:
     virtual void setAudio(AudioSystem* /*audio*/) {}
     // 처음 열 씬. 에디터는 마지막으로 연 씬을 먼저 열고, 게임은 프로젝트 설정의 시작 씬을 엽니다.
     virtual void openInitialScene(const std::string& startScene) = 0;
+    // 실행 중 씬 전환(비동기 로딩 D6). 지원하지 않으면 false. sync 면 미리 읽기 없이 바로 바꿉니다(비교 확인용).
+    virtual bool requestScene(const std::string& /*logicalPath*/, bool /*sync*/) { return false; }
+    // 매 프레임 월드 틱 전에 부릅니다(창이 최소화돼도, 창 없는 실행에서도). 씬 전환을 바꾸는 자리입니다.
+    virtual void updateSceneTransition() {}
     virtual void onRunFinished() {}
     virtual void cleanup() = 0;
 

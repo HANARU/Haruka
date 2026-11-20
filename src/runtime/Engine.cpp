@@ -55,6 +55,9 @@
 #include <string>
 #include <thread>
 
+// 프레임마다 백그라운드 모델을 올리는 예산(비동기 로딩 D2).
+static constexpr float kUploadBudgetMs = 2.f;
+
 // MSVC 의 "예외 없는 STL"(_HAS_EXCEPTIONS=0)에서는 std::runtime_error 가 메시지를 복사하지 않아, 문자열로 만든 FATAL 문구가
 // 깨집니다(DEF-157, 예전에는 Jolt 의 PUBLIC 정의로 새어 들어왔음). 그런 구성으로 다시 빌드되지 않게 막습니다.
 #if defined(_MSC_VER) && defined(_HAS_EXCEPTIONS) && !_HAS_EXCEPTIONS
@@ -382,6 +385,11 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
     assets_ = std::make_unique<AssetManager>(renderer_.get());
     assets_->setAutoLod(options_.autoLod);
+#ifdef __ANDROID__
+    assets_->setStreamWorkers(1);   // Quest: 렌더 · XR 스레드와 코어를 나눠 씀(비동기 로딩 D1)
+#else
+    assets_->setStreamWorkers(2);
+#endif
 
     // 동적 모듈: 표준 세트(Audio, Physics). 각자 월드를 참조합니다. noAudio(Quest 첫 실행)면 소리 장치를 열지 않습니다.
     if (options.noAudio) { HLOG(LogEngine, Log) << "Audio output is off for this run"; }
@@ -422,7 +430,8 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
     // 게임 모듈(씬 콘텐츠) + 프레임 컨텍스트.
     ctx_.reset(new EngineContext{ world_, *assets_, *window_, modules_, *renderer_,
-                                  ComponentRegistry::get() });
+                                  ComponentRegistry::get(), {} });
+    ctx_->requestScene = [this](const std::string& path) { return frontend_->requestScene(path, false); };
     game_ = createGameModule();   // 링크한 게임 모듈(runtime/IGameModule.hpp)
     game_->onRegister();          // 씬 열기 전에 UIPanel 내용 · 게임 타입 등록
     game_->onStart(*ctx_);
@@ -506,6 +515,7 @@ int Engine::run() {
     while (true) {
         FrameState f;
         if (!beginLoop(f)) break;
+        streamAssets();
         beginXrFrame(f);
         applyViewPose(f);
         readDesktopInput(f, loop);
@@ -622,6 +632,13 @@ void Engine::updatePlayState(FrameState& f, LoopState& loop) {
     loop.prevPaused = paused;
 }
 
+// 1-b. 백그라운드에서 읽은 모델을 프레임마다 정한 예산만큼 올리고(비동기 로딩 D2, Unity 기본 2 ms 와 같은 값), 준비된 씬 전환을
+// 바꿉니다(D6). 이번 프레임의 시점(카메라 · 리그 포인터)을 고르기 전에 해야, 바꾸며 지운 액터를 가리키지 않습니다.
+void Engine::streamAssets() {
+    if (assets_) assets_->pump(kUploadBudgetMs);
+    frontend_->updateSceneTransition();
+}
+
 // 6. 틱. 앞단(에디터 UI) → 디버그 선 비우기 → 입력 → 월드 · 게임 · 모듈 → 따라오는 패널 → 월드 UI 포인터.
 void Engine::tickFrame(FrameState& f) {
     ScopedCpuTimer t(gFrameTimings().tick);
@@ -710,6 +727,13 @@ void Engine::renderFrame(FrameState& f) {
 void Engine::endLoop(FrameState& f, LoopState& loop) {
     IWindow& win = *window_;
     // 개발 스위치(크래시 보고 D5): 세 프레임을 그린 뒤 한 번 일으킵니다. throw 는 main 이 잡아 보고서를 쓰고, ensure 는 계속 돕니다.
+    // 개발 스위치(비동기 로딩 L3): 정한 프레임을 그린 뒤 씬 전환을 요청합니다.
+    while (switchNext_ < options_.switchScenes.size() && drawnFrames_ >= options_.switchScenes[switchNext_].second) {
+        const auto& sw = options_.switchScenes[switchNext_++];
+        if (!frontend_->requestScene(sw.first, options_.switchSync)) {
+            HLOG(LogEngine, Warning) << "--switch-scene: " << sw.first << " was not accepted (game executable only)";
+        }
+    }
     if (!options_.debugCrash.empty() && !debugCrashDone_ && drawnFrames_ >= 3) {
         debugCrashDone_ = true;
         hcrash::debugCrash(options_.debugCrash);

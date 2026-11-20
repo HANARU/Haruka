@@ -3,6 +3,10 @@
 //
 // 시작 씬을 열고 처음부터 Play 상태로 돕니다. 에디터의 Play 와 같은 경로(엔진의 BeginPlay 통지)를 쓰므로
 // 게임 코드는 두 실행 형태를 구별하지 않습니다. 실행 규칙은 2026-10-19 사용자 결정입니다(policy()).
+#include "../runtime/SceneTransition.hpp"
+#include "../renderer/Renderer.hpp"
+#include "../assets/AssetManager.hpp"
+#include <cstdio>
 #include "../runtime/IEngineFrontend.hpp"
 #include "../scene/World.hpp"
 #include "../scene/Actor.hpp"
@@ -36,7 +40,8 @@ public:
         return p;
     }
 
-    void init(Renderer& /*renderer*/, World& world, AssetManager& assets, IWindow& window) override {
+    void init(Renderer& renderer, World& world, AssetManager& assets, IWindow& window) override {
+        renderer_ = &renderer;
         world_  = &world;
         assets_ = &assets;
         window_ = &window;
@@ -55,11 +60,27 @@ public:
         ensureCamera();
     }
 
+    // 씬 전환(비동기 로딩 D6): 모델을 백그라운드로 읽는 동안 지금 씬을 계속 그리고, 다 되면 tick 에서 바꿉니다.
+    bool requestScene(const std::string& path, bool sync) override {
+        logMegaBuffer("before transition");
+        return project_settings::isSceneLogicalPath(path) && transition_.request(path, *assets_, sync);
+    }
+
+    void onRunFinished() override { logMegaBuffer("at exit"); }
+
     void cleanup() override {}
 
     bool isPlaying() const override { return true; }    // 일시정지(헤드셋 초점)는 엔진이 정책으로 겹칩니다
     bool isPaused()  const override { return false; }
     bool requestClose() override { return true; }       // 즉시 종료(2026-10-19 결정)
+
+    void updateSceneTransition() override {
+        if (transition_.update(*world_, *assets_)) {
+            sceneName_ = std::filesystem::path(transition_.target()).stem().string();
+            window_->setTitle(windowTitle());
+            ensureCamera();
+        }
+    }
 
     void tick(float /*dt*/) override {
         // 오른쪽 버튼을 누른 채 끈 양을 게임의 시선 축(LookX · LookY)으로 넘깁니다. 에디터 Play 와 같은 조작입니다.
@@ -101,6 +122,18 @@ private:
         HLOG(LogGame, Warning) << "No camera in the scene; using a default camera at (0, 0.3, 2.5)";
     }
 
+    void logMegaBuffer(const char* when) const {
+        if (!renderer_) return;
+        const auto b = renderer_->meshBudget();
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "%u vertices (%.2f %%), %u indices (%.2f %%), %zu model(s) loaded, %zu retired",
+                      b.verts, b.vertPct, b.indices, b.idxPct, assets_ ? assets_->loadedModelCount() : (size_t)0,
+                      renderer_->retiredResources());
+        HLOG(LogGame, Log) << "Mega buffer " << when << ": " << buf;
+    }
+
+    Renderer*     renderer_ = nullptr;
+    SceneTransition transition_;
     World*        world_  = nullptr;
     AssetManager* assets_ = nullptr;
     IWindow*      window_ = nullptr;

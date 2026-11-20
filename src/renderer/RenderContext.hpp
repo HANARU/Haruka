@@ -92,4 +92,7 @@ public:
     // ── 1회성 커맨드 (제출 후 큐 idle 대기) ───────────────────────────────────
     VkCommandBuffer beginOneTimeCmd() const;
     void            endOneTimeCmd(VkCommandBuffer cmd) const;
+    // 끝내고 제출만 하고 기다리지 않습니다(비동기 로딩 D3). 돌려준 펜스가 끝나면 freeOneTimeCmd 로 명령 버퍼와 펜스를 놓으십시오.
+    VkFence         submitOneTimeCmdAsync(VkCommandBuffer cmd) const;
+    void            freeOneTimeCmd(VkCommandBuffer cmd, VkFence fence) const;
 };

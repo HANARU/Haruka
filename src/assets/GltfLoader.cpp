@@ -8,6 +8,7 @@
 #include "Skin.hpp"
 #include "Animation.hpp"
 #include "../geometry/MeshLod.hpp"
+#include "../geometry/MeshOptimize.hpp"
 #include "../vfs/PakFormat.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "../vfs/Vfs.hpp"
@@ -925,6 +926,12 @@ std::vector<MeshSourceData> GltfLoader::loadAll(const std::string& path) {
                                         << " tris, screen size " << scrList << " (" << tbuf << " ms)";
                 }
             }
+
+            // 정점 캐시 순서(O3)를 여기서 한 번 정합니다(LOD 를 만든 뒤, 업로드 때 하던 것과 같은 결과). 캐시에 담겨 다음
+            // 읽기와 백그라운드 읽기(워커)에서 메인 스레드 비용이 없어집니다(비동기 로딩, 2026-11-20).
+            hmesh::optimizeVertexCache(d.indices, (uint32_t)d.vertices.size());
+            for (auto& lod : d.lods) hmesh::optimizeVertexCache(lod.indices, (uint32_t)d.vertices.size());
+            d.cacheOrdered = true;
 
             result.push_back(std::move(d));
         }

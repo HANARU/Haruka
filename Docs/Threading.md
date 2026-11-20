@@ -18,6 +18,7 @@
 | 셰이더 워처 | HotReloader | .spv 변경 감시 | `pending_` atomic + 로그만 |
 | Jolt 워커 ×N | PhysicsSystem (JobSystemThreadPool) | 물리 스텝 내부 병렬화 | 없음 (Update() 내부에서 join) |
 | 오디오 | miniaudio (ma_engine) | 디바이스 콜백 믹싱 | 없음 (ma_* API 내부 동기화) |
+| 에셋 워커 ×2 (Android ×1) | AssetStreamer (2026-11-20, [Async_Loading.md](Async_Loading.md)) | VFS 읽기 · 캐시 읽기 또는 glTF 디코드 · 캐시 쓰기 | 없음. 결과는 뮤텍스로 지킨 표에 두고 메인 스레드의 `AssetManager::pump` 가 GPU 에 올림 |
 
 ## 규칙
 
@@ -42,7 +43,8 @@
    단, 이것이 "백그라운드 스레드에서 UI를 만져도 된다"는 뜻이 아니다. 로그만 예외다.
 
 5. **블로킹 금지 구역.** 메인 루프(틱/렌더 경로)에서 파일 I/O·네트워크·join을
-   새로 추가하지 않는다. 기존 위반(glTF 동기 로드)은 비동기 에셋 로딩 도입 시 해소.
+   새로 추가하지 않는다. glTF 동기 로드는 2026-11-20 비동기 로딩으로 게임 씬 전환에서는 해소했다(에디터의 씬 열기 · 시작 씬은
+   아직 동기, [Async_Loading.md](Async_Loading.md)).
 
 ## 예약된 확장 (시기 미정, 트리거 기반)
 

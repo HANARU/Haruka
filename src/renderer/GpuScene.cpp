@@ -42,10 +42,17 @@ void GpuScene::create(RenderContext& rc) {
           VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     mkBuf(megaIdxBuf_,  megaIdxAlloc_,  kMegaIdxBytes,
           VK_BUFFER_USAGE_INDEX_BUFFER_BIT  | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    vertRanges_.reset((uint32_t)(kMegaVertBytes / sizeof(PackedVertex)));
+    idx32Ranges_.reset((uint32_t)(kIdx16Base / sizeof(uint32_t)));
+    idx16Ranges_.reset((uint32_t)((kMegaIdxBytes - kIdx16Base) / sizeof(uint16_t)));
 }
 
 void GpuScene::destroy() {
     if (!rc_) return;
+    // 진행 중 업로드 · 은퇴 목록을 모두 끝냅니다(장치가 멈춘 뒤라 바로 지워도 됨).
+    vkDeviceWaitIdle(rc_->device);
+    collectUploads(true);
+    collectRetired(UINT64_MAX, 0);
     if (fallbackReady_) {
         for (TexSlot& t : fallback_) { t.shared = false; freeTexSlot(t); t = {}; }
         fallbackReady_ = false;
@@ -61,14 +68,14 @@ PackedVertex* GpuScene::skinArena(uint32_t frameSlot, uint32_t& firstVertex) {
     if (frameSlot >= (uint32_t)MAX_FRAMES || skinArenaFailed_ || !megaVertAlloc_.mappedPtr) return nullptr;
     if (!skinArenaReserved_) {
         const uint64_t need = (uint64_t)kSkinArenaVerts * MAX_FRAMES;
-        if ((megaVertCount_ + need) * sizeof(PackedVertex) > kMegaVertBytes) {
+        const uint32_t at = need <= 0xFFFFFFFFull ? vertRanges_.allocate((uint32_t)need) : RangeAllocator::kFail;
+        if (at == RangeAllocator::kFail) {
             skinArenaFailed_ = true;
             HLOG(LogRenderer, Warning) << "mega vertex buffer has no room for the skinned-mesh area ("
                                        << need << " vertices); skinned meshes are not drawn";
             return nullptr;
         }
-        skinArenaFirst_    = megaVertCount_;
-        megaVertCount_    += (uint32_t)need;
+        skinArenaFirst_    = at;   // 한 번 잡고 놓지 않습니다
         skinArenaReserved_ = true;
         HLOG(LogRenderer, Log) << "Skinned-mesh area reserved: " << kSkinArenaVerts << " vertices x "
                                << MAX_FRAMES << " frame slot(s) at vertex " << skinArenaFirst_;
@@ -81,7 +88,7 @@ PackedVertex* GpuScene::skinArena(uint32_t frameSlot, uint32_t& firstVertex) {
 
 MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
                                  const std::vector<uint32_t>& indices,
-                                 const MeshBounds* precomputed) {
+                                 const MeshBounds* precomputed, bool preOrdered) {
     const uint32_t vCount = (uint32_t)verts.size();
     const uint32_t iCount = (uint32_t)indices.size();
 
@@ -90,46 +97,44 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
     // 검사를 앞으로 옮기면 그 경로 자체가 없어집니다.
     // 16비트로 넣을 수 있는가: 인덱스는 메시 안 번호(정점 오프셋은 그릴 때 더함)이므로 정점 수만 보면 됩니다.
     const bool use16 = vCount <= 65536u;
-    if ((megaVertCount_ + vCount) * sizeof(PackedVertex) > kMegaVertBytes ||
-        (use16 ? (uint64_t)(megaIdx16Count_ + iCount) * sizeof(uint16_t) > kMegaIdxBytes - kIdx16Base
-               : (uint64_t)(megaIdxCount_ + iCount) * sizeof(uint32_t) > kIdx16Base))
+    RangeAllocator& idxRanges = use16 ? idx16Ranges_ : idx32Ranges_;
+    const uint32_t firstV = vertRanges_.allocate(vCount);
+    const uint32_t firstI = firstV == RangeAllocator::kFail ? RangeAllocator::kFail : idxRanges.allocate(iCount);
+    if (firstV == RangeAllocator::kFail || firstI == RangeAllocator::kFail) {
+        if (firstV != RangeAllocator::kFail) vertRanges_.release(firstV, vCount);
         throw std::runtime_error("Mega buffer overflow! Too many vertices/indices.");
+    }
 
     // 정점 캐시 순서(O3): 삼각형 순서만 바꿉니다(집합 · 감기 방향 그대로).
     std::vector<uint32_t> ordered(indices);
-    hmesh::optimizeVertexCache(ordered, vCount);
+    if (!preOrdered) hmesh::optimizeVertexCache(ordered, vCount);
 
     auto* h = new MeshHandle();
-    h->firstVertex = megaVertCount_;
-    h->firstIndex  = use16 ? megaIdx16Count_ : megaIdxCount_;
+    h->firstVertex = firstV;
+    h->firstIndex  = firstI;
     h->indexCount  = iCount;
     h->vertexCount = vCount;
     h->index16     = use16;
 
     // Copy into mega buffers (Zone B mapped via auxMem for images — buffers in heap)
     // QTangent(C2): 올리면서 28 B 정점으로 줄입니다.
-    auto* vertDst = reinterpret_cast<PackedVertex*>(static_cast<uint8_t*>(megaVertAlloc_.mappedPtr)) + megaVertCount_;
+    auto* vertDst = reinterpret_cast<PackedVertex*>(static_cast<uint8_t*>(megaVertAlloc_.mappedPtr)) + firstV;
     hqtan::packRange(verts.data(), vertDst, vCount);
     uint8_t* idxBase = static_cast<uint8_t*>(megaIdxAlloc_.mappedPtr);
     if (use16) {
-        uint16_t* dst = reinterpret_cast<uint16_t*>(idxBase + kIdx16Base) + megaIdx16Count_;
+        uint16_t* dst = reinterpret_cast<uint16_t*>(idxBase + kIdx16Base) + firstI;
         for (uint32_t i = 0; i < iCount; ++i) dst[i] = (uint16_t)ordered[i];
-        megaIdx16Count_ += iCount;
     } else {
-        memcpy(idxBase + (size_t)megaIdxCount_ * sizeof(uint32_t), ordered.data(), iCount * sizeof(uint32_t));
-        megaIdxCount_ += iCount;
+        memcpy(idxBase + (size_t)firstI * sizeof(uint32_t), ordered.data(), iCount * sizeof(uint32_t));
     }
 
-    megaVertCount_ += vCount;
-
     // ── 바운드 ────────────────────────────────────────────────────────────────
-    // 메가버퍼는 해제 없는 범프 할당자입니다. 여기서 소모한 공간은 영영
-    // 돌아오지 않으므로, 넘치기 전에 미리 알려 주는 것이 사후 throw 보다 낫습니다.
+    // 쓰지 않는 모델은 씬을 바꿀 때 해제되지만(비동기 로딩 D5), 한 씬이 너무 크면 넘칩니다. 넘치기 전에 알립니다.
     const auto bud = budget();
-    if (bud.vertPct >= 80.f || bud.idxPct >= 80.f)
+    if (bud.vertPct >= 80.f || bud.idxPct >= 80.f) {
         HLOG(LogRenderer, Warning) << "mega buffer usage high: vertices " << bud.vertPct
-                                   << " %, indices " << bud.idxPct
-                                   << " %. This space is never reclaimed";
+                                   << " %, indices " << bud.idxPct << " %";
+    }
 
     auto traverse = [&](glm::vec3& lo, glm::vec3& hi) {
         lo = glm::vec3( FLT_MAX);
@@ -171,20 +176,20 @@ MeshHandle* GpuScene::uploadMesh(const std::vector<Vertex>& verts,
     return h;
 }
 
-MeshHandle* GpuScene::uploadLodIndices(const MeshHandle& base, const std::vector<uint32_t>& indices) {
+MeshHandle* GpuScene::uploadLodIndices(const MeshHandle& base, const std::vector<uint32_t>& indices, bool preOrdered) {
     if (indices.empty() || base.vertexCount == 0) return nullptr;
     const uint32_t iCount = (uint32_t)indices.size();
     const bool     use16  = base.index16;
-    if (use16 ? (uint64_t)(megaIdx16Count_ + iCount) * sizeof(uint16_t) > kMegaIdxBytes - kIdx16Base
-              : (uint64_t)(megaIdxCount_ + iCount) * sizeof(uint32_t) > kIdx16Base)
+    const uint32_t firstI = (use16 ? idx16Ranges_ : idx32Ranges_).allocate(iCount);
+    if (firstI == RangeAllocator::kFail)
         throw std::runtime_error("Mega buffer overflow! Too many LOD indices.");
 
     std::vector<uint32_t> ordered(indices);
-    hmesh::optimizeVertexCache(ordered, base.vertexCount);
+    if (!preOrdered) hmesh::optimizeVertexCache(ordered, base.vertexCount);
 
     auto* h = new MeshHandle();
     h->firstVertex = base.firstVertex;
-    h->firstIndex  = use16 ? megaIdx16Count_ : megaIdxCount_;
+    h->firstIndex  = firstI;
     h->indexCount  = iCount;
     h->vertexCount = 0;   // 정점은 base 가 소유
     h->index16     = use16;
@@ -195,29 +200,84 @@ MeshHandle* GpuScene::uploadLodIndices(const MeshHandle& base, const std::vector
 
     uint8_t* idxBase = static_cast<uint8_t*>(megaIdxAlloc_.mappedPtr);
     if (use16) {
-        uint16_t* dst = reinterpret_cast<uint16_t*>(idxBase + kIdx16Base) + megaIdx16Count_;
+        uint16_t* dst = reinterpret_cast<uint16_t*>(idxBase + kIdx16Base) + firstI;
         for (uint32_t i = 0; i < iCount; ++i) dst[i] = (uint16_t)ordered[i];
-        megaIdx16Count_ += iCount;
     } else {
-        memcpy(idxBase + (size_t)megaIdxCount_ * sizeof(uint32_t), ordered.data(), iCount * sizeof(uint32_t));
-        megaIdxCount_ += iCount;
+        memcpy(idxBase + (size_t)firstI * sizeof(uint32_t), ordered.data(), iCount * sizeof(uint32_t));
     }
     return h;
 }
 
 GpuScene::MeshBudget GpuScene::budget() const {
     MeshBudget b{};
-    b.verts   = megaVertCount_;
-    b.indices = megaIdxCount_ + megaIdx16Count_;
-    b.vertPct = 100.f * (float)((double)megaVertCount_ * sizeof(PackedVertex) / (double)kMegaVertBytes);
+    b.verts   = vertRanges_.used();
+    b.indices = idx32Ranges_.used() + idx16Ranges_.used();
+    b.vertPct = 100.f * (float)((double)vertRanges_.used() / (double)std::max(vertRanges_.capacity(), 1u));
     // 두 구역 중 더 찬 쪽(어느 한쪽이 차면 그 형식의 메시를 더 올릴 수 없음)
-    b.idxPct  = 100.f * (float)std::max((double)megaIdxCount_ * sizeof(uint32_t) / (double)kIdx16Base,
-                                        (double)megaIdx16Count_ * sizeof(uint16_t) / (double)(kMegaIdxBytes - kIdx16Base));
+    b.idxPct  = 100.f * (float)std::max((double)idx32Ranges_.used() / (double)std::max(idx32Ranges_.capacity(), 1u),
+                                        (double)idx16Ranges_.used() / (double)std::max(idx16Ranges_.capacity(), 1u));
     return b;
 }
 
 void GpuScene::freeMesh(MeshHandle* h) {
-    delete h;  // Mega buffer data is never individually freed
+    if (!h) return;
+    // 정점은 base 메시만 가집니다(LOD 핸들은 vertexCount 0). 인덱스는 핸들마다 자기 구간입니다.
+    if (h->vertexCount) vertRanges_.release(h->firstVertex, h->vertexCount);
+    if (h->indexCount)  (h->index16 ? idx16Ranges_ : idx32Ranges_).release(h->firstIndex, h->indexCount);
+    delete h;
+}
+
+void GpuScene::retireMesh(MeshHandle* h, uint64_t frame) {
+    if (h) retired_.push_back({ frame, h, nullptr });
+}
+
+void GpuScene::retireMaterial(MaterialHandle* h, uint64_t frame) {
+    if (h) retired_.push_back({ frame, nullptr, h });
+}
+
+void GpuScene::collectRetired(uint64_t frame, uint32_t maxFrames) {
+    size_t keep = 0;
+    for (size_t i = 0; i < retired_.size(); ++i) {
+        Retired& r = retired_[i];
+        // r.frame 이전 프레임까지 썼을 수 있습니다. 지금 프레임 번호가 r.frame + maxFrames 이상이면 그 제출은 모두 끝났습니다.
+        if (frame == UINT64_MAX || frame >= r.frame + maxFrames) {
+            if (r.mesh) freeMesh(r.mesh);
+            if (r.material) {
+                freeTexSlot(r.material->albedo);
+                freeTexSlot(r.material->normalMap);
+                freeTexSlot(r.material->metalRough);
+                freeTexSlot(r.material->ao);
+                freeTexSlot(r.material->emissive);
+                delete r.material;
+            }
+        } else {
+            retired_[keep++] = r;
+        }
+    }
+    retired_.resize(keep);
+}
+
+void GpuScene::submitUpload(VkCommandBuffer cmd, std::vector<Staging>&& staging) {
+    collectUploads(false);   // 끝난 앞 업로드부터 정리
+    const VkFence fence = rc_->submitOneTimeCmdAsync(cmd);
+    uploads_.push_back({ fence, cmd, std::move(staging) });
+}
+
+void GpuScene::collectUploads(bool wait) {
+    size_t keep = 0;
+    for (size_t i = 0; i < uploads_.size(); ++i) {
+        PendingUpload& u = uploads_[i];
+        const bool done = wait ? (vkWaitForFences(rc_->device, 1, &u.fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS)
+                               : (vkGetFenceStatus(rc_->device, u.fence) == VK_SUCCESS);
+        if (done) {
+            freeStaging(u.staging);
+            rc_->freeOneTimeCmd(u.cmd, u.fence);
+        } else {
+            if (keep != i) uploads_[keep] = std::move(u);
+            ++keep;
+        }
+    }
+    uploads_.resize(keep);
 }
 
 // ── Texture slot upload ───────────────────────────────────────────────────────
@@ -226,8 +286,7 @@ TexSlot GpuScene::uploadTexture(const uint8_t* pixels, int w, int h, VkFormat fm
     std::vector<Staging> staging;
     auto cmd = rc_->beginOneTimeCmd();
     TexSlot slot = recordTextureUpload(cmd, pixels, w, h, fmt, staging);
-    rc_->endOneTimeCmd(cmd);
-    freeStaging(staging);
+    submitUpload(cmd, std::move(staging));   // 기다리지 않음(D3)
     return slot;
 }
 
@@ -386,8 +445,8 @@ MaterialHandle* GpuScene::uploadMaterial(
     mat->metalRough= upload(metalRough, kFbMetalRough, VK_FORMAT_R8G8B8A8_UNORM);
     mat->ao        = upload(ao,         kFbAo,         VK_FORMAT_R8G8B8A8_UNORM);
     mat->emissive  = upload(emissive,   kFbEmissive,   VK_FORMAT_R8G8B8A8_SRGB);
-    rc_->endOneTimeCmd(cmd);
-    freeStaging(staging);
+    // 큐에 제출만 하고 기다리지 않습니다(D3). 뒤에 같은 큐로 제출하는 프레임은 업로드 끝 배리어(프래그먼트 셰이더 읽기) 뒤에 돕니다.
+    submitUpload(cmd, std::move(staging));
 
     return mat;
 }

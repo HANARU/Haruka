@@ -42,6 +42,9 @@ struct MeshSourceData {
     std::vector<MeshSourceVertex> vertices;
     std::vector<uint32_t>         indices;
     std::vector<MeshLodSource>    lods;     // O13: 자동 생성 LOD (거친 단계 순, 비어 있을 수 있음)
+    // 인덱스(본 · LOD)가 이미 정점 캐시 순서인지(2026-11-20, 비동기 로딩): 가져올 때 한 번 정렬해 캐시에 담고, 업로드는 건너뜁니다.
+    // 예전에는 업로드(메인 스레드)마다 정렬해 큰 모델 하나에 수백 ms 가 걸렸습니다.
+    bool                          cacheOrdered = false;
     TexSourceData albedo;
     TexSourceData normalMap;
     TexSourceData metalRough;

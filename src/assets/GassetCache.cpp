@@ -29,7 +29,9 @@ static constexpr uint32_t kMagic   = 0x47415354u; // "GAST"
 // 10: 스킨 뒤에 애니메이션 클립(u32 개수, 각 이름 · 길이 f32 · 트랙 수 · 트랙마다 관절 i32 · 경로 u8 · 보간 u8 · 성분 u32 ·
 //     시간 수 u32 · 시간 f32[] · 값 수 u32 · 값 f32[])을 둡니다(2026-11-20, Docs/Animation_System.md A2-3). 그 뒤 모프
 //     (타깃 수 u32 · 기본 무게 f32[] · 위치 차이 수 u32 · f32[] · 노멀 차이 수 u32 · f32[], A5-1).
-static constexpr uint32_t kVersion = 10u;
+// 11: 내용 형식은 10 과 같고, 인덱스(본 · LOD)가 이미 정점 캐시 순서입니다(가져올 때 정렬, 2026-11-20 비동기 로딩). 10 이하
+//     캐시는 정렬 전 인덱스라 다시 만듭니다.
+static constexpr uint32_t kVersion = 11u;
 // 머리: magic(4) version(4) mtime(8) size(8) hash(8) meshCount(4)
 static constexpr std::streamoff kMtimeOffset = 8;
 
@@ -352,6 +354,7 @@ std::vector<MeshSourceData> GassetCache::load(const std::string& srcPath) {
         f.read((char*)m.indices.data(),  (std::streamsize)(ic * sizeof(uint32_t)));
         if (!f) throw std::runtime_error("GassetCache: corrupted file " + cp);
         m.skin = rSkin(f, vc, cp);   // 버전 7. save 와 같은 순서
+        m.cacheOrdered = true;      // 버전 11
         const uint32_t lodCount = rU32(f);   // 버전 9 (O13)
         if (!f || lodCount > 16u) throw std::runtime_error("GassetCache: invalid lodCount in " + cp);
         m.lods.resize(lodCount);

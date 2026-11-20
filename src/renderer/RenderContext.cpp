@@ -226,6 +226,24 @@ VkCommandBuffer RenderContext::beginOneTimeCmd() const {
     return cmd;
 }
 
+VkFence RenderContext::submitOneTimeCmdAsync(VkCommandBuffer cmd) const {
+    vkEndCommandBuffer(cmd);
+    VkFenceCreateInfo fi{};
+    fi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    vkCreateFence(device, &fi, nullptr, &fence);
+    VkSubmitInfo si{};
+    si.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1; si.pCommandBuffers = &cmd;
+    vkQueueSubmit(gfxQueue, 1, &si, fence);
+    return fence;
+}
+
+void RenderContext::freeOneTimeCmd(VkCommandBuffer cmd, VkFence fence) const {
+    if (fence) vkDestroyFence(device, fence, nullptr);
+    if (cmd)   vkFreeCommandBuffers(device, cmdPool, 1, &cmd);
+}
+
 void RenderContext::endOneTimeCmd(VkCommandBuffer cmd) const {
     vkEndCommandBuffer(cmd);
     VkSubmitInfo si{};

@@ -92,6 +92,8 @@ private:
     bool          synthetic_      = false;     // 합성 눈을 붙였음(XR 세션과 배타)
     uint32_t      drawnFrames_    = 0;         // 그린 프레임 수(XR · 합성 눈 · 데스크톱)
     bool          debugCrashDone_ = false;     // --debug-crash 를 한 번 일으켰는지
+    size_t        switchNext_     = 0;         // --switch-scene 다음 항목
+    void          streamAssets();             // 프레임 처음: 업로드 예산 · 씬 전환(비동기 로딩)
     uint32_t      syntheticImage_ = 0;         // 다음에 그릴 합성 눈 이미지
     uint32_t      lastSynthetic_  = UINT32_MAX;   // 마지막으로 그린 합성 눈 이미지(캡처용)
     bool          timedOut_       = false;
