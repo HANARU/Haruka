@@ -55,6 +55,7 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
         err = r.error;
     } else {
         ok = AssetStreamer::decode(key, settings, meshes, err, &deps);
+        if (ok) AssetStreamer::attachTextures(key, meshes, texTarget_);
     }
     if (!ok) {
         HLOG(LogAsset, Error) << "Load failed (" << path << "): " << err << " -> using defaultCube";
@@ -64,11 +65,19 @@ std::vector<AssetPair> AssetManager::loadAll(const std::string& path) {
     return uploadModel(key, path, meshes);
 }
 
+void AssetManager::setTextureTarget(htex::Target t) {
+    texTarget_ = t;
+    if (streamer_) streamer_->setTextureTarget(t);
+}
+
 bool AssetManager::requestLoad(const std::string& path) {
     const std::string key = hvfs::toCanonical(path);
     if (cache.count(key)) return true;
     if (streamWorkers_ <= 0) { loadAll(key); return true; }
-    if (!streamer_) streamer_ = std::make_unique<AssetStreamer>(streamWorkers_);
+    if (!streamer_) {
+        streamer_ = std::make_unique<AssetStreamer>(streamWorkers_);
+        streamer_->setTextureTarget(texTarget_);
+    }
     streamer_->request(key, importSettingsFor(key));
     return false;
 }
@@ -211,6 +220,8 @@ std::vector<AssetPair> AssetManager::uploadModel(const std::string& key, const s
                                 << cut << "); cutout is not supported yet, drawn opaque with an opaque shadow";
     }
 
+    logTextureMemory(key);
+
     {
         char buf[160];
         std::snprintf(buf, sizeof(buf), "%.2f ms (mesh %.2f, LOD %.2f)", since(upStart), msMesh, msLod);
@@ -218,6 +229,23 @@ std::vector<AssetPair> AssetManager::uploadModel(const std::string& key, const s
     }
     cache[key] = pairs;
     return pairs;
+}
+
+// 모델을 올릴 때마다 텍스처 메모리를 남깁니다(D12). 압축 · 비압축 장 수 · 실제 바이트 · 같은 텍스처를 RGBA8 + 밉으로 올렸을 때의
+// 바이트 · 핵심 힙 Zone B 사용량. 텍스처 수가 바뀌지 않았으면 남기지 않습니다.
+void AssetManager::logTextureMemory(const std::string& key) {
+    const Renderer::TextureMemory tm = renderer->textureMemory();
+    if (tm.textures == lastLoggedTextures_) return;
+    lastLoggedTextures_ = tm.textures;
+    const double mb = 1.0 / (1024.0 * 1024.0);
+    char buf[256];
+    std::snprintf(buf, sizeof(buf),
+                  "%u textures (%u compressed, %u RGBA8): %.2f MB, RGBA8 would be %.2f MB (%.0f%%); Zone B %.1f / %.0f MB",
+                  tm.textures, tm.compressed, tm.textures - tm.compressed, tm.bytes * mb, tm.rgbaBytes * mb,
+                  tm.rgbaBytes ? 100.0 * (double)tm.bytes / (double)tm.rgbaBytes : 100.0, tm.zoneBUsed * mb, tm.zoneBTotal * mb);
+    // 압축 텍스처가 있을 때만 기본 로그에 남깁니다(압축을 끈 에디터 · 창 없는 실행은 Verbose).
+    if (tm.compressed) { HLOG(LogAsset, Log) << "Textures after " << key << ": " << buf; }
+    else               { HLOG(LogAsset, Verbose) << "Textures after " << key << ": " << buf; }
 }
 
 void AssetManager::noteModel(const std::string& key, uint64_t settingsHash, std::vector<std::string> deps) {
@@ -242,6 +270,7 @@ bool AssetManager::reloadModel(const std::string& path, const RebindFn& rebind, 
         HLOG(LogAsset, Error) << "Reload failed (" << key << "): " << err << " -> keeping the previous version";
         return false;
     }
+    AssetStreamer::attachTextures(key, meshes, texTarget_);
     std::vector<AssetPair> oldPairs = std::move(it->second);
     cache.erase(it);
     noteModel(key, settings.hash(), std::move(deps));

@@ -150,6 +150,47 @@ FetchContent_MakeAvailable(nanosvg)
 add_library(haruka_nanosvg INTERFACE)
 target_include_directories(haruka_nanosvg SYSTEM INTERFACE ${nanosvg_SOURCE_DIR}/src)
 
+# ── 텍스처 인코더 (묶음 도구 전용, 2026-11-21, Docs/Texture_Compression.md D7) ─────────────────
+# 묶을 때 텍스처를 BC(PC) · ASTC(Android)로 압축합니다. HarukaPak 과 시험에만 링크하고, 게임 런타임 · Android 실행 파일에는
+# 넣지 않습니다(런타임은 미리 압축한 KTX2 만 읽음). 판이 고정된 압축 파일을 SHA256 으로 확인해 받고, 저장소의 CMake 는 쓰지
+# 않습니다(SOURCE_SUBDIR 에 CMakeLists.txt 가 없으면 받기만 함). 내려받기: astc-encoder 약 35 MB, bc7enc_rdo 약 15 MB.
+#   astc-encoder 5.7.1 (ARM, Apache-2.0): Source/astcenc_*.cpp(CLI 제외)를 SSE4.1 · POPCNT 정의로 직접 컴파일합니다.
+#   bc7enc_rdo (Richard Geldreich, MIT 또는 공개 도메인): bc7enc.cpp(BC7) · bc7decomp.cpp(BC7 풀기) · rgbcx.cpp(BC5) 세 파일만.
+if(NOT ANDROID)
+    FetchContent_Declare(
+        astcenc
+        URL      https://github.com/ARM-software/astc-encoder/archive/refs/tags/5.7.1.tar.gz
+        URL_HASH SHA256=37ff3928c4c156fb3ac0d1adb5df144ff9c5cdbc8a8e1ffeb20229cc7f35c767
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        SOURCE_SUBDIR _haruka_sources_only
+    )
+    FetchContent_Declare(
+        bc7enc_rdo
+        URL      https://github.com/richgel999/bc7enc_rdo/archive/b9438627eef73a1157e84201b6fa6eb2ffd6d9f0.tar.gz
+        URL_HASH SHA256=bbb33d1dbb6178a3a2c044956c3cc0b8ea9fc2f2903824379dd86f87d53b64c6
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        SOURCE_SUBDIR _haruka_sources_only
+    )
+    FetchContent_MakeAvailable(astcenc bc7enc_rdo)
+    file(GLOB _haruka_astcenc_sources ${astcenc_SOURCE_DIR}/Source/astcenc_*.cpp)
+    add_library(haruka_astcenc STATIC ${_haruka_astcenc_sources})
+    target_include_directories(haruka_astcenc SYSTEM PUBLIC ${astcenc_SOURCE_DIR}/Source)
+    target_compile_definitions(haruka_astcenc PRIVATE
+        ASTCENC_NEON=0 ASTCENC_SVE=0 ASTCENC_SSE=41 ASTCENC_AVX=0 ASTCENC_POPCNT=1 ASTCENC_F16C=0 ASTCENC_X86_GATHERS=0)
+    add_library(haruka_bc7enc STATIC
+        ${bc7enc_rdo_SOURCE_DIR}/bc7enc.cpp
+        ${bc7enc_rdo_SOURCE_DIR}/bc7decomp.cpp
+        ${bc7enc_rdo_SOURCE_DIR}/rgbcx.cpp)
+    target_include_directories(haruka_bc7enc SYSTEM PUBLIC ${bc7enc_rdo_SOURCE_DIR})
+    if(MSVC)
+        target_compile_options(haruka_astcenc PRIVATE /W0 /utf-8)
+        target_compile_options(haruka_bc7enc  PRIVATE /W0 /utf-8)
+    else()
+        target_compile_options(haruka_astcenc PRIVATE -w -msse4.1 -mpopcnt)
+        target_compile_options(haruka_bc7enc  PRIVATE -w)
+    endif()
+endif()
+
 # ── 셰이더 컴파일 (glslc → SPIR-V) ───────────────────────────────────────────
 find_program(GLSLC glslc
     HINTS
@@ -389,11 +430,13 @@ set(RUNTIME_SOURCES
     src/geometry/PrimitiveDesc.cpp
     src/geometry/PrimitiveBuilder.cpp
     src/geometry/MeshLod.cpp
+    src/geometry/Ktx2.cpp
     src/assets/GltfLoader.cpp
     src/assets/AssetManager.cpp
     src/assets/AssetStreamer.cpp
     src/assets/GassetCache.cpp
     src/assets/ImportSettings.cpp
+    src/assets/TextureCompression.cpp
     src/assets/Skin.cpp
     src/assets/Animation.cpp
     src/assets/AnimStateMachine.cpp
@@ -548,8 +591,23 @@ if(NOT ANDROID)
     if(WIN32)
         set(UTF8_MANIFEST res/Haruka.manifest)
     endif()
-    add_executable(HarukaPak src/tools/HarukaPak.cpp src/core/HText.cpp src/core/AssetRefs.cpp ${UTF8_MANIFEST})
-    target_link_libraries(HarukaPak PRIVATE HarukaVfs)
+    # 묶을 때 텍스처 압축(Docs/Texture_Compression.md D6)은 런타임과 같은 glTF 로더로 최종 화소를 얻습니다. 로더 · 가져오기 설정 ·
+    # KTX2 · 형식 표는 소스를 직접 넣습니다(HarukaRuntime 은 셰이더 목록 때문에 이 도구에 기대므로 링크할 수 없음).
+    set(HARUKA_TEXTURE_COOK_SOURCES
+        src/tools/TextureEncode.cpp
+        src/tools/TextureCook.cpp
+        src/geometry/Ktx2.cpp
+        src/assets/TextureCompression.cpp
+        src/assets/GltfLoader.cpp
+        src/assets/ImportSettings.cpp
+        src/assets/Animation.cpp
+        src/assets/Skin.cpp
+        src/geometry/MeshLod.cpp
+        src/core/HLog.cpp)
+    add_executable(HarukaPak src/tools/HarukaPak.cpp src/core/HText.cpp src/core/AssetRefs.cpp ${HARUKA_TEXTURE_COOK_SOURCES}
+                   ${UTF8_MANIFEST})
+    target_link_libraries(HarukaPak PRIVATE HarukaVfs tinygltf glm::glm meshoptimizer haruka_astcenc haruka_bc7enc)
+    target_include_directories(HarukaPak PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
     haruka_target_defaults(HarukaPak)
     if(MSVC)
         set_target_properties(HarukaPak PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -662,6 +720,13 @@ else()
     message(FATAL_ERROR "verblib.h license block not found (miniaudio extras changed?)")
 endif()
 haruka_notice_file("stb, including stb_image bundled with tinygltf (Public Domain or MIT License)" ${stb_SOURCE_DIR}/LICENSE)
+# 텍스처 인코더(2026-11-21): 게임 실행 파일에는 들어가지 않고 묶음 도구(HarukaPak)만 씁니다. 묶음 안의 압축 텍스처는 그 도구의
+# 출력이라 고지 대상은 아니지만, 도구를 함께 배포할 때를 위해 적습니다.
+if(NOT ANDROID)
+    haruka_notice_file("astc-encoder 5.7.1, used by the HarukaPak packaging tool only (Apache License 2.0)" ${astcenc_SOURCE_DIR}/LICENSE.txt)
+    haruka_notice_file("bc7enc_rdo (bc7enc · bc7decomp · rgbcx), used by the HarukaPak packaging tool only (MIT License, chosen from MIT or Public Domain)"
+        ${bc7enc_rdo_SOURCE_DIR}/LICENSE)
+endif()
 # Steam Audio(HRTF, 2026-11-06): 라이브러리를 그대로 함께 배포합니다(Windows phonon.dll, Android libphonon.so). Apache-2.0 §4 에 따라
 # 라이선스 원문과 저작권 표시(phonon.h 머리말)를 넣습니다. 저장소에 NOTICE 파일은 없습니다. 라이브러리 안에 든 서드파티(IPP · FFTS ·
 # PFFFT · MySOFA · Embree · CIPIC HRTF 등)의 문구는 Valve 가 ZIP 에 넣은 THIRDPARTY.md 를 그대로 붙입니다.
@@ -1144,6 +1209,18 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaParticleTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- 텍스처 압축 테스트(2026-11-21, Docs/Texture_Compression.md) ---------------------------
+    # KTX2 쓰기 · 읽기(정상 · 손상), 형식 표, 장치 지원 판단(대체 경로), 밉 생성, 압축 → 풀기 PSNR 하한, 쿠킹 캐시, 시험 모델을
+    # 쿠킹한 뒤 런타임 찾기가 모두 붙는지(열쇠 일치)를 GPU 없이 봅니다. 인코더는 묶음 도구와 같은 소스입니다.
+    add_executable(HarukaTexTest tests/TextureCompressionTest.cpp ${HARUKA_TEXTURE_COOK_SOURCES})
+    target_link_libraries(HarukaTexTest PRIVATE HarukaVfs tinygltf glm::glm meshoptimizer haruka_astcenc haruka_bc7enc)
+    target_include_directories(HarukaTexTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_compile_definitions(HarukaTexTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(HarukaTexTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaTexTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- CPU 구간 계측 테스트(Docs/CPU_Profiling.md) --------------------------------
     # 중첩 · 스레드 구분 · 시작 / 멈춤 · 상한 · Chrome trace JSON(다시 읽어 검사) · 끈 번역 단위(ProfilerOffTest.cpp, 매크로 비용 0) ·
     # FrameTimings 공유 측정 지점 · 추적 경로 규칙을 창 · GPU 없이 봅니다.
@@ -1411,6 +1488,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME physics_lifecycle    COMMAND HarukaPhysicsTest)
     add_test(NAME physics_joints       COMMAND HarukaJointTest)
     add_test(NAME particles_decals     COMMAND HarukaParticleTest)
+    add_test(NAME texture_compression  COMMAND HarukaTexTest)
     add_test(NAME stereo_views         COMMAND HarukaStereoTest)
     add_test(NAME math_common          COMMAND HarukaMathTest)
     add_test(NAME architecture_deps    COMMAND HarukaArchTest)

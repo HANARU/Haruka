@@ -10,6 +10,7 @@
 #include <cstdint>
 
 struct TexSourceData;
+namespace hktx2 { struct Image; }
 
 // Mega-buffer sizes (Zone B)
 constexpr VkDeviceSize kMegaVertBytes = 128ULL * 1024 * 1024;   // 128 MB
@@ -64,6 +65,11 @@ public:
     // 1x1 보다 크면 GPU 블릿으로 밉 사슬을 만듭니다(DEF-165, MipChain.hpp). 형식이 블릿을 받지 않으면 1단계로 올립니다.
     TexSlot uploadTexture(const uint8_t* pixels, int w, int h,
                           VkFormat fmt = VK_FORMAT_R8G8B8A8_SRGB);
+    // 머티리얼 텍스처 메모리(D12). 기본값 1x1(fallback_)은 세지 않습니다.
+    struct TexStats { uint32_t textures = 0, compressed = 0; uint64_t bytes = 0, rgbaBytes = 0; };
+    const TexStats& texStats() const { return texStats_; }
+    // 이 장치에서 압축 형식을 그대로 샘플링할 수 있는지(기능 · 형식 질의, 형식마다 한 번, D10).
+    bool canSampleCompressed(VkFormat fmt);
     void    freeTexSlot(TexSlot slot);
 
     VkBuffer vertexBuffer() const { return megaVertBuf_; }
@@ -93,6 +99,10 @@ private:
     TexSlot recordTextureUpload(VkCommandBuffer cmd, const uint8_t* pixels, int w, int h, VkFormat fmt,
                                 std::vector<Staging>& staging);
     void    freeStaging(std::vector<Staging>& staging);
+    // 미리 압축한 KTX2 의 모든 단계를 블릿 없이 복사합니다(D11).
+    TexSlot recordCompressedUpload(VkCommandBuffer cmd, const hktx2::Image& img, std::vector<Staging>& staging);
+    void    countTexture(TexSlot& slot, uint64_t bytes, uint64_t rgbaBytes, bool compressed);
+    TexStats texStats_;
     // 기록한 업로드를 기다리지 않고 제출하고, 펜스가 끝나면 staging 을 놓도록 남깁니다(D3).
     void    submitUpload(VkCommandBuffer cmd, std::vector<Staging>&& staging);
     struct PendingUpload { VkFence fence; VkCommandBuffer cmd; std::vector<Staging> staging; };
@@ -108,6 +118,7 @@ private:
     bool    fallbackReady_ = false;
     struct BlitSupport { VkFormat fmt; bool ok; };
     std::vector<BlitSupport> blitSupport_;
+    std::vector<BlitSupport> sampleSupport_;   // 압축 형식(D10)
 
     VkBuffer         megaVertBuf_   = VK_NULL_HANDLE;
     HarukaAllocation megaVertAlloc_;

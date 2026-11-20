@@ -250,6 +250,24 @@ int main() {
         check(fcDc.core.depthClamp == VK_TRUE && fcDc.core.depthBiasClamp == VK_FALSE,
               "B1 depthClamp 계획이면 기본 기능에 VK_TRUE(depthBiasClamp 와 따로)");
 
+        // 블록 압축 기능(Docs/Texture_Compression.md D10): 그 실행의 텍스처 대상이 쓰는 것만, 장치가 지원할 때만 켭니다.
+        hvk::DeviceCaps tc = questPro();
+        tc.featTextureCompressionBC   = true;
+        tc.featTextureCompressionASTC = true;
+        const hvk::DevicePlan tcOff  = hvk::planDevice(tc, true, false);
+        const hvk::DevicePlan tcAstc = hvk::planDevice(tc, true, false, false, false, true);
+        check(!tcOff.textureCompressionBC && !tcOff.textureCompressionASTC, "B1 텍스처 압축 대상이 없으면 지원해도 켜지 않음");
+        check(!tcAstc.textureCompressionBC && tcAstc.textureCompressionASTC, "B1 ASTC 대상이면 ASTC 만 켬");
+        hvk::DeviceCaps noAstc = questPro();
+        noAstc.featTextureCompressionASTC = false;
+        check(!hvk::planDevice(noAstc, true, false, false, false, true).textureCompressionASTC &&
+              hvk::planDevice(noAstc, true, false, false, false, true).suitable,
+              "B1 ASTC 를 지원하지 않으면 거부하지 않고 끔(RGBA8 원본)");
+        hvk::FeatureChain fcTc;
+        hvk::buildFeatureChain(hvk::planDevice(tc, true, false, false, true, false), fcTc);
+        check(fcTc.core.textureCompressionBC == VK_TRUE && fcTc.core.textureCompressionASTC_LDR == VK_FALSE,
+              "B1 BC 대상 계획이면 기본 기능에 textureCompressionBC 만 VK_TRUE");
+
         hvk::DeviceCaps noExt = questPro();
         noExt.extSync2 = false;
         noExt.featSamplerAnisotropy = false;

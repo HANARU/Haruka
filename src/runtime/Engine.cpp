@@ -262,6 +262,13 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         }
         else HLOG(LogEngine, Warning) << "--loose is for the game executable; ignored";
     }
+    // 미리 압축한 텍스처 폴더(HarukaPak cook-textures 결과, Docs/Texture_Compression.md D8). 그 안의 textures/<대상>/ 를 찾습니다.
+    if (!options.textureDir.empty()) {
+        std::error_code ec;
+        std::filesystem::path td;
+        if (hpak::pathFromUtf8(options.textureDir, td) && std::filesystem::is_directory(td, ec)) hvfs::mountDirectory(td, "textures/", hvfs::kLoosePriority);
+        else HLOG(LogEngine, Warning) << "--texture-dir: not a folder: " << options.textureDir;
+    }
     for (const auto& m : hvfs::describe()) HLOG(LogEngine, Log) << "Mounted " << m;
     // 게임 실행 파일은 묶음과 실행 파일의 짝을 확인합니다(DEF-149). 에디터는 Shaders 대상만 다시 빌드해 실행 중에 바뀐 셰이더를
     // 읽는(핫 리로드) 흐름이 있어 확인하지 않습니다.
@@ -332,9 +339,29 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         throw std::runtime_error("XR is required on this platform, but the OpenXR runtime or headset is not available "
                                  "(see the XR log lines above)");
 
+    // 미리 압축한 텍스처(Docs/Texture_Compression.md D8). auto 는 게임 묶음을 마운트하고 창이 있는 게임 실행 파일만 플랫폼 대상이고,
+    // 에디터 · 창 없는 실행 · 낱개 파일은 원본(RGBA8)을 씁니다(기준 PNG 그대로). 장치 기능도 이 대상이 쓰는 것만 켭니다(D10).
+#ifdef __ANDROID__
+    const htex::Target platformTarget = htex::Target::ASTC;
+#else
+    const htex::Target platformTarget = htex::Target::BC;
+#endif
+    htex::Target texTarget = htex::Target::Off;
+    {
+        const std::string& tc = options.textureCompression;
+        const bool isAuto = tc.empty() || tc == "auto";
+        if (isAuto) texTarget = (policy_.mountGamePacks && anyPack && !options.headless) ? platformTarget : htex::Target::Off;
+        else        htex::parseTarget(tc, texTarget);
+        // 끈 경우(에디터 · 창 없는 실행의 기본)는 Verbose 로만 남깁니다(Output Log 를 늘리지 않음).
+        const char* why = isAuto ? (texTarget == htex::Target::Off ? " (auto: no game pack, editor or --headless)" : " (auto: game pack)")
+                                 : " (--texture-compression)";
+        if (texTarget == htex::Target::Off) { HLOG(LogEngine, Verbose) << "Texture compression: off" << why; }
+        else { HLOG(LogEngine, Log) << "Texture compression: " << htex::targetName(texTarget) << why; }
+    }
     renderer_ = std::make_unique<Renderer>();
     renderer_->setLimits(limits.maxDrawRows, limits.maxLights);
     renderer_->setForceNoSync2(options.vkNoSync2);
+    renderer_->setTextureCompression(texTarget == htex::Target::BC, texTarget == htex::Target::ASTC);
     renderer_->setForceDedicatedMsaa(options.vkDedicatedMsaa);
     renderer_->setPreferredGpu(options.gpuIndex);
     renderer_->setMultiview(options.multiview);
@@ -429,6 +456,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
             for (const auto& m : messages) HLOG(LogEngine, Warning) << ImportSettingsTable::kPath << ": " << m;
         }
     }
+    assets_->setTextureTarget(texTarget);
 #ifdef __ANDROID__
     assets_->setStreamWorkers(1);   // Quest: 렌더 · XR 스레드와 코어를 나눠 씀(비동기 로딩 D1)
 #else

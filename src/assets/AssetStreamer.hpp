@@ -5,7 +5,9 @@
 
 #include "../geometry/MeshSource.hpp"
 #include "ImportSettings.hpp"
+#include "TextureCompression.hpp"
 
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
@@ -42,6 +44,10 @@ public:
     size_t inFlight() const;   // 대기 + 읽는 중
     size_t pending() const;    // 대기 + 읽는 중 + 끝났지만 아직 꺼내지 않음
     int    workers() const { return (int)threads_.size(); }
+    // 읽은 뒤 미리 압축한 텍스처(KTX2)를 붙일 대상(Docs/Texture_Compression.md D9). 기본 Off.
+    void   setTextureTarget(htex::Target t) { texTarget_.store((uint8_t)t); }
+    // 대상이 있으면 KTX2 를 붙이고, 찾지 못하거나 손상된 것이 있으면 로그를 남깁니다(워커 · 동기 경로가 함께 씀).
+    static void attachTextures(const std::string& path, std::vector<MeshSourceData>& meshes, htex::Target t);
 
     // 모델 하나를 읽습니다(워커 · 동기 경로 공용): 캐시가 맞으면 캐시, 아니면 glTF 를 읽고 캐시에 씁니다. 실패하면 false.
     static bool decode(const std::string& path, std::vector<MeshSourceData>& out, std::string& error);
@@ -60,5 +66,6 @@ private:
     std::unordered_map<std::string, State>   states_;  // mu_
     std::unordered_map<std::string, Result>  done_;    // mu_
     bool                                     stop_ = false;   // mu_
+    std::atomic<uint8_t>                     texTarget_{ 0 };
     std::vector<std::thread>                 threads_;
 };

@@ -774,6 +774,12 @@ void Renderer::createLogicalDevice() {
     }
     HLOG(LogRenderer, Log) << "Multiview: "
                            << (multiview_ ? "on (two-eye main pass drawn once)" : "off (--no-multiview, main pass per eye)");
+    rc_.texCompressionBC   = devicePlan_.textureCompressionBC;
+    rc_.texCompressionASTC = devicePlan_.textureCompressionASTC;
+    if (wantTexBC_ || wantTexASTC_) {
+        HLOG(LogRenderer, Log) << "Block-compressed textures: " << (wantTexBC_ ? "BC " : "ASTC ")
+                               << ((rc_.texCompressionBC || rc_.texCompressionASTC) ? "enabled" : "not supported by this device");
+    }
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -820,6 +826,8 @@ hvk::DeviceCaps Renderer::queryDeviceCaps(VkPhysicalDevice dev) {
     c.featStorageImageMultisample = base.shaderStorageImageMultisample == VK_TRUE;
     c.featDepthBiasClamp          = base.depthBiasClamp == VK_TRUE;
     c.featDepthClamp              = base.depthClamp == VK_TRUE;
+    c.featTextureCompressionBC    = base.textureCompressionBC == VK_TRUE;
+    c.featTextureCompressionASTC  = base.textureCompressionASTC_LDR == VK_TRUE;
     if (hvk::majorMinor(c.apiVersion) < hvk::majorMinor(VK_API_VERSION_1_1)) return c;
 
     VkPhysicalDeviceSynchronization2FeaturesKHR s2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR };
@@ -846,7 +854,7 @@ hvk::DeviceCaps Renderer::queryDeviceCaps(VkPhysicalDevice dev) {
 }
 
 bool Renderer::isDeviceSuitable(VkPhysicalDevice dev, bool xrDevice, hvk::DevicePlan& plan, std::string& why) {
-    plan = hvk::planDevice(queryDeviceCaps(dev), !headless_, xrDevice, forceNoSync2_);
+    plan = hvk::planDevice(queryDeviceCaps(dev), !headless_, xrDevice, forceNoSync2_, wantTexBC_, wantTexASTC_);
     if (!plan.suitable) { why = plan.whyNot; return false; }
     const hvk::QueueFamilies q = findQueueFamilies(dev);
     if (!q.complete(!headless_)) {

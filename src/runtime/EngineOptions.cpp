@@ -76,6 +76,14 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (valueOf(a, "--window-size", v)) {
             if (!parseSize(v, o.windowW, o.windowH)) unknown.push_back(a);
         }
+        else if (valueOf(a, "--texture-compression", v)) {
+            if (v == "off" || v == "auto" || v == "bc" || v == "astc") o.textureCompression = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--texture-dir", v)) {
+            if (!v.empty()) o.textureDir = v;
+            else unknown.push_back(a);
+        }
         else if (valueOf(a, "--write-root", v)) {
             if (!v.empty()) o.writeRoot = v;
             else unknown.push_back(a);

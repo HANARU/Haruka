@@ -7,12 +7,15 @@
 //   HarukaPak shader-manifest -o <out.inc> <.spv | 폴더>...    엔진에 넣을 셰이더 목록(경로 · 내용 해시)을 씁니다(DEF-149)
 //   HarukaPak refs <프로젝트> [에셋 | 폴더] [--check]          에셋 참조: 누가 쓰는지 · 끊긴 참조(참조 체계 A-4)
 //   HarukaPak move-asset <프로젝트> <옛 경로> <새 경로> [--dry-run]  참조를 고쳐 쓰며 에셋을 옮깁니다(참조 체계 A-4)
+//   HarukaPak cook-textures <프로젝트> <bc|astc> <폴더> [/Game/모델 ...]  모델 텍스처를 KTX2 로 압축만 합니다(Docs/Texture_Compression.md D6)
 //
 // 목록 파일(Packaging/game.pack.txt)은 한 줄에 명령 하나입니다. '#' 은 주석이고 ${이름} 은 -D 값으로 바꿉니다.
 //   map <폴더> <논리 접두어>   폴더 아래 모든 파일을 "<접두어>/<상대 경로>" 로 넣습니다
 //   exclude <패턴>...          넣지 않을 논리 경로
 //   stored <패턴>...           압축하지 않고 그대로 저장(이미 압축된 형식). 나머지는 LZ4
 //   text <패턴>...             줄 끝을 LF 로 바꿔 넣음(체크아웃마다 CRLF/LF 가 달라도 같은 묶음이 나옴)
+//   textures <off|bc|astc> <캐시 폴더> <모델 패턴>...  묶는 모델의 텍스처를 압축해 textures/<대상>/<열쇠>.ktx2 로 함께 넣음
+//                              (Docs/Texture_Compression.md D6). 압축 결과는 캐시 폴더에 남겨 다음 묶음에 다시 씀
 // 패턴: '*' 는 '/' 를 뺀 아무 글자, '**' 는 '/' 를 포함한 아무 글자, '?' 는 한 글자. '/' 가 없는 패턴은 파일 이름에만
 // 맞춥니다. 비교는 ASCII 대소문자를 무시합니다(PakGlob.hpp).
 //
@@ -26,7 +29,10 @@
 #include "PakGlob.hpp"
 #include "../core/HTextGather.hpp"
 #include "../core/AssetRefs.hpp"
+#include "../vfs/Vfs.hpp"
+#include "TextureCook.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -49,6 +55,7 @@ int cmdGatherText(int argc, char** argv);
 // refs · move-asset(참조 체계 A-4, Docs/Object_References.md).
 int cmdRefs(int argc, char** argv);
 int cmdMoveAsset(int argc, char** argv);
+int cmdCookTextures(int argc, char** argv);
 
 int usage() {
     std::fprintf(stderr,
@@ -60,7 +67,8 @@ int usage() {
         "  HarukaPak shader-manifest -o <out.inc> <file.spv | folder>...\n"
         "  HarukaPak gather-text -o <out.pot> <source folder>...\n"
         "  HarukaPak refs <project folder> [/Game/asset-or-folder] [--check]\n"
-        "  HarukaPak move-asset <project folder> <from> <to> [--dry-run]\n");
+        "  HarukaPak move-asset <project folder> <from> <to> [--dry-run]\n"
+        "  HarukaPak cook-textures <project folder> <bc|astc> <out folder> [/Game/model ...]\n");
     return 2;
 }
 
@@ -119,6 +127,57 @@ void toLf(std::vector<uint8_t>& d) {
     d.swap(o);
 }
 
+ImportSettingsTable readImportTable() {
+    std::string text;
+    if (!hvfs::readText(ImportSettingsTable::kPath, text)) return {};
+    std::vector<std::string> messages;
+    ImportSettingsTable t = ImportSettingsTable::parse(text, messages);
+    for (const auto& m : messages) std::fprintf(stderr, "warning: %s: %s\n", ImportSettingsTable::kPath, m.c_str());
+    return t;
+}
+
+void printCookStats(const char* what, htex::Target target, const htexcook::Stats& st) {
+    const double mb = 1.0 / (1024.0 * 1024.0);
+    std::printf("HarukaPak: %s %s: %d textures from %d models (%d encoded, %d cached, %d too small), RGBA8 %.2f MB -> %.2f MB "
+                "(%.1f%%), %.1f s\n",
+                what, htex::targetName(target), st.textures, st.models, st.encoded, st.cached, st.small, st.rgbaBytes * mb,
+                st.ktxBytes * mb, st.rgbaBytes ? 100.0 * (double)st.ktxBytes / (double)st.rgbaBytes : 100.0, st.seconds);
+}
+
+// 묶음 입력 중 패턴에 맞는 모델의 텍스처를 압축해 입력에 더합니다. 모델을 읽지 못하면 경고만 합니다(런타임도 그 모델은 기본
+// 상자로 대신하고, 텍스처는 원본으로 감). 압축이 실패하면 묶음을 만들지 않습니다.
+bool cookPackTextures(std::vector<hpak::PakInput>& inputs, htex::Target target, const fs::path& cache,
+                      const std::vector<std::string>& patterns) {
+    const ImportSettingsTable table = readImportTable();
+    std::vector<std::string> models;
+    for (const auto& in : inputs)
+        if (anyMatch(patterns, in.path)) models.push_back(in.path);
+    htexcook::Stats st;
+    std::vector<htexcook::Output> outs;
+    std::vector<std::string> seen;
+    for (const std::string& m : models) {
+        std::string err;
+        const int failedBefore = st.failedModels;
+        if (!htexcook::cookModel(m, table.resolve(m), target, cache, outs, seen, st, err)) {
+            if (st.failedModels > failedBefore) {
+                std::fprintf(stderr, "warning: %s: cannot read the model (%s); its textures stay uncompressed\n", m.c_str(), err.c_str());
+                continue;
+            }
+            std::fprintf(stderr, "error: texture compression: %s\n", err.c_str());
+            return false;
+        }
+    }
+    for (auto& o : outs) {
+        hpak::PakInput in;
+        in.path  = o.logicalPath;
+        in.data  = std::move(o.bytes);
+        in.codec = hpak::Codec::Stored;   // 블록 압축은 LZ4 로 거의 줄지 않습니다
+        inputs.push_back(std::move(in));
+    }
+    printCookStats("textures", target, st);
+    return true;
+}
+
 int cmdBuild(int argc, char** argv) {
     std::string manifest, outPath;
     std::map<std::string, std::string> vars;
@@ -140,6 +199,8 @@ int cmdBuild(int argc, char** argv) {
     if (!mf) { std::fprintf(stderr, "error: cannot open %s\n", manifest.c_str()); return 1; }
     std::vector<std::pair<fs::path, std::string>> maps;
     std::vector<std::string> excludes, storedPats, textPats;
+    struct TexturesLine { htex::Target target = htex::Target::Off; fs::path cache; std::vector<std::string> patterns; };
+    std::vector<TexturesLine> textureLines;
     std::string line;
     int lineNo = 0;
     while (std::getline(mf, line)) {
@@ -162,6 +223,16 @@ int cmdBuild(int argc, char** argv) {
         else if (cmd == "exclude" && t.size() >= 2) excludes.insert(excludes.end(), t.begin() + 1, t.end());
         else if (cmd == "stored"  && t.size() >= 2) storedPats.insert(storedPats.end(), t.begin() + 1, t.end());
         else if (cmd == "text"    && t.size() >= 2) textPats.insert(textPats.end(), t.begin() + 1, t.end());
+        else if (cmd == "textures" && t.size() >= 4) {
+            TexturesLine tl;
+            if (!htex::parseTarget(t[1], tl.target)) {
+                std::fprintf(stderr, "%s:%d: texture target must be off, bc or astc: %s\n", manifest.c_str(), lineNo, t[1].c_str());
+                return 1;
+            }
+            if (!pathFromUtf8(t[2], tl.cache)) { std::fprintf(stderr, "%s:%d: cache folder is not valid UTF-8\n", manifest.c_str(), lineNo); return 1; }
+            tl.patterns.assign(t.begin() + 3, t.end());
+            textureLines.push_back(std::move(tl));
+        }
         else { std::fprintf(stderr, "%s:%d: unknown or malformed line: %s\n", manifest.c_str(), lineNo, line.c_str()); return 1; }
     }
 
@@ -191,6 +262,19 @@ int cmdBuild(int argc, char** argv) {
             inputs.push_back(std::move(in));
         }
         if (ec) { std::fprintf(stderr, "error: cannot list %s: %s\n", utf8Of(dir).c_str(), ec.message().c_str()); return 1; }
+    }
+
+    // 텍스처 압축(Docs/Texture_Compression.md D6): 묶는 모델을 런타임과 같은 로더로 읽어 KTX2 를 만들어 함께 넣습니다. 모델과
+    // 외부 텍스처 · 가져오기 설정을 찾으려고 '/' 로 시작하는 map 폴더를 가상 경로로 마운트합니다.
+    for (const TexturesLine& tl : textureLines) {
+        if (tl.target == htex::Target::Off) continue;
+        hvfs::reset();
+        for (const auto& [dir, prefixRaw] : maps) {
+            std::string prefix = prefixRaw;
+            while (!prefix.empty() && prefix.back() == '/') prefix.pop_back();
+            if (!prefix.empty() && prefix[0] == '/') hvfs::mountDirectoryAs(dir, prefix + "/", 0);
+        }
+        if (!cookPackTextures(inputs, tl.target, tl.cache, tl.patterns)) return 1;
     }
 
     // 임시 파일에 다 쓴 뒤 바꿉니다(쓰다 실패해도 옛 묶음이 남음).
@@ -361,6 +445,7 @@ int main(int argc, char** argv) {
         if (cmd == "gather-text") return cmdGatherText(argc, argv);
         if (cmd == "refs") return cmdRefs(argc, argv);
         if (cmd == "move-asset") return cmdMoveAsset(argc, argv);
+        if (cmd == "cook-textures") return cmdCookTextures(argc, argv);
         return usage();
     } catch (const std::exception& e) {
         std::fprintf(stderr, "error: %s\n", e.what());
@@ -440,6 +525,50 @@ int cmdRefs(int argc, char** argv) {
     std::printf("%zu file(s), %zu reference(s), %zu missing\n", idx.assets.size(), idx.refs.size(), miss.size());
     for (const auto& r : miss) printRef(r);
     return check && !miss.empty() ? 1 : 0;
+}
+
+// cook-textures: 묶음 없이 프로젝트 모델의 텍스처를 압축합니다(개발 · 측정). 결과 폴더는 캐시이기도 하고, 게임 실행 파일의
+// --texture-dir=<폴더> 로 마운트합니다. 모델을 주지 않으면 Content 아래 모든 .glb · .gltf(cache · _reference 폴더 제외).
+int cmdCookTextures(int argc, char** argv) {
+    if (argc < 5) return usage();
+    fs::path proj, outDir;
+    if (!pathFromUtf8(argv[2], proj) || !pathFromUtf8(argv[4], outDir)) return usage();
+    htex::Target target = htex::Target::Off;
+    if (!htex::parseTarget(argv[3], target) || target == htex::Target::Off) return usage();
+    std::error_code ec;
+    if (!fs::is_directory(proj / "Content", ec)) { std::fprintf(stderr, "error: no Content folder in %s\n", argv[2]); return 1; }
+    hvfs::reset();
+    hvfs::mountDirectoryAs(proj / "Content", "/Game/", 0);
+    if (fs::is_directory(proj / "Config", ec)) hvfs::mountDirectoryAs(proj / "Config", "/Config/", 0);
+    std::vector<std::string> models;
+    for (int i = 5; i < argc; ++i) models.push_back(argv[i]);
+    if (models.empty()) {
+        const fs::path content = proj / "Content";
+        for (auto it = fs::recursive_directory_iterator(content, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            const std::string rel = utf8Of(fs::relative(it->path(), content, ec));
+            if (it->is_directory(ec)) {
+                const std::string name = utf8Of(it->path().filename());
+                if (name == "cache" || name == "_reference" || (!name.empty() && name[0] == '.')) it.disable_recursion_pending();
+                continue;
+            }
+            if (anyMatch({ "*.glb", "*.gltf" }, rel)) models.push_back("/Game/" + rel);
+        }
+        std::sort(models.begin(), models.end());
+    }
+    const ImportSettingsTable table = readImportTable();
+    htexcook::Stats st;
+    std::vector<htexcook::Output> outs;
+    std::vector<std::string> seen;
+    int rc = 0;
+    for (const std::string& m : models) {
+        std::string err;
+        if (!htexcook::cookModel(m, table.resolve(m), target, outDir, outs, seen, st, err)) {
+            std::fprintf(stderr, "error: %s: %s\n", m.c_str(), err.c_str());
+            rc = 1;
+        }
+    }
+    printCookStats("cook-textures", target, st);
+    return rc;
 }
 
 int cmdMoveAsset(int argc, char** argv) {

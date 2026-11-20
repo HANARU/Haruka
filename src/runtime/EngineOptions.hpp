@@ -47,6 +47,10 @@ struct EngineOptions {
     // render.ao. 진단용이라 프로젝트 설정을 덮어씁니다.
     std::optional<bool> ssao;
     bool                autoLod = true;  // --no-auto-lod : glTF 자동 LOD 를 컴포넌트에 배정하지 않음(O13 검증용)
+    // --texture-compression=off|auto|bc|astc : 미리 압축한 텍스처(KTX2)를 쓸 대상(Docs/Texture_Compression.md D8). 빈 값 = auto
+    // (게임 묶음을 마운트한 창 있는 게임 실행 파일만 플랫폼 대상, 그 밖은 off).
+    std::string         textureCompression;
+    std::string         textureDir;      // --texture-dir=<폴더> : HarukaPak cook-textures 결과를 textures/ 로 마운트(개발 · 측정)
 
     // ── 에디터 UI 회귀 덤프 (S6-0, 2026-11-19, 에디터 전용) ──────────────────────────────────────
     bool        hiddenWindow = false;    // --hidden-window : OS 창을 숨긴 채 생성(보이는 창 없음)

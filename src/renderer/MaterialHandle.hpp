@@ -8,6 +8,10 @@ struct TexSlot {
     HarukaAllocation alloc;
     // 여러 머티리얼이 함께 쓰는 기본값 1x1 텍스처(2026-11-18, 성능 안정화 1-6). 머티리얼을 지울 때 놓지 않고 GpuScene 이 지웁니다.
     bool             shared    = false;
+    // 텍스처 메모리 집계(Docs/Texture_Compression.md D12): 올린 데이터 바이트 · 같은 텍스처를 RGBA8 + 밉으로 올렸을 때 · 압축 여부.
+    uint64_t         statBytes = 0;
+    uint64_t         statRgba  = 0;
+    bool             compressed = false;
 };
 
 // PBR material: 5 texture slots (albedo, normal, metalRough, AO, emissive)

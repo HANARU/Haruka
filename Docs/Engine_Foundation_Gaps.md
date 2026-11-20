@@ -19,7 +19,7 @@
 | 4 | 게임플레이 기본 도구 · CVar · 콘솔 | **2026-11-20 구현**: 시간 배율 · 타이머 · 태그 · 이벤트 버스 · 물리 뒤 틱 · CVar · 에디터 콘솔 줄 | (남음) 헤드셋 안 콘솔 · 스크립트 계층 | [Gameplay_Tools.md](Gameplay_Tools.md) |
 | 5 | CPU 구간 계측 | **2026-11-20 구현**: 이름 붙인 중첩 스코프 · 스레드별 기록 · Chrome `trace.json` · 명령줄 · 콘솔 | (남음) 에디터 CPU 스코프 표 · Android 추적 파일 꺼내기 · 헤드셋 실측 | [CPU_Profiling.md](CPU_Profiling.md) |
 | 6 | 파티클 · VFX · 데칼 | **2026-11-20 구현**: CPU 이미터(결정적 시드) · 빌보드 인스턴싱(가산 · 알파, 이미터끼리 + 이미터 안 정렬) · 포워드 상자 데칼 | (남음) 텍스처 파일 · Sub UV · 메시 파티클 · 조명 받는 파티클 · 데칼 텍스처 · 에디터 미리보기, Quest 오버드로 실측 | [Particles_And_Decals.md](Particles_And_Decals.md) |
-| 7 | 텍스처 압축 | RGBA8 비압축 | KTX2 · ASTC(Quest) · BCn(PC) | |
+| 7 | 텍스처 압축 | **2026-11-21 구현**: 묶을 때 BC(PC) · ASTC(Android) KTX2 압축(밉 미리 생성 · 내용 열쇠 캐시), 런타임 KTX2 읽기 · 장치 지원 확인 · RGBA8 원본 대체, 블릿 없는 단계별 업로드, 텍스처 메모리 로그 | (남음) 헤드셋 ASTC 실행 · 가져오기 설정의 텍스처별 압축 · 에디터 압축 미리보기 | [Texture_Compression.md](Texture_Compression.md) |
 | 8 | 물리 조인트 · 충돌 이벤트 | **2026-11-20 구현**: 충돌 레이어 표 · 트리거 · 접촉 알림 · 조인트 네 종류 · 셰이프 캐스트 | (남음) 조인트 모터 · 스프링 · 끊어짐, 레이어 표 편집 화면 | [Physics_Joints_And_Events.md](Physics_Joints_And_Events.md) |
 | 9 | 링크된 프리팹 | 꺼내면 복사 | 인스턴스 링크 · 덮어쓰기 · 중첩 | |
 | 10 | 입력 확장 | **2026-11-21 구현**: 데스크톱 게임패드(GLFW 표준 매핑) · 축 수정자(데드존 · 곡선 · 감도 · 반전) · 입력 컨텍스트(우선순위 · 소스 단위 소비) · 사용자 재지정(충돌 목록 · 바뀐 것만 저장) | (남음) 실제 패드 확인 · 패드 진동 · 패드 시선 · 재지정 UI | [Input_Extensions.md](Input_Extensions.md) |
@@ -136,7 +136,12 @@
 - **현재 상태:** RGBA8 sRGB 비압축 업로드, 밉은 업로드 때 블릿(`MipChain.hpp` 에 "ASTC · KTX2 를 들일 때 옮김").
 - **부족한 점:** KTX2(Basis 또는 미리 압축한 ASTC · BCn) 읽기, 묶음 단계의 오프라인 압축, 장치 지원 확인.
 - **의존 관계:** 업로드 경로가 비동기 로딩(2위)과 같습니다. 1GB 힙과 Quest 대역폭 예산에 직접 걸립니다.
-- **검증 체크리스트:** PC BCn · Quest ASTC 각각 메모리 사용량 감소 비율, 기준 PNG 의 PSNR 하한, 지원하지 않는 장치의 대체 경로.
+- **검증 체크리스트:**
+  - [x] PC BCn · Quest ASTC 각각 메모리 사용량 감소 비율(TexProbe 4장 밉 포함 3.33 MB → BC 25.0% · ASTC 13.3%).
+  - [x] 압축 경로 PNG 의 PSNR(TextureProbe 1024², BC 40.05 dB), 텍스처별 하한은 시험이 지킴. 기준 PNG 7장은 그대로(압축은 기본 꺼짐).
+  - [x] 지원하지 않는 장치의 대체 경로(이 PC 에서 ASTC → RGBA8 원본, 원본과 같은 PNG).
+  - [ ] Quest 에서 ASTC 경로 실행(헤드셋 확인 목록에 남김).
+  - (2026-11-21, [Texture_Compression.md](Texture_Compression.md) 4절)
 
 ### 3-8. 물리 조인트 · 충돌 이벤트 (8위)
 
@@ -214,6 +219,7 @@
 
 | 날짜 | 후보 | 상태 |
 |---|---|---|
+| 2026-11-21 | 7 텍스처 압축 | 끝([Texture_Compression.md](Texture_Compression.md)): HarukaPak 이 묶는 모델을 런타임과 같은 glTF 로더로 읽어 텍스처를 KTX2 로 압축(색 BC7 sRGB / ASTC 6x6, 노멀 BC5 / ASTC 5x5 RG01 + 셰이더 Z 복원, 선형 BC7 / ASTC 6x6, 밉 미리 생성)하고 `textures/<대상>/<열쇠>.ktx2` 로 함께 넣습니다(Windows = bc, Android = astc, 최종 화소 XXH3 열쇠 캐시). 엔진은 워커에서 KTX2 를 붙이고, 그 실행의 대상이 쓰는 압축 기능만 켜며, 형식을 샘플링할 수 없으면 RGBA8 원본으로 올립니다. 압축은 묶은 창 게임의 auto 또는 `--texture-compression` 으로만 켜져 기준 PNG 그대로. 외부 라이브러리 astc-encoder 5.7.1 · bc7enc_rdo(HarukaPak · 시험 전용). TexProbe 4장 3.33 MB → BC 25% · ASTC 13.3%, TextureProbe PNG PSNR 40.05 dB. 시험 72 검사 + 장치 계획 4 |
 | 2026-11-21 | 14 접근성 | 끝([Accessibility.md](Accessibility.md)): 자막 큐 `SubtitleQueue`(최대 줄 수 · 우선순위 · 같은 id · 글자 수 표시 시간) 와 표시 `SubtitlePanel`(3D UI 패널 경로, XR 머리 고정 시선 아래 · 데스크톱 화면 아래, 배경 불투명도 · 크기), `AudioComponent` 자막 칸 · 콘솔 `subtitle.say`, 글자 배율 `access.textScale`(패널 트리 다시 만듦), 후처리 비네트 `comfort.vignette`(이동 컴포넌트가 속도를 알림) · 색약 보정 `access.colorFilter`, 앉은 자세 `comfort.seated` · `comfort.standingHeight` · `comfort.recenterSeated`, 한 손 조작 `access.hand`(스틱 맞바꿈 · 텔레포트 손), 시험 `accessibility` 111. 검사 3,253 → 3,364, 기준 PNG · UI 덤프 같음. 남음: 헤드셋 확인 · 자막 깊이 무시 · 큰 대비 테마 · 설정 화면 |
 | 2026-11-21 | 10 입력 확장 | 끝([Input_Extensions.md](Input_Extensions.md)): 플랫폼 층 `HGamepadState` · `IWindow::readGamepad`(GLFW 표준 매핑, 쓰던 패드 유지 · 없으면 번호가 가장 작은 패드, 연결 · 해제 로그), `pad:` 동작 · 축 소스, `input.mod.*` 수정자(패드 기본 원형 데드존 0.15, XR 은 그대로), `input.context.*` 컨텍스트와 `pushContext` · `popContext`(위 컨텍스트가 매핑한 소스는 아래로 가지 않음, `blockLower`), `rebind` · `resetBinding` · `resetAllBindings` · 충돌 목록, 덮어쓰기 규칙을 `HInputSystem::applyUserOverrides` 로 옮김. 검사 3,175 → 3,253, 기준 PNG · UI 덤프 같음. 남음: 실제 패드 확인 · 패드 진동 · 패드 시선 · 재지정 UI |
 | 2026-11-21 | 12 오디오 버스 그래프 · 사운드 큐 | 끝([Audio_Design.md](Audio_Design.md) 12절): 버스마다 passthrough 노드(게인 1 이면 손대지 않음, sfx 를 입력 목록 맨 앞에), 부모 버스 · 음소거 · 출력 피크 미터, FMOD 식 우선순위 스냅숏, 신호 기준 더킹(공격 · 유지 · 해제), 앞보기 없는 피크 리미터(기본 끔, 켤 때만 사슬에 넣어 바이트 동일 유지), 사운드 큐 `.hcue`(가중치 랜덤 · splitmix64 시드 · 피치 · 볼륨 범위 · stopOldest/rejectNew · 재시작 간격), CVar · 콘솔 `audio.*`, 시험 `audio_mix` 86. 귀 확인 · 루프백 실측 · 믹서 패널이 남음 |

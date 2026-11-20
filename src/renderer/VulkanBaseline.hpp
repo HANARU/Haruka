@@ -56,6 +56,8 @@ struct DeviceCaps {
     bool         featStorageImageMultisample = false;
     bool         featDepthBiasClamp          = false;   // 섀도 경사 바이어스 상한(ShadowPass)
     bool         featDepthClamp              = false;   // 섀도 캐스터 pancaking(ShadowPass, ShadowFit.hpp)
+    bool         featTextureCompressionBC    = false;   // 미리 압축한 BC 텍스처(Docs/Texture_Compression.md D10)
+    bool         featTextureCompressionASTC  = false;   // textureCompressionASTC_LDR(Quest)
     bool         featMultiview               = false;   // VkPhysicalDeviceMultiviewFeatures::multiview(1.1 코어)
     uint32_t     maxMultiviewViewCount       = 0;       // VkPhysicalDeviceMultiviewProperties(규격 최솟값 6)
     uint32_t     maxPushDescriptors          = 0;       // 로그용(규격 최솟값 32)
@@ -71,6 +73,8 @@ struct DevicePlan {
     bool                     storageImageMultisample = false;
     bool                     depthBiasClamp          = false;
     bool                     depthClamp              = false;
+    bool                     textureCompressionBC    = false;   // 없으면 끄고 RGBA8 원본(D10)
+    bool                     textureCompressionASTC  = false;
     bool                     multiview               = false;   // 맞는 장치면 늘 참(필수 기능)
 };
 
@@ -79,7 +83,9 @@ inline constexpr uint32_t kMultiviewViews = 2;
 
 // needSwapchain 은 창이 표면을 줄 때만 참입니다(창 없는 경로 · Quest 는 거짓). forceNoSync2 는 1.0 배리어 경로를
 // PC 에서 시험하는 명령줄 스위치(--vk-no-sync2)입니다.
-inline DevicePlan planDevice(const DeviceCaps& caps, bool needSwapchain, bool xrDevice, bool forceNoSync2 = false) {
+// wantBC · wantASTC 는 그 실행의 텍스처 압축 대상이 쓰는 기능입니다(Docs/Texture_Compression.md D10). 쓰지 않는 기능은 켜지 않습니다.
+inline DevicePlan planDevice(const DeviceCaps& caps, bool needSwapchain, bool xrDevice, bool forceNoSync2 = false,
+                             bool wantBC = false, bool wantASTC = false) {
     DevicePlan p;
     auto reject = [&](const std::string& why) {
         if (!p.whyNot.empty()) p.whyNot += "; ";
@@ -104,6 +110,9 @@ inline DevicePlan planDevice(const DeviceCaps& caps, bool needSwapchain, bool xr
     p.depthBiasClamp          = caps.featDepthBiasClamp;
     // 없으면 거부하지 않고 끕니다. 섀도 투영의 near 를 빛 쪽으로 늘려 대신합니다(ShadowFit.hpp).
     p.depthClamp              = caps.featDepthClamp;
+    // 없으면 거부하지 않고 끕니다. 미리 압축한 텍스처 대신 RGBA8 원본을 올립니다(Docs/Texture_Compression.md D10).
+    p.textureCompressionBC    = wantBC && caps.featTextureCompressionBC;
+    p.textureCompressionASTC  = wantASTC && caps.featTextureCompressionASTC;
     return p;
 }
 
@@ -121,6 +130,8 @@ inline const void* buildFeatureChain(const DevicePlan& plan, FeatureChain& out) 
     out.core.shaderStorageImageMultisample = plan.storageImageMultisample ? VK_TRUE : VK_FALSE;
     out.core.depthBiasClamp                = plan.depthBiasClamp ? VK_TRUE : VK_FALSE;
     out.core.depthClamp                    = plan.depthClamp ? VK_TRUE : VK_FALSE;
+    out.core.textureCompressionBC          = plan.textureCompressionBC ? VK_TRUE : VK_FALSE;
+    out.core.textureCompressionASTC_LDR    = plan.textureCompressionASTC ? VK_TRUE : VK_FALSE;
     const void* head = nullptr;
     if (plan.sync2) {
         out.sync2.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR;

@@ -260,7 +260,11 @@ void main() {
     vec3  albedo    = albedoA.rgb;
     float alpha     = albedoA.a;
 
-    vec3  nrmTex    = texture(normalMap, fragUV).rgb * 2.0 - 1.0;
+    vec3  nrmRaw    = texture(normalMap, fragUV).rgb;
+    vec3  nrmTex    = nrmRaw * 2.0 - 1.0;
+    // 두 채널 노멀 맵(BC5 · ASTC RG01, Docs/Texture_Compression.md D2)은 B 가 0 으로 읽힙니다. 접공간 노멀의 B 바이트 0 은
+    // Z = -1(표면 안쪽)이라 RGBA8 노멀 맵에는 나오지 않으므로, B 가 0 이면 X · Y 로 Z 를 복원합니다.
+    if (nrmRaw.b < 0.5 / 255.0) nrmTex.z = sqrt(max(1.0 - dot(nrmTex.xy, nrmTex.xy), 0.0));
     mat3  TBN       = mat3(fragT, fragB, fragN);
     vec3  N         = normalize(TBN * nrmTex);
 

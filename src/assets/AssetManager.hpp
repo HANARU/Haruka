@@ -9,6 +9,7 @@
 
 #include "../geometry/PrimitiveDesc.hpp"
 #include "ImportSettings.hpp"
+#include "TextureCompression.hpp"
 
 struct MeshHandle;
 struct MaterialHandle;
@@ -58,6 +59,9 @@ public:
     // ── 비동기 읽기 (2026-11-20, Docs/Async_Loading.md D1 · D2) ─────────────────────────────
     // 워커 스레드 수를 정합니다(처음 requestLoad 전에, 기본 2 · Android 1). 0 이면 비동기 요청도 동기로 읽습니다.
     void   setStreamWorkers(int n) { streamWorkers_ = n; }
+    // 미리 압축한 텍스처(KTX2)를 찾을 대상(Docs/Texture_Compression.md D8 · D9). 기본 Off(RGBA8 원본만).
+    void   setTextureTarget(htex::Target t);
+    htex::Target textureTarget() const { return texTarget_; }
     // 백그라운드 읽기를 요청합니다. 이미 올라가 있으면 true(바로 쓸 수 있음), 아니면 false(요청함 · 진행 중).
     bool   requestLoad(const std::string& path);
     bool   isReady(const std::string& path) const;
@@ -126,6 +130,9 @@ private:
     int       streamWorkers_ = 2;
     std::unique_ptr<AssetStreamer> streamer_;
     bool      autoLod_ = true;
+    htex::Target texTarget_ = htex::Target::Off;
+    uint32_t  lastLoggedTextures_ = 0;
+    void      logTextureMemory(const std::string& key);
     std::unordered_map<std::string, std::vector<AssetPair>> cache;
     std::unordered_map<std::string, MaterialHandle*>        primMaterials;
     ImportSettingsTable importTable_;

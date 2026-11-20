@@ -88,6 +88,13 @@ public:
     uint32_t       memTypeIndex()  const { return memType;     }
     VkDeviceSize   allocatedSize() const { return heapSize;    }
 
+    // Zone B 에서 지금 잡혀 있는 바이트(빈 목록 합의 나머지, 정렬 틈 포함). 텍스처 메모리 로그(Docs/Texture_Compression.md D12)가 씁니다.
+    VkDeviceSize zoneBUsed() const {
+        VkDeviceSize freeBytes = 0;
+        for (const FreeBlock& b : freeListB) freeBytes += b.size;
+        return freeBytes <= kZoneBSize ? kZoneBSize - freeBytes : 0;
+    }
+
     AllocStats getStats() const {
         return {
             cursorA  - kZoneAOffset, kZoneASize,

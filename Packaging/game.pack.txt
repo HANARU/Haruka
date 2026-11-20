@@ -7,6 +7,9 @@
 #   exclude <pattern>...            logical paths to leave out
 #   stored <pattern>...             keep as is (already compressed formats); everything else is LZ4
 #   text <pattern>...               convert CRLF to LF before packing, so every checkout gives the same pack
+#   textures <off|bc|astc> <cache> <model pattern>...   compress the textures of the packed models to KTX2 and add them
+#                                   as textures/<target>/<key>.ktx2 (Docs/Texture_Compression.md D6). Results are kept in
+#                                   <cache> and reused by the next pack.
 # Patterns: * = any characters except '/', ** = any characters including '/', ? = one character.
 # A pattern without '/' is matched against the file name only. Letter case is ignored.
 
@@ -27,6 +30,10 @@ exclude /Engine/Localization/*.pot /Engine/Editor/**
 
 # Local-only test assets on this machine (2026-11-06, also in .gitignore). Never ship them.
 exclude /Game/models/_reference/** /Game/scenes/_reference/**
+
+# Pre-compressed textures (2026-11-21): BC for the Windows pack, ASTC for the Android pack (TEXTURE_TARGET comes from
+# cmake/HarukaProject.cmake). The original images stay in the models; the game uses them when the device lacks the format.
+textures ${TEXTURE_TARGET} ${TEXTURE_CACHE} *.glb *.gltf
 
 stored *.ogg *.mp3 *.flac *.opus *.wav *.png *.jpg *.jpeg *.ktx2 *.basis *.webp *.zip
 text *.hscene *.hprefab *.ini *.txt *.po *.svg

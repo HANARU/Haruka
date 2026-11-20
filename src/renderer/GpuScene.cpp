@@ -1,5 +1,7 @@
 #include "GpuScene.hpp"
 #include "MipChain.hpp"
+#include "TextureUpload.hpp"
+#include "../geometry/Ktx2.hpp"
 #include "RendererLog.hpp"
 #include "RenderTypes.hpp"
 #include "../geometry/MeshSource.hpp"
@@ -386,6 +388,82 @@ TexSlot GpuScene::recordTextureUpload(VkCommandBuffer cmd, const uint8_t* pixels
     return slot;
 }
 
+bool GpuScene::canSampleCompressed(VkFormat fmt) {
+    for (const auto& s : sampleSupport_)
+        if (s.fmt == fmt) return s.ok;
+    VkFormatProperties fp{};
+    vkGetPhysicalDeviceFormatProperties(rc_->physDev, fmt, &fp);
+    const bool ok = htexup::canSample((uint32_t)fmt, rc_->texCompressionBC, rc_->texCompressionASTC, fp.optimalTilingFeatures);
+    sampleSupport_.push_back({ fmt, ok });
+    // 형식마다 한 번 남깁니다. 지원하지 않으면 묶음의 KTX2 를 버리고 RGBA8 원본을 올립니다(D10).
+    if (ok) HLOG(LogRenderer, Log)     << "Texture compression: " << hktx2::formatName((uint32_t)fmt) << " uploaded as is";
+    else    HLOG(LogRenderer, Warning) << "Texture compression: this device cannot sample "
+                                       << hktx2::formatName((uint32_t)fmt) << "; using the RGBA8 originals";
+    return ok;
+}
+
+void GpuScene::countTexture(TexSlot& slot, uint64_t bytes, uint64_t rgbaBytes, bool compressed) {
+    slot.statBytes  = bytes;
+    slot.statRgba   = rgbaBytes;
+    slot.compressed = compressed;
+    texStats_.textures   += 1;
+    texStats_.compressed += compressed ? 1u : 0u;
+    texStats_.bytes      += bytes;
+    texStats_.rgbaBytes  += rgbaBytes;
+}
+
+TexSlot GpuScene::recordCompressedUpload(VkCommandBuffer cmd, const hktx2::Image& img, std::vector<Staging>& staging) {
+    TexSlot slot;
+    const VkFormat fmt    = (VkFormat)img.vkFormat;
+    const uint32_t levels = (uint32_t)img.levels.size();
+    // 스테이징에는 단계 데이터만 가장 큰 밉부터 붙여 넣습니다. KTX2 의 단계는 16바이트 정렬이고 각 길이가 블록 크기(16)의
+    // 배수라, 이어 붙인 오프셋도 블록 크기 · 4 의 배수(vkCmdCopyBufferToImage 규칙)입니다.
+    VkDeviceSize total = 0;
+    for (const auto& l : img.levels) total += l.length;
+
+    VkBufferCreateInfo sbi{};
+    sbi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    sbi.size  = total; sbi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    sbi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBuffer stagingBuf;
+    if (vkCreateBuffer(rc_->device, &sbi, nullptr, &stagingBuf) != VK_SUCCESS)
+        throw std::runtime_error("uploadTexture: staging buffer failed!");
+    VkMemoryRequirements sreqs;
+    vkGetBufferMemoryRequirements(rc_->device, stagingBuf, &sreqs);
+    auto stagingAlloc = rc_->allocator->allocB(sreqs);
+    if (!stagingAlloc.isValid()) throw std::runtime_error("Zone B: staging alloc failed!");
+    rc_->allocator->bind(stagingBuf, stagingAlloc);
+    staging.push_back({ stagingBuf, stagingAlloc });
+
+    std::vector<VkBufferImageCopy> regions(levels);
+    VkDeviceSize at = 0;
+    for (uint32_t i = 0; i < levels; ++i) {
+        std::memcpy(static_cast<uint8_t*>(stagingAlloc.mappedPtr) + at, img.levelData(i), (size_t)img.levels[i].length);
+        VkBufferImageCopy& r = regions[i];
+        r = {};
+        r.bufferOffset     = at;
+        r.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1 };
+        r.imageExtent      = { hmip::extent(img.width, i), hmip::extent(img.height, i), 1 };
+        at += img.levels[i].length;
+    }
+
+    slot.image = rc_->createImage((int)img.width, (int)img.height, levels, 1, VK_SAMPLE_COUNT_1_BIT,
+        fmt, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, slot.alloc);
+    rc_->transitionImage(cmd, slot.image,
+        VK_IMAGE_LAYOUT_UNDEFINED,            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_PIPELINE_STAGE_2_NONE,             VK_ACCESS_2_NONE,
+        VK_PIPELINE_STAGE_2_COPY_BIT,         VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT, levels);
+    vkCmdCopyBufferToImage(cmd, stagingBuf, slot.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, levels, regions.data());
+    rc_->transitionImage(cmd, slot.image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_PIPELINE_STAGE_2_COPY_BIT,         VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT, levels);
+    slot.imageView = rc_->createImageView(slot.image, fmt, VK_IMAGE_ASPECT_COLOR_BIT, levels, 1);
+    return slot;
+}
+
 bool GpuScene::canBlitMips(VkFormat fmt) {
     for (const auto& s : blitSupport_)
         if (s.fmt == fmt) return s.ok;
@@ -402,6 +480,12 @@ bool GpuScene::canBlitMips(VkFormat fmt) {
 
 void GpuScene::freeTexSlot(TexSlot slot) {
     if (slot.shared) return;   // 기본값 1x1(fallback_)은 destroy 가 지움
+    if (slot.statBytes || slot.statRgba) {
+        texStats_.textures   -= texStats_.textures ? 1u : 0u;
+        texStats_.compressed -= (slot.compressed && texStats_.compressed) ? 1u : 0u;
+        texStats_.bytes      -= std::min(texStats_.bytes, slot.statBytes);
+        texStats_.rgbaBytes  -= std::min(texStats_.rgbaBytes, slot.statRgba);
+    }
     if (slot.imageView) { vkDestroyImageView(rc_->device, slot.imageView, nullptr); slot.imageView = VK_NULL_HANDLE; }
     if (slot.image)     { vkDestroyImage(rc_->device, slot.image, nullptr);         slot.image     = VK_NULL_HANDLE; }
     if (slot.alloc.isValid()) { rc_->allocator->freeB(slot.alloc); slot.alloc = {}; }
@@ -434,10 +518,22 @@ MaterialHandle* GpuScene::uploadMaterial(
         for (TexSlot& t : fallback_) t.shared = true;
         fallbackReady_ = true;
     }
+    // 미리 압축한 KTX2 가 붙어 있고 장치가 그 형식을 샘플링하면 그대로, 아니면 RGBA8 원본(블릿 밉)을 올립니다(D10).
     auto upload = [&](const TexSourceData& tex, FallbackTex fb, VkFormat fmt) -> TexSlot {
-        if (tex.hasData)
-            return recordTextureUpload(cmd, tex.data.data(), tex.w, tex.h, fmt, staging);
-        return fallback_[fb];
+        if (!tex.hasData) return fallback_[fb];
+        if (tex.compressed && canSampleCompressed((VkFormat)tex.compressed->vkFormat)) {
+            const hktx2::Image& img = *tex.compressed;
+            TexSlot s = recordCompressedUpload(cmd, img, staging);
+            uint64_t bytes = 0;
+            for (const auto& l : img.levels) bytes += l.length;
+            countTexture(s, bytes, htexup::rgbaChainBytes(img.width, img.height, (uint32_t)img.levels.size()), true);
+            return s;
+        }
+        TexSlot s = recordTextureUpload(cmd, tex.data.data(), tex.w, tex.h, fmt, staging);
+        const uint32_t mips = (tex.w > 1 || tex.h > 1) && canBlitMips(fmt) ? hmip::levelCount((uint32_t)tex.w, (uint32_t)tex.h) : 1u;
+        const uint64_t rgba = htexup::rgbaChainBytes((uint32_t)tex.w, (uint32_t)tex.h, mips);
+        countTexture(s, rgba, rgba, false);
+        return s;
     };
 
     mat->albedo    = upload(albedo,     kFbAlbedo,     VK_FORMAT_R8G8B8A8_SRGB);

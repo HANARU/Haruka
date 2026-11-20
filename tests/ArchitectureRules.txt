@@ -39,7 +39,7 @@ module sceneio:   core, math, vfs, scene, geometry, vfx, physics, audio, assets,
 module runtime:   core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, audio, renderer, xr, assets, components, sceneio
 module game:      core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, audio, renderer, xr, assets, components, sceneio, runtime
 module editor:    core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, audio, renderer, xr, assets, components, sceneio, runtime
-module tools:     core, vfs
+module tools:     core, math, vfs, geometry, assets
 module main:      core, math, vfs, memory, platform, input, ui, scene, geometry, vfx, physics, audio, renderer, xr, assets, components, sceneio, runtime, game, editor, tools
 
 # ── 허용 목록: 아직 고치지 않은 위반 ──

@@ -201,11 +201,18 @@ function(haruka_add_project)
         ${HP_PROJECT_DIR}/Content/*
         ${HP_PROJECT_DIR}/Config/*
         ${HARUKA_ENGINE_ROOT}/Engine/Content/*)
+    # 텍스처 압축 대상(Docs/Texture_Compression.md D6): Windows 묶음은 BC, Android 묶음은 ASTC. 압축 결과는 빌드 폴더에 캐시합니다.
+    if(ANDROID)
+        set(_hp_tex_target astc)
+    else()
+        set(_hp_tex_target bc)
+    endif()
     add_custom_command(
         OUTPUT  ${PACK_OUT}
         COMMAND ${HARUKA_PAK_TOOL} build ${HARUKA_ENGINE_ROOT}/Packaging/game.pack.txt -o ${PACK_OUT}
                 -D PROJECT_DIR=${HP_PROJECT_DIR} -D SHADER_DIR=${HARUKA_SHADER_BIN_DIR}
                 -D ENGINE_CONTENT_DIR=${HARUKA_ENGINE_ROOT}/Engine/Content
+                -D TEXTURE_TARGET=${_hp_tex_target} -D TEXTURE_CACHE=${CMAKE_BINARY_DIR}/texture_cache
         DEPENDS ${HARUKA_PAK_DEPENDS} ${HARUKA_SPIRV_OUTPUTS} ${PROJECT_PACK_ASSETS} ${HARUKA_ENGINE_ROOT}/Packaging/game.pack.txt
         COMMENT "HarukaPak -> game.hpak (${HP_NAME})"
         VERBATIM

@@ -103,6 +103,17 @@ bool AssetStreamer::decode(const std::string& path, const ImportSettings& settin
     }
 }
 
+void AssetStreamer::attachTextures(const std::string& path, std::vector<MeshSourceData>& meshes, htex::Target t) {
+    if (t == htex::Target::Off) return;
+    const htex::AttachStats st = htex::attachCompressed(meshes, t);
+    if (st.missing || st.invalid) {
+        HLOG(LogAsset, Warning) << "Texture compression (" << path << "): " << st.found << " KTX2 attached, " << st.missing
+                                << " missing, " << st.invalid << " unreadable -> those use the RGBA8 originals";
+    } else if (st.found) {
+        HLOG(LogAsset, Verbose) << "Texture compression (" << path << "): " << st.found << " KTX2 attached";
+    }
+}
+
 void AssetStreamer::run() {
     HPROF_THREAD_NAME("AssetWorker");
     for (;;) {
@@ -122,6 +133,7 @@ void AssetStreamer::run() {
         {
             HPROF_SCOPE("Asset.Decode");
             r.ok = decode(path, settings, r.meshes, r.error, &r.deps);
+            if (r.ok) attachTextures(path, r.meshes, (htex::Target)texTarget_.load());
         }
         {
             std::lock_guard<std::mutex> lk(mu_);

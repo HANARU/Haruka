@@ -87,6 +87,8 @@ public:
     // --vk-no-sync2: 장치가 synchronization2 를 지원해도 1.0 배리어로 기록합니다(Quest 의 대체 경로를 PC 에서 시험, DEF-04).
     // init 전에 부릅니다.
     void setForceNoSync2(bool on) { forceNoSync2_ = on; }
+    // 켤 블록 압축 기능(Docs/Texture_Compression.md D10). 그 실행의 텍스처 대상이 쓰는 것만 켭니다. init 전에 부릅니다.
+    void setTextureCompression(bool bc, bool astc) { wantTexBC_ = bc; wantTexASTC_ = astc; }
     // --vk-dedicated-msaa: MSAA 컬러를 핵심 힙 밖 별도 할당으로(지연 할당 타입이 없는 데스크톱에서 DEF-06 경로 시험).
     void setForceDedicatedMsaa(bool on) { forceDedicatedMsaa_ = on; }
     // --gpu=N: vkEnumeratePhysicalDevices 순서의 N 번째 GPU 를 씁니다(-1 = 처음 쓸 수 있는 것). init 전에 부릅니다.
@@ -230,6 +232,15 @@ public:
     void            endOneTimeCmd(VkCommandBuffer c) { rc_.endOneTimeCmd(c); }
 
     AllocStats getAllocStats() const { return allocator.getStats(); }
+    // 머티리얼 텍스처 메모리(Docs/Texture_Compression.md D12). rgbaBytes = 같은 텍스처를 RGBA8 + 밉으로 올렸을 때.
+    struct TextureMemory {
+        uint32_t textures = 0, compressed = 0;
+        uint64_t bytes = 0, rgbaBytes = 0, zoneBUsed = 0, zoneBTotal = 0;
+    };
+    TextureMemory textureMemory() const {
+        const GpuScene::TexStats& t = scene_.texStats();
+        return { t.textures, t.compressed, t.bytes, t.rgbaBytes, allocator.zoneBUsed(), kZoneBSize };
+    }
     GpuTimings getTimings()   const { return timings_;    }
     FrameStats getFrameStats()const { return frameStats_; }
 
@@ -256,6 +267,8 @@ private:
     // ── 장치 계획 (VulkanBaseline.hpp, 2026-10-31) ────────────────────────────
     bool               headless_ = false;   // 창이 표면을 주지 않음
     bool               forceNoSync2_ = false;   // --vk-no-sync2
+    bool               wantTexBC_    = false;
+    bool               wantTexASTC_  = false;
     bool               forceDedicatedMsaa_ = false;   // --vk-dedicated-msaa
     int                preferredGpu_ = -1;            // --gpu=N
     bool               multiview_ = true;             // --no-multiview 면 거짓(setMultiview)

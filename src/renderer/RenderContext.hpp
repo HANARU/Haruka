@@ -50,6 +50,9 @@ public:
     // 장면 타깃(깊이 · MSAA · HDR)의 층 수입니다. XR 이나 스테레오 흉내가 켜져 있는 동안 2(층 v = 눈 v, 멀티뷰 메인 패스),
     // 아니면 1 입니다(2026-11-18). 렌더러가 바꾸고 바로 크기 의존 자원을 다시 만듭니다.
     uint32_t   sceneLayers = 1;
+    // 장치 생성 때 켠 블록 압축 기능(Docs/Texture_Compression.md D10). 켜지 않은 압축 형식은 쓸 수 없습니다.
+    bool       texCompressionBC   = false;
+    bool       texCompressionASTC = false;
 
     // ── 생성 헬퍼 ─────────────────────────────────────────────────────────────
     VkShaderModule createShaderModule(const std::vector<char>& code) const;

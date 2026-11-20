@@ -5,6 +5,7 @@
 #include <memory>
 
 struct SkinSourceData;   // assets/Skin.hpp
+namespace hktx2 { struct Image; }   // geometry/Ktx2.hpp
 
 // ── 메시 소스 데이터 (CPU 측) ────────────────────────────────────────────────
 // glTF 로더와 절차 도형 생성기가 공통으로 뱉는 중간 표현입니다.
@@ -19,6 +20,9 @@ struct TexSourceData {
     int  w       = 0;
     int  h       = 0;
     bool hasData = false;
+    // 묶을 때 미리 압축한 같은 텍스처(KTX2, Docs/Texture_Compression.md D9). 워커가 붙이고, 장치가 형식을 지원하면 GpuScene 이
+    // 이것을 올립니다(아니면 위 RGBA8 화소). .gasset 캐시에는 저장하지 않습니다.
+    std::shared_ptr<const hktx2::Image> compressed;
 };
 
 struct MeshSourceVertex {
