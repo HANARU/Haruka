@@ -94,6 +94,24 @@ struct EngineOptions {
     std::string tracePath;
     uint32_t    traceFrom = 0, traceTo = 0;
     std::string uiAssetActions;          // --ui-asset-actions=<logical path> : 에셋 대화상자 열기(참조 체계 A-5, 에디터 전용)
+    // Add Component 팝업(2026-11-21, 에디터 전용): 선택한 액터의 팝업 열기 · 검색어 · 분류 · 아래 화살표 N 번 · Enter
+    bool        uiAddComponent = false;          // --ui-add-component
+    std::string uiAddComponentSearch;            // --ui-add-component-search=<text>
+    std::string uiAddComponentCategory;          // --ui-add-component-category=<분류>
+    int         uiAddComponentDown = 0;          // --ui-add-component-down=N
+    bool        uiAddComponentCommit = false;    // --ui-add-component-commit
+    // 콘텐츠 브라우저(2026-11-21, 에디터 전용): 탭을 열고 폴더 · 검색 · 거르기(종류 이름 쉼표) · 보기(tiles|list) · 고르기 ·
+    // 메뉴(경로, 빈 값 = 빈 자리) · 실행(두 번 누름과 같음)
+    std::string uiContentFolder;                 // --ui-content-folder=/Game/models
+    std::string uiContentSearch;                 // --ui-content-search=<text>
+    std::string uiContentFilter;                 // --ui-content-filter=Model,Sound
+    std::string uiContentView;                   // --ui-content-view=list
+    std::string uiContentSelect;                 // --ui-content-select=<path>
+    std::string uiContentMenu;                   // --ui-content-menu=<path>
+    bool        uiContentMenuSet = false;
+    std::string uiContentActivate;               // --ui-content-activate=<path>
+    std::string uiContentDrag;                   // --ui-content-drag=<path>@x,y : 그 항목을 그 자리까지 끌고 있는 화면
+    std::string uiContentDrop;                   // --ui-content-drop=<path>@x,y : 그 자리에 놓기
     bool        uiActorPicker = false;   // --ui-actor-picker : 선택한 액터의 첫 액터 참조 칸의 고르기 목록 열기(R-7, 에디터 전용)
     // --ui-move-asset=<from>|<to> : 첫 프레임 뒤 에셋을 옮김(참조 체계 A-5, 에디터 전용). 프로젝트 파일을 실제로 옮기므로
     // --project=<사본 폴더> 와 함께만 쓰십시오.

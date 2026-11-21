@@ -54,6 +54,9 @@ size_t EditorApp::pumpAssetChanges() {
     bool rescan = false;
     const std::vector<std::string> ready = assetChanges_.takeReady(now, &rescan);
     for (const auto& p : ready) processAssetChange(p);
+    // 콘텐츠 브라우저: Content 아래에서 무엇이든 바뀌었으면(만듦 · 지움 · 이름 바꾸기 포함, DEF-177) 한 번 다시 훑습니다(2026-11-21).
+    if (rescan || std::any_of(ready.begin(), ready.end(), [](const std::string& p) { return p.rfind("/Game/", 0) == 0; }))
+        contentPanel_.scanAll();
     if (rescan && ctx_.assets && ctx_.world) {
         HLOG(LogHotReload, Warning) << "Too many file changes at once; checking every loaded model";
         AssetManager::ReloadStats st;
@@ -74,7 +77,7 @@ void EditorApp::processAssetChange(const std::string& path) {
 
     if (kind == hreload::ChangeKind::Prefab) {
         // 링크된 프리팹(Docs/Linked_Prefabs.md D7): 캐시와 글이 다를 때만 다시 펼칩니다. 에디터가 쓴 저장은 캐시를 먼저 바꾸므로 넘어갑니다.
-        contentPanel_.refreshPrefabs();
+        // 콘텐츠 브라우저 목록은 pumpAssetChanges 가 한 번에 다시 훑습니다.
         std::string text, cached;
         if (!hvfs::readText(path, text)) return;
         if (!prefabCache_.peek(path, &cached)) { HLOG(LogHotReload, Verbose) << "Prefab changed (not used): " << path; return; }

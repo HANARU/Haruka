@@ -133,6 +133,27 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             else unknown.push_back(a);
         }
         else if (a == "--ui-actor-picker") o.uiActorPicker = true;
+        else if (a == "--ui-add-component") o.uiAddComponent = true;
+        else if (valueOf(a, "--ui-content-folder", v))   o.uiContentFolder = v;
+        else if (valueOf(a, "--ui-content-search", v))   o.uiContentSearch = v;
+        else if (valueOf(a, "--ui-content-filter", v))   o.uiContentFilter = v;
+        else if (valueOf(a, "--ui-content-view", v))     o.uiContentView = v;
+        else if (valueOf(a, "--ui-content-select", v))   o.uiContentSelect = v;
+        else if (valueOf(a, "--ui-content-menu", v))     { o.uiContentMenu = v; o.uiContentMenuSet = true; }
+        else if (valueOf(a, "--ui-content-activate", v)) o.uiContentActivate = v;
+        else if (valueOf(a, "--ui-content-drag", v))     o.uiContentDrag = v;
+        else if (valueOf(a, "--ui-content-drop", v))     o.uiContentDrop = v;
+        else if (a == "--ui-add-component-commit") { o.uiAddComponent = true; o.uiAddComponentCommit = true; }
+        else if (valueOf(a, "--ui-add-component-search", v)) { o.uiAddComponent = true; o.uiAddComponentSearch = v; }
+        else if (valueOf(a, "--ui-add-component-category", v)) {
+            if (!v.empty()) { o.uiAddComponent = true; o.uiAddComponentCategory = v; }
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-add-component-down", v)) {
+            uint32_t n = 0;
+            if (parseUint(v, n) && n <= 64) { o.uiAddComponent = true; o.uiAddComponentDown = (int)n; }
+            else unknown.push_back(a);
+        }
         else if (valueOf(a, "--ui-move-asset", v)) {
             if (v.find('|') != std::string::npos) o.uiMoveAsset = v;
             else unknown.push_back(a);

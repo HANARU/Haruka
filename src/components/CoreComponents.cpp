@@ -47,4 +47,20 @@ void registerCoreComponents() {
     if (!r.find("AIBrainComponent"))     r.registerType<AIBrainComponent>    ("AIBrainComponent",     "AI Brain");
     // 3D UI 패널 P1b(2026-11-16, Spatial_Representation_Design 6단계)
     if (!r.find("UIPanelComponent"))     r.registerType<UIPanelComponent>    ("UIPanelComponent",     "UI Panel");
+
+    // 에디터 Add Component 팝업의 분류(2026-11-21). 순서는 팝업이 정합니다(ComponentPickerModel.hpp).
+    static const std::pair<const char*, const char*> kCategories[] = {
+        { "LightComponent", "Rendering" }, { "CameraComponent", "Rendering" }, { "StaticMeshComponent", "Rendering" },
+        { "SkinnedMeshComponent", "Rendering" }, { "DecalComponent", "Rendering" }, { "HeightFogComponent", "Rendering" },
+        { "ReflectionCaptureComponent", "Rendering" },
+        { "AudioComponent", "Audio" }, { "ReverbZoneComponent", "Audio" },
+        { "RigidBodyComponent", "Physics" }, { "JointComponent", "Physics" },
+        { "AnimationComponent", "Animation" },
+        { "ParticleSystemComponent", "Effects" },
+        { "NavMeshVolumeComponent", "Navigation & AI" }, { "NavAgentComponent", "Navigation & AI" },
+        { "AIBrainComponent", "Navigation & AI" },
+        { "HandPoseComponent", "XR" },
+        { "UIPanelComponent", "UI" },
+    };
+    for (const auto& [name, cat] : kCategories) r.setCategory(name, cat);
 }

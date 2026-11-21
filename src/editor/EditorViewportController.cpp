@@ -365,6 +365,92 @@ void EditorViewportController::pickActor(float mx, float my, float winW, float w
     pick(best);
 }
 
+bool EditorViewportController::nearestBoundsHit(const glm::vec3& rayO, const glm::vec3& rayD, float maxT, float& t,
+                                                Actor*& actor) const {
+    t = maxT;
+    actor = nullptr;
+    if (!deps_.ctx || !deps_.ctx->world) return false;
+    for (auto& ap : deps_.ctx->world->getActors()) {
+        Actor* a = ap.get();
+        if (a == editorCamActor_ || !a->activeInHierarchy()) continue;
+        glm::vec3 lo(0.f), hi(0.f);
+        bool hasBounds = false;
+        for (const auto& comp : a->getComponents()) {
+            glm::vec3 cmin, cmax;
+            if (comp->localBounds(cmin, cmax)) {
+                if (!hasBounds) { lo = cmin; hi = cmax; hasBounds = true; }
+                else { lo = glm::min(lo, cmin); hi = glm::max(hi, cmax); }
+            }
+        }
+        if (!hasBounds) continue;
+        const glm::mat4  wm    = a->worldMatrix();
+        const hmath::Ray local = hmath::transformRay({ rayO, rayD }, hmath::affineInverse(wm));
+        float tmin = 0.f, tmax = 0.f;
+        if (!hmath::intersectRayAabb(local, { lo, hi }, tmin, tmax) || tmin < 0.f) continue;   // 광선 시작이 상자 안이면 건너뜀
+        const glm::vec3 worldHit = glm::vec3(wm * glm::vec4(local.origin + local.dir * tmin, 1.f));
+        const float     worldT   = glm::length(worldHit - rayO);
+        if (worldT < t) { t = worldT; actor = a; }
+    }
+    return actor != nullptr;
+}
+
+glm::vec3 EditorViewportController::placementPoint() const {
+    if (!editorCamActor_) return glm::vec3(0.f);
+    const glm::mat4 cm   = editorCamActor_->worldMatrix();
+    const glm::vec3 rayO = glm::vec3(cm[3]);
+    const glm::vec3 rayD = -glm::normalize(glm::vec3(cm[2]));
+    float t = 0.f;
+    Actor* hit = nullptr;
+    return rayO + rayD * (nearestBoundsHit(rayO, rayD, 20.f, t, hit) ? t : 3.f);
+}
+
+bool EditorViewportController::dropPoint(float mx, float my, float winW, float winH, glm::vec3& point, Actor** hitActor) const {
+    if (hitActor) *hitActor = nullptr;
+    if (!deps_.ctx || !deps_.ctx->world || !inViewport(mx, my, winW, winH)) return false;
+    CameraComponent* cam = CameraComponent::activeIn(*deps_.ctx->world);
+    if (!cam || !cam->owner) return false;
+    const WorldViewport wvp = worldVP(mx, my, winW, winH);
+    if (wvp.fbRect.width <= 0.f || wvp.fbRect.height <= 0.f) return false;
+    const glm::mat4 vp = cam->projMatrix(wvp.aspect()) * cam->viewMatrix();
+    glm::vec3 rayO, rayD;
+    if (!wvp.ray(vp, rayO, rayD)) return false;
+    rayD = glm::normalize(rayD);
+    // 아이콘이 있는 액터(소리 · 라이트 등, 메시가 없어 경계 상자가 없음)는 고르기와 같이 아이콘 18 px 안이면 닿은 것으로 봅니다.
+    if (hitActor && deps_.visualizers) {
+        Actor* iconBest = nullptr;
+        float  iconBestD = 18.f;
+        for (auto& ap : deps_.ctx->world->getActors()) {
+            Actor* a = ap.get();
+            if (a == editorCamActor_ || !a->activeInHierarchy()) continue;
+            glm::vec4 c;
+            bool has = false;
+            for (const auto& comp : a->getComponents())
+                if (deps_.visualizers->icon(*comp, c)) { has = true; break; }
+            if (!has) continue;
+            const float d = glm::length(wvp.project(vp, a->worldPosition()) - wvp.mouseFb);
+            if (d < iconBestD) { iconBestD = d; iconBest = a; }
+        }
+        if (iconBest) {
+            point = iconBest->worldPosition();
+            *hitActor = iconBest;
+            return true;
+        }
+    }
+    float t = 0.f;
+    Actor* hit = nullptr;
+    if (nearestBoundsHit(rayO, rayD, 200.f, t, hit)) {
+        point = rayO + rayD * t;
+        if (hitActor) *hitActor = hit;
+        return true;
+    }
+    if (rayD.y < -1e-4f) {
+        const float tp = -rayO.y / rayD.y;
+        if (tp > 0.f && tp < 200.f) { point = rayO + rayD * tp; return true; }
+    }
+    point = rayO + rayD * 5.f;
+    return true;
+}
+
 void EditorViewportController::buildIcons(World& world,
                                           std::vector<LineVertex>& lines,
                                           std::vector<LineVertex>& tris) const {

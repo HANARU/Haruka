@@ -25,7 +25,8 @@ public:
     struct Entry {
         std::string              name;          // 파일의 COMPONENT: 뒤에 쓰는 이름(typeName() 과 같아야 함)
         std::vector<std::string> aliases;       // 옛 이름. 이름을 바꿨을 때 옛 파일을 읽으려고 둡니다
-        std::string              editorLabel;   // 에디터의 "+ 라벨" 버튼. 비우면 버튼을 만들지 않습니다
+        std::string              editorLabel;   // 에디터 Add Component 목록의 이름. 비우면 목록에 넣지 않습니다
+        std::string              category;      // Add Component 팝업의 분류(Rendering · Audio ...). 비우면 "Other"(2026-11-21)
         std::function<Component*(Actor&)>       add;    // 액터에 붙여 돌려줌
         std::function<Component*(const Actor&)> find;   // 이미 붙어 있는 것(없으면 null)
     };
@@ -54,6 +55,13 @@ public:
         e.find = [](const Actor& a) -> Component* { return a.getComponent<T>(); };
         entries_.push_back(std::move(e));
         return true;
+    }
+
+    // 에디터 분류를 정합니다(Unity 의 AddComponentMenu 경로와 같은 몫). 없는 이름이면 false.
+    bool setCategory(const std::string& name, std::string category) {
+        for (auto& e : entries_)
+            if (e.name == name) { e.category = std::move(category); return true; }
+        return false;
     }
 
     // 이름이나 옛 이름으로 찾습니다.

@@ -104,7 +104,7 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
         [this] { return dock_.contains("Viewport"); },
         [this] { return currentFocus() == EFocusTarget::None; },
         [this] { return vpToolbar_.fbRect(); },
-        [this](glm::vec2 p) { return logPanel_.popupContains(p); },
+        [this](glm::vec2 p) { return logPanel_.popupContains(p) || componentPicker_.popupContains(p) || contextMenu_.popupContains(p); },
         [this](const Actor* a) { return isSelected(a); },
         [this](Actor* a) { selectOnly(a); },
         [this](Actor* a) { toggleSelect(a); },
@@ -140,10 +140,12 @@ void EditorApp::initPanels() {
             outlinerVisible_ = outlinerVis;
             const EFocusTarget f = currentFocus();
             if ((!outlinerVis && (f == EFocusTarget::Search || f == EFocusTarget::Rename)) ||
-                (!bottomVis   && (f == EFocusTarget::LogSearch || f == EFocusTarget::Console)) ||
+                (!bottomVis   && (f == EFocusTarget::LogSearch || f == EFocusTarget::Console || f == EFocusTarget::ContentSearch)) ||
                 (!detailsVis  && f == EFocusTarget::NumberField))
                 setTextFocus(EFocusTarget::None);
             if (!bottomVis) logPanel_.closePopup();
+            if (!detailsVis) componentPicker_.close();
+            if (!bottomVis) contextMenu_.close();
         },
         [this] { outlinerPanel_.cancelDrag(); }
     });
@@ -210,7 +212,9 @@ void EditorApp::initPanels() {
         [this] { deleteSelection(); },
         [this] { copySelection(); },
         [this] { pasteClipboard(); },
-        [this] { return logPanel_.consoleField(); }
+        [this] { return logPanel_.consoleField(); },
+        [this] { return componentPicker_.field(); },
+        [this] { return contentPanel_.searchField(); }
     });
     detailsPanel_.init({ &ui_, &ctx_, &cmdStack_, &cachedEuler_, &undoSnapshot_,
                          &LogEditor,
@@ -222,7 +226,12 @@ void EditorApp::initPanels() {
                          [this](const std::string& title, uint64_t current, std::function<void(uint64_t)> pick) {
                              openActorPicker(title, current, std::move(pick));
                          },
-                         [this] { outlinerPanel_.markDirty(); } });
+                         [this] { outlinerPanel_.markDirty(); },
+                         [this](Actor* a, const std::shared_ptr<HWidget>& anchor) { componentPicker_.toggle(a, anchor); } });
+    componentPicker_.init({ &ui_, &ctx_,
+                            [this](EFocusTarget t) { setTextFocus(t); },
+                            [this](Actor* a, int entry) { detailsPanel_.addComponentUndoable(a, entry); },
+                            [this] { return detailsPanel_.addComponentButton(); } });
     contentPanel_.init({
         &ui_, &ctx_, &cmdStack_, &LogEditor,
         [this] { return doc_.path(); },
@@ -234,8 +243,15 @@ void EditorApp::initPanels() {
         [this](const std::vector<Actor*>& made) { recordActorCreation(made); },
         [this](const Actor* a) { return a == viewport_.cameraActor(); },
         [this] { detailsPanel_.markDirty(); },
-        [this](const std::string& path) { openAssetActions(path); }
+        [this](const std::string& path) { openAssetActions(path); },
+        // 두 번 눌러 놓는 자리: 에디터 카메라 정면 광선이 닿는 면(없으면 3 m 앞).
+        [this] { return viewport_.placementPoint(); },
+        [this](const std::string& path) { previewSound(path); },
+        [this](EFocusTarget t) { setTextFocus(t); },
+        &contextMenu_,
+        dumpMode_
     });
+    contextMenu_.init(&ui_);
     gpuStatsPanel_.init(&ui_, &ctx_, &vpTimings_, dumpMode_);
     logPanel_.init(&ui_, &LogEditor, kMenuBarH, dumpMode_, [this] {
         setTextFocus(currentFocus() == EFocusTarget::LogSearch ? EFocusTarget::None
@@ -334,7 +350,6 @@ void EditorApp::tickSelectionSync(int actorCount) {
 
     bool renamChanged = outlinerPanel_.renamingChanged();
     outlinerPanel_.checkLayoutSize();
-    detailsPanel_.checkWidthChange();
 
     if (actorCount != prevActorCount_ || selChanged || renamChanged)
         outlinerPanel_.markDirty();
@@ -426,6 +441,8 @@ void EditorApp::tick(float dt) {
 
     vpToolbar_.tick();
     statusBar_.tick(logPanel_.tick(bottomTab_ == 1));
+    componentPicker_.tick();   // 대상 액터가 사라지거나 선택이 바뀌면 닫음
+    contentPanel_.tick(bottomTab_ == 0);
 
     if (dumpMode_ && !dumpStateApplied_ && dumpFrameCount_ >= 1) {
         applyDumpState();
@@ -567,6 +584,9 @@ void EditorApp::buildWidgetTree() {
     auto dockOverlay   = dock_.resetOverlay();
     auto menuPopupHost = menus_.resetPopupHost();
     auto logPopupHost = logPanel_.resetPopupHost();
+    auto pickerHost   = componentPicker_.resetPopupHost();
+    auto menuHost     = contextMenu_.resetPopupHost();
+    auto dragHost     = contentPanel_.resetDragHost();
     modalHost_     = HNew(BR)->background(EditorTheme::transparent);
     auto statusBar = statusBar_.build();
 
@@ -580,6 +600,9 @@ void EditorApp::buildWidgetTree() {
     auto root = HNew(SOverlay);
     root->addSlot(rootStack);
     root->addSlot(logPopupHost);
+    root->addSlot(pickerHost);
+    root->addSlot(menuHost);
+    root->addSlot(dragHost);
     root->addSlot(menuPopupHost);
     root->addSlot(dockOverlay);
     root->addSlot(outlinerPanel_.resetDropOverlay());
@@ -740,6 +763,9 @@ void EditorApp::flushChromeRebuilds() {
     toolbar_.flushRebuild();
     detailsPanel_.flushRebuild();
     logPanel_.flushRebuilds(bottomTab_ == 1);
+    componentPicker_.flushRebuild();
+    if (bottomTab_ == 0) contentPanel_.flushRebuild();
+    contextMenu_.flushRebuild();
     if (bottomDirty_) { bottomDirty_ = false; rebuildBottomPanel(); }
 }
 
@@ -760,7 +786,7 @@ void EditorApp::rebuildBottomPanel() {
     // Output Log 는 스크롤 상자 밖에 둡니다(buildWidgetTree 의 설명 참고). 탭이 바뀌면 스크롤을
     // 맨 위로 돌리고, 같은 탭을 다시 그릴 때(Refresh 등)는 위치를 지킵니다.
     if (bottomHost_ && bottomScroll_) {
-        if (bottomTab_ == 1) {
+        if (bottomTab_ == 1 || bottomTab_ == 0) {   // 로그 · 콘텐츠 브라우저는 자체 스크롤을 가짐(2026-11-21)
             bottomScroll_->content(nullptr);
             bottomHost_->content(bottomContent_);
         } else {
@@ -773,6 +799,8 @@ void EditorApp::rebuildBottomPanel() {
     // Output Log 탭에만 있는 위젯의 참조를 놓습니다. 다른 탭으로 가면 팝업을 닫고 로그 검색
     // 포커스도 풉니다. 풀지 않으면 보이지 않는 검색창으로 타이핑이 계속 들어갑니다.
     logPanel_.releaseTab(bottomTab_ == 1);
+    contentPanel_.releaseTab(bottomTab_ == 0);   // 콘텐츠 탭이면 아래 buildTab 이 다시 잡음(검색 포커스 유지)
+    contextMenu_.close();
     if (bottomTab_ != 1 && (currentFocus() == EFocusTarget::LogSearch || currentFocus() == EFocusTarget::Console))
         setTextFocus(EFocusTarget::None);
 
@@ -928,6 +956,55 @@ void EditorApp::handleInput(float mouseX, float mouseY,
     // 프레임 끝에 일어나므로, 이번 프레임의 디스패치는 팝업이 있는 상태에서 판정됩니다.
     if (leftDown && !prevLeftDown_) {
         logPanel_.handleOutsideClick(glm::vec2{ mouseX, mouseY });
+        componentPicker_.handleOutsideClick(glm::vec2{ mouseX, mouseY });
+        contextMenu_.handleOutsideClick(glm::vec2{ mouseX, mouseY });
+    }
+    // 오른쪽 누름: 열린 메뉴 밖이면 닫고, 콘텐츠 브라우저 위면 그 자리의 메뉴를 엽니다(2026-11-21).
+    {
+        const bool rightDown = ctx_.window && ctx_.window->isMouseButtonDown(HInput::MOUSE_BUTTON_RIGHT);
+        if (rightDown && !prevRightDown_) {
+            const glm::vec2 p{ mouseX, mouseY };
+            contextMenu_.handleOutsideClick(p);
+            if (!modal_ && bottomTab_ == 0) contentPanel_.openContextMenuAt(p);
+        }
+        prevRightDown_ = rightDown;
+        if (contextMenu_.isOpen() && ctx_.window && ctx_.window->isKeyDown(HInput::KEY_ESCAPE)) contextMenu_.close();
+    }
+    // 콘텐츠 브라우저 끌어 놓기(2026-11-21): 에셋 보기의 항목을 누른 채 끌어 뷰포트에 놓습니다. 끄는 동안 커서 옆 이름표와
+    // 놓일 자리 표시를 그리고, 놓으면 종류별로 놓습니다(Undo 가능). Esc 는 취소입니다.
+    {
+        const glm::vec2 p{ mouseX, mouseY };
+        if (leftDown && !prevLeftDown_ && !modal_ && bottomTab_ == 0) contentPanel_.pointerPress(p);
+        if (!dumpDrag_) contentPanel_.pointerMove(p, leftDown);
+        if (contentPanel_.dragging()) {
+            const std::string path = contentPanel_.dragPath();
+            glm::vec3 point{ 0.f };
+            Actor* hit = nullptr;
+            const bool can = !modal_ && contentPanel_.canDropInViewport(path) &&
+                             viewport_.dropPoint(mouseX, mouseY, winW, winH, point, &hit);
+            if (ctx_.window && ctx_.window->isKeyDown(HInput::KEY_ESCAPE) && !dumpDrag_) {
+                contentPanel_.cancelDrag();
+            } else if (!leftDown && !dumpDrag_) {
+                if (can) contentPanel_.dropInViewport(path, point, hit);
+                contentPanel_.cancelDrag();
+            } else {
+                if (can) {
+                    // 놓일 자리: 바닥 원 + 세운 선(화면에서 같은 크기로 보이게 카메라 거리에 비례). 소리를 소리 액터 위에 놓으면
+                    // 그 액터의 소리를 바꾸므로 그 액터 자리에 구를 그립니다.
+                    const glm::vec4 col{ 0.30f, 0.65f, 1.f, 1.f };
+                    const Actor* cam = viewport_.cameraActor();
+                    const float dist = cam ? std::max(0.2f, glm::length(cam->worldPosition() - point)) : 5.f;
+                    hdebug::circle(point, glm::vec3(0.f, 1.f, 0.f), dist * 0.03f, col);
+                    hdebug::line(point, point + glm::vec3(0.f, dist * 0.06f, 0.f), col);
+                    const hcb::Item* item = contentPanel_.index().find(path);
+                    const bool sound = item && (item->kind == hcb::AssetKind::Audio || item->kind == hcb::AssetKind::Cue);
+                    if (sound && hit && hit != viewport_.cameraActor() && hit->getComponent<AudioComponent>())
+                        hdebug::sphere(hit->worldPosition(), dist * 0.04f, glm::vec4(0.35f, 0.9f, 0.45f, 1.f));
+                }
+                contentPanel_.updateDragVisual(p, can);
+            }
+        }
+        if (!contentPanel_.dragging()) contentPanel_.updateDragVisual(p, false);   // 이름표 지우기(한 번)
     }
 
     // ── 메뉴 hover 전환 ──────────────────────────────────────────────────────────
@@ -938,7 +1015,8 @@ void EditorApp::handleInput(float mouseX, float mouseY,
     // 탭이 클릭을 가져가 메뉴가 열린 채로 남았습니다(DEF-64 의 우회 경로).
     const bool overPopup =
         modal_ != nullptr || menus_.isOpen() ||
-        logPanel_.popupContains(glm::vec2{ mouseX, mouseY });
+        logPanel_.popupContains(glm::vec2{ mouseX, mouseY }) || componentPicker_.popupContains(glm::vec2{ mouseX, mouseY }) ||
+        contextMenu_.popupContains(glm::vec2{ mouseX, mouseY });
 
     // ── Dock splitter resize & tab drag ─────────────────────────────────────────
     if (dock_.handleSplitterInput(mouseX, mouseY, leftDown, prevLeftDown_, overPopup, ctx_.window) ||

@@ -26,6 +26,7 @@
 |---|---|
 | [Lighting_UE_Design.md](Lighting_UE_Design.md) | 라이팅 UE 용어·설계(색온도·Cast Shadows 포함) |
 | [Editor_Layout_Design.md](Editor_Layout_Design.md) | 에디터 레이아웃 구조(UE5 기반): 5분할 + 메뉴바/상태바/뷰포트툴바/아웃라이너 계층 |
+| [Editor_Content_Browser.md](Editor_Content_Browser.md) | 콘텐츠 브라우저(UE 방식: 폴더 트리 · 경로 · 검색 · 종류 거르기 · 타일/목록 · 한 번 누름 = 고르기, 두 번 = 실행 · 오른쪽 누름 메뉴) · Add Component 검색 팝업(Unity 방식, 분류 · 검색 · 키보드)(2026-11-21). 체크리스트 |
 | [Log_Category_Design.md](Log_Category_Design.md) | 로그 카테고리: 기록 수준과 표시 필터 분리, Output Log 필터 |
 | [Transform_Design.md](Transform_Design.md) | 트랜스폼·기즈모, 월드 행렬 캐시 제거 |
 | [Spatial_Representation_Design.md](Spatial_Representation_Design.md) | 엔티티 무관 공간 표현, Transform 캡슐화 |

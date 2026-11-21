@@ -38,6 +38,8 @@ const std::vector<const char*>& EditorIcons::names() {
         "mouse-pointer-2", "move", "rotate-cw", "scaling", "globe", "box", "magnet", "camera",
         "eye", "eye-off", "x", "chevron-down", "chevron-right", "search", "plus", "trash-2",
         "settings", "file", "sun", "volume-2", "layers", "check",
+        // 콘텐츠 브라우저(2026-11-21): 폴더 · 종류 아이콘 · 보기 바꾸기 · 뒤로
+        "folder", "chevron-left", "music", "film", "layout-grid", "list", "package", "map", "image",
     };
     return k;
 }

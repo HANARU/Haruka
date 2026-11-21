@@ -64,13 +64,6 @@ void DetailsPanel::flushRebuild() {
     rebuild();
 }
 
-void DetailsPanel::checkWidthChange() {
-    // 디테일 패널 폭이 바뀌면 컴포넌트 추가 버튼의 줄 나눔을 다시 합니다(DEF-109, 4px 양자화).
-    if (scroll_ && deps_.ctx && deps_.ctx->selected && addCompWidthSig_ >= 0 &&
-        (int)(scroll_->cachedGeometry().size.x / 4.f) != addCompWidthSig_)
-        dirty_ = true;
-}
-
 void DetailsPanel::onActorDestroyed(Actor* a) {
     if (actor_ == a) {
         actor_ = nullptr;
@@ -462,54 +455,34 @@ void DetailsPanel::buildComponentsSection(Actor& sel) {
 void DetailsPanel::buildAddComponentSection(Actor& sel) {
     Actor* selPtr = &sel;
     list_->addSlot(deps_.ui->spacer(), SVerticalBox::ESizeRule::Fixed, s(EditorTheme::space8));
-    list_->addSlot(deps_.ui->sectionHeader("ADD COMPONENT", EditorUiKit::kTextHdr, 13.f),
-                   SVerticalBox::ESizeRule::Fixed, s(EditorTheme::headerH));
 
-    // 버튼은 패널 폭에 맞춰 여러 줄로 나눕니다(DEF-109). 예전에는 한 줄에 늘어놓아, 기본 창 크기에서 컴포넌트가
-    // 없는 액터는 + Audio 가 잘리고 + RigidBody 는 보이지 않아 누를 수 없었습니다. 폭은 직전 배치의 디테일 스크롤
-    // 상자 폭에서 스크롤 막대 자리를 늘 뺀 값이라, 막대가 생기고 없어져도 줄 나눔이 바뀌지 않습니다. 패널 폭이
-    // 바뀌면 tick 이 디테일을 다시 만듭니다(addCompWidthSig_).
-    const float addLeft  = s(8.f), addGap = s(4.f);
-    const float addAvail = scroll_ ? scroll_->cachedGeometry().size.x - s(14.f) : 0.f;
-    addCompWidthSig_ = scroll_ ? (int)(scroll_->cachedGeometry().size.x / 4.f) : -1;
-    std::shared_ptr<SHorizontalBox> addRow;
-    float addX = 0.f;
-    auto flushAddRow = [&] {
-        if (addRow) list_->addSlot(addRow, SVerticalBox::ESizeRule::Fixed, s(EditorTheme::tabH));
-        addRow.reset();
-    };
-    auto addCompBtn = [&](const std::string& label, std::function<void()> fn) {
-        const float w = EditorUiKit::textWidth(label, s(12.f)) + s(7.f) * 2.f;
-        if (addRow && addAvail > 0.f && addX + w > addAvail) flushAddRow();
-        if (!addRow) {
-            addRow = HNew(SHorizontalBox);
-            addRow->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, addLeft);
-            addX = addLeft;
-        }
-        addRow->addSlot(
-            deps_.ui->textButton(label, 12.f, EditorTheme::accentHover, {7.f, 3.f},
-                                 EditorTheme::ctlNormal, EditorTheme::ctlHover, std::move(fn)),
-            SHorizontalBox::ESizeRule::Auto);
-        addRow->addSlot(deps_.ui->spacer(), SHorizontalBox::ESizeRule::Fixed, addGap);
-        addX += w + addGap;
-    };
+    // Add Component 단추 하나(2026-11-21, Unity 방식). 누르면 그 아래에 검색 팝업이 열립니다(ComponentPicker). 예전에는
+    // 등록된 타입마다 "+ 이름" 단추를 패널 폭에 맞춰 여러 줄로 늘어놓았습니다(DEF-22 · DEF-109). 타입이 24개를 넘어
+    // 찾기 어려워 검색 · 분류로 바꿨습니다.
+    auto btn = deps_.ui->textButton(HTEXT("Editor.Details", "AddComponent", "Add Component").toString(), 13.f, EditorUiKit::kTextBody,
+                                    {12.f, 4.f}, EditorTheme::ctlNormal, EditorTheme::ctlHover, {});
+    std::weak_ptr<SButton> weak = btn;   // 단추가 자기 자신을 붙잡지 않게
+    btn->onClick([this, selPtr, weak] {
+        if (auto b = weak.lock(); b && deps_.onOpenComponentPicker) deps_.onOpenComponentPicker(selPtr, b);
+    });
+    btn->hAlign(EHAlign::Center);
+    addCompBtn_ = btn;
+    list_->addSlot(
+        HNew(SBorder)->background(EditorTheme::transparent)->padding({s(EditorTheme::space24), 0.f})->content(btn),
+        SVerticalBox::ESizeRule::Fixed, s(EditorTheme::tabH) + s(4.f));
+}
 
-    // 컴포넌트 추가 버튼은 ComponentRegistry 에 등록된 타입에서 만듭니다(DEF-22). 예전에는 다섯 종을 손으로
-    // 나열해, Layer 2 컴포넌트는 에디터에서 붙일 수 없었습니다. 순서는 등록 순서이고, 이미 붙어 있는 타입과
-    // 버튼 라벨이 없는 타입은 건너뜁니다.
-    for (const auto& entry : ComponentRegistry::get().entries()) {
-        if (entry.editorLabel.empty() || entry.find(sel)) continue;
-        auto add = entry.add;
-        addCompBtn("+ " + entry.editorLabel, [this, selPtr, add]{
-            if (Component* c = add(*selPtr))
-                deps_.cmdStack->push(std::make_unique<ComponentPresenceCmd>(ComponentPresenceCmd::Kind::Add, *deps_.ctx->world, selPtr, c,
-                                                                            ComponentLoadContext{ deps_.ctx->assets },
-                                                                            [this] { dirty_ = true; }));
-            dirty_ = true;
-        });
-    }
-    if (!addRow) addRow = HNew(SHorizontalBox);   // 붙일 것이 없어도 예전처럼 빈 줄 하나를 둡니다
-    flushAddRow();
+void DetailsPanel::addComponentUndoable(Actor* a, int entryIndex) {
+    const auto& entries = ComponentRegistry::get().entries();
+    if (!a || entryIndex < 0 || entryIndex >= (int)entries.size()) return;
+    const auto& entry = entries[(size_t)entryIndex];
+    if (entry.find(*a)) return;   // 한 액터에 같은 타입은 하나
+    if (Component* c = entry.add(*a))
+        deps_.cmdStack->push(std::make_unique<ComponentPresenceCmd>(ComponentPresenceCmd::Kind::Add, *deps_.ctx->world, a, c,
+                                                                    ComponentLoadContext{ deps_.ctx->assets },
+                                                                    [this] { dirty_ = true; }));
+    if (deps_.logCat) HLOG(*deps_.logCat, Log) << "Added " << entry.editorLabel << " to " << a->name;
+    dirty_ = true;
 }
 
 void DetailsPanel::buildSavePrefabRow(Actor& sel) {

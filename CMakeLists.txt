@@ -503,6 +503,8 @@ set(EDITOR_SOURCES
     src/editor/ContentBrowserPanel.cpp
     src/editor/GpuStatsPanel.cpp
     src/editor/OutputLogPanel.cpp
+    src/editor/ComponentPicker.cpp
+    src/editor/EditorContextMenu.cpp
     src/editor/ComponentVisualizers.cpp
     src/editor/EditorApp_scene.cpp
     src/editor/EditorApp_edit.cpp

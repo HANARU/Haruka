@@ -681,4 +681,7 @@ void registerXrComponents() {
     if (!r.find("RigLocomotionComponent"))  r.registerType<RigLocomotionComponent> ("RigLocomotionComponent",  "Locomotion");
     if (!r.find("GrabbableComponent"))      r.registerType<GrabbableComponent>     ("GrabbableComponent",      "Grabbable");
     if (!r.find("GrabInteractorComponent")) r.registerType<GrabInteractorComponent>("GrabInteractorComponent", "Grab Hand");
+    for (const char* n : { "XrRigComponent", "TrackedPoseComponent", "RigLocomotionComponent", "GrabbableComponent",
+                           "GrabInteractorComponent" })
+        r.setCategory(n, "XR");   // 에디터 Add Component 분류(2026-11-21)
 }

@@ -17,6 +17,8 @@
 #include "../src/scene/ComponentFields.hpp"
 #include "../src/scene/ComponentRegistry.hpp"
 #include "../src/scene/UnknownComponent.hpp"
+#include "../src/editor/ComponentPickerModel.hpp"
+#include "../src/editor/ContentBrowserModel.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -96,6 +98,84 @@ int main() {
     check(reg.find("SpinnerComponent") && reg.find("SpinnerComponent")->name == "OrbitComponent", "옛 이름으로 찾음");
     check(reg.entries().size() == 3 && reg.entries()[0].editorLabel == "Light" && reg.entries()[2].editorLabel == "Orbit",
           "버튼 순서 = 등록 순서");
+
+    std::printf("\n== 1b. Add Component 팝업 목록(2026-11-21) ==\n");
+    {
+        check(reg.setCategory("LightComponent", "Rendering") && reg.setCategory("CameraComponent", "Rendering") &&
+              !reg.setCategory("NopeComponent", "X"), "분류 정하기(없는 이름은 false)");
+        auto labels = [](const std::vector<hcpick::Item>& v) {
+            std::string s;
+            for (const auto& it : v) s += (s.empty() ? "" : ",") + it.label + (it.present ? "*" : "");
+            return s;
+        };
+        const auto root = hcpick::buildItems(reg, nullptr, "", "");
+        check(labels(root) == "Rendering,Other" && root[0].isCategory && root[0].count == 2 && root[1].count == 1,
+              "검색어 없음 → 분류 목록(정한 순서, 분류 없는 것은 Other 맨 끝): " + labels(root));
+        check(labels(hcpick::buildItems(reg, nullptr, "", "Rendering")) == "Camera,Light", "분류 안 → 이름 순");
+        check(labels(hcpick::buildItems(reg, nullptr, "li", "")) == "Light", "검색 'li' → Light");
+        check(labels(hcpick::buildItems(reg, nullptr, "  CAM ", "Other")) == "Camera", "검색은 분류 무시 · 대소문자 · 공백 무시");
+        check(labels(hcpick::buildItems(reg, nullptr, "lightcomp", "")) == "Light", "타입 이름으로도 찾음");
+        check(labels(hcpick::buildItems(reg, nullptr, "rend", "")) == "Camera,Light", "분류 이름으로도 찾음");
+        check(hcpick::buildItems(reg, nullptr, "zzz", "").empty(), "맞는 것 없음 → 빈 목록");
+        // 이름 앞부분이 맞는 것이 가운데가 맞는 것보다 먼저
+        check(labels(hcpick::buildItems(reg, nullptr, "o", "")) == "Orbit,Camera,Light" &&
+              labels(hcpick::buildItems(reg, nullptr, "r", "")) == "Camera,Orbit,Light",
+              "점수 순: 이름 앞 → 타입 이름 · 이름 가운데 → 분류 이름, 같은 점수는 이름 순");
+
+        Actor a;
+        a.addComponent<LightComponent>();
+        const auto in = hcpick::buildItems(reg, &a, "", "Rendering");
+        check(labels(in) == "Camera,Light*" && !in[1].selectable() && hcpick::firstSelectable(in) == 0,
+              "붙어 있는 타입은 남기되 고를 수 없음");
+        check(hcpick::stepSelection(in, 0, +1) == 0 && hcpick::stepSelection(in, 0, -1) == 0 &&
+              hcpick::stepSelection(in, -1, +1) == 0, "고르기: 고를 수 없는 행은 건너뛰고 끝에서 멈춤");
+
+        check(hcpick::foldKey("Nav Agent") == "navagent" && hcpick::initials("Exponential Height Fog") == "ehf" &&
+              hcpick::initials("RigidBody") == "rb", "비교 글 · 머리글자");
+        ComponentRegistry::Entry fog;
+        fog.name = "HeightFogComponent";
+        fog.editorLabel = "Exponential Height Fog";
+        check(hcpick::matchScore(fog, "expo") == 0 && hcpick::matchScore(fog, "ehf") == 1 &&
+              hcpick::matchScore(fog, "fog") == 1 && hcpick::matchScore(fog, "height fog") == 1 &&
+              hcpick::matchScore(fog, "ight") == 2 && hcpick::matchScore(fog, "fogcomp") == 3 &&
+              hcpick::matchScore(fog, "other") == 4 && hcpick::matchScore(fog, "xyz") == -1,
+              "점수: 앞 0 · 머리글자/단어 앞 1 · 가운데 2 · 타입 이름 3 · 분류 4 · 없음 -1");
+    }
+
+    std::printf("\n== 1c. 콘텐츠 브라우저 색인(2026-11-21) ==\n");
+    {
+        using hcb::AssetKind;
+        hcb::ContentIndex idx;
+        idx.build({ "scenes/A.hscene", "scenes/b.hscene", "models/model.glb", "models/hands/Glove.GLB", "audio/Chime.wav",
+                    "audio/Hit.hcue", "prefabs/Lamp.hprefab", "scenes/A.hnav", "readme.txt", "scenes/.hidden.hscene",
+                    "scenes/A.hscene.tmp", ".git/config", "textures/T.png" },
+                  { "empty", "models/hands" });
+        auto names = [](const std::vector<hcb::Item>& v) {
+            std::string s;
+            for (const auto& it : v) s += (s.empty() ? "" : ",") + it.name;
+            return s;
+        };
+        check(names(idx.view("/Game", "", 0)) == "audio,empty,models,prefabs,scenes,textures,readme",
+              "맨 위: 폴더(이름 순, 빈 폴더 포함) 다음 파일, 숨김 폴더(.git) 없음: " + names(idx.view("/Game", "", 0)));
+        const auto scenes = idx.view("/Game/scenes", "", 0);
+        check(names(scenes) == "A,A,b" && scenes[0].kind == AssetKind::Nav && scenes[1].kind == AssetKind::Scene,
+              "폴더 안: 이름 순(대소문자 무시), 숨김 · .tmp 빠짐, 확장자로 종류: " + names(scenes));
+        check(idx.view("/Game/models", "", 0).size() == 2 && idx.view("/Game/models", "", 0)[0].kind == AssetKind::Folder,
+              "하위 폴더(hands)는 폴더로, 그 안의 파일은 보이지 않음");
+        check(idx.find("/Game/models/hands/Glove.GLB") && idx.find("/Game/models/hands/Glove.GLB")->kind == AssetKind::Model,
+              "확장자 대소문자 무시(.GLB = 모델)");
+        check(names(idx.view("/Game", "a", 0)) == "A,A,Chime,Lamp,readme", "검색: 하위 폴더까지, 폴더는 빼고, 이름(확장자 포함)에서");
+        check(names(idx.view("/Game", "", hcb::kindBit(AssetKind::Audio) | hcb::kindBit(AssetKind::Cue))) == "Chime,Hit",
+              "종류 거르기: 소리 · 큐만(하위 폴더까지)");
+        check(names(idx.view("/Game/models", "glove", 0)) == "Glove" && idx.view("/Game/audio", "glove", 0).empty(),
+              "검색은 지금 폴더 아래로 한정");
+        check(idx.pathsOfKind(AssetKind::Scene) == std::vector<std::string>{ "/Game/scenes/A.hscene", "/Game/scenes/b.hscene" },
+              "종류별 경로(Open Scene 목록)");
+        check(idx.hasFolder("/Game/empty") && !idx.hasFolder("/Game/.git") && idx.childFolders("/Game/models").size() == 1,
+              "폴더 판정");
+        check(hcb::parentOf("/Game/models/hands") == "/Game/models" && hcb::parentOf("/Game/models") == "/Game" &&
+              hcb::stemOf("/Game/a/b.c.glb") == "b.c" && hcb::extOf("x/.hidden") == "", "경로 도우미");
+    }
 
     std::printf("\n== 2. 쓰기와 왕복 ==\n");
     std::string text;

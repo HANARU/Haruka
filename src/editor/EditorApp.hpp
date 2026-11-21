@@ -16,6 +16,8 @@
 #include "ContentBrowserPanel.hpp"
 #include "GpuStatsPanel.hpp"
 #include "OutputLogPanel.hpp"
+#include "ComponentPicker.hpp"
+#include "EditorContextMenu.hpp"
 #include "../core/HLog.hpp"
 #include "HCommandStack.hpp"
 #include "SceneDocument.hpp"
@@ -124,6 +126,8 @@ private:
     ContentBrowserPanel contentPanel_;
     GpuStatsPanel       gpuStatsPanel_;
     OutputLogPanel      logPanel_;
+    ComponentPicker     componentPicker_;   // 디테일의 Add Component 팝업(2026-11-21)
+    EditorContextMenu   contextMenu_;       // 오른쪽 누름 메뉴(콘텐츠 브라우저, 2026-11-21)
 
     EditorContext  ctx_;
     EditorIcons    icons_;            // 글꼴 아틀라스가 가리키므로 slateRenderer_ 보다 먼저 선언(나중에 사라짐, D3)
@@ -213,6 +217,7 @@ private:
 
     EFocusTarget currentFocus() const { return textInput_.currentFocus(); }
     void         setTextFocus(EFocusTarget t) { textInput_.setFocus(t); }
+    void         previewSound(const std::string& path);   // 콘텐츠 브라우저 미리 듣기(2026-11-21)
     bool         focusWidgetContains(float x, float y) const { return textInput_.focusWidgetContains(x, y); }
 
     bool        outlinerVisible_ = true;
@@ -230,6 +235,7 @@ private:
     uint64_t  prevRecreate_ = 0;
 
     bool      prevLeftDown_   = false;
+    bool      prevRightDown_  = false;   // 오른쪽 누름 메뉴(2026-11-21)
     Actor*    prevSelected_   = nullptr;
     uint64_t  prevSelSig_     = 0;   // 앞 프레임 선택 집합의 서명(DEF-135)
     int       prevActorCount_ = -1;
@@ -413,6 +419,16 @@ private:
     int         uiConsoleRecall_ = 0;      // --ui-console-recall=N
     std::string uiRename_;
     std::string uiAssetActions_;          // --ui-asset-actions(참조 체계 A-5)
+    bool        uiAddComponent_ = false;         // --ui-add-component*(2026-11-21)
+    std::string uiContentFolder_, uiContentSearch_, uiContentFilter_, uiContentView_, uiContentSelect_,
+                uiContentMenu_, uiContentActivate_;   // --ui-content-*(2026-11-21)
+    bool        uiContentMenuSet_ = false;
+    std::string uiContentDrag_, uiContentDrop_;   // --ui-content-drag · drop=<path>@x,y
+    bool        dumpDrag_ = false;              // 덤프가 끌기 화면을 고정함(놓지 않음)
+    std::string uiAddComponentSearch_;
+    std::string uiAddComponentCategory_;
+    int         uiAddComponentDown_ = 0;
+    bool        uiAddComponentCommit_ = false;
     bool        uiActorPicker_ = false;   // --ui-actor-picker(참조 체계 R-7)
     std::string uiMoveAsset_;             // --ui-move-asset(참조 체계 A-5)
     std::string uiType_;          // 글자 체계 T1 · T2 덤프

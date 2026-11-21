@@ -324,6 +324,12 @@ bool EditorApp::requestClose() {
         if (modalOpen()) return false;   // 취소 동작이 다른 대화상자를 열었으면 그 답을 기다립니다
     }
     if (!sceneDirty()) return true;
+    // 덤프 실행(--ui-dump · --viewport-dump)은 답할 사람이 없으므로 묻지 않고 저장 없이 닫습니다(2026-11-21). 예전에는 덤프 옵션이
+    // 씬을 바꾸면(--ui-add-component-commit) 종료 때 Unsaved Changes 대화상자가 떠 시간 제한까지 기다렸습니다.
+    if (dumpMode_) {
+        HLOG(LogEditorScene, Log) << "Closing with unsaved changes (dump run; not saved)";
+        return true;
+    }
     // Play 중이면 먼저 멈춥니다. 저장은 Play 월드가 아니라 편집 중이던 월드를 써야 합니다.
     if (playState_ != EPlayState::Editor) stopPlay();
     guardUnsaved(HTEXT("Editor.Dialog", "Verb.Closing", "closing"), [this] {
@@ -355,6 +361,8 @@ void EditorApp::openModal(ModalSpec spec) {
     if (currentFocus() != EFocusTarget::None) setTextFocus(EFocusTarget::None);
     menus_.close();
     logPanel_.closePopup();
+    componentPicker_.close();
+    contextMenu_.close();
     modal_ = std::make_unique<ModalSpec>(std::move(spec));
     if (modal_->hasInput) setTextFocus(EFocusTarget::Dialog);
     modalDirty_ = true;
@@ -603,4 +611,19 @@ bool EditorApp::moveAsset(const std::string& from, const std::string& to) {
     detailsPanel_.markDirty();
     outlinerPanel_.markDirty();
     return true;
+}
+
+// 콘텐츠 브라우저에서 소리 · 큐를 두 번 누르면 미리 듣습니다(2026-11-21). 공간화 없이 sfx 버스로 한 번 냅니다(UE 의 에셋 미리 듣기와 같은 몫).
+void EditorApp::previewSound(const std::string& path) {
+    if (!audio_) {
+        HLOG(LogEditorScene, Warning) << "Preview: no audio system";
+        return;
+    }
+    AudioAttenuationSettings at;
+    at.spatialize = false;
+    const glm::vec3 pos = viewport_.cameraActor() ? viewport_.cameraActor()->worldPosition() : glm::vec3(0.f);
+    bool ok = false;
+    if (AudioSystem::isCuePath(path)) ok = audio_->playCue(path, pos, 1.f, at) != 0;
+    else                              ok = audio_->playOneShot(path.c_str(), pos, 1.f, EAudioBus::Sfx, at);
+    HLOG(LogEditorScene, Log) << "Preview " << path << (ok ? "" : " (not played; see the audio log)");
 }

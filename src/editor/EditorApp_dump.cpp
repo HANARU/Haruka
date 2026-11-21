@@ -24,6 +24,21 @@ void EditorApp::setOptions(const EngineOptions& options) {
     uiRename_           = options.uiRename;
     uiAssetActions_     = options.uiAssetActions;
     uiActorPicker_      = options.uiActorPicker;
+    uiAddComponent_         = options.uiAddComponent;
+    uiContentFolder_   = options.uiContentFolder;
+    uiContentSearch_   = options.uiContentSearch;
+    uiContentFilter_   = options.uiContentFilter;
+    uiContentView_     = options.uiContentView;
+    uiContentSelect_   = options.uiContentSelect;
+    uiContentMenu_     = options.uiContentMenu;
+    uiContentMenuSet_  = options.uiContentMenuSet;
+    uiContentActivate_ = options.uiContentActivate;
+    uiContentDrag_     = options.uiContentDrag;
+    uiContentDrop_     = options.uiContentDrop;
+    uiAddComponentSearch_   = options.uiAddComponentSearch;
+    uiAddComponentCategory_ = options.uiAddComponentCategory;
+    uiAddComponentDown_     = options.uiAddComponentDown;
+    uiAddComponentCommit_   = options.uiAddComponentCommit;
     uiMoveAsset_        = options.uiMoveAsset;
     uiType_             = options.uiType;
     uiCaretLeft_        = options.uiCaretLeft;
@@ -61,6 +76,8 @@ HTextEditState* EditorApp::focusedEdit() {
         case EFocusTarget::LogSearch: return &logPanel_.searchField().edit;
         case EFocusTarget::Console:   return &logPanel_.consoleEdit();
         case EFocusTarget::Dialog:    return &dialogEdit_;
+        case EFocusTarget::Picker:    return &componentPicker_.edit();
+        case EFocusTarget::ContentSearch: return &contentPanel_.searchEdit();
         default:                      return nullptr;
     }
 }
@@ -189,6 +206,73 @@ void EditorApp::applyDumpState() {
         moveAsset(uiMoveAsset_.substr(0, bar), uiMoveAsset_.substr(bar + 1));
     }
     if (!uiAssetActions_.empty()) openAssetActions(uiAssetActions_);
+    {
+        const bool any = !uiContentFolder_.empty() || !uiContentSearch_.empty() || !uiContentFilter_.empty() ||
+                         !uiContentView_.empty() || !uiContentSelect_.empty() || uiContentMenuSet_ || !uiContentActivate_.empty() ||
+                         !uiContentDrag_.empty() || !uiContentDrop_.empty();
+        if (any) {
+            if (bottomTab_ != 0) { bottomTab_ = 0; rebuildBottomPanel(); }
+            if (!uiContentFolder_.empty()) contentPanel_.navigate(uiContentFolder_);
+            if (!uiContentView_.empty()) contentPanel_.setTileView(uiContentView_ != "list");
+            if (!uiContentSearch_.empty()) contentPanel_.setSearch(uiContentSearch_);
+            for (size_t pos = 0; pos < uiContentFilter_.size();) {
+                const size_t comma = uiContentFilter_.find(',', pos);
+                const std::string name = uiContentFilter_.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+                for (hcb::AssetKind k : hcb::filterKinds())
+                    if (name == hcb::kindName(k)) contentPanel_.toggleFilter(k);
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+            if (!uiContentSelect_.empty()) contentPanel_.select(uiContentSelect_);
+            if (!uiContentActivate_.empty()) contentPanel_.activate(uiContentActivate_);
+            // <경로>@x,y 를 나눕니다(창 좌표).
+            auto splitAt = [](const std::string& s, std::string& path, glm::vec2& at) {
+                const size_t atPos = s.rfind('@');
+                const size_t comma = s.find(',', atPos == std::string::npos ? 0 : atPos);
+                if (atPos == std::string::npos || comma == std::string::npos) return false;
+                path = s.substr(0, atPos);
+                at.x = std::strtof(s.substr(atPos + 1, comma - atPos - 1).c_str(), nullptr);
+                at.y = std::strtof(s.substr(comma + 1).c_str(), nullptr);
+                return true;
+            };
+            std::string path;
+            glm::vec2 at{ 0.f };
+            if (!uiContentDrag_.empty() && splitAt(uiContentDrag_, path, at)) {
+                contentPanel_.forceDrag(path);
+                dumpDrag_      = true;
+                uiHoverActive_ = true;   // 마우스 자리를 그 좌표로(handleInput)
+                uiHoverPos_    = at;
+            }
+            // 놓기는 ';' 로 여럿(차례로). 앞의 놓기가 만든 액터 위에 다음을 놓아 볼 수 있습니다.
+            for (size_t pos = 0; ctx_.window && pos < uiContentDrop_.size();) {
+                const size_t semi = uiContentDrop_.find(';', pos);
+                const std::string one = uiContentDrop_.substr(pos, semi == std::string::npos ? std::string::npos : semi - pos);
+                pos = semi == std::string::npos ? uiContentDrop_.size() : semi + 1;
+                if (!splitAt(one, path, at)) continue;
+                int w = 0, h = 0;
+                ctx_.window->getWindowSize(w, h);
+                glm::vec3 point{ 0.f };
+                Actor* hit = nullptr;
+                if (contentPanel_.canDropInViewport(path) && viewport_.dropPoint(at.x, at.y, (float)w, (float)h, point, &hit))
+                    contentPanel_.dropInViewport(path, point, hit);
+                else
+                    HLOG(LogEditorDump, Warning) << "ui-content-drop: cannot drop " << path << " at " << at.x << "," << at.y;
+            }
+            if (uiContentMenuSet_) {
+                if (!uiContentMenu_.empty()) contentPanel_.select(uiContentMenu_);
+                contextMenu_.open(glm::vec2{ 640.f, 640.f }, contentPanel_.contextItems(uiContentMenu_));
+            }
+        }
+    }
+    if (uiAddComponent_ && ctx_.selected) {
+        // 디테일의 Add Component 단추를 누른 것과 같습니다. 단추 자리는 다음 배치 뒤에 정해지므로 팝업은 그때 그려집니다.
+        detailsPanel_.rebuild();
+        componentPicker_.open(ctx_.selected, detailsPanel_.addComponentButton());
+        if (!uiAddComponentCategory_.empty()) componentPicker_.enterCategory(uiAddComponentCategory_);
+        if (!uiAddComponentSearch_.empty()) componentPicker_.setQuery(uiAddComponentSearch_);
+        for (int i = 0; i < uiAddComponentDown_; ++i) componentPicker_.moveHighlight(+1);
+        if (uiAddComponentCommit_) componentPicker_.activateHighlighted();
+    }
     if (uiActorPicker_ && ctx_.selected) {
         // 선택한 액터의 첫 액터 참조 칸(디테일 패널에서 그 칸을 누른 것과 같음).
         bool opened = false;

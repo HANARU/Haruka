@@ -60,6 +60,12 @@ public:
     void releaseOrbit(bool leftDown) { if (!leftDown) lmbOrbit_ = false; }
 
     void pickActor(float mx, float my, float winW, float winH);
+    // 콘텐츠 브라우저가 에셋을 놓을 자리(2026-11-21): 에디터 카메라 정면 광선이 처음 닿는 액터 경계 상자의 면.
+    // 닿는 것이 없거나 20 m 보다 멀면 카메라 앞 3 m. UE 가 뷰포트 가운데 아래 표면에 놓는 것과 같은 몫입니다.
+    glm::vec3 placementPoint() const;
+    // 콘텐츠 브라우저에서 끌어 놓을 자리(2026-11-21): 커서 광선이 처음 닿는 액터 경계 상자 면과 그 액터. 닿는 것이 없으면
+    // 바닥 평면(y = 0, 200 m 안), 그것도 없으면 광선 5 m. 커서가 뷰포트 밖이면 false.
+    bool dropPoint(float mx, float my, float winW, float winH, glm::vec3& point, Actor** hitActor) const;
     bool pointerRay(float mx, float my, float winW, float winH, glm::vec3& origin, glm::vec3& dir) const;
     bool inViewport(float mx, float my, float winW, float winH) const;
 
@@ -79,6 +85,8 @@ public:
 
 private:
     void buildIcons(World& world, std::vector<LineVertex>& lines, std::vector<LineVertex>& tris) const;
+    // 광선이 처음 닿는 액터 경계 상자(에디터 카메라 · 상자 안에서 시작하는 것 제외). maxT 안에 없으면 false.
+    bool nearestBoundsHit(const glm::vec3& rayO, const glm::vec3& rayD, float maxT, float& t, Actor*& actor) const;
 
     Deps deps_;
     Actor*              editorCamActor_ = nullptr;

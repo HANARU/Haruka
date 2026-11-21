@@ -4,11 +4,6 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: ko\n"
 
-#: src/editor/ContentBrowserPanel.cpp:95
-msgctxt "Editor.Content,Tip.AssetActions"
-msgid "References, rename and move"
-msgstr "참조 · 이름 바꾸기 · 옮기기"
-
 #: src/editor/DetailsPanel.cpp:131
 msgctxt "Editor.Details,ActorRef.Missing"
 msgid "(missing)"
@@ -574,3 +569,133 @@ msgstr "선택"
 msgctxt "Editor.Viewport,World"
 msgid "World"
 msgstr "월드"
+
+#: src/editor/DetailsPanel.cpp:462
+msgctxt "Editor.Details,AddComponent"
+msgid "Add Component"
+msgstr "컴포넌트 추가"
+
+#: src/editor/ComponentPicker.cpp:174
+msgctxt "Editor.Details,ComponentSearchHint"
+msgid "Search components..."
+msgstr "컴포넌트 검색..."
+
+#: src/editor/ComponentPicker.cpp:192
+msgctxt "Editor.Details,ComponentSearchTitle"
+msgid "Search"
+msgstr "검색"
+
+#: src/editor/ComponentPicker.cpp:193
+msgctxt "Editor.Details,ComponentTitle"
+msgid "Component"
+msgstr "컴포넌트"
+
+#: src/editor/ComponentPicker.cpp:251
+msgctxt "Editor.Details,ComponentNoMatch"
+msgid "No matching component"
+msgstr "맞는 컴포넌트 없음"
+
+#: src/editor/ComponentPicker.cpp:261
+msgctxt "Editor.Details,ComponentAdded"
+msgid "added"
+msgstr "추가됨"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,ClearFilters"
+msgid "Clear"
+msgstr "지우기"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,EmptyFolder"
+msgid "This folder is empty"
+msgstr "빈 폴더입니다"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Filters"
+msgid "Filters"
+msgstr "거르기"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.AssetActions"
+msgid "References, Rename, Move..."
+msgstr "참조 · 이름 바꾸기 · 옮기기..."
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.Assign"
+msgid "Assign to Selected Actor"
+msgstr "고른 액터에 지정"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.CopyPath"
+msgid "Copy Path"
+msgstr "경로 복사"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.OpenFolder"
+msgid "Open"
+msgstr "열기"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.OpenScene"
+msgid "Open Scene"
+msgstr "씬 열기"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.Place"
+msgid "Place in Scene"
+msgstr "씬에 놓기"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.Play"
+msgid "Play"
+msgstr "재생"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.Refresh"
+msgid "Refresh"
+msgstr "새로 고침"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.ShowFolder"
+msgid "Show in Explorer"
+msgstr "탐색기에서 보기"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Menu.ShowInExplorer"
+msgid "Show in Explorer"
+msgstr "탐색기에서 보기"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,NoMatch"
+msgid "No matching assets"
+msgstr "맞는 에셋 없음"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,SearchHint"
+msgid "Search assets..."
+msgstr "에셋 검색..."
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Tip.Back"
+msgid "Back"
+msgstr "뒤로"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Tip.Forward"
+msgid "Forward"
+msgstr "앞으로"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Tip.List"
+msgid "List view"
+msgstr "목록 보기"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Tip.Tiles"
+msgid "Tile view"
+msgstr "타일 보기"
+
+#: src/editor/ContentBrowserPanel.cpp
+msgctxt "Editor.Content,Drag.CannotDrop"
+msgid "cannot drop here"
+msgstr "여기에 놓을 수 없음"

@@ -34,6 +34,8 @@ public:
         std::function<void(const std::string&, uint64_t, std::function<void(uint64_t)>)> pickActor;
         // 프리팹 링크가 바뀜(링크 끊기 · 되돌리기): 아웃라이너 표시를 다시 만듭니다.
         std::function<void()> onPrefabLinksChanged;
+        // Add Component 단추를 누름(2026-11-21): 대상 액터 · 단추 위젯. EditorApp 이 그 아래에 검색 팝업을 엽니다.
+        std::function<void(Actor*, const std::shared_ptr<HWidget>&)> onOpenComponentPicker;
     };
 
     void init(Deps deps);
@@ -43,8 +45,11 @@ public:
     void flushRebuild();
     void markDirty() { dirty_ = true; }
 
-    void checkWidthChange();
     void onActorDestroyed(Actor* a);
+    // ComponentRegistry::entries()[entryIndex] 타입을 붙입니다(Undo 가능). 이미 있으면 아무것도 하지 않습니다.
+    void addComponentUndoable(Actor* a, int entryIndex);
+    // 마지막으로 만든 Add Component 단추(덤프가 팝업 자리를 정할 때). 없으면 null.
+    std::shared_ptr<HWidget> addComponentButton() const { return addCompBtn_.lock(); }
     bool scrollContains(const glm::vec2& p) const;
 
 private:
@@ -83,8 +88,8 @@ private:
     std::shared_ptr<SVerticalBox> list_;
     std::shared_ptr<SScrollBox>   scroll_;
     bool   dirty_           = false;
-    int    addCompWidthSig_ = -1;
     Actor* actor_           = nullptr;
+    std::weak_ptr<HWidget> addCompBtn_;
     bool   txExpanded_      = true;
     std::vector<std::string> overrides_;   // 고른 소속 액터의 덮어쓴 경로(build 때 구함)
 };

@@ -8,7 +8,8 @@
 
 class IWindow;
 
-enum class EFocusTarget { None, Rename, Search, LogSearch, NumberField, Dialog, Console };
+// Picker: 디테일의 Add Component 팝업 검색 칸 · ContentSearch: 콘텐츠 브라우저 검색 칸(2026-11-21).
+enum class EFocusTarget { None, Rename, Search, LogSearch, NumberField, Dialog, Console, Picker, ContentSearch };
 
 // 텍스트 입력 칸의 공용 바인딩(S6d).
 // 아웃라이너 리네임 · 아웃라이너 검색 · 로그 검색이 같은 구조로 TextInputController 에 등록됩니다.
@@ -21,7 +22,9 @@ struct TextInputField {
     std::function<bool()>          onBegin  = {};   // false 이면 진입을 취소합니다
     std::function<void()>          onCommit = {};   // Enter 확정 시 호출
     bool                           keepFocusOnCommit = false;   // 콘솔: Enter 뒤에도 입력을 이어 감
-    std::function<void(int)>       onHistory = {};   // 위(-1) · 아래(+1) 화살표(콘솔 기록)
+    std::function<void(int)>       onHistory = {};   // 위(-1) · 아래(+1) 화살표(콘솔 기록 · 팝업 목록 고르기)
+    std::function<void()>          onCancel  = {};   // Esc 로 빠져나올 때(팝업 닫기). 포커스를 푼 뒤 부릅니다
+    std::function<void()>          onBackspaceEmpty = {};   // 빈 칸에서 Backspace(팝업: 분류에서 위로)
 };
 
 // 에디터 텍스트 입력 포커스 중재 및 키/문자 입력 처리기(S6d).
@@ -51,7 +54,15 @@ public:
         std::function<void()> onCopySelection;
         std::function<void()> onPasteClipboard;
         std::function<TextInputField()> consoleField;   // Output Log 의 콘솔 줄(2026-11-20, Docs/Gameplay_Tools.md D9)
+        std::function<TextInputField()> pickerField;          // Add Component 팝업(2026-11-21)
+        std::function<TextInputField()> contentSearchField;   // 콘텐츠 브라우저 검색(2026-11-21)
     };
+
+    // 글 입력 칸 대상인지(숫자 칸 · 대화상자 제외).
+    static bool isTextField(EFocusTarget t) {
+        return t == EFocusTarget::Rename || t == EFocusTarget::Search || t == EFocusTarget::LogSearch ||
+               t == EFocusTarget::Console || t == EFocusTarget::Picker || t == EFocusTarget::ContentSearch;
+    }
 
     void init(Deps deps);
 
@@ -88,6 +99,8 @@ public:
                           IWindow* clipboard);
 
 private:
+    // 대상의 바인딩. 글 입력 칸이 아니거나 등록되지 않았으면 null 입니다. 대상별 분기를 여기 한 곳에 둡니다.
+    const std::function<TextInputField()>* fieldFn(EFocusTarget t) const;
     KeyEdges sampleEdges(IWindow& win);
     bool editField(IWindow& win, HTextEditState& st, const KeyEdges& k);
     void syncIme(IWindow& win);

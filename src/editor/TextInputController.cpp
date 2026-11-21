@@ -8,13 +8,26 @@ void TextInputController::init(Deps deps) {
     deps_ = std::move(deps);
 }
 
+const std::function<TextInputField()>* TextInputController::fieldFn(EFocusTarget t) const {
+    const std::function<TextInputField()>* fn = nullptr;
+    switch (t) {
+        case EFocusTarget::Rename:        fn = &deps_.renameField;        break;
+        case EFocusTarget::Search:        fn = &deps_.searchField;        break;
+        case EFocusTarget::LogSearch:     fn = &deps_.logSearchField;     break;
+        case EFocusTarget::Console:       fn = &deps_.consoleField;       break;
+        case EFocusTarget::Picker:        fn = &deps_.pickerField;        break;
+        case EFocusTarget::ContentSearch: fn = &deps_.contentSearchField; break;
+        default: break;
+    }
+    return fn && *fn ? fn : nullptr;
+}
+
 EFocusTarget TextInputController::currentFocus() const {
     if (deps_.isDialogFocused && deps_.isDialogFocused()) return EFocusTarget::Dialog;
     if (SNumberField::focusedField())                     return EFocusTarget::NumberField;
-    if (deps_.renameField    && deps_.renameField().focused)    return EFocusTarget::Rename;
-    if (deps_.searchField    && deps_.searchField().focused)    return EFocusTarget::Search;
-    if (deps_.logSearchField && deps_.logSearchField().focused) return EFocusTarget::LogSearch;
-    if (deps_.consoleField   && deps_.consoleField().focused)   return EFocusTarget::Console;
+    for (EFocusTarget t : { EFocusTarget::Rename, EFocusTarget::Search, EFocusTarget::LogSearch, EFocusTarget::Console,
+                            EFocusTarget::Picker, EFocusTarget::ContentSearch })
+        if (const auto* fn = fieldFn(t); fn && (*fn)().focused) return t;
     return EFocusTarget::None;
 }
 
@@ -22,20 +35,12 @@ void TextInputController::setFocus(EFocusTarget t) {
     const EFocusTarget prev = currentFocus();
     if (prev == t) return;
 
-    auto getField = [this](EFocusTarget target) -> TextInputField {
-        if (target == EFocusTarget::Rename)    return deps_.renameField();
-        if (target == EFocusTarget::Search)    return deps_.searchField();
-        if (target == EFocusTarget::Console)   return deps_.consoleField();
-        return deps_.logSearchField();
-    };
-
     // 이전 포커스를 정리합니다. 숫자 필드는 편집 중이던 값을 확정해야, 나중에 다른 곳에서
     // 누른 Enter 가 낡은 값으로 되살아나지 않습니다.
     if (prev == EFocusTarget::NumberField) {
         if (auto* nf = SNumberField::focusedField()) nf->commitEdit();
-    } else if (prev == EFocusTarget::Rename || prev == EFocusTarget::Search || prev == EFocusTarget::LogSearch ||
-               prev == EFocusTarget::Console) {
-        auto f = getField(prev);
+    } else if (const auto* fn = fieldFn(prev)) {
+        auto f = (*fn)();
         f.focused = false;
         f.edit.clearSelection();
         f.edit.clearComposition();
@@ -44,25 +49,23 @@ void TextInputController::setFocus(EFocusTarget t) {
         if (deps_.endDialogFocus) deps_.endDialogFocus();
     }
 
-    if (t == EFocusTarget::Rename) {
-        auto f = getField(t);
-        if (!f.onBegin || f.onBegin()) {
+    if (t == EFocusTarget::Dialog) {
+        if (deps_.beginDialogFocus) deps_.beginDialogFocus();
+    } else if (const auto* fn = fieldFn(t)) {
+        auto f = (*fn)();
+        if (t == EFocusTarget::Rename) {
+            if (!f.onBegin || f.onBegin()) {
+                f.focused = true;
+                f.edit.selectAll();   // 윈도우 표준: 이름 변경 시작 시 전체 선택
+            }
+        } else if (t == EFocusTarget::Console) {
             f.focused = true;
-            f.edit.selectAll();   // 윈도우 표준: 이름 변경 시작 시 전체 선택
+            f.edit.end(false);   // 콘솔은 이어 쓰기(전체 선택 없음)
+        } else {
+            f.focused = true;
+            f.edit.selectAll();   // 키보드로 들어오면 전체 선택(마우스로 누르면 위젯이 곧바로 그 자리에 커서를 놓음)
         }
         if (f.onChanged) f.onChanged();
-    } else if (t == EFocusTarget::Search || t == EFocusTarget::LogSearch) {
-        auto f = getField(t);
-        f.focused = true;
-        f.edit.selectAll();   // 키보드로 들어오면 전체 선택(마우스로 누르면 위젯이 곧바로 그 자리에 커서를 놓음)
-        if (f.onChanged) f.onChanged();
-    } else if (t == EFocusTarget::Console && deps_.consoleField) {
-        auto f = deps_.consoleField();
-        f.focused = true;
-        f.edit.end(false);   // 콘솔은 이어 쓰기(전체 선택 없음)
-        if (f.onChanged) f.onChanged();
-    } else if (t == EFocusTarget::Dialog) {
-        if (deps_.beginDialogFocus) deps_.beginDialogFocus();
     }
 
     if (deps_.window && *deps_.window) {
@@ -81,8 +84,7 @@ void TextInputController::setFocus(EFocusTarget t) {
         prevADown_      = w.isKeyDown(HInput::KEY_A);
         prevXDown_      = w.isKeyDown(HInput::KEY_X);
         // 글 입력 칸에서만 IME 를 켭니다(T2). 숫자 칸 · 포커스 없음은 끔.
-        const bool textFocus = t == EFocusTarget::Rename || t == EFocusTarget::Search ||
-                               t == EFocusTarget::LogSearch || t == EFocusTarget::Dialog || t == EFocusTarget::Console;
+        const bool textFocus = isTextField(t) || t == EFocusTarget::Dialog;
         w.setTextInputEnabled(textFocus);
     }
 
@@ -93,28 +95,17 @@ void TextInputController::setFocus(EFocusTarget t) {
 
 bool TextInputController::focusWidgetContains(float x, float y) const {
     const glm::vec2 p{ x, y };
-    switch (currentFocus()) {
-        case EFocusTarget::NumberField:
-            // 숫자 칸은 디테일 스크롤 상자 안에만 있습니다. 스크롤로 가려진 칸은 그 자리가 다른 패널이므로,
-            // 상자 영역 밖의 누름은 칸 밖으로 칩니다. 아니면 가려진 칸 위를 눌러도 편집이 끝나지 않습니다.
-            if (auto* nf = SNumberField::focusedField())
-                return nf->cachedGeometry().contains(p) &&
-                       (!deps_.detailsScrollContains || deps_.detailsScrollContains(p));
-            return false;
-        case EFocusTarget::Search:
-            return deps_.searchField && deps_.searchField().contains(p);
-        case EFocusTarget::LogSearch:
-            return deps_.logSearchField && deps_.logSearchField().contains(p);
-        case EFocusTarget::Console:
-            return deps_.consoleField && deps_.consoleField().contains(p);
-        case EFocusTarget::Rename:
-            return deps_.renameField && deps_.renameField().contains(p);
-        case EFocusTarget::Dialog:
-            return false;
-        case EFocusTarget::None:
-        default:
-            return false;
+    const EFocusTarget focus = currentFocus();
+    if (focus == EFocusTarget::NumberField) {
+        // 숫자 칸은 디테일 스크롤 상자 안에만 있습니다. 스크롤로 가려진 칸은 그 자리가 다른 패널이므로,
+        // 상자 영역 밖의 누름은 칸 밖으로 칩니다. 아니면 가려진 칸 위를 눌러도 편집이 끝나지 않습니다.
+        if (auto* nf = SNumberField::focusedField())
+            return nf->cachedGeometry().contains(p) &&
+                   (!deps_.detailsScrollContains || deps_.detailsScrollContains(p));
+        return false;
     }
+    if (const auto* fn = fieldFn(focus)) return (*fn)().contains(p);
+    return false;   // 대화상자 · 없음
 }
 
 namespace {
@@ -234,14 +225,9 @@ bool TextInputController::editField(IWindow& win, HTextEditState& st, const KeyE
 
 void TextInputController::syncIme(IWindow& win) {
     HTextEditState* st = nullptr;
-    switch (currentFocus()) {
-        case EFocusTarget::Rename:    if (deps_.renameField)    st = &deps_.renameField().edit;    break;
-        case EFocusTarget::Search:    if (deps_.searchField)    st = &deps_.searchField().edit;    break;
-        case EFocusTarget::LogSearch: if (deps_.logSearchField) st = &deps_.logSearchField().edit; break;
-        case EFocusTarget::Console:   if (deps_.consoleField)   st = &deps_.consoleField().edit;   break;
-        case EFocusTarget::Dialog:    if (deps_.dialogEdit)     st = deps_.dialogEdit();          break;
-        default: break;
-    }
+    const EFocusTarget focus = currentFocus();
+    if (const auto* fn = fieldFn(focus)) st = &(*fn)().edit;
+    else if (focus == EFocusTarget::Dialog && deps_.dialogEdit) st = deps_.dialogEdit();
     if (st && st->caretRect.w > 0.f)
         win.setTextInputRect(st->caretRect.x, st->caretRect.y, st->caretRect.z, st->caretRect.w);
 }
@@ -274,11 +260,13 @@ void TextInputController::handleNumberFieldInput(IWindow& win, const KeyEdges& k
 }
 
 void TextInputController::handleTextFieldInput(IWindow& win, EFocusTarget focus, const KeyEdges& k) {
-    auto f = (focus == EFocusTarget::Rename)  ? deps_.renameField()
-           : (focus == EFocusTarget::Search)  ? deps_.searchField()
-           : (focus == EFocusTarget::Console) ? deps_.consoleField()
-                                              : deps_.logSearchField();
+    const auto* fn = fieldFn(focus);
+    if (!fn) return;
+    auto f = (*fn)();
+    // 빈 칸에서 누른 Backspace(팝업: 분류 안에서 위로). 지울 글이 없을 때만입니다.
+    const bool emptyBackspace = k.bsCount > 0 && f.edit.text.empty() && !f.edit.isComposing();
     const bool dirty = editField(win, f.edit, k);
+    if (emptyBackspace && f.onBackspaceEmpty) f.onBackspaceEmpty();
     if (k.enterEdge && !f.edit.isComposing()) {
         if (f.onCommit) f.onCommit();
         if (!f.keepFocusOnCommit) setFocus(EFocusTarget::None);
@@ -308,7 +296,10 @@ void TextInputController::tickInput() {
     size_t      compCaretNow = 0;
     const bool  imeComposing = win.getComposition(compNow, compCaretNow);
     if (k.escEdge && focus != EFocusTarget::None && !imeComposing) {
+        std::function<void()> cancel;
+        if (const auto* fn = fieldFn(focus)) cancel = (*fn)().onCancel;
         setFocus(EFocusTarget::None);
+        if (cancel) cancel();
         return;
     }
 
@@ -325,8 +316,7 @@ void TextInputController::tickInput() {
         return;
     }
 
-    if (focus == EFocusTarget::Rename || focus == EFocusTarget::Search ||
-        focus == EFocusTarget::LogSearch || focus == EFocusTarget::Console) {
+    if (isTextField(focus)) {
         handleTextFieldInput(win, focus, k);
         return;
     }
