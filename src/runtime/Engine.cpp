@@ -610,6 +610,30 @@ void Engine::setupCVars() {
                           access_.requestSeatedRecalibrate();
                           return "seated height will be measured on the next head pose";
                       });
+    // 사용자 설정을 실행 중에 보고 바꿉니다(2026-11-21, 헤드셋 점검용). 게임 설정 화면과 같은 길이라 바로 적용되고 1 초 뒤 저장됩니다.
+    cvars_.addCommand("setting", "setting [name [value|reset]]: show or change a user setting (comfort.*, access.*, audio.*, ...); saved",
+                      [this](const std::vector<std::string>& args) -> std::string {
+                          if (args.empty()) {
+                              std::string t = "changed user settings:";
+                              if (userSettings_.values().empty()) t += " none";
+                              for (const auto& [k, v] : userSettings_.values()) t += "\n  " + k + " = " + v;
+                              return t;
+                          }
+                          const std::string& name = args[0];
+                          if (args.size() == 1) {
+                              const auto v = userSettings_.raw(name);
+                              return name + " = " + (v ? *v : std::string("(project default)"));
+                          }
+                          if (args[1] == "reset") {
+                              const bool had = userSettings_.reset(name);
+                              return name + (had ? " reset to the project default" : " was not changed");
+                          }
+                          std::string value = args[1];
+                          for (size_t i = 2; i < args.size(); ++i) value += " " + args[i];
+                          std::string why;
+                          if (!userSettings_.set(name, value, &why)) return "not set: " + why;
+                          return name + " = " + userSettings_.raw(name).value_or(value) + (why.empty() ? "" : " (" + why + ")");
+                      });
     cvars_.addCommand("scene", "scene <path>: switch to a scene in the background (game executable only)",
                       [this](const std::vector<std::string>& args) -> std::string {
                           if (args.size() != 1) return "usage: scene /Game/scenes/Name.hscene";

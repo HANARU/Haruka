@@ -157,3 +157,11 @@ ctx.settings.reset("comfort.snapTurn");          // 씬 값으로
 - 액터 상태 자동 스냅숏(어느 컴포넌트 값을 남길지 표시하는 방식), 클라우드 저장, 암호화.
 - POSIX 에서 이름 바꾸기 뒤 폴더 fsync(Android 전원 차단 대비)는 하지 않았습니다. `.bak` 이 남으므로 본 파일이 사라져도 이전 저장본을 읽습니다.
 - (헤드셋) G-4.
+
+## 5. 콘솔 명령 `setting` (2026-11-21)
+
+헤드셋 점검에서 설정을 바꿔 가며 비교하려고 넣었습니다(시작 옵션 `--user-setting` 은 실행마다 다시 띄워야 함).
+`setting` = 바꾼 값 목록, `setting <이름>` = 지금 값(없으면 project default), `setting <이름> <값>` = 바꾸기,
+`setting <이름> reset` = 프로젝트 기본값으로. 게임 설정 화면과 같은 길(`UserSettings::set`)이라 형 확인 · 범위 자르기 · 모르는 이름 거부가
+같고, Live 값은 다음 프레임에 적용되며 1 초 뒤 `Config/user_settings.ini` 에 저장됩니다. 확인: `--console-at` 으로 바꾸기 · 목록 · 되돌리기 ·
+모르는 이름 거부와 Comfort · Accessibility 적용 로그.
