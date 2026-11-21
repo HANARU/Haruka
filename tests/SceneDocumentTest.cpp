@@ -250,6 +250,13 @@ int main() {
               "새 파일(폴더도 만듦)");
         check(hfile::writeAtomic(f, "second\n", &err) && hfile::readAll(f, back) && back == "second\n",
               "있는 파일을 바꿈");
+        {
+            // DEF-178: 줄 끝을 바꾸지 않습니다(예전에는 Windows 에서 CRLF). 바이트로 읽어 봅니다.
+            check(hfile::writeAtomic(f, "a\nb\n", &err), "LF 글 쓰기");
+            std::ifstream bin(f, std::ios::binary);
+            const std::string bytes((std::istreambuf_iterator<char>(bin)), std::istreambuf_iterator<char>());
+            check(bytes == "a\nb\n", "DEF-178: 쓴 바이트 그대로(CR 없음, " + std::to_string(bytes.size()) + " 바이트)");
+        }
         fs::path tmp = f;
         tmp += ".tmp";
         check(!fs::exists(tmp, ec), "임시 파일이 남지 않음");

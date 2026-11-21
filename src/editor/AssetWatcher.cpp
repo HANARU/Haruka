@@ -104,7 +104,10 @@ void AssetWatcher::watchLoop() {
             const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buf);
             for (;;) {
                 const DWORD act = info->Action;
-                if (act == FILE_ACTION_ADDED || act == FILE_ACTION_MODIFIED || act == FILE_ACTION_RENAMED_NEW_NAME) {
+                // 지움 · 이름 바꾸기 전 이름도 알립니다(DEF-177). 예전에는 버려, import.ini 를 지워도 가져오기 설정이 그대로였습니다.
+                // 받는 쪽(EditorApp::processAssetChange)이 파일이 없는 경우를 종류마다 처리합니다.
+                if (act == FILE_ACTION_ADDED || act == FILE_ACTION_MODIFIED || act == FILE_ACTION_RENAMED_NEW_NAME ||
+                    act == FILE_ACTION_REMOVED || act == FILE_ACTION_RENAMED_OLD_NAME) {
                     const std::string rel = utf8FromWide(info->FileName, (int)(info->FileNameLength / sizeof(wchar_t)));
                     std::string logical = hreload::logicalFromProjectRelative(rel);
                     if (!logical.empty()) names.push_back(std::move(logical));

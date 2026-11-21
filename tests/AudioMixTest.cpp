@@ -278,6 +278,13 @@ int main() {
         sys.tick(kDt);   // 미터는 지난 틱 뒤의 렌더 피크
         check(base > 0.3 && sys.busPeak(1) > 0.4f && sys.busPeak(0) == 0.f, "음악 소리는 music 버스로(미터: music 피크 " +
               std::to_string(sys.busPeak(1)) + ", sfx 0, RMS " + std::to_string(base) + ")");
+        {
+            // DEF-176: 틱이 오디오 블록보다 잦으면(에디터 고 fps) 렌더가 없는 틱이 생깁니다. 그 틱은 미터를 0 으로 읽지 않습니다.
+            const float before = sys.busPeak(1);
+            for (int i = 0; i < 8; ++i) sys.tick(kDt / 8.f);
+            check(sys.busPeak(1) == before && sys.busMeter(1) >= before && sys.busMeter(0) == 0.f,
+                  "DEF-176: 렌더 없는 틱 8번 → 미터 그대로(music 피크 " + std::to_string(sys.busPeak(1)) + ")");
+        }
         sys.setBusMuted(1, true);
         check(level(sys) < 1e-7 && sys.busMuted(1), "music 버스 음소거 → 무음");
         sys.setBusMuted(1, false);

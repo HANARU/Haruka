@@ -1672,6 +1672,7 @@ float AudioSystem::busEffectiveGain(int id) const {
     return g;
 }
 float AudioSystem::busPeak(int id) const         { return (id >= 0 && id < (int)buses_.size()) ? buses_[id].peak : 0.f; }
+float AudioSystem::busMeter(int id) const        { return (id >= 0 && id < (int)buses_.size()) ? buses_[id].meter : 0.f; }
 float AudioSystem::busDuckGain(int id) const     { return (id >= 0 && id < (int)buses_.size()) ? buses_[id].duck : 1.f; }
 float AudioSystem::busSnapshotGain(int id) const { return (id >= 0 && id < (int)buses_.size()) ? buses_[id].snap : 1.f; }
 
@@ -1681,8 +1682,22 @@ void AudioSystem::pushBusGains() {
 }
 
 void AudioSystem::updateMix(float dt) {
-    // 미터: 지난 틱 동안 오디오 스레드가 남긴 피크를 읽고 0 으로(headless 면 renderHeadless 사이의 피크).
-    for (BusState& b : buses_) b.peak = b.node ? asBus(b.node)->peak.exchange(0.f, std::memory_order_acq_rel) : 0.f;
+    // 미터: 지난 읽기 뒤 오디오 스레드가 남긴 피크를 읽고 0 으로(headless 면 renderHeadless 사이의 피크).
+    // 그 사이에 엔진이 한 프레임도 렌더하지 않았으면 읽지 않고 직전 값을 둡니다(DEF-176). 오디오 스레드는 약 10 ms 마다
+    // 블록을 렌더하는데, 에디터처럼 틱이 그보다 잦으면 블록이 없는 틱이 0 을 읽어 미터가 거의 늘 -144 dB 로 보이고, 더킹
+    // 포락선도 그 틱마다 원천이 조용하다고 보았습니다. 엔진 시각을 먼저 읽으므로, 그 뒤에 렌더한 블록의 피크는 이번 읽기에
+    // 들어가거나 노드에 남아 다음 읽기로 넘어갈 뿐 버려지지 않습니다.
+    const uint64_t now = engine_ ? ma_engine_get_time_in_pcm_frames(asEngine(engine_)) : 0;
+    if (now != meterFrame_) {
+        meterFrame_ = now;
+        for (BusState& b : buses_) b.peak = b.node ? asBus(b.node)->peak.exchange(0.f, std::memory_order_acq_rel) : 0.f;
+    }
+    constexpr float kMeterHold = 0.3f, kMeterFallDbPerSec = 40.f;
+    for (BusState& b : buses_) {
+        if (b.peak >= b.meter) { b.meter = b.peak; b.meterHold = kMeterHold; }
+        else if (b.meterHold > 0.f) b.meterHold -= dt;
+        else b.meter = std::max(b.peak, b.meter * std::pow(10.f, -kMeterFallDbPerSec * dt / 20.f));
+    }
     // 스냅숏(D3): 무게를 옮기고, 다 꺼진 것은 뺀 뒤 섞습니다.
     for (size_t i = 0; i < activeSnaps_.size();) {
         if (hmix::stepSnapshot(activeSnaps_[i], snapshots_[activeSnaps_[i].snapshot], dt)) activeSnaps_.erase(activeSnaps_.begin() + (long)i);
@@ -2033,7 +2048,7 @@ std::string AudioSystem::busReport() const {
         char line[160];
         std::snprintf(line, sizeof(line), "\n%-10s %-10s %-7.3f %-7.3f %-8.1f %-7.3f %-7.3f%s", b.name.c_str(),
                       b.parent >= 0 ? buses_[b.parent].name.c_str() : "-", (double)b.volume, (double)busGain(i),
-                      (double)hdb::gainToDb(b.peak), (double)b.duck, (double)b.snap, busMuted(i) ? " muted" : "");
+                      (double)hdb::gainToDb(b.meter), (double)b.duck, (double)b.snap, busMuted(i) ? " muted" : "");
         t += line;
     }
     t += "\nlimiter " + std::string(limiterOn_ ? "on" : "off") + " (ceiling " + floatToText(limiterCeilingDb_) + " dBFS), snapshots active "

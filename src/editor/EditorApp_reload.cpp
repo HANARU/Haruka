@@ -10,6 +10,7 @@
 #include "../vfs/LogicalPath.hpp"
 #include "../vfs/Vfs.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <thread>
@@ -77,7 +78,9 @@ void EditorApp::processAssetChange(const std::string& path) {
         std::string text, cached;
         if (!hvfs::readText(path, text)) return;
         if (!prefabCache_.peek(path, &cached)) { HLOG(LogHotReload, Verbose) << "Prefab changed (not used): " << path; return; }
-        if (cached == text) return;
+        // 줄 끝만 다른 글(바깥 편집기가 CRLF 로 다시 저장 · 예전 에디터의 텍스트 모드 저장)은 같은 내용입니다(DEF-178).
+        auto noCr = [](std::string s) { s.erase(std::remove(s.begin(), s.end(), '\r'), s.end()); return s; };
+        if (cached == text || noCr(cached) == noCr(text)) return;
         refreshPrefab(path, text);
         return;
     }
@@ -86,6 +89,7 @@ void EditorApp::processAssetChange(const std::string& path) {
         std::string text;
         std::vector<std::string> messages;
         ImportSettingsTable table;
+        // 파일이 지워졌으면(DEF-177) 빈 표 = 모든 모델이 기본 설정으로 돌아갑니다.
         if (hvfs::readText(ImportSettingsTable::kPath, text)) table = ImportSettingsTable::parse(text, messages);
         for (const auto& m : messages) HLOG(LogHotReload, Warning) << ImportSettingsTable::kPath << ": " << m;
         ctx_.assets->setImportSettings(std::move(table));
@@ -104,6 +108,14 @@ void EditorApp::processAssetChange(const std::string& path) {
     if (models.empty()) {
         HLOG(LogHotReload, Verbose) << "Changed (not loaded, ignored): " << path;
         return;
+    }
+    {
+        // 지워졌거나 다른 이름으로 옮겨진 파일(DEF-177): 올라간 모델은 그대로 둡니다(다시 만들어지면 그때 알림이 옴).
+        if (!hvfs::exists(path)) {
+            HLOG(LogHotReload, Warning) << path << " was removed or renamed on disk; keeping the loaded copy of "
+                                        << models.size() << " model(s)";
+            return;
+        }
     }
     for (const auto& key : models) {
         AssetManager::ReloadStats st;

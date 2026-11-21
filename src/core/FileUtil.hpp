@@ -87,7 +87,10 @@ inline bool readConfigText(const std::filesystem::path& path, std::string& out, 
 
 // 같은 폴더의 임시 파일에 다 쓴 뒤 원본과 바꿉니다(2026-10-15). 쓰는 도중 실패하거나 프로그램이 죽어도
 // 원본은 그대로 남습니다. 예전에는 원본을 바로 열어 덮어써, 쓰다 실패하면 반쯤 쓴 씬이 남았습니다.
-// 텍스트 모드로 써서 예전 저장과 줄 끝이 같습니다. 실패하면 error 에 이유를 적고 false.
+// 글을 바이트 그대로 씁니다(DEF-178). 예전에는 텍스트 모드라 Windows 에서 LF 가 CRLF 로 바뀌어, 에디터가 기억한 글(LF)과
+// 디스크의 글이 달랐습니다. 프리팹 Apply 뒤 감시 알림이 그 차이를 바깥 편집으로 보고 인스턴스를 한 번 더 펼쳤고, LF 로
+// 받은 저장소 파일이 저장할 때마다 CRLF 로 바뀌었습니다. 읽는 쪽(파서)은 CR 을 지우므로 예전에 CRLF 로 저장한 파일도
+// 그대로 읽힙니다. 실패하면 error 에 이유를 적고 false.
 inline bool writeAtomic(const std::filesystem::path& path, const std::string& text, std::string* error = nullptr) {
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -95,7 +98,7 @@ inline bool writeAtomic(const std::filesystem::path& path, const std::string& te
     fs::path tmp = path;
     tmp += ".tmp";
     {
-        std::ofstream f(tmp, std::ios::out | std::ios::trunc);
+        std::ofstream f(tmp, std::ios::out | std::ios::binary | std::ios::trunc);
         if (!f) {
             if (error) *error = "cannot open " + tmp.string() + " for writing";
             return false;

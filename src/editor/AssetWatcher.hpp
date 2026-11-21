@@ -23,7 +23,7 @@ public:
     void stop();
     bool running() const { return running_.load(std::memory_order_acquire); }
 
-    // 그동안 모인 바뀐 파일(정식 논리 경로, 들어온 순서, 중복 가능). overflow 가 있으면 넘침이 있었는지.
+    // 그동안 모인 바뀐 파일(정식 논리 경로, 들어온 순서, 중복 가능). 만듦 · 고침 · 지움 · 이름 바꾸기(앞뒤 이름 모두)를 가리지 않습니다(DEF-177). overflow 가 있으면 넘침이 있었는지.
     std::vector<std::string> drain(bool* overflow = nullptr);
 
 private:

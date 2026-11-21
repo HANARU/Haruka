@@ -135,7 +135,8 @@ public:
     bool  busMuted(int id) const;
     float busGain(int id) const;            // 이 버스 노드에 넣는 게인
     float busEffectiveGain(int id) const;   // 부모까지 곱한 게인(들리는 크기 계산에 씀)
-    float busPeak(int id) const;            // 지난 틱 동안 버스 출력의 피크(더킹 · 콘솔용)
+    float busPeak(int id) const;            // 마지막으로 렌더한 블록들의 버스 출력 피크(더킹용). 틱 사이에 렌더가 없었으면 직전 값(DEF-176)
+    float busMeter(int id) const;           // 미터 표시용 피크: 가장 큰 값을 0.3 초 붙잡은 뒤 내려감(콘솔 `audio.buses`)
     float busDuckGain(int id) const;        // 더킹이 이 버스에 곱하는 값(1 = 그대로)
     float busSnapshotGain(int id) const;    // 스냅숏이 이 버스에 곱하는 값
 
@@ -268,7 +269,9 @@ private:
         bool  cvarMuted  = false;
         float snap       = 1.f;   // 스냅숏 섞은 값
         float duck       = 1.f;   // 더킹 값
-        float peak       = 0.f;   // 지난 틱의 출력 피크
+        float peak       = 0.f;   // 마지막으로 렌더한 블록들의 출력 피크(DEF-176)
+        float meter      = 0.f;   // 표시용: 붙잡은 피크
+        float meterHold  = 0.f;   // meter 를 붙잡아 둘 남은 시간(초)
         void* node       = nullptr;   // .cpp 의 BusNode(엔진이 없으면 없음)
     };
     std::vector<BusState> buses_;
@@ -282,6 +285,7 @@ private:
     std::vector<hmix::Snapshot>       snapshots_;
     std::vector<hmix::ActiveSnapshot> activeSnaps_;
     uint64_t                          snapOrder_ = 0;
+    uint64_t                          meterFrame_ = ~0ull;   // 지난 미터 읽기 때의 엔진 시각(PCM 프레임)
     struct Duck { hmix::DuckRule rule; hmix::DuckState st; };
     std::vector<Duck> ducks_;
     void* limiter_          = nullptr;   // .cpp 의 LimiterNode
