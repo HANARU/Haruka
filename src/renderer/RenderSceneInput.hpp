@@ -113,6 +113,7 @@ struct RenderUIPanel {                    // componentsOf<UIPanelComponent> 순�
     glm::uvec2          textureSize{ 0, 0 };
     bool                twoSided    = false;
     float               brightness  = 1.f;
+    bool                onTop       = false;   // 장면 깊이를 무시하고 맨 위에(자막, 2026-11-21 Link 점검 H3)
 };
 
 // 파티클 이미터 하나(2026-11-20, Docs/Particles_And_Decals.md). 인스턴스는 월드 공간이고 컴포넌트가 가진 목록을 가리킵니다

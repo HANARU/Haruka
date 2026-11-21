@@ -145,6 +145,7 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         rp.source      = sp;
         rp.model       = sp->model();
         rp.textureSize = sp->textureSize();
+        rp.onTop       = true;   // 자막은 늘 읽혀야 하므로 앞의 물체에 가려지지 않게(UE Stereo Layer · Unity Overlay 와 같은 몫)
         out.panels.push_back(rp);
     }
 

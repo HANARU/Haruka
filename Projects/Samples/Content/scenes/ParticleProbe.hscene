@@ -2,6 +2,7 @@
 # Particle and decal probe (2026-11-20, Docs/Particles_And_Decals.md). Fixed seeds: the same --fixed-dt run gives the same PNG.
 # Left: additive fountain (cone, gravity). Middle: alpha smoke (size and color curves, spin). Right: looping star burst (sphere, local space).
 # Floor: red circle decal (replace), dark ring decal (multiply, glossy). Sphere: square decal from above (angle fade on the sides).
+# XrPlayer (2026-11-21): stick movement in VR so you can walk into the smoke (Link check H1); the Head camera keeps the old view.
 ACTOR:Sun
 POS:0 0 0
 ROT:-50 0 0
@@ -35,18 +36,43 @@ prim=box|0x0|0|0.0000
 primMaterial=color B4B4B4FF 0 0.6
 END_COMPONENT
 END_ACTOR
-ACTOR:Camera
-POS:0 1.2 3.2
+ACTOR:XrPlayer
+POS:0 0 3.2
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:XrRigComponent
+enabled=1
+height=tracked
+eyeHeight=1.2
+END_COMPONENT
+COMPONENT:RigLocomotionComponent
+enabled=1
+moveSpeed=2
+snapTurn=45
+flying=0
+lookSensitivity=0.15
+END_COMPONENT
+END_ACTOR
+ACTOR:Head
+POS:0 1.2 0
 ROT:-10 0 0
 QUAT:-0.08715574 0 0 0.9961947
 SCALE:1 1 1
 ACTIVE:1
+PARENT:2
 COMPONENT:CameraComponent
 enabled=1
 fovY=60
 zNear=0.05
 zFar=1000
 primary=1
+END_COMPONENT
+COMPONENT:TrackedPoseComponent
+enabled=1
+source=head
+showDebug=0
 END_COMPONENT
 END_ACTOR
 ACTOR:Fountain

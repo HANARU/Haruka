@@ -55,6 +55,7 @@ public:
         VkImageView view     = VK_NULL_HANDLE;
         bool        twoSided = false;   // 거짓이면 뒷면을 그리지 않음(UE Widget Component 의 기본과 같음)
         float       brightness = 1.f;   // 색에 곱함(알파는 그대로)
+        bool        onTop    = false;   // 깊이 검사 없이 다른 패널 뒤에(맨 위에) 그림
     };
 
     // 빌보드 파티클(2026-11-20, Docs/Particles_And_Decals.md D7). data 는 월드 공간 인스턴스를 그릴 순서대로 이은 것이고(ParticleOrder),
@@ -136,11 +137,12 @@ private:
         VkPipeline line = VK_NULL_HANDLE;             // 에디터 선 · 월드 UI 포인터(subpass 2)
         VkPipeline tri = VK_NULL_HANDLE;              // 기즈모 삼각형(subpass 2)
         VkPipeline panel = VK_NULL_HANDLE;            // 월드 UI 패널(subpass 2)
+        VkPipeline panelOnTop = VK_NULL_HANDLE;       // 깊이 검사 없는 패널(자막, subpass 2)
         VkPipeline particleAdd   = VK_NULL_HANDLE;    // 빌보드 파티클 가산(subpass 2)
         VkPipeline particleAlpha = VK_NULL_HANDLE;    // 빌보드 파티클 알파 섞기(subpass 2)
         template <class F> void forEach(F&& f) {
             for (VkPipeline* p : { &depth, &opaque, &transparentBack, &transparentFront, &depthMirrored, &opaqueMirrored,
-                                   &transparentBackMirrored, &transparentFrontMirrored, &line, &tri, &panel,
+                                   &transparentBackMirrored, &transparentFrontMirrored, &line, &tri, &panel, &panelOnTop,
                                    &particleAdd, &particleAlpha })
                 f(*p);
         }

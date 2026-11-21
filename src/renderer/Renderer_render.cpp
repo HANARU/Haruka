@@ -611,6 +611,7 @@ void Renderer::gatherUIPanels(const RenderSceneInput& scene, std::vector<Geometr
         d.view       = panels_.view(st.handle);
         d.twoSided   = rp.twoSided;
         d.brightness = rp.brightness;
+        d.onTop      = rp.onTop;
         if (d.view) out.push_back(d);
     }
     // panelStates_ 가 패널 핸들의 유일한 소유자이므로 표에 없는 키를 지우면서 핸들을 해제합니다.

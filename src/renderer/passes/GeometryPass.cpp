@@ -654,7 +654,12 @@ void GeometryPass::createPipelineSet(VkRenderPass rp, PipelineSet& ps) {
         ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
         ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
         ci.layout = panelLayout_; ci.renderPass = rp; ci.subpass = 2;
-        const VkResult r = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.panel);
+        VkResult r = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.panel);
+        // 맨 위 패널(자막): 깊이 검사도 하지 않습니다. 다른 패널을 다 그린 뒤에 그려 그 위에 놓입니다.
+        if (r == VK_SUCCESS) {
+            ds.depthTestEnable = VK_FALSE;
+            r = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.panelOnTop);
+        }
         vkDestroyShaderModule(rc_->device, vert, nullptr);
         vkDestroyShaderModule(rc_->device, frag, nullptr);
         if (r != VK_SUCCESS) throw std::runtime_error("Failed to create UI panel pipeline!");
@@ -902,24 +907,27 @@ void GeometryPass::recordImpl(VkCommandBuffer cmd, uint32_t frameIdx, VkRenderPa
 
     // 월드 UI 패널(3D UI P1b). 반투명 물체 뒤에 그려 패널 뒤의 유리가 비쳐 보이게 합니다(패널 앞의 반투명은 순서가
     // 어긋나지만 드뭅니다). 두 눈이 같은 텍스처를 읽습니다. 아직 한 번도 그리지 않은 패널(view 없음)은 건너뜁니다.
-    if (in.panels && !in.panels->empty() && ps.panel && in.panelSampler) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ps.panel);
+    // 맨 위 패널(onTop, 자막)은 둘째 차례에 깊이 검사 없는 파이프라인으로 그려 앞의 물체 · 다른 패널 위에 놓습니다.
+    if (in.panels && !in.panels->empty() && ps.panel && ps.panelOnTop && in.panelSampler) {
         vkCmdSetViewport(cmd, 0, 1, &vp);
         vkCmdSetScissor (cmd, 0, 1, &sc);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, panelLayout_, 0, 1, &in.frameSet, 0, nullptr);
-        for (const PanelDraw& p : *in.panels) {
-            if (!p.view) continue;
-            VkDescriptorImageInfo img{ in.panelSampler, p.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-            VkWriteDescriptorSet w{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            w.dstBinding      = 0;
-            w.descriptorCount = 1;
-            w.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            w.pImageInfo      = &img;
-            rc_->vk.push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, panelLayout_, 1, 1, &w);
-            const GpuPanelPush push{ p.model, (int32_t)viewIndex, p.twoSided ? 1 : 0, p.brightness, 0.f };
-            vkCmdPushConstants(cmd, panelLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0, sizeof(push), &push);
-            vkCmdDraw(cmd, 6, 1, 0, 0);
+        for (int round = 0; round < 2; ++round) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, round == 0 ? ps.panel : ps.panelOnTop);
+            for (const PanelDraw& p : *in.panels) {
+                if (!p.view || p.onTop != (round == 1)) continue;
+                VkDescriptorImageInfo img{ in.panelSampler, p.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+                VkWriteDescriptorSet w{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                w.dstBinding      = 0;
+                w.descriptorCount = 1;
+                w.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                w.pImageInfo      = &img;
+                rc_->vk.push(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, panelLayout_, 1, 1, &w);
+                const GpuPanelPush push{ p.model, (int32_t)viewIndex, p.twoSided ? 1 : 0, p.brightness, 0.f };
+                vkCmdPushConstants(cmd, panelLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   0, sizeof(push), &push);
+                vkCmdDraw(cmd, 6, 1, 0, 0);
+            }
         }
     }
 
