@@ -37,7 +37,7 @@
 | [Audio_Design.md](Audio_Design.md) | 오디오: 재생 규칙(일시정지·비활성), 청취자·3D 감쇠 설정, 씬 형식, 시험 음원, 공간 음향, 12절 버스 그래프 · 스냅숏 · 더킹 · 리미터 · 사운드 큐(2026-11-21) |
 | [Engine_Basics_Design.md](Engine_Basics_Design.md) | 엔진 기본 기능 보강(2026-10-15): 씬 관리 · 편집 기본기(ID 기반 Undo · 다중 선택 · 클립보드) · 플레이어 리그와 입력 · 잡기, 제안서 대조 결정 |
 | [Packaging_Design.md](Packaging_Design.md) | 패키징(2026-10-19 ~ 24, Windows · Android XR): 조사 요약, 1단계 결정, 런타임 분리(HarukaGame) · 실행 폴더 기준 경로와 쓰기 루트 · 배포 ZIP, 자체 묶음 파일 `.hpak` v1 · 가상 파일 시스템 · 묶음 도구 |
-| [Hand_Grasp_Design.md](Hand_Grasp_Design.md) | 손 쥐기(2026-11-07, A · B 단계 구현, 헤드셋 확인 대기): 조사 요약, 혼합형 결정(자동 맞춤 + 지정 자세), 스키닝 · OpenXR 26관절 손 뼈대 · 컨트롤러 손가락 · 볼록 껍질 충돌체 · 자동 맞춤의 단계별 설계, A · B 단계 결과 |
+| [Hand_Grasp_Design.md](Hand_Grasp_Design.md) | 손 쥐기(2026-11-07, A · B 단계 구현, 2026-11-16 헤드셋 확인 통과): 조사 요약, 혼합형 결정(자동 맞춤 + 지정 자세), 스키닝 · OpenXR 26관절 손 뼈대 · 컨트롤러 손가락 · 볼록 껍질 충돌체 · 자동 맞춤의 단계별 설계, A · B 단계 결과 |
 | [Text_System.md](Text_System.md) | 글자 체계(2026-11-19): 유니코드 입력 · 편집 칸, Windows IME, 표시 글 `HText`(번역 · 서식 · 숫자), 글꼴 대체 사슬 · 아틀라스 페이지. 완료 조건 체크리스트와 결과 |
 | [Object_References.md](Object_References.md) | 참조 체계(2026-11-19): 액터 고유 ID(GUID) · 액터 참조 `HActorRef` · 복제 · 프리팹의 GUID 정책, 에셋 참조 색인 · 끊긴 참조 검사 · 참조를 고치며 옮기기. 체크리스트와 결과 |
 | [Crash_Reporting.md](Crash_Reporting.md) | 크래시 보고 · 검사 매크로(2026-11-19): `HCHECK` · `HENSURE` · `HCHECK_SLOW`, Windows 예외 필터 · 미니덤프(도우미 스레드), Android 시그널 보고서, Release PDB, `--debug-crash`. 체크리스트와 결과 |
@@ -72,7 +72,8 @@
 
 ## VR · 이식 (계획 문서)
 
-2026-10-04 에 PC OpenXR 연결과 두 눈 렌더(VR 첫걸음)를 넣었고, 헤드셋 확인과 Quest 이식이 남았습니다. 아래 표의 앞 두 문서는
+2026-10-04 에 PC OpenXR 연결과 두 눈 렌더(VR 첫걸음)를 넣었고, PC VR(Quest Link)은 2026-11-21 Link 헤드셋 점검까지 마쳤습니다
+([Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) "Link 헤드셋 점검"). 남은 것은 Quest 단독 실행 확인(헤드셋 개발자 모드 허가 대기)입니다. 아래 표의 앞 두 문서는
 착수 전에 쓴 사전 조사 · 계획이라 현재 구현과 다른 부분이 있습니다. 정적 기지 건설 지침은 2026-10-15 코드 기준으로 쓴 미착수 기능의 설계 지침입니다. 현재 상태는 [Engine_Specification.md](Engine_Specification.md) 를 보십시오. 사운드는 2026-10-02 에
 기초를 정리했고, 정본은 위의 [Audio_Design.md](Audio_Design.md) 입니다.
 

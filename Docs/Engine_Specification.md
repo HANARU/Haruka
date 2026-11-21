@@ -29,6 +29,10 @@
 > **갱신(2026-11-01, Android 오류 검출과 수정)**: 패키징 관점의 Android 오류 검출에서 나온 DEF-149 ~ 156 과 확인 중 찾은 Windows 쪽
 > DEF-157 을 등재하고 모두 고쳤습니다(묶음과 실행 파일의 짝 확인 · configChanges · APK 고지 · 설정 파일 인코딩 · 파이프라인 캐시 파일 ·
 > 종료 순서 · XR 손실 · SSAO 깊이 샘플러 · `_HAS_EXCEPTIONS`). 1-3 · 4-12 의 수치를 고쳤습니다(정본 [Packaging_Design.md](Packaging_Design.md) 7-1).
+>
+> **갱신(2026-11-21, VR 상태)**: PC VR(Quest Link)은 헤드셋 점검을 모두 마쳤습니다(10-15 · 10-16 · 11-02 · 11-16 · 11-17 · 11-21).
+> 1-1 의 VR 상태, 5-1 의 Quest 단독 실행, 7장 1번, 8장 1 · 2번을 이에 맞췄습니다. 남은 VR 일은 Quest 단독 실행 확인 하나입니다
+> ([Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) 끝 "Link 헤드셋 점검").
 
 ---
 
@@ -44,7 +48,7 @@
 |---|---|
 | 최종 목표 기기 | Meta Quest Pro(Snapdragon XR2+ Gen 1) 단독 실행 VR |
 | 현재 실행 형태 | Windows 데스크톱 실행 파일 둘(2026-10-19): 에디터 `HarukaEngine`(엔진과 에디터가 같은 창), 게임만 실행하는 `HarukaGame`(에디터 코드 없음, 배포 ZIP 으로 내보냄) |
-| VR 상태 | PC OpenXR 연결(`--xr`, Quest Link 등)과 두 눈 렌더. 2026-10-15 Meta Quest Pro(Quest Link)에서 두 눈 · 머리 추적 · 컨트롤러 · 72Hz 를 확인했습니다. 헤드셋에는 Play 동안만 그립니다. Quest 단독 실행은 APK 까지 만들었고(2026-10-31) 헤드셋 첫 실행이 남았습니다 |
+| VR 상태 | PC OpenXR 연결(`--xr`, Quest Link 등)과 두 눈 렌더. 2026-10-15 Meta Quest Pro(Quest Link)에서 두 눈 · 머리 추적 · 컨트롤러 · 72Hz 를 확인했습니다. 헤드셋에는 Play 동안만 그립니다. PC VR 은 2026-11-21 Link 헤드셋 점검까지 마쳤습니다. Quest 단독 실행은 APK 까지 만들었고(2026-10-31) 헤드셋 첫 실행이 남았습니다(헤드셋 개발자 모드 허가 대기) |
 | 언어 · API | C++20, Vulkan 1.1(데스크톱 · Quest 같은 경로, 2026-10-31), GLSL(빌드 시 SPIR-V 1.0 으로 컴파일) |
 | 개발 형태 | 1인 개발. 외부 엔진 프레임워크 없이 렌더러 · GPU 메모리 할당자 · UI 위젯 시스템 · 에디터를 직접 구현 |
 | 저장소 | `github.com/HANARU/Haruka`(공개). 라이선스 파일 없음 |
@@ -568,7 +572,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 
 | 항목 | 현재 상태 | 관련 |
 |---|---|---|
-| Quest 단독 실행(Android) | APK 까지 만듦(2026-10-31): NDK 빌드(Gradle 없이) · `android_main` · 표면 없는 AndroidWindow · 공유 OpenXR 로더. 헤드셋 첫 실행이 남았고, 첫 실행은 묶음 파일을 `adb push` 로 넣고 소리를 끕니다([Packaging_Design.md](Packaging_Design.md) 7절) | DEF-08 |
+| Quest 단독 실행(Android) | APK 까지 만듦(2026-10-31): NDK 빌드(Gradle 없이) · `android_main` · 표면 없는 AndroidWindow · 공유 OpenXR 로더. 헤드셋 첫 실행이 남았고(헤드셋 개발자 모드 허가 대기), 첫 실행은 묶음 파일을 `adb push` 로 넣고 소리를 끕니다([Packaging_Design.md](Packaging_Design.md) 7절) | DEF-08 |
 | 게임 배포 형태 | Windows 는 2026-10-19 ~ 24 에 생겼습니다(게임 실행 파일 · 묶음 파일 · 배포 ZIP, DEF-12 해결). Android APK 는 개발용(디버그 서명)만 있고 묶음 파일을 아직 APK 안에서 읽지 않습니다. 게임 설정 화면(창 크기 · 전체 화면 · 소리 장치)도 없습니다 | [Packaging_Design.md](Packaging_Design.md) |
 | Linux · macOS | 빌드된 적 없음 | |
 | 게임플레이 기본 도구 · CVar | 2026-11-20 에 들어옴: 시간 배율 · 게임 시간(`World::setTimeScale` · `gameTime`), 타이머(`World::timers`), 태그(`Actor::addTag` · `World::actorsWithTag`), 이벤트 버스(`World::events`), 물리 뒤 틱(`ETickGroup::PostPhysics`), CVar · 콘솔 명령(`EngineContext::cvars`, ini · `--cvar` · 에디터 Output Log 콘솔 줄). 없는 것: 헤드셋 안 콘솔, 스크립트 계층 | [Gameplay_Tools.md](Gameplay_Tools.md) |
@@ -645,8 +649,9 @@ Floating Origin 은 Layer 1 옵션 후보입니다.
 
 1. **VR 은 PC(Quest Link)에서만 확인했습니다.** 2026-10-15 첫 헤드셋 확인에서 OpenXR 세션 · 두 눈 렌더 · 컨트롤러 입력 · 헤드셋
    주사율 물리가 통과했습니다. 2026-10-16 2차 확인에서 DEF-110(검증 메시지 0), 최소화 중 XR 그리기(DEF-106), 플레이어 리그 · 잡기,
-   보이지 않는 리그를 보았고 사용자가 충분하다고 판단했습니다. 소리 방향은 사용자가 따로 보고하지 않았습니다. Quest 단독 실행은 아래
-   2번 때문에 아직 실행해 보지 못했습니다.
+   보이지 않는 리그를 보았고 사용자가 충분하다고 판단했습니다. 그 뒤 11-02(XR 소리 자동 전환) · 11-16(손 쥐기 · 공간 음향) ·
+   11-17(3D UI 패널) · 11-21(이동 리그 · 자막 · 편안함 · HRTF · 추적 파일, DEF-180 해결) 점검도 통과했습니다. Quest 단독 실행은
+   헤드셋 개발자 모드 허가를 기다리는 중이라 아직 실행해 보지 못했습니다.
 2. **Quest 단독 실행은 헤드셋 확인만 남았지만, PC 흉내로만 다져졌습니다.** 2026-10-31 에 Vulkan 1.1 기준선 · 배리어 분기 · 창 없는
    렌더 · 힙 · 지연 할당(DEF-04 · 06 · 42 · 97)을 고치고 APK 까지 만들었습니다. 확인은 창 없는 PC 실행과 Quest Pro 형 Vulkan 프로필
    레이어뿐입니다. 프로필 레이어는 메모리 표와 런타임이 덧붙이는 확장을 흉내 내지 못하고, OpenXR 런타임 · Android 수명주기 · 실제
@@ -686,9 +691,10 @@ Floating Origin 은 Layer 1 옵션 후보입니다.
 정본은 [Roadmap.md](Roadmap.md) 입니다. 2026-10-15 기준으로 합의한 순서는 다음과 같습니다.
 
 1. ~~**헤드셋 확인**~~: 2026-10-15 기본 확인, 2026-10-16 2차 확인(DEF-110 · DEF-106 · 플레이어 리그 · 보이지 않는 리그)을 마쳤습니다
-   ([Editor_QA_Checklist.md](Editor_QA_Checklist.md) 5절). 같은 날 넣은 XR Play 동안의 헤드셋 소리 자동 전환만 헤드셋에서 확인하지 못했습니다.
-2. **패키징(Windows · Android XR, 2026-10-17 목표)**: 1단계(Windows 첫 패키징)는 2026-10-24 에 끝났고 Quest Link 실행 확인만
-   남았습니다. 2단계(PC 에서 확인하는 Android 준비)는 2026-10-31 에 코드를 끝냈고(창 · 헤드셋 확인 남음), 3단계(Android 빌드)는 APK 까지
+   ([Editor_QA_Checklist.md](Editor_QA_Checklist.md) 5절). 같은 날 넣은 XR Play 동안의 헤드셋 소리 자동 전환은 2026-11-02 에 확인했고,
+   2026-11-21 Link 헤드셋 점검으로 PC VR 확인을 모두 마쳤습니다.
+2. **패키징(Windows · Android XR, 2026-10-17 목표)**: 1단계(Windows 첫 패키징)는 2026-10-24 에 끝났고, 2단계(PC 에서 확인하는
+   Android 준비)는 2026-10-31 에 코드를 끝냈습니다(Quest Link 확인은 11-02 헤드셋 마지막 점검). 3단계(Android 빌드)는 APK 까지
    만들어 헤드셋 첫 실행이 남았습니다. 사용자 목표는 "가능한 빨리 스탠드얼론"(2026-10-31)이라 검토 결함 묶음(DEF-130 ~ 147)보다 먼저
    하려 했으나, 헤드셋 개발자 모드가 꺼져 있어 Quest 단독 확인은 보류 중이고 검토 결함 묶음을 먼저 마쳤습니다(2026-11-06). 그 뒤 Quest 에서 DEF-34(라이트 비용)를 실측하고, 멀티뷰는 그 뒤입니다. 정본
    [Packaging_Design.md](Packaging_Design.md).
