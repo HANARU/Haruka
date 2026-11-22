@@ -189,6 +189,21 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
   있던 패널의 리프로, 없으면 기본 배치에 가까운 자리로 돌아갑니다. 결함 정본의 "기반 공사 수정 결과" 절 참고.)
 - 신규 위젯은 `registerPanel` 한 줄이면 도킹 대상이 됩니다 — 이것이 사용자가 말한 "위에 위젯을 디자인"하는 확장 지점.
 
+### 7.3a 메뉴 구성 · 명령 (H2b, 2026-11-22, 정본 `Docs/Editor_MultiWindow_Design.md` 6절 H2b)
+
+- 메뉴 항목 · 툴바 단추 · 단축키는 명령 레지스트리(`src/editor/EditorCommandRegistry.hpp`, `EditorApp::commands_`)의 같은 명령 id 를
+  부릅니다. 메뉴의 글 · 아이콘 · 단축키 글 · 켜짐(canExecute) · 체크는 명령에서 읽고, 꺼진 항목은 흐리게 그리며 누를 수 없습니다.
+- 메뉴 모델은 `EditorMenuEntry`(명령 · 소제목 · 구분선 · 하위 메뉴, `src/editor/EditorMenuModel.hpp`)이고, 상단 드롭다운과 오른쪽
+  누름 메뉴가 같은 위젯(`EditorMenuView`)으로 그립니다.
+- 구성(UE5 를 따라 소제목으로 묶음, 메뉴 줄 이름은 그대로):
+  File(Scene: New · Open | Save: Save · Save As), Edit(History: Undo · Redo | Edit: Copy · Paste · Duplicate · Delete |
+  Configuration: Language ▸ · Audio Output...), Actor(Create: Add Empty | Hierarchy: Attach To Prev Selected · Detach Selected),
+  View(Viewport: Frame Selected · Gizmo Size), Window(Panels: 등록된 패널 + 열림 체크 | Layout: Reset Layout).
+  예전 자리에서 옮긴 것: Frame Selected · Gizmo Size(Edit → View), Reset Layout(View → Window), Language(View → Edit 하위 메뉴).
+- 키보드: 열린 메뉴에서 ↑ ↓(소제목 · 구분선 · 꺼진 항목 건너뜀) · Enter · → (하위 메뉴 · 다음 메뉴) · ← (하위 닫기 · 이전 메뉴) ·
+  Esc(한 단계). 메뉴가 열려 있는 동안 그 창의 키는 단축키 · 글 칸 · Q W E R 로 가지 않습니다. Alt · F10 · 가속 글자는 없습니다.
+- 같은 창 안 팝업은 한 번에 하나(새 팝업이 뜨면 다른 팝업이 닫힘), 팝업이 덮은 자리에서는 그 밑 위젯의 툴팁이 뜨지 않습니다.
+
 ### 7.4 뷰포트 통합 (핵심 · 좌표 진리원 승격)
 
 도킹으로 패널 크기가 동적이 되므로, `viewportFbRect()` 를 **고정 패널 폭(outlinerW_ 등)이 아니라 뷰포트
@@ -209,6 +224,9 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
 
 - 도크 트리(분할 방향·비율, 탭 스택의 패널 id 목록·활성 인덱스)를 텍스트로 저장/복원(예: `Config/editor_layout.txt`).
   파일 없거나 파싱 실패 시 **기본 레이아웃**으로 폴백. 알 수 없는 패널 id 는 건너뜁니다(전방 호환).
+- 떠 있는 창(2026-11-21, `Docs/Editor_MultiWindow_Design.md` M1 · 결정 D9): 메인 트리 뒤에 `# floating windows` 주석 줄과
+  창마다 `F <번호> <x> <y> <w> <h> <maximized>` 줄 + 그 창의 트리를 덧붙입니다. 옛 빌드는 첫 트리 뒤를 읽지 않아 메인만
+  복원합니다. 떠 있는 창이 없으면 예전과 같은 글을 씁니다.
 
 ### 7.7 신규 HSlate 위젯
 
@@ -367,7 +385,7 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
 **상태 표시**
 - 모든 표시는 `isActive`/`AttrStr` 로 매 프레임 읽습니다. 그래서 클릭이 리빌드를 부르지 않고(자기 콜백
   안에서 자기 컨테이너를 지우는 자기 파괴가 원천 차단), 단축키로 바꾼 상태도 즉시 반영됩니다.
-  디테일 패널의 `addEnumRow` 처럼 "콜백에서 리빌드해 라벨 갱신" 패턴을 여기에 베끼면 안 됩니다.
+  디테일 패널의 예전 `addEnumRow` 처럼 "콜백에서 리빌드해 라벨 갱신" 패턴을 여기에 베끼면 안 됩니다(H3a 부터 열거는 콤보).
 - 라벨은 ASCII 만 씁니다(`deg`, `x`, `m`, `+`, `-`, 괄호). 스냅이 꺼져 있으면 값을 괄호로 감싸
   "지금은 적용되지 않는 값"임을 알립니다.
 
@@ -501,7 +519,7 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
 - 덤프 옵션: `--ui-type=<글>`(포커스 칸에 넣음, 없으면 아웃라이너 검색), `--ui-caret-left=<n>`, `--ui-select-left=<n>`, `--ui-ime-compose=<글>`,
   `--culture=<en|ko>`.
 - 화면 글은 `HTEXT("ns", "key", "원문")` 으로 쓰고(메뉴 · 툴바 · 툴팁 · 패널 · 탭 · 대화상자), 액터 이름 · 경로 · 로그 · 디테일 속성 이름은
-  `std::string` 그대로입니다. 메뉴 항목의 단축키는 따로 오른쪽 열에 그립니다(번역 안 함). 언어는 View > Language, 에디터 상태
+  `std::string` 그대로입니다. 메뉴 항목의 단축키는 따로 오른쪽 열에 그립니다(번역 안 함, H2b 부터 명령의 chord 에서 만듦). 언어는 Edit > Configuration > Language ▸(H2b 전에는 View > Language), 에디터 상태
   (`Config/editor_state.txt` 의 `culture=`)에 남습니다. 바꾸면 UI 를 처음부터 다시 만듭니다(배율이 바뀔 때와 같은 경로).
 - 새 화면 글을 넣으면 `HarukaPak gather-text -o Engine/Content/Localization/Engine.pot <엔진>/src` 로 틀을 다시 만들고
   `Engine/Content/Localization/ko/Engine.po` 에 번역을 더합니다. 빠지면 `text_system` 시험이 실패합니다.
@@ -518,3 +536,63 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
 - 덤프 옵션: `--ui-actor-picker`(선택한 액터의 첫 액터 참조 칸 목록), `--ui-asset-actions=<논리 경로>`(에셋 대화상자),
   `--ui-move-asset=<옛 경로>|<새 경로>`(실제로 옮김, `--project=<사본>` 과 함께만). Git Bash 에서는 `/Game/...` 값이 Windows 경로로
   바뀌지 않게 `MSYS2_ARG_CONV_EXCL` 을 씁니다(`build/chk/uidump.sh`).
+
+### 8.3 디테일 속성 행 · 기본값 · 에셋 칸 · 색 선택기 · 속성 검색 (H3a · H3b, 2026-11-22, 정본 `Docs/Editor_MultiWindow_Design.md` 6절 H3a · H3b)
+
+- 모든 속성은 같은 행(`SPropertyRow`, `ui/slate/widgets/SPropertyRow.hpp`)입니다: `[들여쓰기][이름 열] | [값 열][되돌리기 자리]`. 이름 열 폭은
+  패널 전체가 함께 쓰는 비율(`HPropertyColumns`, 처음 0.4)이고, 어느 행이든 열 나눔선(±4px)을 끌면 모든 행이 같이 움직입니다(패널을 다시
+  만들어도 유지, 저장은 안 함). 이름이 열보다 길면 ".." 로 줄이고 툴팁으로 전체 이름을 보입니다. 포인터가 올라간 행은 바탕이 밝아집니다.
+- 종류별 값 칸(`scene/Reflect.hpp` 의 `PropDesc::Kind`)
+  - Float: 숫자 칸(끌기 감도 · 수정 키 · 입력 모드는 DEF-46 · 77 · 92 그대로). 축 색이 붙은 칸(폭 · 높이 등)은 왼쪽에 색 띠.
+  - Toggle: 체크 상자(값 열 왼쪽). Enum: 콤보(아래 참고). ActorRef: 8.2.
+  - Vec3: `SVectorField` = 같은 폭 숫자 칸 셋, 성분마다 왼쪽 빨강 · 초록 · 파랑 띠(UE5 와 같이 글자는 툴팁). 끌기 · 입력은 성분마다 숫자 칸 규칙.
+    여러 액터를 함께 고르면 바꾼 성분 하나만 다른 액터에 넣습니다(트랜스폼과 같음).
+  - Color: `[견본][R G B (A)]`. 값은 컴포넌트가 저장하는 그대로 보입니다(라이트 · 안개 · 데칼 = 선형, 기본 도형 재질 = sRGB 표시값,
+    `PropDesc::srgb`). 견본은 렌더러에 선형 값을 넘깁니다. 견본을 누르면 색 선택기(아래).
+  - String: 글을 보이는 칸, 누르면 그 자리에서 편집(H1a-2 글 칸 = `EFocusTarget::TextField`). Enter = 확정(Undo 한 단계), Esc = 취소,
+    다른 곳 누름 · 다른 칸으로 포커스 = **확정**(H3b, UE · 숫자 칸과 같음. H3a 에서는 취소였음, 아웃라이너 이름 바꾸기 칸은 그대로 취소).
+    같은 값이면 기록 없음, 행이 없어지면(선택 바뀜 · 컴포넌트 지움) 조용히 놓음. 지금 쓰는 곳: AI Brain 의 Patrol Tag · Target Tag.
+  - AssetPath: 에셋 고르기 칸(아래).
+  - TRANSFORM 의 Location · Rotation · Scale 도 성분 칸 행입니다(예전 LOCATION · ROTATION · SCALE 머리 + 줄 셋). 프리팹 덮어쓰기는 이름 색.
+- 열거 콤보: 누르면 단추 아래에 선택 목록(지금 값에 체크 · 강조)이 디테일이 있는 창의 팝업 층에 열립니다. ↑ ↓(돎) · Enter · Esc · 바깥 누름
+  (왼쪽 · 오른쪽) 닫기, 단추를 다시 누르면 닫힘. 오른쪽 메뉴와 같은 위젯(`EditorContextMenu::openBelow` → `EditorMenuView`)이라 메뉴가 열린
+  동안 키는 메뉴 몫입니다(H2b). 예전에는 누를 때마다 다음 값으로 돌았습니다.
+- 기본값(`PropDesc::hasDefault` · `def*`, `withDefault(...)`): 생성자 기본값이 분명한 칸에만 둡니다(목록이 데이터에 따라 바뀌는 칸 ·
+  에셋이 정하는 칸은 없음: 애니메이션 Clip, UI 패널 Content, 메시 Transparent). 값이 기본값과 다르면(수는 1e-6 상대 오차) 행 오른쪽에 노란
+  되돌리기 화살표가 나타나고, 누르면 기본값을 세터로 넣습니다(Undo 한 단계, 함께 고른 액터 포함). 트랜스폼 기본값은 위치 0 · 회전 0 · 배율 1.
+- 행 오른쪽 누름 메뉴: Reset to Default(되돌릴 것이 없으면 흐림) · Copy · Paste. 명령 레지스트리 `Details.ResetToDefault` · `Details.CopyValue` ·
+  `Details.PasteValue` 가 메뉴를 연 행에 대해 동작합니다. 복사 글은 UE 모양(`2.5`, `True`, 열거 항목 글, `(X=1,Y=2,Z=3)`, `(R=..,G=..,B=..)`),
+  붙여넣기는 이름 있는 성분 일부(`Y=5`)나 `1, 2, 3` 도 받고 모양이 틀리면 아무것도 바꾸지 않습니다(로그 경고).
+- 컴포넌트 칸 정의: `makePropFloat` · `makePropToggle` · `makePropEnum` · `makePropActorRef` · `makePropString` · `makePropVec3` ·
+  `makePropColor` · `makePropAssetPath`, 매크로 `XPROP_Float` · `XPROP_Toggle` · `XPROP_String` · `XPROP_Vec3Min` …, 뒤에 `.withDefault(값)`.
+  칸 이름(label)은 Undo 스냅샷의 열쇠입니다(DEF-131). 씬 파일은 `writeFields` · `readField` 가 따로 쓰므로 칸을 바꿔도 `.hscene` 형식은 그대로입니다.
+- 에셋 경로 칸(H3b, UE 의 에셋 고르기 칸 축소판): `[종류 아이콘 · 에셋 이름(비면 None) · ▾][찾기][비우기]`.
+  - 이름 단추를 누르면 칸 아래에 고르기 팝업(`AssetPicker`): 위 검색 칸(열면 곧바로 침), 아래 그 종류의 에셋 목록(콘텐츠 색인, 이름 순,
+    지금 값에 체크 · 처음 강조, 오른쪽에 폴더), 아래 항목 수. ↑ ↓(끝에서 멈춤) · Enter = 넣기, 행 누름 = 넣기, Esc · 바깥 누름 · 칸 다시
+    누름 = 닫기. 검색은 이름의 낱말 모두(대소문자 무시, 폴더 경로는 보지 않음, UE 와 같음). 팝업은 디테일이 있는 창의 팝업 층(떠 있는 창 포함).
+  - 종류: `PropDesc::assetType` = 콘텐츠 브라우저 종류 이름을 쉼표로(`"Model"`, `"Sound,Sound Cue"`, `"Nav Data"`, 비면 모든 에셋). 목록 ·
+    거르기는 `editor/AssetPickerModel.hpp`(`hasset::`).
+  - 찾기 = 콘텐츠 브라우저를 그 에셋의 폴더로 열고 고름(하단 패널 · 탭을 앞으로, 검색어 지움). 비우기 = 빈 경로. 값이 비면 둘 다 흐림.
+  - 콘텐츠 브라우저에서 에셋을 끌어 칸에 놓을 수 있습니다(메인 창의 디테일만). 끄는 동안 칸 테두리가 강조색(받음) · 빨강(종류가 다름 = 거부),
+    커서 이름표에 "(cannot drop here)".
+  - 넣기 · 비우기 · 끌어 놓기 · 붙여넣기 모두 Undo 한 단계(함께 고른 액터 포함), 같은 값이면 기록 없음. 세터가 다시 읽기 · 갱신을 합니다.
+  - 쓰는 칸: StaticMesh `Model`(파일 메시만, 절차 도형은 칸 없음, 바꾸면 메시 · 충돌 · LOD · 머티리얼을 다시 읽고 Transparent 를 그 메시 값으로,
+    물리 몸 충돌 형상은 다시 만들지 않음 = 핫 리로드와 같음), Audio `File`(Sound · Sound Cue, `setFile`), NavMeshVolume `Data`(Nav Data, `loadData`).
+    남긴 칸: SkinnedMesh 모델(뼈대 · 애니메이션 묶임), 애니메이션 Clip · UI 패널 Content(에셋이 아니라 목록 이름). 에셋 칸은 기본값을 두지 않습니다.
+- 색 선택기(H3b, `ColorPickerPopup`, 값 계산 `ColorPickerModel.hpp`): 견본 아래 팝업
+  `[채도 · 명도 판][색상 막대][알파 막대(4성분)] | [이전 · 새 견본][R G B (A)][H S V][16진수(sRGB)] / [확인][취소]`.
+  - 끄는 동안 값이 곧바로 들어갑니다(라이트 · 안개 색은 바로 보임, 기본 도형 재질 색은 확인 때 머티리얼을 다시 받음 = 숫자 칸 끌기와 같음).
+  - Undo: 연 동안이 한 세션(`hcmd::PropSession`). 확인 · 바깥 누름 · 견본 다시 누름 = 확정(Undo 한 단계, 바뀐 것이 없으면 기록 없음),
+    Esc · 취소 = 원래 값(기록 없음), 이전 색 견본 누름 = 원래 값으로(세션 안). 고른 액터가 바뀌면 · 모달 · 디테일 닫힘 = 확정.
+  - 색 공간: 숫자 칸 · HSV 는 저장 값 그대로(선형 칸은 선형 HSV = UE 기본), 16진수는 늘 sRGB, 판 · 막대 · 견본은 선형으로 칠함.
+  - HDR(안개 색 0 ~ 100): 세기 칸을 따로 두지 않고 V 가 1 을 넘습니다. 판 세로 범위는 열 때 max(1, V), 16진수 · 칠하는 색은 0 ~ 1 로 자름.
+  - 그리기: 판은 8 × 8 칸, 막대는 12 칸의 그라데이션 사각형(`HPaintContext::drawGradientRect`, 렌더러 정점 색, 잘리면 잘린 자리 색).
+- 속성 검색(H3b): 디테일 위 검색 칸. 공백으로 나눈 낱말이 모두 행 이름(지금 문화권 이름 또는 영어 원문)에 있는 행만 보입니다(ASCII 대소문자
+  무시). TRANSFORM 은 맞는 행이 있으면 펼치고 없으면 접음(사용자 접힘 상태는 그대로), 컴포넌트는 맞는 행이 없으면 머리 줄만, 읽기 정보 줄은
+  숨김, 하나도 없으면 "No properties match '…'". 검색어는 선택이 바뀌어도 남습니다(UE 와 같음). Esc = 지우고 나감, Enter = 나감.
+  글 칸 포커스는 H1a-2 체계(`TextField`). Ctrl+F 는 예전처럼 아웃라이너 검색(패널 포커스 개념이 없어 바꾸지 않음).
+- 덤프 옵션: `--ui-details-set=<이름>=<값>[;…]`(붙여넣기와 같음), `--ui-details-combo=<이름>`(+ `--ui-menu-keys`), `--ui-details-menu=<이름>`,
+  `--ui-details-edit=<이름>`(+ `--ui-type`), `--ui-details-split=<0~1>`, `--ui-save-scene-copy=<파일>`(지금 씬 글을 다른 파일로, 열기 → 저장 확인),
+  H3b: `--ui-details-asset=<이름>`(+ `--ui-details-asset-search=<글>`), `--ui-details-drop=<이름>=<경로>`, `--ui-details-color=<이름>`
+  (+ `--ui-details-color-rgba` 네 성분 시험 값, `--ui-details-color-hex=<RRGGBB[AA]>`), `--ui-details-search=<글>`.
+  디테일 덤프 동작은 선택 뒤 디테일이 다시 만들어진 다음(3번째 프레임) 합니다.

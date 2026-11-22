@@ -32,6 +32,8 @@ updateUBO → updateLightSSBO → buildDrawCommands(CPU)
 [TS5] present
 ```
 
+> 2026-11-21 보조 OS 창(다중 OS 창 M2, `Renderer_window.cpp`): 메인 acquire 뒤 · 펜스 리셋 전에 보조 창마다 그리기 목록 → 해시 → acquire(타임아웃 0, 해시가 같거나 최소화면 건너뜀), 메인 UI 기록(아틀라스 업로드 1회) 뒤 보조 창을 지우기 패스로 기록, 제출 1회에 받은 창의 세마포어만 더하고, 메인 present 뒤 창마다 따로 present 합니다. 보조 창이 없으면 예전 흐름 그대로입니다(정본 `Docs/Editor_MultiWindow_Design.md`).
+
 ## 2. 설계 원칙
 
 1. **범용 렌더그래프를 만들지 않는다.** 패스 그래프는 고정이고 Quest Pro 성능 예산에서 추상화 비용을 치를 이유가 없다. 배리어 자동화도 하지 않는다 — 현재 수동 배리어가 모두 검증된 상태다.

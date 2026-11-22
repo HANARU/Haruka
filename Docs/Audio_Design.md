@@ -425,7 +425,7 @@ ma_sound ──▶ 보이스 필터 ─[출력 0: 직접음]──────�
 | 행 | 필드 | 기본값 | 의미 |
 |---|---|---|---|
 | Unbounded | `unbounded` | 꺼짐 | 켜면 위치와 무관한 장면 기본 잔향(야외 등). 아래 모양 행을 숨김 |
-| Shape | `shape` | Box | Box(반 크기 HalfX · Y · Z, 기본 5 · 3 · 5 m) 또는 Sphere(Radius 5 m). 크기에 액터 크기를 곱하고, 위치 · 회전은 액터를 따름 |
+| Shape | `shape` | Box | Box(반 크기 Half Extent X · Y · Z, 기본 5 · 3 · 5 m, H3a 부터 성분 칸 하나) 또는 Sphere(Radius 5 m). 크기에 액터 크기를 곱하고, 위치 · 회전은 액터를 따름 |
 | Blend Distance | `blendDistance` | 1 m | 경계 밖 이 거리 안에서는 크기가 1 → 0 으로 줄어듦 |
 | Priority | `priority` | 0 | 겹치면 높은 구역. 같으면 더 깊이 들어간(가중치가 큰) 구역, 그것도 같으면 액터 ID 가 작은 구역 |
 | Decay Time | `decayTime` | 1.5 s | 잔향 시간 RT60. verblib 로 만들 수 있는 약 0.61 ~ 10.7 s 로 자름 |

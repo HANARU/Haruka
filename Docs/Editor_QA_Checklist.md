@@ -129,7 +129,7 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 | ID | 조작 | 지금 | 고친 뒤 |
 |---|---|---|---|
 | DEF-40 | 기즈모를 빠르게 끌면서 라인·화살표를 봄(느린 화면 녹화가 있으면 좋음) | 드물게 한 프레임 깨질 수 있음. 정점 버퍼 1개를 두 프레임이 공유하고, 렌더 루프는 현재 슬롯 펜스만 기다림 | 프레임별 버퍼, 깨짐 없음 |
-| DEF-43 | 플레이 중 RigidBody 의 HalfX 를 끌어서 바꿈 | 끄는 동안 매 프레임 바디를 다시 만듦 | 드래그가 끝날 때 한 번 |
+| DEF-43 | 플레이 중 RigidBody 의 Half Extent X(H3a 전 HalfX)를 끌어서 바꿈 | 끄는 동안 매 프레임 바디를 다시 만듦 | 드래그가 끝날 때 한 번 |
 | DEF-44 | 씬 파일의 `RIGID:` 줄을 봄 | 셰이프·모션을 순번(정수)으로 기록 | 이름으로 기록(PRIM·AUDIO_3D 와 같은 방식), 옛 파일도 읽음 |
 
 ## 3. 기능 회귀 점검
@@ -157,12 +157,13 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 ### 3-3. 뷰포트
 - [ ] 클릭 픽(메시·아이콘), 빈 곳 클릭으로 선택 해제
 - [ ] 기즈모 이동·회전·크기(W/E/R), 스냅 토글과 값, World/Local 전환. 여러 액터를 고르면 함께 변환되고 한 번에 되돌아옴
-- [ ] F 키(Edit > Frame Selected) → 선택한 액터들이 화면에 맞춰짐
+- [ ] F 키(View > Frame Selected, H2b 전에는 Edit) → 선택한 액터들이 화면에 맞춰짐
 - [ ] 우클릭 + WASD/QE 비행, 휠 돌리, 카메라 속도 칩(Shift+클릭으로 감소)
 - [ ] 뷰포트 툴바 폭 축약: 디테일·아웃라이너를 넓혀 뷰포트를 좁힐 때 단계적으로 줄고, 다시 넓히면 돌아옴
 
 ### 3-4. 툴바 · 메뉴 · 단축키
-- [ ] File: New / Open / Save / Save As Scene, Edit: Undo / Redo / Copy / Paste / Duplicate / Delete / Frame Selected, View: Reset Layout
+- [ ] File: New / Open / Save / Save As Scene, Edit: Undo / Redo / Copy / Paste / Duplicate / Delete · Language ▸ · Audio Output, View: Frame Selected · Gizmo Size, Window: 패널 · Reset Layout(H2b 구성)
+- [ ] 메뉴 키보드(H2b): ↑ ↓ · Enter · → ← · Esc, 꺼진 항목은 흐리고 눌러도 무반응, 하위 메뉴 hover
 - [ ] Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z / Ctrl+N · O · S · Shift+S / Ctrl+C · V · D / F / Ctrl+F / Delete / F2 / Q·W·E·R
 - [ ] 텍스트 입력 중에는 Ctrl+Z 가 씬 undo 를 하지 않음
 
@@ -177,7 +178,7 @@ Start-Process -FilePath .\HarukaEngine.exe -WorkingDirectory (Resolve-Path .)
 - [ ] 한글 로그가 물음표로 보이는 줄이 있는지(5절 표의 "한글 로그 6곳" 참고)
 
 ### 3-7. 도킹
-- [ ] 스플리터로 패널 크기 조절, 탭 드래그 재도킹, View > Reset Layout
+- [ ] 스플리터로 패널 크기 조절, 탭 드래그 재도킹, Window > Reset Layout(H2b 전에는 View)
 - [ ] 종료 후 다시 열면 레이아웃 유지(그다음 0-2 백업으로 복원)
 
 ### 3-8. 플레이

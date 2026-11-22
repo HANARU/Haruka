@@ -444,7 +444,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 - UE Slate 를 본뜬 리테인드 모드 위젯 시스템. 외부 의존은 stb_truetype 하나입니다.
 - 위젯 14종: SBox · SBorder · SButton · SCollapseSection · SHorizontalBox · SVerticalBox · SImage · SNumberField · SOverlay ·
   SScrollBox · SSearchBox · STabBar · STextBlock · SToggleButton.
-- 2패스 배치(desired size → arrange), `Attr<T>` 지연 바인딩, 클립 스택(사각형 자르기), 컨테이너의 휠 전달, 프레스 추적, 마우스 캡처.
+- 2패스 배치(desired size → arrange). 원하는 크기는 측정 패스마다 위젯당 한 번 재 캐시하고(`HWidget::desiredSize`), 크기 · 트리 · 원하는 크기가 그대로면 같은 프레임의 두 번째 arrange 를 건너뜁니다(H1b, 2026-11-22). 콜백에서 트리를 바꾸는 일은 `HSlateContext::deferred` 로 전달 뒤에 실행합니다. `Attr<T>` 지연 바인딩, 클립 스택(사각형 자르기), 컨테이너의 휠 전달, 프레스 추적, 마우스 캡처.
 - 폰트 아틀라스 2048×512(ASCII 32 ~ 127), 글자 폭 실측. 전용 `VkRenderPass`, 프레임 슬롯별 정점 버퍼, 프레임당 정점 65,536개 상한.
 - **UI 문맥과 GPU 출력의 분리(3D UI 패널 P0, 2026-11-15).** CPU 쪽 상태(루트 위젯 · 배치 · 포인터 캡처 · 그리기 목록 만들기)는
   `HSlateContext`(`src/ui/slate/HSlateContext.hpp`, 결과는 `HSlateDrawList`)가, 렌더 패스 · 파이프라인 · 버퍼 · 폰트 업로드는
