@@ -22,31 +22,68 @@ void StaticMeshComponent::assignMeshFromPair(const AssetPair& pair) {
 
 std::vector<PropDesc> StaticMeshComponent::buildProps() {
     auto* p = this;
-    std::vector<PropDesc> props{ SM_PROPS(p) };
+    std::vector<PropDesc> props;
+    // 파일 메시의 모델(H3b, 에셋 경로 칸). 절차 도형은 경로가 없어 칸을 두지 않습니다(prim 과 배타). 기본값은 두지 않습니다(놓은
+    // 모델이 그 액터의 값). Undo 가 Transparent 를 모델 뒤에 되돌리도록 맨 앞에 둡니다(applyProps 는 칸 순서대로 넣음).
+    if (!primitive)
+        props.push_back(makePropAssetPath("Model", "Model", [p] { return p->modelPath; },
+                                          [p](const std::string& v) { p->setModelPath(v); }));
+    for (PropDesc& d : std::vector<PropDesc>{ SM_PROPS(p) }) props.push_back(std::move(d));
     hchan::addProps(props, &lightChannels);
     if (primitive) {
         PrimitiveMaterialDesc* m = &primitiveMaterial;
-        props.push_back(makePropToggle("Checker", [m] { return m->checker; }, [m](bool v) { m->checker = v; }));
+        const PrimitiveMaterialDesc defMat;   // 기본값(H3a)
+        props.push_back(makePropToggle("Checker", [m] { return m->checker; }, [m](bool v) { m->checker = v; }).withDefault(defMat.checker));
         if (!m->checker) {
-            // 색은 sRGB 표시값 0 ~ 1(저장은 8비트 그대로). shift 는 rgba8 안의 자리입니다.
-            auto channel = [m](const char* lbl, glm::vec4 col, int shift) {
-                return makePropFloat(lbl, col, 0.005f,
-                    [m, shift] { return float((m->rgba8 >> shift) & 0xFFu) / 255.f; },
-                    [m, shift](float v) {
-                        const uint32_t c = uint32_t(std::clamp(v, 0.f, 1.f) * 255.f + 0.5f);
-                        m->rgba8 = (m->rgba8 & ~(0xFFu << shift)) | (c << shift);
-                    }, PropUnit::Ratio);
-            };
-            props.push_back(channel("R", PropColor::Red,   24));
-            props.push_back(channel("G", PropColor::Green, 16));
-            props.push_back(channel("B", PropColor::Blue,  8));
+            // 색은 sRGB 표시값 0 ~ 1(저장은 8비트 그대로, H3a 에서 R · G · B 세 칸을 색 칸 하나로). 알파 바이트는 그대로 둡니다.
+            auto channel = [](uint32_t rgba8, int shift) { return float((rgba8 >> shift) & 0xFFu) / 255.f; };
+            props.push_back(makePropColor("Color",
+                [m, channel] { return glm::vec4(channel(m->rgba8, 24), channel(m->rgba8, 16), channel(m->rgba8, 8), 1.f); },
+                [m](const glm::vec4& v) {
+                    uint32_t c = m->rgba8 & 0xFFu;
+                    for (int i = 0; i < 3; ++i) {
+                        const uint32_t b = uint32_t(std::clamp(v[i], 0.f, 1.f) * 255.f + 0.5f);
+                        c |= b << (24 - 8 * i);
+                    }
+                    m->rgba8 = c;
+                }, false, true, 0.005f)
+                .withDefault(glm::vec3(channel(defMat.rgba8, 24), channel(defMat.rgba8, 16), channel(defMat.rgba8, 8))));
             props.push_back(makePropFloat("Metallic", PropColor::Neutral, 0.01f, [m] { return m->metallic; },
-                                          [m](float v) { m->metallic = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+                                          [m](float v) { m->metallic = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio).withDefault(defMat.metallic));
             props.push_back(makePropFloat("Roughness", PropColor::Neutral, 0.01f, [m] { return m->roughness; },
-                                          [m](float v) { m->roughness = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+                                          [m](float v) { m->roughness = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio).withDefault(defMat.roughness));
         }
     }
     return props;
+}
+
+void StaticMeshComponent::bindLoadContext(const ComponentLoadContext& ctx) {
+    if (ctx.assets) assets_ = ctx.assets;
+}
+
+void StaticMeshComponent::setModelPath(const std::string& path) {
+    if (path == modelPath) return;
+    modelPath = path;
+    if (!assets_) return;
+    mesh = nullptr;
+    collision.reset();
+    lodMeshes.clear();
+    lodScreenSizes.clear();
+    material  = nullptr;
+    vertCount = 0;
+    triCount  = 0;
+    if (modelPath.empty()) return;
+    const std::string actorName = owner ? owner->name : std::string("?");
+    try {
+        auto pairs = assets_->loadAll(modelPath);
+        if (pairs.empty()) return;
+        const int idx = std::clamp(meshIndex, 0, (int)pairs.size() - 1);
+        assignMeshFromPair(pairs[(size_t)idx]);
+        material    = pairs[(size_t)idx].material;
+        transparent = pairs[(size_t)idx].isBlend;
+    } catch (const std::exception& ex) {
+        HLOG(LogScene, Error) << "Mesh load failed (" << actorName << "): " << ex.what();
+    }
 }
 
 void StaticMeshComponent::onPropsCommitted() {

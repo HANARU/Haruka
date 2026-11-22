@@ -17,7 +17,7 @@ public:
     };
 
     std::shared_ptr<SButton> content(std::shared_ptr<HWidget> w) {
-        child_ = std::move(w); return self();
+        hslate::noteLayoutChange(); child_ = std::move(w); return self();
     }
     std::shared_ptr<SButton> onClick(ClickFn fn) {
         onClick_ = std::move(fn); return self();
@@ -31,12 +31,12 @@ public:
     std::shared_ptr<SButton> hoveredColor (glm::vec4 c) { hovered_      = c; return self(); }
     std::shared_ptr<SButton> pressedColor (glm::vec4 c) { pressed_      = c; return self(); }
     std::shared_ptr<SButton> cornerRadius (float     r) { cornerRadius_ = r; return self(); }
-    std::shared_ptr<SButton> padding      (HPadding  p) { padding_  = p; return self(); }
-    std::shared_ptr<SButton> hAlign       (EHAlign   a) { hAlign_   = a; return self(); }
-    std::shared_ptr<SButton> vAlign       (EVAlign   a) { vAlign_   = a; return self(); }
+    std::shared_ptr<SButton> padding      (HPadding  p) { hslate::noteLayoutChange(); padding_  = p; return self(); }
+    std::shared_ptr<SButton> hAlign       (EHAlign   a) { hslate::noteLayoutChange(); hAlign_   = a; return self(); }
+    std::shared_ptr<SButton> vAlign       (EVAlign   a) { hslate::noteLayoutChange(); vAlign_   = a; return self(); }
 
     glm::vec2 computeDesiredSize() override {
-        glm::vec2 cd = child_ ? child_->computeDesiredSize() : glm::vec2(0.f);
+        glm::vec2 cd = child_ ? child_->desiredSize() : glm::vec2(0.f);
         return { cd.x + padding_.totalH(), cd.y + padding_.totalV() };
     }
 
@@ -44,7 +44,7 @@ public:
         cachedGeo_ = allotted;
         if (!child_) return;
         HGeometry inner = allotted.deflate(padding_);
-        glm::vec2 cs = child_->computeDesiredSize();
+        glm::vec2 cs = child_->desiredSize();
         float cx = inner.alignH(cs.x, hAlign_);
         float cy = inner.alignV(cs.y, vAlign_);
         float cw = (hAlign_ == EHAlign::Fill) ? inner.size.x : cs.x;
@@ -104,6 +104,11 @@ public:
         // 떼면 이 위젯은 마우스-업을 영영 받지 못해, 없으면 눌린 색으로 굳습니다.
         if (!e.down || !enabled.get()) { armed_ = false; isPressed_ = false; }
         return HReply::Unhandled();
+    }
+
+    // 자식 하나(H1a-1). 그리는 순서 = 이 자식 하나.
+    void forEachChild(const std::function<void(const std::shared_ptr<HWidget>&)>& fn) override {
+        if (child_) fn(child_);
     }
 
 private:

@@ -16,13 +16,13 @@ struct ViewCameraOverride {
 
 // zFar uses makePropFloat directly to clamp against the live zNear value.
 #define CAMERA_PROPS(p) \
-    XPROP_FloatClamp(p, "FovY",  PropColor::Neutral, 1.f,   fovY,  10.f, 170.f), \
-    XPROP_FloatMin  (p, "zNear", PropColor::Neutral, 0.01f, zNear, 0.001f),       \
+    XPROP_FloatClamp(p, "FovY",  PropColor::Neutral, 1.f,   fovY,  10.f, 170.f).withDefault(45.f), \
+    XPROP_FloatMin  (p, "zNear", PropColor::Neutral, 0.01f, zNear, 0.001f).withDefault(0.1f),      \
     makePropFloat("zFar", PropColor::Neutral, 1.f,                                \
         [p]() -> float { return (p)->zFar; },                                     \
-        [p](float _v){ (p)->zFar = std::max((p)->zNear + 1.f, _v); }),            \
-    XPROP_Toggle(p, "Primary", primary),                                          \
-    XPROP_FloatClamp(p, "Exposure Compensation", PropColor::Neutral, 0.1f, exposureEv, -10.f, 10.f)
+        [p](float _v){ (p)->zFar = std::max((p)->zNear + 1.f, _v); }).withDefault(100.f), \
+    XPROP_Toggle(p, "Primary", primary).withDefault(true),                        \
+    XPROP_FloatClamp(p, "Exposure Compensation", PropColor::Neutral, 0.1f, exposureEv, -10.f, 10.f).withDefault(0.f)
 
 class CameraComponent : public Component {
 public:

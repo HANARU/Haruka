@@ -3,45 +3,64 @@
 
 #include <algorithm>
 
-std::shared_ptr<SBorder> EditorContextMenu::resetPopupHost() {
-    host_  = HNew(SBorder)->background(EditorTheme::transparent);
-    panel_.reset();
+void EditorContextMenu::resetPopup() {
+    view_.close();
     open_  = false;
-    items_.clear();
-    return host_;
+    dirty_ = false;
+    entries_.clear();
 }
 
-void EditorContextMenu::open(glm::vec2 at, std::vector<Item> items) {
-    items_ = std::move(items);
-    at_    = at;
-    open_  = !items_.empty();
-    dirty_ = true;
+void EditorContextMenu::open(glm::vec2 at, std::vector<EditorMenuEntry> entries, const std::string& panel) {
+    entries_   = std::move(entries);
+    at_        = at;
+    panel_     = panel;
+    anchor_.reset();
+    anchored_  = false;
+    highlight_ = -1;
+    open_      = !entries_.empty();
+    dirty_     = true;
+}
+
+void EditorContextMenu::openBelow(const std::shared_ptr<HWidget>& anchor, std::vector<EditorMenuEntry> entries,
+                                  const std::string& panel, int highlightRow) {
+    entries_   = std::move(entries);
+    at_        = anchor ? anchor->cachedGeometry().position : glm::vec2{ 0.f };
+    panel_     = panel;
+    anchor_    = anchor;
+    anchored_  = true;
+    highlight_ = highlightRow;
+    open_      = !entries_.empty() && anchor;
+    dirty_     = true;
 }
 
 void EditorContextMenu::close() {
     if (!open_) return;
     open_  = false;
     dirty_ = true;
+    view_.close();   // 판정에서 곧바로 빠짐(예전에는 open_ 이 꺼지면 popupContains 가 거짓)
 }
 
-bool EditorContextMenu::popupContains(glm::vec2 p) const {
-    return open_ && panel_ && panel_->cachedGeometry().contains(p);
-}
-
-void EditorContextMenu::handleOutsideClick(glm::vec2 p) {
-    if (open_ && !popupContains(p)) close();
+HSlateContext* EditorContextMenu::targetContext() const {
+    if (!open_) return nullptr;
+    if (HSlateContext* c = view_.context()) return c;
+    return popupContext_ ? popupContext_(panel_) : nullptr;
 }
 
 void EditorContextMenu::flushRebuild() {
     if (!dirty_) return;
+    // 콤보 단추가 아직 배치되지 않았으면(디테일을 이번 프레임에 다시 만듦) 자리를 정할 수 없으니 다음 프레임에 띄웁니다(Add Component 와 같음).
+    if (open_ && anchored_)
+        if (auto a = anchor_.lock(); a && a->cachedGeometry().size.x <= 0.f) return;
     dirty_ = false;
     rebuild();
 }
 
 bool EditorContextMenu::invoke(const std::string& label) {
-    for (const auto& it : items_) {
-        if (it.label != label || !it.enabled) continue;
-        auto fn = it.action;
+    // 덤프 · 시험이 열자마자(소진 전) 부를 수 있으므로 항목 목록에서 직접 찾습니다(맨 위 단계, 꺼진 항목 · 소제목은 제외).
+    const std::vector<EditorMenuRow> rows = hmenu::resolve(entries_, nullptr);
+    for (const EditorMenuRow& r : rows) {
+        if (r.label != label || !hmenu::selectable(r) || r.kind != hmenu::Kind::Command || r.entry < 0) continue;
+        auto fn = entries_[(size_t)r.entry].action;
         close();
         if (fn) fn();
         return true;
@@ -49,70 +68,47 @@ bool EditorContextMenu::invoke(const std::string& label) {
     return false;
 }
 
+void EditorContextMenu::handleKey(hmenu::Key k) {
+    if (!open_) return;
+    if (view_.key(k, false) == hmenu::Act::Close) close();
+}
+
 void EditorContextMenu::rebuild() {
-    if (!host_) return;
-    panel_.reset();
-    if (!open_ || !ui_) {
-        host_->content(nullptr);
+    HSlateContext* c = (open_ && ui_ && popupContext_) ? popupContext_(panel_) : nullptr;
+    if (!c) {
+        open_ = false;
+        view_.close();
         return;
     }
-    const EditorUiKit& u = *ui_;
-    const float rowH = u.s(24.f);
-    const float sepH = u.s(7.f);
-    float maxText = 0.f;
-    float panelH  = u.s(8.f);
-    for (const auto& it : items_) {
-        maxText = std::max(maxText, EditorUiKit::textWidth(it.label, u.s(13.f)));
-        panelH += rowH + (it.separator ? sepH : 0.f);
+    if (anchored_) {
+        // 콤보(H3a): 단추 아래, 넘치면 위. 왼쪽 끝을 단추에 맞추고 폭은 단추 폭 이상입니다. 바깥 누름(왼쪽 · 오른쪽)으로 닫고, 단추 위
+        // 누름은 바깥이 아닙니다(단추의 onClick 이 닫음). 단추가 사라졌으면(디테일을 다시 만듦) 닫습니다.
+        std::shared_ptr<HWidget> a = anchor_.lock();
+        if (!a) { open_ = false; view_.close(); return; }
+        const HGeometry& g = a->cachedGeometry();
+        EditorMenuView::RootSpec spec;
+        spec.anchor          = { g.position, g.size };
+        spec.placement.side  = HPopupPlacement::Side::Below;
+        spec.placement.align = HPopupPlacement::Align::Start;
+        spec.placement.flip  = HPopupPlacement::Flip::Overflow;
+        spec.placement.clamp = true;
+        spec.placement.gap   = ui_->s(1.f);
+        spec.closeOnLeft     = true;
+        spec.closeOnRight    = true;
+        spec.minWidth        = ui_->uiScale > 0.f ? g.size.x / ui_->uiScale : g.size.x;
+        spec.anchorWidget    = a;
+        if (!view_.show(c, entries_, spec, highlight_)) open_ = false;
+        return;
     }
-    const float panelW = std::max(u.s(180.f), maxText + u.s(40.f));
-
-    auto list = HNew(SVerticalBox);
-    for (size_t i = 0; i < items_.size(); ++i) {
-        const Item& it = items_[i];
-        if (it.separator)
-            list->addSlot(HNew(SBorder)->background(EditorTheme::transparent)->padding(HPadding{ u.s(8.f), u.s(3.f) })
-                              ->content(HNew(SBorder)->background(EditorTheme::lineDivider)),
-                          SVerticalBox::ESizeRule::Fixed, sepH);
-        const std::string label = it.label;
-        auto btn = HNew(SButton)
-            ->style(EditorUiKit::buttonStyle())->cornerRadius(0.f)
-            ->normalColor(EditorTheme::transparent)->hoveredColor(EditorTheme::selectRow)
-            ->pressedColor(EditorTheme::accentPressed)
-            ->padding(HPadding{ u.s(14.f), 0.f })->hAlign(EHAlign::Fill)
-            ->onClick([this, label] { invoke(label); })
-            ->content(HNew(STextBlock)->text(it.label)->fontSize(u.s(13.f))
-                          ->color(it.enabled ? EditorUiKit::kTextBody : EditorUiKit::kTextDim)
-                          ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center));
-        btn->enabled.set(it.enabled);
-        list->addSlot(btn, SVerticalBox::ESizeRule::Fixed, rowH);
-    }
-
-    auto panel = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
-        HNew(SBorder)
-            ->background(EditorTheme::bgPopup)
-            ->borderColor(EditorTheme::borderPopup)->borderThickness(EditorTheme::borderThin)
-            ->cornerRadius(u.s(EditorTheme::radiusPopup))
-            ->shadow({ 0.f, u.s(EditorTheme::shadowOffset.y) }, u.s(EditorTheme::shadowBlur), EditorTheme::shadowColor)
-            ->padding(HPadding{ 0.f, u.s(4.f) })
-            ->content(list));
-    auto absorber = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
-        HNew(SBorder)->onWheel([](float) { return true; })->content(
-            HNew(SButton)
-                ->normalColor(EditorTheme::transparent)->hoveredColor(EditorTheme::transparent)
-                ->pressedColor(EditorTheme::transparent)->content(u.spacer())));
-
-    // 누른 자리의 오른쪽 아래. 창 밖으로 나가면 왼쪽 · 위로 엽니다.
-    const HGeometry& host = host_->cachedGeometry();
-    float left = at_.x, top = at_.y;
-    if (left + panelW > host.position.x + host.size.x) left = at_.x - panelW;
-    if (top + panelH > host.position.y + host.size.y) top = at_.y - panelH;
-    left = std::clamp(left, host.position.x, std::max(host.position.x, host.position.x + host.size.x - panelW));
-    top  = std::clamp(top,  host.position.y, std::max(host.position.y, host.position.y + host.size.y - panelH));
-    const HPadding pos{ left - host.position.x, top - host.position.y, 0.f, 0.f };
-    auto ov = HNew(SOverlay);
-    ov->addSlot(absorber, EHAlign::Left, EVAlign::Top, pos);
-    ov->addSlot(panel,    EHAlign::Left, EVAlign::Top, pos);
-    panel_ = panel;
-    host_->content(ov);
+    // 누른 자리의 오른쪽 아래. 창 밖으로 나가면 왼쪽 · 위로 열고 창 안으로 끼웁니다(팝업 층의 Right 자리 = 예전 식 그대로).
+    // 팝업 아래로 누름 · 휠이 새지 않는 것은 팝업 층이 맡습니다(예전 같은 크기의 빈 단추). Esc 는 메뉴 키 처리가 한 단계씩 닫습니다.
+    EditorMenuView::RootSpec spec;
+    spec.anchor          = { at_, { 0.f, 0.f } };
+    spec.placement.side  = HPopupPlacement::Side::Right;
+    spec.placement.flip  = HPopupPlacement::Flip::Overflow;
+    spec.placement.clamp = true;
+    spec.closeOnLeft     = true;
+    spec.closeOnRight    = true;
+    spec.minWidth        = 180.f;
+    if (!view_.show(c, entries_, spec, -1)) open_ = false;
 }

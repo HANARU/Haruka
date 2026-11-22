@@ -7,7 +7,7 @@
 class SBorder : public HWidget {
 public:
     std::shared_ptr<SBorder> content(std::shared_ptr<HWidget> w) {
-        child_ = std::move(w); return self();
+        hslate::noteLayoutChange(); child_ = std::move(w); return self();
     }
     std::shared_ptr<SBorder> background(glm::vec4 c) {
         bgColor_ = c; return self();
@@ -25,13 +25,13 @@ public:
         shadowOffset_ = offset; shadowBlur_ = blur; shadowColor_ = color; return self();
     }
     std::shared_ptr<SBorder> padding(HPadding p) {
-        padding_ = p; return self();
+        hslate::noteLayoutChange(); padding_ = p; return self();
     }
     std::shared_ptr<SBorder> hAlign(EHAlign a) {
-        hAlign_ = a; return self();
+        hslate::noteLayoutChange(); hAlign_ = a; return self();
     }
     std::shared_ptr<SBorder> vAlign(EVAlign a) {
-        vAlign_ = a; return self();
+        hslate::noteLayoutChange(); vAlign_ = a; return self();
     }
     // 자식이 이 테두리 밖으로 그려지지 않게 자릅니다(DEF-56). 도크 리프가 패널 내용을 자르는
     // 데 씁니다. 자르는 테두리는 영역 밖의 이동을 자식에게 "바깥" 으로 알려, 잘려 보이지 않는
@@ -47,7 +47,7 @@ public:
     }
 
     glm::vec2 computeDesiredSize() override {
-        glm::vec2 childDesired = child_ ? child_->computeDesiredSize() : glm::vec2(0.f);
+        glm::vec2 childDesired = child_ ? child_->desiredSize() : glm::vec2(0.f);
         return {
             childDesired.x + padding_.totalH(),
             childDesired.y + padding_.totalV()
@@ -58,7 +58,7 @@ public:
         cachedGeo_ = allotted;
         if (!child_) return;
         HGeometry inner = allotted.deflate(padding_);
-        glm::vec2 childSize = child_->computeDesiredSize();
+        glm::vec2 childSize = child_->desiredSize();
         float cx = inner.alignH(childSize.x, hAlign_);
         float cy = inner.alignV(childSize.y, vAlign_);
         float cw = (hAlign_ == EHAlign::Fill) ? inner.size.x : childSize.x;
@@ -115,6 +115,13 @@ public:
         if (onWheel_ && onWheel_(e.wheelDelta)) return HReply::Handled();
         return HReply::Unhandled();
     }
+
+    // 자식 하나(H1a-1). 그리는 순서 = 이 자식 하나.
+    void forEachChild(const std::function<void(const std::shared_ptr<HWidget>&)>& fn) override {
+        if (child_) fn(child_);
+    }
+    // clipChildren(true) 일 때만 자식을 잘라 그립니다(paint 와 같은 기준).
+    bool clipsChildren() const override { return clip_; }
 
 private:
     std::shared_ptr<HWidget> child_;

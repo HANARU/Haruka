@@ -20,12 +20,14 @@ constexpr uint8_t kDefault = 1;   // 채널 0
 constexpr int     kCount   = 3;
 constexpr uint8_t kAll     = (1u << kCount) - 1u;
 
-inline void addProps(std::vector<PropDesc>& props, uint8_t* mask) {
+// defaultMask: 그 컴포넌트의 생성자 기본값(디테일의 기본값 되돌리기, H3a). 지금 쓰는 곳은 모두 kDefault 입니다.
+inline void addProps(std::vector<PropDesc>& props, uint8_t* mask, uint8_t defaultMask = kDefault) {
     static const char* const kLabels[kCount] = { "Light Channel 0", "Light Channel 1", "Light Channel 2" };
     for (int i = 0; i < kCount; ++i) {
         const uint8_t bit = (uint8_t)(1u << i);
         props.push_back(makePropToggle(kLabels[i], [mask, bit] { return (*mask & bit) != 0; },
-                                       [mask, bit](bool v) { *mask = v ? (uint8_t)(*mask | bit) : (uint8_t)(*mask & ~bit); }));
+                                       [mask, bit](bool v) { *mask = v ? (uint8_t)(*mask | bit) : (uint8_t)(*mask & ~bit); })
+                            .withDefault((defaultMask & bit) != 0));
     }
 }
 

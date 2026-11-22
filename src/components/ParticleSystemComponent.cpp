@@ -51,54 +51,51 @@ std::vector<PropDesc> ParticleSystemComponent::buildProps() {
     auto* p = this;
     vfx::EmitterDesc* d = &desc;
     std::vector<PropDesc> props;
-    props.push_back(makePropToggle("Auto Play", [p]{ return p->autoPlay; }, [p](bool v){ p->autoPlay = v; }));
+    props.push_back(makePropToggle("Auto Play", [p]{ return p->autoPlay; }, [p](bool v){ p->autoPlay = v; }).withDefault(true));
     props.push_back(makePropFloat("Rate", PropColor::Neutral, 1.f,
-        [d]{ return d->rate; }, [d](float v){ d->rate = v; d->clampValues(); }));
+        [d]{ return d->rate; }, [d](float v){ d->rate = v; d->clampValues(); }).withDefault(20.f));
     props.push_back(makePropFloat("Burst", PropColor::Neutral, 1.f,
-        [d]{ return (float)d->burst; }, [d](float v){ d->burst = (uint32_t)std::max(0.f, std::round(v)); d->clampValues(); }));
+        [d]{ return (float)d->burst; }, [d](float v){ d->burst = (uint32_t)std::max(0.f, std::round(v)); d->clampValues(); }).withDefault(0.f));
     props.push_back(makePropFloat("Duration", PropColor::Neutral, 0.1f,
-        [d]{ return d->duration; }, [d](float v){ d->duration = v; d->clampValues(); }));
-    props.push_back(makePropToggle("Loop", [d]{ return d->loop; }, [d](bool v){ d->loop = v; }));
+        [d]{ return d->duration; }, [d](float v){ d->duration = v; d->clampValues(); }).withDefault(2.f));
+    props.push_back(makePropToggle("Loop", [d]{ return d->loop; }, [d](bool v){ d->loop = v; }).withDefault(true));
     props.push_back(makePropFloat("Max Particles", PropColor::Neutral, 10.f,
         [d]{ return (float)d->maxParticles; },
-        [d](float v){ d->maxParticles = (uint32_t)std::max(1.f, std::round(v)); d->clampValues(); }));
+        [d](float v){ d->maxParticles = (uint32_t)std::max(1.f, std::round(v)); d->clampValues(); }).withDefault(1000.f));
     props.push_back(makePropFloat("Seed", PropColor::Neutral, 1.f,
-        [d]{ return (float)d->seed; }, [d](float v){ d->seed = (uint32_t)std::clamp(std::round(v), 0.f, 1.0e9f); }));
+        [d]{ return (float)d->seed; }, [d](float v){ d->seed = (uint32_t)std::clamp(std::round(v), 0.f, 1.0e9f); }).withDefault(0.f));
     props.push_back(makePropEnum("Space", { "World", "Local" },
-        [d]{ return (int)d->space; }, [d](int v){ d->space = (vfx::Space)std::clamp(v, 0, 1); }));
+        [d]{ return (int)d->space; }, [d](int v){ d->space = (vfx::Space)std::clamp(v, 0, 1); }).withDefault(vfx::Space::World));
     props.push_back(makePropFloat("Life Min", PropColor::Neutral, 0.1f,
-        [d]{ return d->lifeMin; }, [d](float v){ d->lifeMin = v; d->clampValues(); }));
+        [d]{ return d->lifeMin; }, [d](float v){ d->lifeMin = v; d->clampValues(); }).withDefault(1.f));
     props.push_back(makePropFloat("Life Max", PropColor::Neutral, 0.1f,
-        [d]{ return d->lifeMax; }, [d](float v){ d->lifeMax = v; d->clampValues(); }));
+        [d]{ return d->lifeMax; }, [d](float v){ d->lifeMax = v; d->clampValues(); }).withDefault(2.f));
     props.push_back(makePropFloat("Speed Min", PropColor::Neutral, 0.1f,
-        [d]{ return d->speedMin; }, [d](float v){ d->speedMin = v; d->clampValues(); }));
+        [d]{ return d->speedMin; }, [d](float v){ d->speedMin = v; d->clampValues(); }).withDefault(1.f));
     props.push_back(makePropFloat("Speed Max", PropColor::Neutral, 0.1f,
-        [d]{ return d->speedMax; }, [d](float v){ d->speedMax = v; d->clampValues(); }));
+        [d]{ return d->speedMax; }, [d](float v){ d->speedMax = v; d->clampValues(); }).withDefault(2.f));
     props.push_back(makePropEnum("Shape", { "Cone", "Sphere" },
-        [d]{ return (int)d->shape; }, [d](int v){ d->shape = (vfx::Shape)std::clamp(v, 0, 1); }));
+        [d]{ return (int)d->shape; }, [d](int v){ d->shape = (vfx::Shape)std::clamp(v, 0, 1); }).withDefault(vfx::Shape::Cone));
     if (desc.shape == vfx::Shape::Cone)
         props.push_back(makePropFloat("Cone Angle", PropColor::Neutral, 1.f,
-            [d]{ return d->coneAngle; }, [d](float v){ d->coneAngle = v; d->clampValues(); }, PropUnit::Angle));
+            [d]{ return d->coneAngle; }, [d](float v){ d->coneAngle = v; d->clampValues(); }, PropUnit::Angle).withDefault(25.f));
     props.push_back(makePropFloat("Radius", PropColor::Neutral, 0.01f,
-        [d]{ return d->radius; }, [d](float v){ d->radius = v; d->clampValues(); }, PropUnit::Size));
+        [d]{ return d->radius; }, [d](float v){ d->radius = v; d->clampValues(); }, PropUnit::Size).withDefault(0.f));
     props.push_back(makePropFloat("Size", PropColor::Neutral, 0.01f,
-        [d]{ return d->size; }, [d](float v){ d->size = v; d->clampValues(); }, PropUnit::Size));
+        [d]{ return d->size; }, [d](float v){ d->size = v; d->clampValues(); }, PropUnit::Size).withDefault(0.1f));
     props.push_back(makePropFloat("Spin Min", PropColor::Neutral, 5.f,
-        [d]{ return d->spinMin; }, [d](float v){ d->spinMin = v; d->clampValues(); }));
+        [d]{ return d->spinMin; }, [d](float v){ d->spinMin = v; d->clampValues(); }).withDefault(0.f));
     props.push_back(makePropFloat("Spin Max", PropColor::Neutral, 5.f,
-        [d]{ return d->spinMax; }, [d](float v){ d->spinMax = v; d->clampValues(); }));
-    props.push_back(makePropFloat("Gravity X", PropColor::Red, 0.1f,
-        [d]{ return d->gravity.x; }, [d](float v){ d->gravity.x = std::clamp(v, -1000.f, 1000.f); }));
-    props.push_back(makePropFloat("Gravity Y", PropColor::Green, 0.1f,
-        [d]{ return d->gravity.y; }, [d](float v){ d->gravity.y = std::clamp(v, -1000.f, 1000.f); }));
-    props.push_back(makePropFloat("Gravity Z", PropColor::Blue, 0.1f,
-        [d]{ return d->gravity.z; }, [d](float v){ d->gravity.z = std::clamp(v, -1000.f, 1000.f); }));
+        [d]{ return d->spinMax; }, [d](float v){ d->spinMax = v; d->clampValues(); }).withDefault(0.f));
+    props.push_back(makePropVec3("Gravity", 0.1f,
+        [d]{ return d->gravity; }, [d](const glm::vec3& v){ d->gravity = glm::clamp(v, glm::vec3(-1000.f), glm::vec3(1000.f)); })
+        .withDefault(glm::vec3(0.f)));
     props.push_back(makePropFloat("Drag", PropColor::Neutral, 0.05f,
-        [d]{ return d->drag; }, [d](float v){ d->drag = v; d->clampValues(); }));
+        [d]{ return d->drag; }, [d](float v){ d->drag = v; d->clampValues(); }).withDefault(0.f));
     props.push_back(makePropEnum("Blend", { "Additive", "Alpha" },
-        [d]{ return (int)d->blend; }, [d](int v){ d->blend = (vfx::Blend)std::clamp(v, 0, 1); }));
+        [d]{ return (int)d->blend; }, [d](int v){ d->blend = (vfx::Blend)std::clamp(v, 0, 1); }).withDefault(vfx::Blend::Additive));
     props.push_back(makePropEnum("Sprite", { "Soft Circle", "Circle", "Ring", "Star" },
-        [d]{ return (int)d->sprite; }, [d](int v){ d->sprite = (vfx::Sprite)std::clamp(v, 0, 3); }));
+        [d]{ return (int)d->sprite; }, [d](int v){ d->sprite = (vfx::Sprite)std::clamp(v, 0, 3); }).withDefault(vfx::Sprite::SoftCircle));
     return props;
 }
 

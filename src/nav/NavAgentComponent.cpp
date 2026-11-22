@@ -290,15 +290,15 @@ bool NavAgentComponent::readField(const std::string& key, const std::string& val
 std::vector<PropDesc> NavAgentComponent::buildProps() {
     auto* p = this;
     return {
-        XPROP_FloatClamp(p, "Speed", PropColor::Neutral, 0.05f, speed, 0.f, 100.f),
-        XPROP_FloatClamp(p, "Angular Speed", PropColor::Neutral, 5.f, angularSpeed, 0.f, 10000.f),
-        XPROP_FloatClamp(p, "Arrival Radius", PropColor::Neutral, 0.01f, arrivalRadius, 0.01f, 100.f),
-        XPROP_FloatClamp(p, "Radius", PropColor::Neutral, 0.01f, radius, 0.01f, 10.f),
-        XPROP_FloatClamp(p, "Height", PropColor::Neutral, 0.01f, height, 0.05f, 20.f),
-        XPROP_Toggle(p, "Use Character", useCharacter),
-        XPROP_Toggle(p, "Avoidance", avoidance),
-        XPROP_Toggle(p, "Allow Partial", allowPartial),
-        XPROP_FloatClamp(p, "Repath Interval", PropColor::Neutral, 0.05f, repathInterval, 0.f, 60.f),
+        XPROP_FloatClamp(p, "Speed", PropColor::Neutral, 0.05f, speed, 0.f, 100.f).withDefault(2.f),
+        XPROP_FloatClamp(p, "Angular Speed", PropColor::Neutral, 5.f, angularSpeed, 0.f, 10000.f).withDefault(360.f),
+        XPROP_FloatClamp(p, "Arrival Radius", PropColor::Neutral, 0.01f, arrivalRadius, 0.01f, 100.f).withDefault(0.3f),
+        XPROP_FloatClamp(p, "Radius", PropColor::Neutral, 0.01f, radius, 0.01f, 10.f).withDefault(0.3f),
+        XPROP_FloatClamp(p, "Height", PropColor::Neutral, 0.01f, height, 0.05f, 20.f).withDefault(1.8f),
+        XPROP_Toggle(p, "Use Character", useCharacter).withDefault(true),
+        XPROP_Toggle(p, "Avoidance", avoidance).withDefault(true),
+        XPROP_Toggle(p, "Allow Partial", allowPartial).withDefault(true),
+        XPROP_FloatClamp(p, "Repath Interval", PropColor::Neutral, 0.05f, repathInterval, 0.f, 60.f).withDefault(0.5f),
     };
 }
 

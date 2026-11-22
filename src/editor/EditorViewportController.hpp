@@ -44,6 +44,8 @@ public:
         std::function<void()>              onUpdateGroupDrag;
         std::function<void()>              onClearGroupDrag;
         std::function<void(const Transform&, const Transform&)> onCommitGizmoDrag;
+        // 열린 메뉴가 키보드를 쥐고 있는가(H2b). 참이면 Q · W · E · R 기즈모 단축키를 받지 않습니다.
+        std::function<bool()> isKeyboardCaptured = {};
     };
 
     void init(Deps deps);

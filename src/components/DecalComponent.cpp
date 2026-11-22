@@ -15,26 +15,23 @@ int indexOf(const char* const (&names)[N], const std::string& v) {
 std::vector<PropDesc> DecalComponent::buildProps() {
     auto* p = this;
     return {
-        makePropFloat("Size X", PropColor::Red, 0.01f,
-            [p]{ return p->size.x; }, [p](float v){ p->size.x = std::clamp(v, 0.01f, 100.f); }, PropUnit::Size),
-        makePropFloat("Depth", PropColor::Green, 0.01f,
-            [p]{ return p->size.y; }, [p](float v){ p->size.y = std::clamp(v, 0.01f, 100.f); }, PropUnit::Size),
-        makePropFloat("Size Z", PropColor::Blue, 0.01f,
-            [p]{ return p->size.z; }, [p](float v){ p->size.z = std::clamp(v, 0.01f, 100.f); }, PropUnit::Size),
-        makePropFloat("Color R", PropColor::Red, 0.01f,
-            [p]{ return p->color.r; }, [p](float v){ p->color.r = std::clamp(v, 0.f, 1.f); }),
-        makePropFloat("Color G", PropColor::Green, 0.01f,
-            [p]{ return p->color.g; }, [p](float v){ p->color.g = std::clamp(v, 0.f, 1.f); }),
-        makePropFloat("Color B", PropColor::Blue, 0.01f,
-            [p]{ return p->color.b; }, [p](float v){ p->color.b = std::clamp(v, 0.f, 1.f); }),
+        // 상자 크기(가로 · 투영 깊이 · 세로)와 선형 알베도(H3a 에서 성분 칸 · 색 칸 하나로).
+        makePropVec3("Size", 0.01f,
+            [p]{ return p->size; }, [p](const glm::vec3& v){ p->size = glm::clamp(v, glm::vec3(0.01f), glm::vec3(100.f)); },
+            PropUnit::Size).withDefault(glm::vec3(1.f, 0.5f, 1.f)),
+        makePropColor("Color",
+            [p]{ return glm::vec4(p->color, 1.f); },
+            [p](const glm::vec4& v){ p->color = glm::clamp(glm::vec3(v), glm::vec3(0.f), glm::vec3(1.f)); }, false, false, 0.01f,
+            PropUnit::Scalar)
+            .withDefault(glm::vec3(0.6f, 0.08f, 0.05f)),
         makePropFloat("Opacity", PropColor::Neutral, 0.01f,
-            [p]{ return p->opacity; }, [p](float v){ p->opacity = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio),
+            [p]{ return p->opacity; }, [p](float v){ p->opacity = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio).withDefault(1.f),
         makePropFloat("Roughness", PropColor::Neutral, 0.01f,
-            [p]{ return p->roughness; }, [p](float v){ p->roughness = std::clamp(v, -1.f, 1.f); }),
+            [p]{ return p->roughness; }, [p](float v){ p->roughness = std::clamp(v, -1.f, 1.f); }).withDefault(-1.f),
         makePropEnum("Blend", { "Replace", "Multiply" },
-            [p]{ return (int)p->blend; }, [p](int v){ p->blend = (Blend)std::clamp(v, 0, 1); }),
+            [p]{ return (int)p->blend; }, [p](int v){ p->blend = (Blend)std::clamp(v, 0, 1); }).withDefault(DecalComponent::Blend::Replace),
         makePropEnum("Shape", { "Circle", "Soft Circle", "Ring", "Square" },
-            [p]{ return (int)p->shape; }, [p](int v){ p->shape = (Shape)std::clamp(v, 0, 3); }),
+            [p]{ return (int)p->shape; }, [p](int v){ p->shape = (Shape)std::clamp(v, 0, 3); }).withDefault(DecalComponent::Shape::Circle),
     };
 }
 

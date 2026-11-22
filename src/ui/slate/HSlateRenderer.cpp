@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstring>
 
 // ── 헬퍼 ──────────────────────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ void HSlateRenderer::init(VkDevice device, VkPhysicalDevice physDevice,
     colorFmt_          = swapFormat;
     pushDescriptorFn_  = pushDescriptor;
 
-    if (colorFmt_ != VK_FORMAT_UNDEFINED) createUIRenderPass();
+    if (colorFmt_ != VK_FORMAT_UNDEFINED) { createUIRenderPass(); createWindowRenderPass(); }
     createPanelRenderPass();
     createPipeline();
     createWhiteTexture(beginCmd, endCmd);
@@ -100,6 +101,52 @@ void HSlateRenderer::createUIRenderPass() {
     ci.pDependencies   = &dep;
     if (vkCreateRenderPass(device_, &ci, nullptr, &uiRenderPass_) != VK_SUCCESS)
         throw std::runtime_error("[HSlateRenderer] Failed to create UI render pass!");
+}
+
+// ── createWindowRenderPass (다중 OS 창 M2) ─────────────────────────────────────
+// 보조 창은 앞에 3D 패스가 없으므로 이전 내용을 버리고(UNDEFINED) 지우며 시작합니다. 메인 오버레이 패스(LOAD)를 이 방식으로
+// 바꾸면 3D 화면이 지워지므로 따로 둡니다. 형식 · 샘플 수 · 서브패스가 메인 패스와 같아 pipeline_ 을 그대로 씁니다
+// (렌더 패스 호환성은 load · store · 배치를 따지지 않음, 의존은 같게 둠).
+void HSlateRenderer::createWindowRenderPass() {
+    VkAttachmentDescription att{};
+    att.format         = colorFmt_;
+    att.samples        = VK_SAMPLE_COUNT_1_BIT;
+    att.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    att.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+    att.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    att.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    att.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference colorRef{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments    = &colorRef;
+
+    // 외부 의존은 메인 오버레이 패스(createUIRenderPass)와 **똑같이** 둡니다. 파이프라인을 같이 쓰려면 두 패스가 호환이어야 하는데,
+    // 검증 계층은 서브패스 의존(접근 마스크 · BY_REGION)까지 같아야 호환으로 봅니다(VUID-vkCmdDrawIndexed-renderPass-02684,
+    // M2 Debug 실행에서 확인). 단계가 COLOR_ATTACHMENT_OUTPUT 이라 제출이 기다리는 acquire 세마포어 단계와도 맞습니다(배치 전환 ·
+    // 지우기가 표시 엔진이 이미지를 놓은 뒤). 나갈 때의 표시는 신호 세마포어가 맡습니다.
+    VkSubpassDependency dep{};
+    dep.srcSubpass    = VK_SUBPASS_EXTERNAL;
+    dep.dstSubpass    = 0;
+    dep.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dep.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dep.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    VkRenderPassCreateInfo ci{};
+    ci.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    ci.attachmentCount = 1;
+    ci.pAttachments    = &att;
+    ci.subpassCount    = 1;
+    ci.pSubpasses      = &subpass;
+    ci.dependencyCount = 1;
+    ci.pDependencies   = &dep;
+    if (vkCreateRenderPass(device_, &ci, nullptr, &windowRenderPass_) != VK_SUCCESS)
+        throw std::runtime_error("[HSlateRenderer] Failed to create window render pass!");
 }
 
 // ── createPanelRenderPass (3D UI P1a) ──────────────────────────────────────────
@@ -176,6 +223,11 @@ void HSlateRenderer::rebuildFramebuffers(VkExtent2D extent,
 
 // ── cleanup ────────────────────────────────────────────────────────────────────
 void HSlateRenderer::cleanup() {
+    // 정점 예산의 근거(다중 OS 창 M2): 한 프레임 슬롯에 쓴 정점 수의 최댓값과 목록 하나의 최댓값.
+    if (peakSlotVerts_ > 0) {
+        HLOG(LogUI, Log) << "UI vertices: peak per frame slot " << peakSlotVerts_ << ", largest list " << peakListVerts_
+                         << ", slot capacity " << slotVerts_ << ", list limit " << kMaxVerts;
+    }
     fonts_.cleanup();
     destroyFramebuffers();
     vkDestroyPipeline(device_, panelPipeline_, nullptr);
@@ -183,6 +235,7 @@ void HSlateRenderer::cleanup() {
     vkDestroyRenderPass(device_, panelRenderPass_, nullptr);
     panelRenderPass_ = VK_NULL_HANDLE;
     if (uiRenderPass_) { vkDestroyRenderPass(device_, uiRenderPass_, nullptr); uiRenderPass_ = VK_NULL_HANDLE; }
+    if (windowRenderPass_) { vkDestroyRenderPass(device_, windowRenderPass_, nullptr); windowRenderPass_ = VK_NULL_HANDLE; }
 
     vkDestroyPipeline           (device_, pipeline_,       nullptr);
     vkDestroyPipelineLayout     (device_, pipelineLayout_, nullptr);
@@ -451,8 +504,10 @@ void HSlateRenderer::createWhiteTexture(CmdBeginFn beginCmd, CmdEndFn endCmd) {
 
 // ── createBuffers ──────────────────────────────────────────────────────────────
 void HSlateRenderer::createBuffers(CmdBeginFn /*beginCmd*/, CmdEndFn /*endCmd*/) {
-    // Dynamic vertex buffers: HOST_VISIBLE | HOST_COHERENT, persistently mapped, 프레임 슬롯마다 하나
-    VkDeviceSize vbSize = kMaxVerts * sizeof(UIVertex);
+    // Dynamic vertex buffers: HOST_VISIBLE | HOST_COHERENT, persistently mapped, 프레임 슬롯마다 하나.
+    // 크기는 슬롯 정점 수(slotVerts_)입니다. 인덱스 버퍼는 배치 하나가 목록 상한(kMaxQuads)을 넘지 않으므로 그대로 둡니다
+    // (그리기는 vertexOffset 으로 쿼드 번호를 밀어 같은 인덱스를 씀).
+    VkDeviceSize vbSize = (VkDeviceSize)slotVerts_ * sizeof(UIVertex);
     VkBufferCreateInfo bi{};
     bi.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bi.size        = vbSize;
@@ -633,10 +688,25 @@ static bool buildDrawListFromElements(const std::vector<HDrawElement>& elements,
         const float x = rect.x, y = rect.y, w = rect.z, h = rect.w;
         const float u0 = uvRect.x, v0 = uvRect.y, u1 = uvRect.z, v1 = uvRect.w;
         const glm::vec4 params{ e.cornerRadius, e.borderWidth, e.shadowBlur, isShadow ? 1.f : 0.f };
-        out.vertices.push_back({ { x,     y     }, { u0, v0 }, e.color, { localRect.x, localRect.y }, halfSize, params, e.borderColor });
-        out.vertices.push_back({ { x + w, y     }, { u1, v0 }, e.color, { localRect.z, localRect.y }, halfSize, params, e.borderColor });
-        out.vertices.push_back({ { x + w, y + h }, { u1, v1 }, e.color, { localRect.z, localRect.w }, halfSize, params, e.borderColor });
-        out.vertices.push_back({ { x,     y + h }, { u0, v1 }, e.color, { localRect.x, localRect.w }, halfSize, params, e.borderColor });
+        // 정점 색: 보통은 하나, 그라데이션(H3b)은 잘린 자리의 모서리 색을 원래 사각형 안 비율로 구합니다(쌍선형).
+        glm::vec4 cTL = e.color, cTR = e.color, cBR = e.color, cBL = e.color;
+        if (e.gradient && !isShadow) {
+            auto at = [&](float px, float py) {
+                const float fx = e.rect.z > 0.f ? std::clamp((px - e.rect.x) / e.rect.z, 0.f, 1.f) : 0.f;
+                const float fy = e.rect.w > 0.f ? std::clamp((py - e.rect.y) / e.rect.w, 0.f, 1.f) : 0.f;
+                const glm::vec4 top = e.corner[0] + (e.corner[1] - e.corner[0]) * fx;
+                const glm::vec4 bot = e.corner[3] + (e.corner[2] - e.corner[3]) * fx;
+                return top + (bot - top) * fy;
+            };
+            cTL = at(x, y);
+            cTR = at(x + w, y);
+            cBR = at(x + w, y + h);
+            cBL = at(x, y + h);
+        }
+        out.vertices.push_back({ { x,     y     }, { u0, v0 }, cTL, { localRect.x, localRect.y }, halfSize, params, e.borderColor });
+        out.vertices.push_back({ { x + w, y     }, { u1, v0 }, cTR, { localRect.z, localRect.y }, halfSize, params, e.borderColor });
+        out.vertices.push_back({ { x + w, y + h }, { u1, v1 }, cBR, { localRect.z, localRect.w }, halfSize, params, e.borderColor });
+        out.vertices.push_back({ { x,     y + h }, { u0, v1 }, cBL, { localRect.x, localRect.w }, halfSize, params, e.borderColor });
         vertCount += 4;
     }
     flushBatch();
@@ -656,6 +726,8 @@ bool HSlateContext::collectElements(glm::vec2 size, HFontAtlas* fonts, std::vect
 
     HPaintContext ctx(fonts);
     root_->paint(ctx, fullGeo);
+    // 팝업 층(H2a): 루트 위, 툴팁 아래. 예전 팝업 호스트는 루트 오버레이 안에 있었고 같은 순서로 그려졌습니다.
+    popups_.paint(ctx);
 
     // 툴팁은 모든 위젯 위(맨 위 레이어)에 그립니다.
     if (isTooltipVisible()) {
@@ -713,9 +785,9 @@ bool HSlateContext::buildDrawList(glm::vec2 size, HFontAtlas& fonts,
     return buildDrawListFromElements(elements, fonts, whiteView, maxVerts, out);
 }
 
-bool HSlateRenderer::dumpElements(glm::vec2 size, const std::string& path) {
+bool HSlateRenderer::dumpElements(HSlateContext& ctx, glm::vec2 size, const std::string& path) {
     std::vector<HDrawElement> elements;
-    if (!ctx_.collectElements(size, &fonts_, elements)) return false;
+    if (!ctx.collectElements(size, &fonts_, elements)) return false;
 
     std::error_code ec;
     const std::filesystem::path p(path);
@@ -754,6 +826,12 @@ bool HSlateRenderer::dumpElements(glm::vec2 size, const std::string& path) {
             n = std::snprintf(buf, sizeof(buf), " blur=%.2f", e.shadowBlur);
             if (n > 0) f.write(buf, n);
         }
+        if (e.gradient) {   // H3b: 그라데이션 사각형만 붙습니다(예전 덤프 줄은 그대로)
+            n = std::snprintf(buf, sizeof(buf), " grad=(%.3f,%.3f,%.3f|%.3f,%.3f,%.3f|%.3f,%.3f,%.3f|%.3f,%.3f,%.3f)",
+                              e.corner[0].r, e.corner[0].g, e.corner[0].b, e.corner[1].r, e.corner[1].g, e.corner[1].b,
+                              e.corner[2].r, e.corner[2].g, e.corner[2].b, e.corner[3].r, e.corner[3].g, e.corner[3].b);
+            if (n > 0) f.write(buf, n);
+        }
         if (e.type == HDrawElement::Type::Texture) {
             n = std::snprintf(buf, sizeof(buf), " tex uv=(%.3f,%.3f,%.3f,%.3f)",
                               e.uvRect.x, e.uvRect.y, e.uvRect.z, e.uvRect.w);
@@ -781,7 +859,7 @@ bool HSlateRenderer::dumpElements(glm::vec2 size, const std::string& path) {
 bool HSlateRenderer::recordDrawList(VkCommandBuffer cmd, VkRenderPass renderPass,
                                     VkFramebuffer framebuffer, VkExtent2D extent,
                                     const HSlateDrawList& drawList, uint32_t frameIdx) {
-    return recordPass(cmd, renderPass, pipeline_, framebuffer, extent, false, drawList,
+    return recordPass(cmd, renderPass, pipeline_, framebuffer, extent, nullptr, drawList,
                       frameIdx % kFramesInFlight);
 }
 
@@ -797,38 +875,73 @@ bool HSlateRenderer::recordPanel(VkCommandBuffer cmd, const HSlateDrawList& list
                                  VkExtent2D extent, uint32_t frameIdx) {
     const uint32_t slot = frameIdx % kFramesInFlight;
     bool drew = !list.batches.empty();
-    if (drew && slotVertOffset_[slot] + (uint32_t)list.vertices.size() > kMaxVerts) {
+    static constexpr VkClearColorValue kTransparent = {{ 0.f, 0.f, 0.f, 0.f }};
+    if (drew && !fitsSlot(slotVertOffset_[slot], (uint32_t)list.vertices.size(), slotVerts_)) {
         static bool panelBudgetWarned = false;
         if (!panelBudgetWarned) {
             panelBudgetWarned = true;
             HLOG(LogUI, Warning) << "UI slot vertex budget exceeded by a world panel (" << slotVertOffset_[slot]
-                                 << " + " << list.vertices.size() << " > " << kMaxVerts
+                                 << " + " << list.vertices.size() << " > " << slotVerts_
                                  << ") - panel cleared this frame";
         }
         // 비운 목록으로 패스만 열어 투명하게 지웁니다. false 를 돌려 다음 프레임에 다시 그리게 합니다.
-        recordPass(cmd, panelRenderPass_, panelPipeline_, framebuffer, extent, true, HSlateDrawList{}, slot);
+        recordPass(cmd, panelRenderPass_, panelPipeline_, framebuffer, extent, &kTransparent, HSlateDrawList{}, slot);
         return false;
     }
-    recordPass(cmd, panelRenderPass_, panelPipeline_, framebuffer, extent, true, list, slot);
+    recordPass(cmd, panelRenderPass_, panelPipeline_, framebuffer, extent, &kTransparent, list, slot);
     return true;
 }
 
+// ── 보조 OS 창 (다중 OS 창 M2) ──────────────────────────────────────────────────
+bool HSlateRenderer::buildWindow(HSlateContext& ctx, VkExtent2D extent, HSlateDrawList& out) {
+    const glm::vec2 size{ (float)extent.width, (float)extent.height };
+    const bool drew = ctx.buildDrawList(size, fonts_, whiteView_, kMaxVerts, out);
+    if (!drew) out = HSlateDrawList{};
+    return drew;
+}
+
+bool HSlateRenderer::recordWindow(VkCommandBuffer cmd, const HSlateDrawList& list, VkFramebuffer framebuffer,
+                                  VkExtent2D extent, uint32_t frameIdx) {
+    if (windowRenderPass_ == VK_NULL_HANDLE || framebuffer == VK_NULL_HANDLE) return false;
+    const uint32_t slot = frameIdx % kFramesInFlight;
+    if (!list.batches.empty() && !fitsSlot(slotVertOffset_[slot], (uint32_t)list.vertices.size(), slotVerts_)) {
+        static bool windowBudgetWarned = false;
+        if (!windowBudgetWarned) {
+            windowBudgetWarned = true;
+            HLOG(LogUI, Warning) << "UI slot vertex budget exceeded by an aux window (" << slotVertOffset_[slot]
+                                 << " + " << list.vertices.size() << " > " << slotVerts_
+                                 << ") - window cleared this frame";
+        }
+        // 받은 이미지는 표시해야 하므로 패스를 열어 지우고 PRESENT_SRC 로 끝냅니다.
+        recordPass(cmd, windowRenderPass_, pipeline_, framebuffer, extent, &kWindowClear, HSlateDrawList{}, slot);
+        return false;
+    }
+    recordPass(cmd, windowRenderPass_, pipeline_, framebuffer, extent, &kWindowClear, list, slot);
+    return true;
+}
+
+void HSlateRenderer::notePeak(uint32_t slotOffset, uint32_t listVerts) {
+    peakSlotVerts_ = std::max(peakSlotVerts_, slotOffset);
+    peakListVerts_ = std::max(peakListVerts_, listVerts);
+}
+
 bool HSlateRenderer::recordPass(VkCommandBuffer cmd, VkRenderPass renderPass, VkPipeline pipeline,
-                                VkFramebuffer framebuffer, VkExtent2D extent, bool clear,
+                                VkFramebuffer framebuffer, VkExtent2D extent, const VkClearColorValue* clear,
                                 const HSlateDrawList& drawList, uint32_t slot) {
     const uint32_t count = static_cast<uint32_t>(drawList.vertices.size());
-    if (slotVertOffset_[slot] + count > kMaxVerts) {
+    if (!fitsSlot(slotVertOffset_[slot], count, slotVerts_)) {
         static bool budgetWarned = false;
         if (!budgetWarned) {
             budgetWarned = true;
             HLOG(LogUI, Warning) << "UI slot vertex budget exceeded (" << slotVertOffset_[slot]
-                                 << " + " << count << " > " << kMaxVerts
+                                 << " + " << count << " > " << slotVerts_
                                  << ") - skipping render pass";
         }
         return false;
     }
 
     const uint32_t baseVert = advanceSlotVertexOffset(slotVertOffset_[slot], count);
+    notePeak(slotVertOffset_[slot], count);
     if (count > 0) {
         std::memcpy(vertexPtr_[slot] + baseVert, drawList.vertices.data(),
                     count * sizeof(UIVertex));
@@ -839,10 +952,9 @@ bool HSlateRenderer::recordPass(VkCommandBuffer cmd, VkRenderPass renderPass, Vk
     rpbi.renderPass        = renderPass;
     rpbi.framebuffer       = framebuffer;
     rpbi.renderArea.extent = extent;
-    // 에디터 오버레이는 지우기 값이 없습니다(LOAD_OP_LOAD 로 3D 장면을 보존). 패널은 투명으로 지웁니다.
-    VkClearValue transparent{};
-    transparent.color = {{ 0.f, 0.f, 0.f, 0.f }};
-    if (clear) { rpbi.clearValueCount = 1; rpbi.pClearValues = &transparent; }
+    // 에디터 오버레이는 지우기 값이 없습니다(LOAD_OP_LOAD 로 3D 장면을 보존). 패널은 투명, 보조 창은 kWindowClear 로 지웁니다.
+    VkClearValue clearValue{};
+    if (clear) { clearValue.color = *clear; rpbi.clearValueCount = 1; rpbi.pClearValues = &clearValue; }
     vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
     if (drawList.batches.empty()) {   // 지우기만(패널이 비었거나 예산 초과)
         vkCmdEndRenderPass(cmd);
@@ -906,12 +1018,104 @@ void HSlateRenderer::pushDescriptor(VkCommandBuffer cmd, VkImageView view) {
 }
 
 // ── arrange ────────────────────────────────────────────────────────────────────
+namespace {
+// 이벤트 전달 중 표시(H1b). 이 안에서는 flushDeferred 가 아무것도 하지 않습니다.
+struct DispatchScope {
+    int& depth;
+    explicit DispatchScope(int& d) : depth(d) { ++depth; }
+    ~DispatchScope() { --depth; }
+};
+
+// 건너뛰기를 판정할 때, 배치가 원하는 크기를 물을 위젯을 모두 잽니다. 배치는 forEachChild 가 넘기는 자식만
+// 배치하므로(접힌 섹션의 body 는 빠짐) 같은 범위입니다. 이미 이번 패스에 잰 위젯은 캐시를 돌려줍니다.
+void measureSubtree(const std::shared_ptr<HWidget>& w) {
+    if (!w) return;
+    w->desiredSize();
+    w->forEachChild([](const std::shared_ptr<HWidget>& c) { measureSubtree(c); });
+}
+
+// 측정 패스 하나의 범위. 중첩된 arrange(다른 문맥)가 있어도 바깥 패스 값을 되돌립니다.
+struct MeasurePassScope {
+    hslate::LayoutCounters& lc;
+    uint64_t savedPass, savedPrev;
+    bool     savedChanged;
+    MeasurePassScope(hslate::LayoutCounters& c, uint64_t prevPass)
+        : lc(c), savedPass(c.pass), savedPrev(c.prevPass), savedChanged(c.changed) {
+        lc.pass     = ++lc.nextPass;
+        lc.prevPass = prevPass;
+        lc.changed  = false;
+    }
+    ~MeasurePassScope() { lc.pass = savedPass; lc.prevPass = savedPrev; lc.changed = savedChanged; }
+};
+} // namespace
+
 void HSlateContext::arrange(glm::vec2 size) {
-    if (!root_ || root_->isCollapsed()) return;
+    // 이벤트 전달 중에 맡긴 지연 작업은 배치 전에 실행합니다. 전달 밖(tick 등)에서 맡긴 것은 소유자의
+    // flushDeferred 자리를 기다립니다(그 자리가 예전 지연 플래그의 소진 자리라 순서가 그대로임).
+    if (deferredFromDispatch_) flushDeferred();
+    if (dispatchDepth_ == 0) popups_.collect();
+    popups_.setBounds({ { 0.f, 0.f }, size });
+    ++layoutStats_.arrangeCalls;
+    struct ArrangeTimer {
+        double& ms;
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+        ~ArrangeTimer() { ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(); }
+    } timer{ layoutStats_.arrangeMs };
+    if (!root_ || root_->isCollapsed()) { layoutValid_ = false; return; }
     HGeometry fullGeo;
     fullGeo.size = size;
-    root_->computeDesiredSize();
-    root_->onArrangeChildren(fullGeo);
+
+    hslate::LayoutCounters& lc = hslate::layoutCounters();
+    if (!lc.cacheEnabled) {
+        // 예전 방식(계측 · 비교용): 캐시 없이 재고 늘 배치합니다.
+        layoutValid_ = false;
+        root_->desiredSize();
+        root_->onArrangeChildren(fullGeo);
+        popups_.arrange();
+        ++layoutStats_.arrangeRuns;
+        ++layoutGeneration_;
+        return;
+    }
+
+    // 측정 전의 변경 횟수를 기억합니다. 측정 · 배치 도중에 변경이 생기면 다음 arrange 가 다시 배치합니다.
+    const uint64_t mutation = lc.mutation;
+    MeasurePassScope scope(lc, lastPass_);
+    root_->desiredSize();   // 예전에도 배치 전에 루트를 한 번 쟀습니다(같은 순서로 잼)
+    bool skip = layoutValid_ && size == lastLayoutSize_ && root_.get() == lastLayoutRoot_ &&
+                mutation == lastMutation_;
+    if (skip) {
+        measureSubtree(root_);
+        skip = !lc.changed;
+    }
+    if (!skip) {
+        root_->onArrangeChildren(fullGeo);
+        ++layoutStats_.arrangeRuns;
+        ++layoutGeneration_;
+    }
+    // 팝업은 루트 배치를 건너뛰어도 늘 배치합니다(작고, 넣을 때 정한 자리라 루트와 무관).
+    popups_.arrange();
+    lastPass_       = lc.pass;
+    lastLayoutSize_ = size;
+    lastLayoutRoot_ = root_.get();
+    lastMutation_   = mutation;
+    layoutValid_    = true;
+}
+
+// ── 지연 변경 큐 (H1b) ────────────────────────────────────────────────────────
+void HSlateContext::deferred(std::function<void()> fn) {
+    if (!fn) return;
+    deferred_.push_back(std::move(fn));
+    if (dispatchDepth_ > 0) deferredFromDispatch_ = true;
+}
+
+void HSlateContext::flushDeferred() {
+    if (dispatchDepth_ > 0) return;
+    if (deferred_.empty()) { popups_.collect(); return; }
+    std::vector<std::function<void()>> run;
+    run.swap(deferred_);
+    deferredFromDispatch_ = false;
+    for (auto& fn : run) fn();
+    popups_.collect();
 }
 
 // ── tickTooltip ───────────────────────────────────────────────────────────────
@@ -922,7 +1126,9 @@ void HSlateContext::tickTooltip(float dt) {
         tooltipSuppressed_ = false;
         return;
     }
-    auto target = root_->findTooltipWidget(pointerPos_);
+    // 팝업이 덮은 자리(영역 안 · Consume 배경)에서는 그 밑 루트 위젯의 툴팁을 띄우지 않습니다(H2b, H2a 판단 4).
+    auto target = popups_.findTooltip(pointerPos_);
+    if (!target && !popups_.overPopup(pointerPos_)) target = root_->findTooltipWidget(pointerPos_);
     auto prev   = hoverTooltipTarget_.lock();
     if (target != prev) {
         hoverTooltipTarget_ = target;
@@ -941,7 +1147,34 @@ bool HSlateContext::isTooltipVisible() const {
 }
 
 // ── handlePointerEvent ─────────────────────────────────────────────────────────
+// 마우스 전달 자체(캡처 · 컨테이너가 자식에게 뿌리는 방식)는 routePointerEvent 가 예전 그대로
+// 합니다. 여기서는 누름이 끝난 뒤 포커스 요청 · "누르면 포커스" 만 덧붙입니다(H1a-1).
 HReply HSlateContext::handlePointerEvent(HPointerEvent e) {
+    // 누름 · 뗌 · 휠은 위젯 상태(펼침 · 스크롤 · 리빌드 요청)를 바꾸는 일이 많으므로 다음 arrange 가 늘 배치합니다
+    // (H1b, 보수적). 이동은 호버만 바꾸는 것이 보통이라 무효화하지 않고, 배치에 드러나는 변경은 원하는 크기 비교와
+    // 배치 변경 알림이 잡습니다.
+    if (e.wheelDelta != 0.f || e.button >= 0) layoutValid_ = false;
+    HReply r;
+    {
+        DispatchScope ds(dispatchDepth_);
+        r = routePointerEvent(e);
+    }
+    if (dispatchDepth_ == 0) popups_.collect();   // 전달 중 닫힌 팝업의 위젯을 이제 놓음
+    const bool isPress = (e.wheelDelta == 0.f) && e.button >= 0 && e.down;
+    if (!isPress) return r;
+    if (r.hasFocusRequest()) {
+        applyFocusRequest(r);
+    } else if (clickToFocus_ && root_ && root_->isVisible()) {
+        const HWidgetPath path = hitTest(e.position);
+        for (size_t i = path.size(); i-- > 0;) {
+            auto w = path.widgetAt(i);
+            if (w && w->supportsKeyboardFocus()) { setFocus(w); break; }
+        }
+    }
+    return r;
+}
+
+HReply HSlateContext::routePointerEvent(const HPointerEvent& e) {
     if (!root_ || !root_->isVisible()) return HReply::Unhandled();
 
     // 버튼 상태를 싣는 것은 이동 이벤트뿐입니다(e.down = 좌버튼이 지금 눌려 있음). 휠
@@ -956,7 +1189,8 @@ HReply HSlateContext::handlePointerEvent(HPointerEvent e) {
         hoverElapsed_      = 0.f;
         tooltipSuppressed_ = true;
     } else if (isMove) {
-        auto target = root_->findTooltipWidget(pointerPos_);
+        auto target = popups_.findTooltip(pointerPos_);
+        if (!target && !popups_.overPopup(pointerPos_)) target = root_->findTooltipWidget(pointerPos_);   // H2b: 팝업 밑 툴팁 막기
         auto prev   = hoverTooltipTarget_.lock();
         if (target != prev) {
             hoverTooltipTarget_ = target;
@@ -987,15 +1221,132 @@ HReply HSlateContext::handlePointerEvent(HPointerEvent e) {
         if (isMove && !e.down) releaseCapture();
     }
 
+    // 팝업 층이 먼저 받습니다(H2a). 누름 · 휠은 팝업 영역 · Consume 배경이면 루트로 가지 않고, 이동은 둘 다 받습니다.
     HReply r;
-    if (isWheel)       r = root_->onScroll(e);
-    else if (isButton) r = root_->onMouseButton(e);
-    else               r = root_->onMouseMove(e);
+    bool   consumed = false;
+    if (isWheel)       consumed = popups_.routeWheel(e, r);
+    else if (isButton) consumed = popups_.routeButton(e, r);
+    else               r = popups_.routeMove(e);
+    if (!consumed) {
+        if (isWheel)       r = root_->onScroll(e);
+        else if (isButton) r = root_->onMouseButton(e);
+        else               r.merge(root_->onMouseMove(e));
+    }
 
     if (r.mouseCapture) {
         captured_      = r.mouseCapture->weak_from_this();
         captureActive_ = true;
     }
     if (r.mouseRelease) releaseCapture();
+    return r;
+}
+
+// ── 히트 경로 · 포커스 (H1a-1) ────────────────────────────────────────────────
+namespace hslate {
+
+namespace {
+bool hitTestRec(const std::shared_ptr<HWidget>& w, glm::vec2 pos, HWidgetPath& out) {
+    if (!w || !w->isVisible()) return false;
+    const HGeometry& geo = w->cachedGeometry();
+    const bool inside = geo.contains(pos);
+    if (w->clipsChildren() && !inside) return false;
+    out.entries.push_back({ w, geo });
+    std::vector<std::shared_ptr<HWidget>> kids;
+    w->forEachChild([&kids](const std::shared_ptr<HWidget>& c) { kids.push_back(c); });
+    for (size_t i = kids.size(); i-- > 0;)          // 위에 그려진 자식(나중 것)부터
+        if (hitTestRec(kids[i], pos, out)) return true;
+    if (inside && w->hitTestVisible()) return true;
+    out.entries.pop_back();
+    return false;
+}
+
+bool findPathRec(const std::shared_ptr<HWidget>& w, const HWidget* target, HWidgetPath& out) {
+    if (!w) return false;
+    out.entries.push_back({ w, w->cachedGeometry() });
+    if (w.get() == target) return true;
+    bool found = false;
+    w->forEachChild([&](const std::shared_ptr<HWidget>& c) {
+        if (!found) found = findPathRec(c, target, out);
+    });
+    if (!found) out.entries.pop_back();
+    return found;
+}
+
+void collectFocusableRec(const std::shared_ptr<HWidget>& w, std::vector<std::shared_ptr<HWidget>>& out) {
+    if (!w || !w->isVisible()) return;
+    if (w->supportsKeyboardFocus()) out.push_back(w);
+    w->forEachChild([&out](const std::shared_ptr<HWidget>& c) { collectFocusableRec(c, out); });
+}
+} // namespace
+
+bool hitTest(const std::shared_ptr<HWidget>& root, glm::vec2 pos, HWidgetPath& out) {
+    out.entries.clear();
+    return hitTestRec(root, pos, out);
+}
+
+bool findPath(const std::shared_ptr<HWidget>& root, const HWidget* target, HWidgetPath& out) {
+    out.entries.clear();
+    if (!target) return false;
+    return findPathRec(root, target, out);
+}
+
+void collectFocusable(const std::shared_ptr<HWidget>& root, std::vector<std::shared_ptr<HWidget>>& out) {
+    out.clear();
+    collectFocusableRec(root, out);
+}
+
+} // namespace hslate
+
+HWidgetPath HSlateContext::hitTest(glm::vec2 pos) const {
+    HWidgetPath path;
+    if (root_ && root_->isVisible() && popups_.hitTest(pos, path)) return path;
+    hslate::hitTest(root_, pos, path);
+    return path;
+}
+
+void HSlateContext::applyFocusRequest(const HReply& r) {
+    if (r.focusClear) { clearFocus(); return; }
+    if (r.focusRequest) setFocus(r.focusRequest->weak_from_this().lock());
+}
+
+bool HSlateContext::validFocusPath(HWidgetPath& out) {
+    out.entries.clear();
+    auto f = focused_.lock();
+    if (!f) { focused_.reset(); return false; }
+    bool ok = root_ && (hslate::findPath(root_, f.get(), out) || popups_.findPath(f.get(), out));
+    for (size_t i = 0; ok && i < out.size(); ++i) {
+        auto w = out.widgetAt(i);
+        ok = w && w->isVisible();
+    }
+    if (!ok) { out.entries.clear(); clearFocus(); }
+    return ok;
+}
+
+HReply HSlateContext::handleKeyEvent(const HKeyEvent& e) {
+    layoutValid_ = false;
+    DispatchScope ds(dispatchDepth_);
+    HWidgetPath path;
+    if (!validFocusPath(path)) return HReply::Unhandled();
+    for (size_t i = path.size(); i-- > 0;) {        // 포커스 위젯 → 루트
+        auto w = path.widgetAt(i);
+        if (!w) continue;
+        HReply r = e.down ? w->onKeyDown(e) : w->onKeyUp(e);
+        if (r.handled) {
+            if (r.hasFocusRequest()) applyFocusRequest(r);
+            return r;
+        }
+    }
+    return HReply::Unhandled();
+}
+
+HReply HSlateContext::handleCharEvent(const HCharEvent& e) {
+    layoutValid_ = false;
+    DispatchScope ds(dispatchDepth_);
+    HWidgetPath path;
+    if (!validFocusPath(path)) return HReply::Unhandled();
+    auto w = path.lastWidget();
+    if (!w) return HReply::Unhandled();
+    HReply r = w->onChar(e);
+    if (r.hasFocusRequest()) applyFocusRequest(r);
     return r;
 }

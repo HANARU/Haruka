@@ -17,13 +17,25 @@ public:
         EVAlign   vAlign   = EVAlign::Fill;
     };
 
-    void clearSlots() { slots_.clear(); }
+    void clearSlots() { slots_.clear(); hslate::noteLayoutChange(); }
+
+    // 슬롯 수와 슬롯의 크기 값(Fill 가중치 · Fixed 픽셀)을 바꿉니다(H1b). 도크 스플리터가 끄는 동안 위젯 트리를
+    // 다시 만들지 않고 비율만 고칠 때 씁니다. 범위 밖이면 false 이고 아무것도 바꾸지 않습니다. 값이 바뀌면 배치
+    // 변경으로 알려, 다음 arrange 가 건너뛰지 않게 합니다.
+    size_t slotCount() const { return slots_.size(); }
+    bool setSlotValue(size_t i, float value) {
+        if (i >= slots_.size()) return false;
+        if (slots_[i].value != value) { slots_[i].value = value; hslate::noteLayoutChange(); }
+        return true;
+    }
+    float slotValue(size_t i) const { return i < slots_.size() ? slots_[i].value : 0.f; }
 
     std::shared_ptr<SVerticalBox> addSlot(std::shared_ptr<HWidget> w,
                                            ESizeRule rule  = ESizeRule::Auto,
                                            float     value = 0.f,
                                            HPadding  pad   = {},
                                            EHAlign   ha    = EHAlign::Fill) {
+        hslate::noteLayoutChange();
         slots_.push_back({ std::move(w), rule, value, pad, ha, EVAlign::Fill });
         return std::static_pointer_cast<SVerticalBox>(shared_from_this());
     }
@@ -34,7 +46,7 @@ public:
             if (s.sizeRule == ESizeRule::Fixed) {
                 totalH += s.value + s.padding.totalV();
             } else {
-                glm::vec2 d = s.widget->computeDesiredSize();
+                glm::vec2 d = s.widget->desiredSize();
                 maxW   = std::max(maxW, d.x + s.padding.totalH());
                 totalH += d.y + s.padding.totalV();
             }
@@ -53,7 +65,7 @@ public:
                 desiredHeights[i] = s.value;
                 fixedHeight += s.value + s.padding.totalV();
             } else if (s.sizeRule == ESizeRule::Auto) {
-                float dh = s.widget->computeDesiredSize().y;
+                float dh = s.widget->desiredSize().y;
                 desiredHeights[i] = dh;
                 fixedHeight += dh + s.padding.totalV();
             } else {
@@ -83,7 +95,7 @@ public:
                                  slotH - s.padding.totalV() };
             slotGeo.scale    = allotted.scale;
 
-            glm::vec2 childDesired = s.widget->computeDesiredSize();
+            glm::vec2 childDesired = s.widget->desiredSize();
             float cx = slotGeo.alignH(childDesired.x, s.hAlign);
             float childW = (s.hAlign == EHAlign::Fill) ? slotGeo.size.x : childDesired.x;
             s.widget->onArrangeChildren(
@@ -130,6 +142,12 @@ public:
         HReply ret = HReply::Unhandled();
         for (auto& s : slots_) ret.merge(s.widget->onMouseMove(e));
         return ret;
+    }
+
+    // 슬롯을 그리는 순서(앞 슬롯 먼저)대로 넘깁니다(H1a-1).
+    void forEachChild(const std::function<void(const std::shared_ptr<HWidget>&)>& fn) override {
+        for (auto& s : slots_)
+            if (s.widget) fn(s.widget);
     }
 
 private:

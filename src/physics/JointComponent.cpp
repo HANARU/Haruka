@@ -41,20 +41,18 @@ std::vector<PropDesc> JointComponent::buildProps() {
     return {
         makePropEnum("Type", { "Fixed", "Hinge", "Slider", "Distance" },
             [p]{ return (int)p->type; },
-            [p](int v){ p->type = (EJointType)std::clamp(v, 0, 3); }),
+            [p](int v){ p->type = (EJointType)std::clamp(v, 0, 3); }).withDefault(EJointType::Hinge),
         XPROP_ActorRef(p, "Target", target),
-        makePropFloat("AnchorX", PropColor::Red,   0.01f, [p]{ return p->anchor.x; }, [p](float v){ p->anchor.x = v; }, PropUnit::Size),
-        makePropFloat("AnchorY", PropColor::Green, 0.01f, [p]{ return p->anchor.y; }, [p](float v){ p->anchor.y = v; }, PropUnit::Size),
-        makePropFloat("AnchorZ", PropColor::Blue,  0.01f, [p]{ return p->anchor.z; }, [p](float v){ p->anchor.z = v; }, PropUnit::Size),
-        makePropFloat("AxisX",   PropColor::Red,   0.01f, [p]{ return p->axis.x; },   [p](float v){ p->axis.x = v; }),
-        makePropFloat("AxisY",   PropColor::Green, 0.01f, [p]{ return p->axis.y; },   [p](float v){ p->axis.y = v; }),
-        makePropFloat("AxisZ",   PropColor::Blue,  0.01f, [p]{ return p->axis.z; },   [p](float v){ p->axis.z = v; }),
-        makePropFloat("Connected AnchorX", PropColor::Red,   0.01f, [p]{ return p->connectedAnchor.x; }, [p](float v){ p->connectedAnchor.x = v; }, PropUnit::Size),
-        makePropFloat("Connected AnchorY", PropColor::Green, 0.01f, [p]{ return p->connectedAnchor.y; }, [p](float v){ p->connectedAnchor.y = v; }, PropUnit::Size),
-        makePropFloat("Connected AnchorZ", PropColor::Blue,  0.01f, [p]{ return p->connectedAnchor.z; }, [p](float v){ p->connectedAnchor.z = v; }, PropUnit::Size),
-        makePropToggle("Limits", [p]{ return p->limits; }, [p](bool v){ p->limits = v; }),
-        makePropFloat("Limit Min", PropColor::Neutral, 0.1f, [p]{ return p->limitMin; }, [p](float v){ p->limitMin = v; }),
-        makePropFloat("Limit Max", PropColor::Neutral, 0.1f, [p]{ return p->limitMax; }, [p](float v){ p->limitMax = v; }),
+        // 성분 칸(H3a 에서 X · Y · Z 세 칸을 하나로, 단위는 예전 그대로).
+        makePropVec3("Anchor", 0.01f, [p]{ return p->anchor; }, [p](const glm::vec3& v){ p->anchor = v; }, PropUnit::Size)
+            .withDefault(glm::vec3(0.f)),
+        makePropVec3("Axis", 0.01f, [p]{ return p->axis; }, [p](const glm::vec3& v){ p->axis = v; })
+            .withDefault(glm::vec3(0.f, 1.f, 0.f)),
+        makePropVec3("Connected Anchor", 0.01f, [p]{ return p->connectedAnchor; }, [p](const glm::vec3& v){ p->connectedAnchor = v; },
+                     PropUnit::Size).withDefault(glm::vec3(0.f)),
+        makePropToggle("Limits", [p]{ return p->limits; }, [p](bool v){ p->limits = v; }).withDefault(false),
+        makePropFloat("Limit Min", PropColor::Neutral, 0.1f, [p]{ return p->limitMin; }, [p](float v){ p->limitMin = v; }).withDefault(-45.f),
+        makePropFloat("Limit Max", PropColor::Neutral, 0.1f, [p]{ return p->limitMax; }, [p](float v){ p->limitMax = v; }).withDefault(45.f),
     };
 }
 

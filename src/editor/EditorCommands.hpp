@@ -51,8 +51,10 @@ struct PropValue {
     int            i    = 0;
     bool           b    = false;
     uint64_t       g    = 0;   // ActorRef: 대상 GUID(참조 체계 R-7)
+    std::string    s;          // String · AssetPath(H3a)
+    glm::vec4      v { 0.f };  // Vec3 · Color(H3a)
     bool operator==(const PropValue& o) const {
-        return label == o.label && kind == o.kind && f == o.f && i == o.i && b == o.b && g == o.g;
+        return label == o.label && kind == o.kind && f == o.f && i == o.i && b == o.b && g == o.g && s == o.s && v == o.v;
     }
 };
 struct PropValues {
@@ -65,17 +67,45 @@ struct PropValues {
         return n;
     }
 };
+// 칸 하나의 지금 값을 e 에 뜹니다(종류에 맞는 게터가 없으면 거짓).
+inline bool readProp(const PropDesc& pd, PropValue& e) {
+    if (!hprop::readable(pd)) return false;
+    switch (pd.kind) {
+        case PropDesc::Float:     e.f = pd.getF(); break;
+        case PropDesc::Toggle:    e.b = pd.getB(); break;
+        case PropDesc::Enum:      e.i = pd.getI(); break;
+        case PropDesc::ActorRef:  e.g = pd.getG(); break;
+        case PropDesc::String:
+        case PropDesc::AssetPath: e.s = pd.getS(); break;
+        case PropDesc::Vec3:
+        case PropDesc::Color:     e.v = pd.getV(); break;
+    }
+    return true;
+}
+// e 의 값을 세터로 넣습니다(종류에 맞는 세터가 없으면 거짓). 칸 목록을 바꿀 수 있는 종류(토글 · 열거 · 액터 참조)면 layoutMayChange.
+inline bool writeProp(const PropDesc& pd, const PropValue& e, bool* layoutMayChange = nullptr) {
+    if (!hprop::writable(pd)) return false;
+    bool layout = false;
+    switch (pd.kind) {
+        case PropDesc::Float:     pd.setF(e.f); break;
+        case PropDesc::Toggle:    pd.setB(e.b); layout = true; break;
+        case PropDesc::Enum:      pd.setI(e.i); layout = true; break;
+        case PropDesc::ActorRef:  pd.setG(e.g); layout = true; break;
+        case PropDesc::String:
+        case PropDesc::AssetPath: pd.setS(e.s); break;
+        case PropDesc::Vec3:
+        case PropDesc::Color:     pd.setV(e.v); break;
+    }
+    if (layoutMayChange && layout) *layoutMayChange = true;
+    return true;
+}
 inline PropValues captureProps(Component& c) {
     PropValues out;
     for (const PropDesc& pd : c.buildProps()) {
         PropValue e;
         e.label = pd.label ? pd.label : "";
         e.kind  = pd.kind;
-        if (pd.kind == PropDesc::Float && pd.getF)       e.f = pd.getF();
-        else if (pd.kind == PropDesc::Toggle && pd.getB) e.b = pd.getB();
-        else if (pd.kind == PropDesc::Enum && pd.getI)   e.i = pd.getI();
-        else if (pd.kind == PropDesc::ActorRef && pd.getG) e.g = pd.getG();
-        else continue;
+        if (!readProp(pd, e)) continue;
         out.v.push_back(std::move(e));
     }
     return out;
@@ -92,10 +122,7 @@ inline void applyProps(Component& c, const PropValues& v) {
             for (size_t k = 0; k < v.v.size(); ++k) {
                 const PropValue& e = v.v[k];
                 if (done[k] || e.kind != pd.kind || e.label != lbl) continue;
-                if (pd.kind == PropDesc::Float && pd.setF)       pd.setF(e.f);
-                else if (pd.kind == PropDesc::Toggle && pd.setB) { pd.setB(e.b); layoutMayChange = true; }
-                else if (pd.kind == PropDesc::Enum && pd.setI)   { pd.setI(e.i); layoutMayChange = true; }
-                else if (pd.kind == PropDesc::ActorRef && pd.setG) { pd.setG(e.g); layoutMayChange = true; }
+                writeProp(pd, e, &layoutMayChange);
                 done[k] = 1;
                 break;
             }
@@ -121,10 +148,19 @@ inline std::vector<Component*> peerComponents(const Actor& primary, const Compon
 inline bool setProp(Component& c, const PropValue& e) {
     for (const PropDesc& pd : c.buildProps()) {
         if (pd.kind != e.kind || e.label != (pd.label ? pd.label : "")) continue;
-        if (pd.kind == PropDesc::Float && pd.setF)       { pd.setF(e.f); return true; }
-        if (pd.kind == PropDesc::Toggle && pd.setB)      { pd.setB(e.b); return true; }
-        if (pd.kind == PropDesc::Enum && pd.setI)        { pd.setI(e.i); return true; }
-        if (pd.kind == PropDesc::ActorRef && pd.setG)    { pd.setG(e.g); return true; }
+        if (writeProp(pd, e)) return true;
+    }
+    return false;
+}
+// 칸 이름 · 종류가 같은 성분 칸(Vec3 · Color)의 성분 axis 하나만 value 로 바꿉니다(나머지 성분은 그 컴포넌트 값 그대로). 여러 액터를
+// 함께 고친 디테일 성분 칸이 다른 액터에 넣을 때 씁니다(트랜스폼과 같은 규칙: 바꾼 성분 하나만). 그런 칸이 없으면 false.
+inline bool setPropComponent(Component& c, const std::string& label, PropDesc::Kind kind, int axis, float value) {
+    for (const PropDesc& pd : c.buildProps()) {
+        if (pd.kind != kind || label != (pd.label ? pd.label : "") || !pd.getV || !pd.setV) continue;
+        glm::vec4 v = pd.getV();
+        v[std::clamp(axis, 0, 3)] = value;
+        pd.setV(v);
+        return true;
     }
     return false;
 }
@@ -224,6 +260,82 @@ struct ComponentPropsCmd : ICommand {
     void undo() override { set(before); }
     void redo() override { set(after); }
 };
+
+namespace hcmd {
+
+// 디테일 패널의 클릭 한 번 편집(토글 · 열거 · 글 확정 · 기본값 되돌리기 · 붙여넣기)을 한 번의 Undo 로 쌓습니다(H3a 에서 DetailsPanel 의
+// commitClick 을 옮김). comp 와 peers(여러 액터를 함께 고칠 때 같은 컴포넌트)의 값을 떠 두고 change 를 부른 뒤, 확정 훅을 부르고 값이
+// 바뀐 컴포넌트만 커맨드로 묶습니다(하나면 그대로, 여럿이면 CompositeCmd). 바뀐 것이 없으면 아무것도 쌓지 않고 거짓.
+// 여러 번에 걸친 편집 한 묶음(H3b: 색 선택기를 연 동안). 열 때 값을 떠 두고(begin), 확정하면 바뀐 컴포넌트만 한 번의 Undo 로
+// 쌓고(end), 취소하면 떠 둔 값으로 되돌립니다(cancel, Undo 기록 없음). [0] = comp, [1..] = peers.
+struct PropSession {
+    std::vector<PropValues> before;
+};
+inline PropSession beginPropSession(Component& comp, const std::vector<Component*>& peers) {
+    PropSession s;
+    s.before.push_back(captureProps(comp));
+    for (Component* pc : peers) s.before.push_back(captureProps(*pc));
+    return s;
+}
+// 확정 훅(onPropsCommitted)을 부르고 바뀐 것을 쌓습니다. 바뀐 것이 없으면 쌓지 않고 거짓.
+inline bool endPropSession(World& world, Actor* primary, Component* comp, const std::vector<Component*>& peers,
+                           PropSession& s, HCommandStack& stack) {
+    if (!comp) return false;
+    comp->onPropsCommitted();
+    for (Component* pc : peers) pc->onPropsCommitted();
+    auto group = std::make_unique<CompositeCmd>();
+    for (size_t k = 0; k < s.before.size() && k <= peers.size(); ++k) {
+        Component* c = k == 0 ? comp : peers[k - 1];
+        PropValues after = captureProps(*c);
+        if (after == s.before[k]) continue;
+        group->add(std::make_unique<ComponentPropsCmd>(world, k == 0 ? primary : c->owner, c, std::move(s.before[k]), std::move(after)));
+    }
+    s.before.clear();
+    if (group->empty()) return false;
+    if (group->cmds.size() == 1) stack.push(std::move(group->cmds.front()));
+    else                         stack.push(std::move(group));
+    return true;
+}
+// 떠 둔 값으로 되돌립니다(세터 · 확정 훅을 거침, applyProps). Undo 기록은 남기지 않습니다.
+inline void cancelPropSession(Component* comp, const std::vector<Component*>& peers, PropSession& s) {
+    for (size_t k = 0; k < s.before.size() && k <= peers.size(); ++k) {
+        Component* c = k == 0 ? comp : peers[k - 1];
+        if (c) applyProps(*c, s.before[k]);
+    }
+    s.before.clear();
+}
+
+inline bool commitPropChange(World& world, Actor* primary, Component* comp, const std::vector<Component*>& peers,
+                             const std::function<void()>& change, HCommandStack& stack) {
+    if (!comp) return false;
+    PropSession s = beginPropSession(*comp, peers);
+    if (change) change();
+    return endPropSession(world, primary, comp, peers, s, stack);
+}
+
+// 칸 이름 · 종류가 같은 칸을 찾아 fn(pd) 를 부릅니다. 없으면 거짓.
+inline bool withProp(Component& c, const std::string& label, PropDesc::Kind kind, const std::function<void(const PropDesc&)>& fn) {
+    for (const PropDesc& pd : c.buildProps())
+        if (pd.kind == kind && label == (pd.label ? pd.label : "")) { fn(pd); return true; }
+    return false;
+}
+
+// 칸 하나를 기본값으로 되돌립니다(Undo 한 단계, 함께 고른 액터의 같은 칸도 함께). 되돌릴 것이 없으면(기본값 없음 · 이미 기본값) 거짓.
+inline bool resetPropToDefault(World& world, Actor* primary, Component* comp, const std::vector<Component*>& peers,
+                               const std::string& label, PropDesc::Kind kind, HCommandStack& stack) {
+    if (!comp) return false;
+    bool can = false;
+    withProp(*comp, label, kind, [&](const PropDesc& pd) { can = hprop::canReset(pd); });
+    for (Component* pc : peers)
+        withProp(*pc, label, kind, [&](const PropDesc& pd) { can = can || hprop::canReset(pd); });
+    if (!can) return false;
+    return commitPropChange(world, primary, comp, peers, [&] {
+        withProp(*comp, label, kind, [](const PropDesc& pd) { hprop::resetToDefault(pd); });
+        for (Component* pc : peers) withProp(*pc, label, kind, [](const PropDesc& pd) { hprop::resetToDefault(pd); });
+    }, stack);
+}
+
+} // namespace hcmd
 
 // 컴포넌트 추가 · 제거. 지울 때마다 그 순간의 값을 씬 저장과 같은 이름 · 값 쌍으로 떠 두고(writeFields), 되살릴 때
 // 씬을 읽을 때와 같은 길(레지스트리로 만들고 readField → onFieldsLoaded)로 원래 자리에 다시 붙입니다.

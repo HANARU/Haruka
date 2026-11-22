@@ -12,10 +12,11 @@ struct MaterialHandle;
 class AssetManager;
 class World;
 
+// Transparent 는 파일에 없으면 에셋 값을 쓰므로 기본값을 두지 않습니다(생성자 값이 그 메시의 기본이 아님, H3a).
 #define SM_PROPS(p) \
-    XPROP_Toggle(p, "Visible",      visible),     \
+    XPROP_Toggle(p, "Visible",      visible).withDefault(true),     \
     XPROP_Toggle(p, "Transparent",  transparent), \
-    XPROP_Toggle(p, "Auto LOD",     autoLod)
+    XPROP_Toggle(p, "Auto LOD",     autoLod).withDefault(true)
 
 class StaticMeshComponent : public Component, public ICollisionMeshSource {
 public:
@@ -64,6 +65,12 @@ public:
     // 확정하면(onPropsCommitted) 그 값의 머티리얼을 다시 받습니다(AssetManager 가 값마다 하나를 캐시하므로 같은 값은 공유).
     // 파일 메시의 머티리얼은 텍스처만 있어(인자 없음) 아직 편집하지 않습니다.
     void bindAssets(AssetManager* a) { assets_ = a; }
+    void bindLoadContext(const ComponentLoadContext& ctx) override;   // H3b: 디테일이 보일 때 assets_ 를 받음
+    // 파일 메시 경로를 바꿉니다(H3b, 디테일 Model 칸). 같은 경로면 아무것도 하지 않습니다. 바뀌면 그 자리에서 다시 읽어 메시 · 충돌 ·
+    // LOD · 머티리얼 · 정점 수를 바꾸고 Transparent 를 그 메시 값으로 둡니다(UE 의 메시 바꾸기와 같음, Undo 는 Model 다음에 Transparent
+    // 를 넣어 사용자 값으로 돌아옴). 빈 경로 = 메시 없음. assets_ 가 없으면 경로만 바꿉니다. 물리 몸의 충돌 형상은 다시 만들지 않습니다
+    // (핫 리로드와 같음).
+    void setModelPath(const std::string& path);
 
     // 그릴 메시(예전 World::getVisibleMeshes, 2026-11-18 S3): 활성 · 켜짐 · visible · 메시 있음, 액터 순서. 머티리얼은 거르지
     // 않습니다. 없으면 렌더러가 오류 머티리얼로 그립니다(DEF-28).

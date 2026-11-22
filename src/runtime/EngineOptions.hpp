@@ -60,7 +60,8 @@ struct EngineOptions {
     std::string projectDir;              // --project=<dir> : 프로젝트 폴더(.hproject · Content/ · Config/) 지정
     std::string uiDumpPath;              // --ui-dump=<path> : 마지막 프레임 에디터 HSlate 요소 덤프(에디터 전용)
     std::string uiSelect;                // --ui-select=<name[,name...]> : 첫 프레임 뒤 액터 선택(에디터 전용)
-    std::string uiOpenMenu;              // --ui-open-menu=<name> : 첫 프레임 뒤 상단 메뉴 열기(에디터 전용)
+    std::string uiOpenMenu;              // --ui-open-menu=<name[/하위 메뉴]> : 첫 프레임 뒤 상단 메뉴(와 그 하위 메뉴) 열기(에디터 전용)
+    std::string uiMenuKeys;              // --ui-menu-keys=<키,키...> : 메뉴가 뜬 뒤 한 프레임에 하나씩 메뉴 키(up · down · left · right · enter · esc, H2b)
     std::string uiBottomTab;             // --ui-bottom-tab=<name> : 첫 프레임 뒤 하단 탭 전환(에디터 전용)
     bool        uiLogCategories = false; // --ui-log-categories : 첫 프레임 뒤 로그 Categories 팝업 열기(에디터 전용)
     std::string uiOutlinerSearch;        // --ui-outliner-search=<text> : 아웃라이너 검색어(에디터 전용)
@@ -97,6 +98,21 @@ struct EngineOptions {
     // Add Component 팝업(2026-11-21, 에디터 전용): 선택한 액터의 팝업 열기 · 검색어 · 분류 · 아래 화살표 N 번 · Enter
     bool        uiAddComponent = false;          // --ui-add-component
     std::string uiAddComponentSearch;            // --ui-add-component-search=<text>
+    // 디테일 속성 행(H3a, 에디터 전용). 행 이름은 디테일에 보이는 이름(Location · Intensity · Type …), 같은 이름이면 처음 행.
+    std::string uiDetailsSet;     // --ui-details-set=<이름>=<값>[;<이름>=<값>…] : 붙여넣기와 같이 값을 넣음(되돌리기 화살표 확인)
+    std::string uiDetailsCombo;   // --ui-details-combo=<이름> : 열거 콤보 열기(--ui-menu-keys 로 키)
+    std::string uiDetailsMenu;    // --ui-details-menu=<이름>  : 그 행의 오른쪽 메뉴 열기
+    std::string uiDetailsEdit;    // --ui-details-edit=<이름>  : 글 칸 편집 시작(--ui-type 으로 글자)
+    float       uiDetailsSplit = -1.f;
+    // H3b: 에셋 경로 칸 · 색 선택기 · 속성 검색(에디터 전용 덤프)
+    std::string uiDetailsAsset;        // --ui-details-asset=<이름>        : 에셋 칸의 고르기 팝업 열기
+    std::string uiDetailsAssetSearch;  // --ui-details-asset-search=<글>   : 그 팝업 검색어(--ui-details-asset 와 함께)
+    std::string uiDetailsColor;        // --ui-details-color=<이름>        : 색 칸의 색 선택기 열기
+    bool        uiDetailsColorRgba = false;   // --ui-details-color-rgba : 네 성분 시험 값으로 열기(실제 RGBA 속성이 아직 없음)
+    std::string uiDetailsColorHex;     // --ui-details-color-hex=<RRGGBB[AA]> : 연 뒤 16진수를 넣음(실시간 반영 확인)
+    std::string uiDetailsSearch;       // --ui-details-search=<글>         : 속성 검색어
+    std::string uiDetailsDrop;         // --ui-details-drop=<이름>=<경로>  : 그 에셋 칸에 끌어 놓은 것과 같음(종류가 틀리면 거부)
+    std::string uiSaveSceneCopy;  // --ui-save-scene-copy=<파일> : 덤프 끝(디테일 덤프 뒤)에 지금 씬 글을 그 파일로 씀(씬 문서 · 원본은 그대로)   // --ui-details-split=<0~1> : 이름 열 비율(열 나눔선을 끈 것과 같음)
     std::string uiAddComponentCategory;          // --ui-add-component-category=<분류>
     int         uiAddComponentDown = 0;          // --ui-add-component-down=N
     bool        uiAddComponentCommit = false;    // --ui-add-component-commit
@@ -130,6 +146,15 @@ struct EngineOptions {
     bool        uiLocalSpace    = false; // --ui-local-space : 기즈모 로컬 좌표계(에디터 전용)
     std::string uiPick;                  // --ui-pick=<x>,<y> : 첫 프레임 뒤 창 좌표 픽(에디터 전용)
     std::string uiHover;                 // --ui-hover=<x>,<y> : 숨은 창 포인터 호버 · 툴팁 덤프(에디터 전용)
+    // --ui-float-cycle : 떠 있는 도크 창을 60 프레임째에 OS 닫기 단추로 닫고(D4) 90 프레임째에 배치 파일을 다시 읽어 다시 만듦
+    // (다중 OS 창 M3a, 보조 창 정리 경로 확인 — M2 의 --ui-aux-probe=cycle 을 대신함). --ui-layout 과 함께 씀(에디터 전용).
+    bool        uiFloatCycle = false;
+    // --ui-float-input=<대본> : 숨은 실행에서 떠 있는 창의 입력을 흉내 냄(다중 OS 창 M3b). 단계는 ';' 로 나누고 한 단계 = 한 프레임,
+    // 4 프레임째부터. 형식은 editor/EditorWindowInput.hpp(hwininput::parseScript). --ui-layout 의 F 블록과 함께 씀(에디터 전용).
+    std::string uiFloatInput;
+    // --ui-layout-stats[=nocache] : 메인 UI 문맥의 프레임당 arrange 호출 · 실제 배치 · 측정 호출 수와 arrange 시간을 실행 끝에
+    // 로그로 남김(H1b 계측). nocache 는 예전 방식(원하는 크기 캐시 · 배치 건너뛰기 없음)으로 돌림. 1 = 켬, 2 = nocache.
+    int         uiLayoutStats = 0;
 
     // ── 플랫폼 진입점이 정하는 것 (명령줄 아님, 2026-10-31 패키징 3단계) ────────────────────────────
     PlatformContext platform;            // Android: android_app · JavaVM · 액티비티

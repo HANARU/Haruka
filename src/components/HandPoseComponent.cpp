@@ -153,12 +153,12 @@ std::vector<PropDesc> HandPoseComponent::buildProps() {
     auto* p = this;
     return {
         makePropEnum("Hand", { "None (manual)", "Left", "Right" },
-                     [p] { return (int)p->hand; }, [p](int v) { p->hand = (EHandSide)std::clamp(v, 0, 2); }),
-        XPROP_FloatClamp(p, "Thumb",  PropColor::Neutral, 0.05f, curl[0], 0.f, 1.f),
-        XPROP_FloatClamp(p, "Index",  PropColor::Neutral, 0.05f, curl[1], 0.f, 1.f),
-        XPROP_FloatClamp(p, "Middle", PropColor::Neutral, 0.05f, curl[2], 0.f, 1.f),
-        XPROP_FloatClamp(p, "Ring",   PropColor::Neutral, 0.05f, curl[3], 0.f, 1.f),
-        XPROP_FloatClamp(p, "Little", PropColor::Neutral, 0.05f, curl[4], 0.f, 1.f),
+                     [p] { return (int)p->hand; }, [p](int v) { p->hand = (EHandSide)std::clamp(v, 0, 2); }).withDefault(EHandSide::None),
+        XPROP_FloatClamp(p, "Thumb",  PropColor::Neutral, 0.05f, curl[0], 0.f, 1.f).withDefault(0.f),
+        XPROP_FloatClamp(p, "Index",  PropColor::Neutral, 0.05f, curl[1], 0.f, 1.f).withDefault(0.f),
+        XPROP_FloatClamp(p, "Middle", PropColor::Neutral, 0.05f, curl[2], 0.f, 1.f).withDefault(0.f),
+        XPROP_FloatClamp(p, "Ring",   PropColor::Neutral, 0.05f, curl[3], 0.f, 1.f).withDefault(0.f),
+        XPROP_FloatClamp(p, "Little", PropColor::Neutral, 0.05f, curl[4], 0.f, 1.f).withDefault(0.f),
     };
 }
 

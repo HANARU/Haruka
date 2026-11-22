@@ -30,6 +30,11 @@ void OutputLogPanel::init(const EditorUiKit* ui, HLogCategory* logCat, float men
     menuBarH_        = menuBarH;
     dumpMode_        = dumpMode;
     onSearchClicked_ = std::move(onSearchClicked);
+    catAnchor_ = HNew(SMenuAnchor)
+        ->menuContent([this] { return buildPopupPanel(); })
+        ->popupContext([this]() -> HSlateContext* { return popupContextFn_ ? popupContextFn_() : nullptr; })
+        ->configure([](HPopupLayer::Spec& sp) { sp.closeOnLeftOutside = true; })   // 단추 위는 바깥이 아님(앵커)
+        ->onOpenChanged([this](bool open) { if (!open) popupOpen_ = false; });   // 층이 닫음(바깥 누름 · 다른 창)
 }
 
 bool OutputLogPanel::tick(bool tabActive) {
@@ -54,11 +59,10 @@ void OutputLogPanel::flushRebuilds(bool tabActive) {
     if (viewDirty_ && tabActive && rowsBox_) { viewDirty_ = false; refreshView(); }
 }
 
-std::shared_ptr<SBorder> OutputLogPanel::resetPopupHost() {
-    popupHost_  = HNew(SBorder)->background(EditorTheme::transparent);
+void OutputLogPanel::resetPopup() {
     popupOpen_  = false;
-    popupPanel_.reset();
-    return popupHost_;
+    popupDirty_ = false;
+    if (catAnchor_) catAnchor_->close();
 }
 
 void OutputLogPanel::openPopup() {
@@ -70,20 +74,7 @@ void OutputLogPanel::closePopup() {
     if (!popupOpen_) return;
     popupOpen_  = false;
     popupDirty_ = true;
-}
-
-void OutputLogPanel::handleOutsideClick(glm::vec2 mousePos) {
-    if (!popupOpen_) return;
-    const bool inPanel  = popupPanel_ && popupPanel_->cachedGeometry().contains(mousePos);
-    const bool onButton = catButton_  && catButton_->cachedGeometry().contains(mousePos);
-    if (!inPanel && !onButton) {
-        popupOpen_  = false;
-        popupDirty_ = true;
-    }
-}
-
-bool OutputLogPanel::popupContains(glm::vec2 pos) const {
-    return popupOpen_ && popupPanel_ && popupPanel_->cachedGeometry().contains(pos);
+    if (catAnchor_) catAnchor_->close();   // 판정에서 곧바로 빠짐(예전 popupContains 는 popupOpen_ 을 봄)
 }
 
 bool OutputLogPanel::searchContains(glm::vec2 p) const {
@@ -113,6 +104,7 @@ TextInputField OutputLogPanel::consoleField() {
     };
     f.onCommit          = [this] { submitConsole(); };
     f.keepFocusOnCommit = true;
+    f.selectAllOnFocus  = false;   // 이어 쓰기(커서를 끝에)
     f.onHistory         = [this](int dir) { stepHistory(dir); };
     return f;
 }
@@ -156,8 +148,9 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
     const glm::vec4 btnN = EditorTheme::ctlNormal;
     const glm::vec4 btnH = EditorTheme::ctlHover;
 
-    searchBox_ = HNew(SSearchBox);
+    searchBox_ = HReuse(searchBoxKeep_);
     searchBox_
+        ->focusable(true)
         ->style(EditorUiKit::searchBoxStyle(u.s(1.f)))
         ->placeholder(HTEXT("Editor.OutputLog", "SearchHint", "Search log...").toString())
         ->edit(&searchEdit_)
@@ -166,7 +159,11 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
         ->fontSize(u.s(12.f));
 
     catButton_ = u.textButton("Categories", 11.f, EditorUiKit::kTextBody, HPadding{ 8.f, 3.f }, btnN, btnH,
-                              [this] { popupOpen_ = !popupOpen_; popupDirty_ = true; });
+                              [this] {
+                                  popupOpen_ = !popupOpen_; popupDirty_ = true;
+                                  if (!popupOpen_ && catAnchor_) catAnchor_->close();
+                              });
+    catAnchor_->content(catButton_);
 
     auto verbToggle = [&](const char* label, ELogVerbosity v) {
         const int vi = (int)v;
@@ -209,7 +206,7 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
         ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(4.f))
         ->addSlot(searchBox_,   HR::ESizeRule::Fixed, u.s(200.f), vpad)
         ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(6.f))
-        ->addSlot(catButton_,   HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(catAnchor_,   HR::ESizeRule::Auto, 0.f, vpad)
         ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(10.f))
         ->addSlot(verbToggle("Err",  ELogVerbosity::Error),   HR::ESizeRule::Auto, 0.f, vpad)
         ->addSlot(verbToggle("Warn", ELogVerbosity::Warning), HR::ESizeRule::Auto, 0.f, vpad)
@@ -263,8 +260,9 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
                               }),
                           VR::ESizeRule::Fill);
     // 콘솔 줄(D9): 로그 아래에 명령 입력 칸(UE Output Log 의 Cmd 줄과 같은 자리).
-    consoleBox_ = HNew(SSearchBox);
+    consoleBox_ = HReuse(consoleBoxKeep_);
     consoleBox_
+        ->focusable(true)
         ->style(EditorUiKit::searchBoxStyle(u.s(1.f)))
         ->icon(false)
         ->placeholder(HTEXT("Editor.OutputLog", "ConsoleHint", "Enter console command (help)").toString())
@@ -619,37 +617,27 @@ std::shared_ptr<SVerticalBox> OutputLogPanel::buildPopupList(const std::vector<H
     return list;
 }
 
-void OutputLogPanel::positionPopupPanel(const std::shared_ptr<HWidget>& panel,
-                                        const std::shared_ptr<HWidget>& absorber,
-                                        float panelW, float panelH) {
-    const EditorUiKit& u    = *ui_;
-    const HGeometry&   host = popupHost_->cachedGeometry();
-    const HGeometry&   btn  = catButton_->cachedGeometry();
-    const bool  up   = (btn.position.y + btn.size.y * 0.5f) > (host.position.y + host.size.y * 0.5f);
-    float       top  = up ? btn.position.y - panelH - u.s(2.f) : btn.position.y + btn.size.y + u.s(2.f);
-    const float minT = host.position.y + u.s(menuBarH_);
-    top = std::clamp(top, minT, std::max(minT, host.position.y + host.size.y - panelH));
-    const float left = std::clamp(btn.position.x, host.position.x,
-                                  std::max(host.position.x, host.position.x + host.size.x - panelW));
-
-    const HPadding at{ left - host.position.x, top - host.position.y, 0.f, 0.f };
-    auto ov = HNew(SOverlay);
-    ov->addSlot(absorber, EHAlign::Left, EVAlign::Top, at);
-    ov->addSlot(panel,    EHAlign::Left, EVAlign::Top, at);
-    popupPanel_ = panel;
-    popupHost_->content(ov);
-}
-
 void OutputLogPanel::rebuildPopup() {
-    if (!popupHost_) return;
-    popupPanel_.reset();
-    if (!popupOpen_ || !catButton_) {
+    if (!popupOpen_ || !catButton_ || !catAnchor_) {
         popupOpen_ = false;
-        popupHost_->content(nullptr);
+        if (catAnchor_) catAnchor_->close();
         return;
     }
     syncCategories();
+    // 자리: 단추가 창 아래 절반이면 위로, 아니면 아래로 열고 메뉴 줄 아래 · 창 안으로 끼웁니다(예전 positionPopupPanel 식 그대로).
+    const EditorUiKit& u = *ui_;
+    HPopupPlacement pl;
+    pl.side     = HPopupPlacement::Side::Below;
+    pl.align    = HPopupPlacement::Align::Start;
+    pl.flip     = HPopupPlacement::Flip::Half;
+    pl.clamp    = true;
+    pl.gap      = u.s(2.f);
+    pl.insetTop = u.s(menuBarH_);
+    catAnchor_->placement(pl);
+    if (!catAnchor_->open()) popupOpen_ = false;   // 이미 열려 있으면 내용 · 자리를 다시 만듦
+}
 
+std::shared_ptr<HWidget> OutputLogPanel::buildPopupPanel() {
     std::vector<HLogCategoryState*> cats = HLog::categories();
     std::sort(cats.begin(), cats.end(), [](const HLogCategoryState* a, const HLogCategoryState* b) {
         return a->name < b->name;
@@ -661,7 +649,8 @@ void OutputLogPanel::rebuildPopup() {
     const float headerH  = u.s(28.f) + u.s(20.f);
     const float panelH   = headerH + rowH * (float)cats.size() + u.s(8.f);
 
-    auto panel = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
+    // 팝업 아래로 누름 · 휠이 새지 않는 것은 팝업 층이 맡습니다(예전 같은 크기의 빈 단추).
+    return HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
         HNew(SBorder)
             ->background(EditorTheme::bgPopup)
             ->borderColor(EditorTheme::borderPopup)->borderThickness(EditorTheme::borderThin)
@@ -669,11 +658,4 @@ void OutputLogPanel::rebuildPopup() {
             ->shadow({ 0.f, u.s(EditorTheme::shadowOffset.y) }, u.s(EditorTheme::shadowBlur), EditorTheme::shadowColor)
             ->padding(HPadding{ 0.f, u.s(4.f) })
             ->content(buildPopupList(cats)));
-    auto absorber = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
-        HNew(SBorder)->onWheel([](float) { return true; })->content(
-            HNew(SButton)
-                ->normalColor(EditorTheme::transparent)->hoveredColor(EditorTheme::transparent)
-                ->pressedColor(EditorTheme::transparent)->content(u.spacer())));
-
-    positionPopupPanel(panel, absorber, panelW, panelH);
 }

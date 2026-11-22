@@ -16,6 +16,13 @@
 
 class Actor;
 
+// 종류 아이콘 이름 · 색 · 대신할 글자(콘텐츠 브라우저 · 디테일 에셋 칸 · 에셋 고르기 팝업 공용, H3b).
+namespace hcbui {
+glm::vec4   kindColor(hcb::AssetKind k);
+const char* kindIcon(hcb::AssetKind k);
+const char* kindFallback(hcb::AssetKind k);
+} // namespace hcbui
+
 // 하단 Content Browser 탭(S6c → 2026-11-21 UE 방식으로 다시 짬).
 //  - 왼쪽: Content 폴더를 디스크 그대로 보이는 폴더 트리. 누르면 그 폴더로 갑니다.
 //  - 위: 뒤로 · 앞으로, 경로(Content > models > hands, 마디를 누르면 그리로), 검색, 보기 바꾸기(타일 · 목록), 종류 거르기.
@@ -61,6 +68,7 @@ public:
 
     TextInputField searchField();
     HTextEditState& searchEdit() { return searchEdit_; }
+    std::shared_ptr<HWidget> searchWidget() const { return searchBoxKeep_; }   // 글 칸 포커스 위젯(H1a-2)
     bool contains(glm::vec2 p) const;           // 트리 · 에셋 보기 위
     bool openContextMenuAt(glm::vec2 p);        // 오른쪽 누름. 처리했으면 참
 
@@ -73,7 +81,7 @@ public:
     void setTileView(bool tiles);
     void setSearch(const std::string& text);
     void toggleFilter(hcb::AssetKind k);
-    std::vector<EditorContextMenu::Item> contextItems(const std::string& path);   // 빈 경로 = 빈 자리
+    std::vector<EditorMenuEntry> contextItems(const std::string& path);   // 빈 경로 = 빈 자리
 
     // 끌어 놓기(2026-11-21, UE 와 같음): 에셋 보기의 항목을 누른 채 6 px 넘게 움직이면 끌기가 시작됩니다. EditorApp 이 마우스로
     // 부르고, 뷰포트 위에서 놓으면 dropInViewport 를 부릅니다. Esc 는 cancelDrag.
@@ -132,6 +140,10 @@ private:
     bool toolbarDirty_ = false, treeDirty_ = false, viewDirty_ = false, filterDirty_ = false;
     std::shared_ptr<SBorder>      toolbarHost_, filterHost_;
     std::shared_ptr<SSearchBox>   searchBox_;
+    // 글 칸 포커스 위젯(H1a-2). HSlate 포커스는 위젯을 약한 참조로 잡으므로, 다시 지을 때 새로 만들지 않고 HReuse 로
+    // 같은 객체를 처음 상태로 되돌려 씁니다. 처음 짓기 전에도(팝업 · 행이 아직 없음) 포커스를 받도록 만들 때부터 focusable 입니다.
+    // searchBox_ 는 탭이 지어져 있을 때만 이 객체를 가리킵니다(판정 코드는 그대로).
+    std::shared_ptr<SSearchBox>   searchBoxKeep_ = HNew(SSearchBox)->focusable(true);
     std::shared_ptr<SVerticalBox> treeBox_, viewBox_;
     std::shared_ptr<SScrollBox>   treeScroll_, viewScroll_;
     // 오른쪽 누름 판정용: 지금 그린 항목 위젯과 그 경로

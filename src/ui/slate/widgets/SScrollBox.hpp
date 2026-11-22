@@ -24,32 +24,32 @@ public:
     };
 
     std::shared_ptr<SScrollBox> content(std::shared_ptr<HWidget> w) {
-        child_ = std::move(w); return self();
+        hslate::noteLayoutChange(); child_ = std::move(w); return self();
     }
     std::shared_ptr<SScrollBox> style(const Style& s) {
-        style_ = s; return self();
+        hslate::noteLayoutChange(); style_ = s; return self();
     }
     // 휠 한 칸에 움직일 거리(px)입니다. 터치패드의 작은 휠 값은 그 비율만큼 움직입니다.
     std::shared_ptr<SScrollBox> wheelStep(float px) {
         step_ = px; return self();
     }
     std::shared_ptr<SScrollBox> barWidth(float px) {
-        style_.barWidth = px; return self();
+        hslate::noteLayoutChange(); style_.barWidth = px; return self();
     }
 
     float scrollOffset()    const { return offset_; }
     float maxScrollOffset() const { return maxOffset_; }   // 마지막 배치 기준
-    void  setScrollOffset(float y) { offset_ = std::clamp(y, 0.f, maxOffset_); }
-    void  scrollToTop() { offset_ = 0.f; }
+    void  setScrollOffset(float y) { const float o = std::clamp(y, 0.f, maxOffset_); if (o != offset_) { offset_ = o; hslate::noteLayoutChange(); } }
+    void  scrollToTop() { if (offset_ != 0.f) { offset_ = 0.f; hslate::noteLayoutChange(); } }
 
     glm::vec2 computeDesiredSize() override {
-        return child_ ? child_->computeDesiredSize() : glm::vec2(0.f);
+        return child_ ? child_->desiredSize() : glm::vec2(0.f);
     }
 
     void onArrangeChildren(const HGeometry& allotted) override {
         cachedGeo_ = allotted;
         if (!child_) { offset_ = maxOffset_ = 0.f; return; }
-        const float contentH = child_->computeDesiredSize().y;
+        const float contentH = child_->desiredSize().y;
         maxOffset_ = std::max(0.f, contentH - allotted.size.y);
         offset_    = std::clamp(offset_, 0.f, maxOffset_);
         // 글자가 픽셀 경계에 놓이도록 정수 픽셀로 밉니다(소수 위치는 글리프가 번집니다).
@@ -103,9 +103,17 @@ public:
             if (auto r = child_->onScroll(e); r.handled) return r;
         if (maxOffset_ <= 0.f) return HReply::Unhandled();   // 넘치지 않으면 바깥이 받게 둡니다
         // 휠을 위로(양수) 굴리면 내용이 내려와 위쪽이 보입니다.
-        offset_ = std::clamp(offset_ - e.wheelDelta * step_, 0.f, maxOffset_);
+        const float o = std::clamp(offset_ - e.wheelDelta * step_, 0.f, maxOffset_);
+        if (o != offset_) { offset_ = o; hslate::noteLayoutChange(); }
         return HReply::Handled();
     }
+
+    // 자식 하나(H1a-1). 그리는 순서 = 이 자식 하나.
+    void forEachChild(const std::function<void(const std::shared_ptr<HWidget>&)>& fn) override {
+        if (child_) fn(child_);
+    }
+    // 내용을 자기 영역으로 잘라 그립니다(DEF-56). 히트 테스트도 영역 밖의 내용을 보지 않습니다.
+    bool clipsChildren() const override { return true; }
 
 private:
     HGeometry thumbGeo(const HGeometry& geo) const {

@@ -3,6 +3,11 @@
 #include "../src/core/Utf8.hpp"
 #include "../src/ui/slate/HTextEdit.hpp"
 #include "../src/editor/TextInputController.hpp"
+#include "../src/editor/PropertyTextEdit.hpp"
+#include "../src/editor/DetailsSearch.hpp"
+#include "../src/ui/slate/HSlateContext.hpp"
+#include "../src/ui/slate/widgets/SSearchBox.hpp"
+#include "../src/ui/slate/widgets/SEditableText.hpp"
 #include "../src/platform/IWindow.hpp"
 #include "../src/core/HText.hpp"
 #include "../src/core/HTextGather.hpp"
@@ -229,16 +234,27 @@ static void testController() {
     TextInputController tc;
     TextInputController::Deps d;
     d.window = &wp;
-    d.searchField = [&] {
-        return TextInputField{ searchEdit, searchFocused, [](glm::vec2) { return false; }, [&] { ++changed; } };
-    };
-    d.renameField = [&] {
-        return TextInputField{ renameEdit, renameFocused, [](glm::vec2) { return false; }, [&] { ++changed; },
-                               [&] { renameEdit.setText(actorName, true); return true; },
-                               [&] { actorName = renameEdit.text; ++committed; } };
-    };
-    d.logSearchField = [&] {
-        return TextInputField{ logEdit, logFocused, [](glm::vec2) { return false; }, [&] { ++changed; } };
+    // 글 칸 포커스의 정본은 HSlate 포커스 위젯입니다(H1a-2). 칸마다 포커스 받는 위젯 하나를 등록합니다.
+    HSlateContext slate;
+    auto searchW = HNew(SSearchBox);
+    auto renameW = HNew(SEditableText);
+    auto logW    = HNew(SSearchBox);
+    searchW->focusable(true);
+    renameW->focusable(true);
+    logW->focusable(true);
+    d.slate = &slate;
+    d.textFields = {
+        { EFocusTarget::Search, [&] { return std::shared_ptr<HWidget>(searchW); }, [&] {
+            return TextInputField{ searchEdit, searchFocused, [](glm::vec2) { return false; }, [&] { ++changed; } };
+        } },
+        { EFocusTarget::Rename, [&] { return std::shared_ptr<HWidget>(renameW); }, [&] {
+            return TextInputField{ renameEdit, renameFocused, [](glm::vec2) { return false; }, [&] { ++changed; },
+                                   [&] { renameEdit.setText(actorName, true); return true; },
+                                   [&] { actorName = renameEdit.text; ++committed; } };
+        } },
+        { EFocusTarget::LogSearch, [&] { return std::shared_ptr<HWidget>(logW); }, [&] {
+            return TextInputField{ logEdit, logFocused, [](glm::vec2) { return false; }, [&] { ++changed; } };
+        } },
     };
     d.dialogEdit = [&]() -> HTextEditState* { return &dialogEdit; };
     d.onDeleteSelection = [&] { ++deletedActors; };
@@ -252,6 +268,7 @@ static void testController() {
 
     tc.setFocus(EFocusTarget::Search);
     check(searchFocused && fw.imeOn, "검색 포커스: IME 켬(T2-3)");
+    check(slate.focusedWidget() == searchW && tc.currentFocus() == EFocusTarget::Search, "검색 포커스: HSlate 포커스 위젯이 검색 칸(H1a-2)");
     typeUtf8(fw, "Probe " + kHan + kGeul);
     tc.tickInput();
     fw.endFrame();
@@ -370,6 +387,169 @@ static void testController() {
     TextInputController::KeyEdges k;
     check(TextInputController::applyEdit(st, { 'a', 0xD55C, 0x1B, 'b' }, k, nullptr) && st.text == "a" + kHan + "b",
           "applyEdit: 제어 문자(ESC)는 거르고 나머지 넣음");
+}
+
+
+// ── H1a-2 글 칸 포커스 = HSlate 포커스 위젯 ──────────────────────────────────────────────────────
+static void testFocusWidgets() {
+    std::printf("focus widgets (H1a-2)\n");
+    FakeWindow fw;
+    IWindow*   wp = &fw;
+    HSlateContext slate;
+    HTextEditState aEdit, conEdit, genEdit, pickEdit;
+    bool aFoc = false, conFoc = false, genFoc = false, pickFoc = false;
+    int  aChanged = 0, conCommits = 0, genBegins = 0, pickCancels = 0, pickCommits = 0;
+    int  deleted = 0, copied = 0, menusClosed = 0;
+    bool genAllow = true;
+    EFocusTarget focusSeenInCancel = EFocusTarget::Search;
+    auto aW = HNew(SSearchBox), conW = HNew(SSearchBox), pickW = HNew(SSearchBox);
+    auto genW = HNew(SEditableText);
+    auto loose = HNew(SSearchBox);   // 등록하지 않은 포커스 위젯
+    aW->focusable(true); conW->focusable(true); pickW->focusable(true); genW->focusable(true); loose->focusable(true);
+
+    TextInputController tc;
+    TextInputController::Deps d;
+    d.window = &wp;
+    d.slate  = &slate;
+    d.onDeleteSelection = [&] { ++deleted; };
+    d.onCopySelection   = [&] { ++copied; };
+    d.onCloseMenus      = [&] { ++menusClosed; };
+    d.textFields = {
+        { EFocusTarget::Search, [&] { return std::shared_ptr<HWidget>(aW); }, [&] {
+            return TextInputField{ aEdit, aFoc, [](glm::vec2) { return false; }, [&] { ++aChanged; } };
+        } },
+        { EFocusTarget::Console, [&] { return std::shared_ptr<HWidget>(conW); }, [&] {
+            TextInputField f{ conEdit, conFoc, [](glm::vec2) { return false; }, [] {} };
+            f.onCommit = [&] { ++conCommits; };
+            f.keepFocusOnCommit = true;
+            f.selectAllOnFocus  = false;
+            return f;
+        } },
+        { EFocusTarget::Picker, [&] { return std::shared_ptr<HWidget>(pickW); }, [&] {
+            TextInputField f{ pickEdit, pickFoc, [](glm::vec2) { return false; }, [] {} };
+            f.onCommit = [&] { ++pickCommits; };
+            f.onCancel = [&] { ++pickCancels; focusSeenInCancel = tc.currentFocus(); };
+            return f;
+        } },
+        // 이름표 없는 새 글 칸(TextField): 열거값 · Deps 줄을 더하지 않고 등록 한 줄로 붙음
+        { EFocusTarget::TextField, [&] { return std::shared_ptr<HWidget>(genW); }, [&] {
+            TextInputField f{ genEdit, genFoc, [](glm::vec2) { return false; }, [] {} };
+            f.onBegin = [&] { ++genBegins; return genAllow; };
+            return f;
+        } },
+    };
+    tc.init(d);
+    auto step = [&] { tc.tickInput(); fw.endFrame(); };
+
+    // 1) 대상 종류 계산 · 정본
+    check(tc.currentFocus() == EFocusTarget::None && !slate.focusedWidget(), "처음: 포커스 없음");
+    aEdit.setText("abc");
+    fw.chars = { 'x', 'y' };
+    tc.setFocus(EFocusTarget::Search);
+    check(slate.focusedWidget() == aW && tc.currentFocus() == EFocusTarget::Search && aFoc,
+          "setFocus(Search): HSlate 포커스 = 검색 위젯, 이름표 Search, 거울 값 켬");
+    check(fw.chars.empty() && aEdit.text == "abc" && aEdit.isAllSelected() && fw.imeOn && menusClosed == 1,
+          "들어갈 때: 문자 큐 비움 · 전체 선택 · IME 켬 · 메뉴 닫음");
+    check(tc.focusedTextEdit() == &aEdit, "focusedTextEdit = 포커스 칸의 편집 상태");
+
+    // 2) 키 엣지 다시 심기: Enter 를 누른 채 콘솔에 들어가면 그 Enter 는 확정하지 않음
+    fw.down[HInput::KEY_ENTER] = true;
+    tc.setFocus(EFocusTarget::Console);
+    check(!aFoc && conFoc && slate.focusedWidget() == conW && !aEdit.hasSelection(), "칸 이동: 이전 칸 정리 · 새 칸");
+    fw.down[HInput::KEY_ENTER] = true;
+    step();
+    check(conCommits == 0 && conFoc, "눌린 채 들어온 Enter 는 엣지가 아님(키 엣지 다시 심기)");
+    step();
+    fw.tap(HInput::KEY_ENTER);
+    step();
+    check(conCommits == 1 && conFoc && slate.focusedWidget() == conW, "콘솔 Enter: 확정 · 포커스 유지");
+    conEdit.setText("hist");
+    tc.setFocus(EFocusTarget::Search);
+    tc.setFocus(EFocusTarget::Console);
+    check(conEdit.caret == conEdit.text.size() && !conEdit.hasSelection(), "selectAllOnFocus=false: 콘솔은 끝에 커서");
+
+    // 3) 단축키: 글 칸 포커스면 Delete · Ctrl+C 가 에디터로 가지 않고, 놓으면 감
+    fw.tap(HInput::KEY_DELETE);
+    step();
+    fw.down[HInput::KEY_LEFT_CTRL] = true;
+    fw.tap(HInput::KEY_C);
+    step();
+    check(deleted == 0 && copied == 0, "글 칸 포커스: Delete · Ctrl+C 는 칸 몫(에디터 단축키 아님)");
+    tc.setFocus(EFocusTarget::None);
+    check(!slate.focusedWidget() && !conFoc && !fw.imeOn && tc.currentFocus() == EFocusTarget::None, "None: HSlate 포커스 · IME 끔");
+    fw.tap(HInput::KEY_DELETE);
+    step();
+    fw.down[HInput::KEY_LEFT_CTRL] = true;
+    fw.tap(HInput::KEY_C);
+    step();
+    check(deleted == 1 && copied == 1, "포커스 없음: Delete · Ctrl+C 가 에디터로 감");
+
+    // 4) 이름표 없는 칸: 위젯으로 포커스
+    check(tc.setFocusWidget(genW) && tc.currentFocus() == EFocusTarget::TextField && genFoc && fw.imeOn && genBegins == 1,
+          "setFocusWidget: 이름표 없는 칸(TextField)도 같은 규칙");
+    check(!tc.setFocusWidget(loose) && tc.currentFocus() == EFocusTarget::TextField, "등록 안 된 위젯은 setFocusWidget 거절");
+    genAllow = false;
+    tc.setFocus(EFocusTarget::None);
+    check(!tc.setFocusWidget(genW) || (tc.currentFocus() == EFocusTarget::None && !slate.focusedWidget() && !genFoc),
+          "onBegin 거절: 들어가지 않고 HSlate 포커스도 없음");
+    genAllow = true;
+
+    // 5) 바깥에서 HSlate 포커스를 직접 옮김(훅 경로) → 컨트롤러가 같은 부수 효과를 냄
+    fw.chars = { 'q' };
+    slate.setFocus(aW);
+    check(aFoc && tc.currentFocus() == EFocusTarget::Search && fw.chars.empty() && aEdit.isAllSelected() && fw.imeOn,
+          "훅: 위젯이 포커스를 받으면 컨트롤러가 들어감(문자 큐 · 전체 선택 · IME)");
+    slate.setFocus(conW);
+    check(!aFoc && conFoc && tc.currentFocus() == EFocusTarget::Console, "훅: 위젯 사이 이동 — 이전 칸 정리");
+    slate.setFocus(loose);
+    check(!conFoc && tc.currentFocus() == EFocusTarget::None && !fw.imeOn, "훅: 등록 안 된 위젯으로 가면 글 칸 포커스 없음 · IME 끔");
+    slate.setFocus(aW);
+    slate.clearFocus();
+    check(!aFoc && tc.currentFocus() == EFocusTarget::None && !fw.imeOn, "훅: 포커스 해제 = 칸을 닫음(확정 없음)");
+    genAllow = false;
+    slate.setFocus(genW);
+    check(!genFoc && !slate.focusedWidget() && tc.currentFocus() == EFocusTarget::None, "훅: onBegin 거절이면 HSlate 포커스를 되돌림");
+    genAllow = true;
+
+    // 6) 패널이 거울 값을 직접 끔(액터 삭제 · 행 누름 · 팝업 호스트 재설정): 부수 효과 없이 포커스 없음(예전과 같음)
+    tc.setFocus(EFocusTarget::Search);
+    const int toggles = fw.imeToggles;
+    aFoc = false;
+    check(tc.currentFocus() == EFocusTarget::None && fw.imeToggles == toggles && slate.focusedWidget() == aW,
+          "거울 값 끔: 곧바로 None, IME 그대로(HSlate 포커스는 다음 전환이 덮음)");
+    tc.setFocus(EFocusTarget::Search);
+    check(aFoc && tc.currentFocus() == EFocusTarget::Search, "다시 들어갈 수 있음");
+
+    // 7) 루트 교체: preserveFocusAcross 안에서는 확정 · 취소 · 문자 큐 · IME 변화 없음
+    slate.setRootWidget(HNew(SBox));
+    tc.setFocus(EFocusTarget::Picker);
+    pickEdit.setText("tra");
+    fw.chars = { 'n' };
+    const int t0 = fw.imeToggles, cm0 = pickCommits, cc0 = pickCancels, mc0 = menusClosed;
+    tc.preserveFocusAcross([&] { slate.setRootWidget(HNew(SBox)); });
+    check(pickFoc && slate.focusedWidget() == pickW && tc.currentFocus() == EFocusTarget::Picker,
+          "루트 교체: 같은 위젯에 포커스 유지");
+    check(pickCommits == cm0 && pickCancels == cc0 && fw.imeToggles == t0 && fw.chars.size() == 1 && menusClosed == mc0 &&
+          pickEdit.text == "tra", "루트 교체: 확정 · 취소 · IME · 문자 큐 · 메뉴 변화 없음");
+    fw.chars.clear();
+    // 감싸지 않은 루트 교체는 포커스를 풂(확정 · 취소는 여전히 없음)
+    slate.setRootWidget(HNew(SBox));
+    check(!pickFoc && tc.currentFocus() == EFocusTarget::None && pickCommits == cm0 && pickCancels == cc0,
+          "감싸지 않은 루트 교체: 포커스만 풀림(확정 · 취소 없음)");
+
+    // 8) Esc: 포커스를 먼저 푼 뒤 onCancel(팝업 닫기)
+    tc.setFocus(EFocusTarget::Picker);
+    fw.tap(HInput::KEY_ESCAPE);
+    step();
+    check(pickCancels == cc0 + 1 && focusSeenInCancel == EFocusTarget::None && !slate.focusedWidget() && !pickFoc,
+          "Esc: 포커스를 푼 뒤 onCancel");
+    // 9) Enter(keepFocusOnCommit 아님): 확정 후 포커스 없음
+    tc.setFocus(EFocusTarget::Picker);
+    step();
+    fw.tap(HInput::KEY_ENTER);
+    step();
+    check(pickCommits == cm0 + 1 && !pickFoc && !slate.focusedWidget(), "Enter: 확정 후 포커스 해제");
+    (void)aChanged;
 }
 
 // ── T3 표시 글 ───────────────────────────────────────────────────────────────────────────────────
@@ -515,12 +695,296 @@ static void testSceneNames() {
           "빈 이름 · 앞 / · // · 깨진 바이트는 거절");
 }
 
+// 거울 값 정리(M3a, H1a-2 판단 2): 패널이 거울 값을 직접 끄던 자리가 부르는 releaseQuiet 는 예전 동작(거울 값만 끔)과 같은 결과에
+// HSlate 포커스까지 비웁니다. IME · 문자 큐 · 글 칸 상태 · onChanged 는 그대로여야 합니다(setFocus(None) 과 다름).
+static void testReleaseQuiet() {
+    std::printf("release quiet (M3a)\n");
+    FakeWindow fw;
+    IWindow*   wp = &fw;
+    HSlateContext slate;
+    HTextEditState renEdit, srchEdit;
+    bool renFoc = false, srchFoc = false;
+    int  renChanged = 0;
+    auto renW = HNew(SSearchBox), srchW = HNew(SSearchBox);
+    renW->focusable(true); srchW->focusable(true);
+    TextInputController tc;
+    TextInputController::Deps d;
+    d.window = &wp;
+    d.slate  = &slate;
+    d.textFields = {
+        { EFocusTarget::Rename, [&] { return std::shared_ptr<HWidget>(renW); }, [&] {
+            return TextInputField{ renEdit, renFoc, [](glm::vec2) { return false; }, [&] { ++renChanged; } };
+        } },
+        { EFocusTarget::Search, [&] { return std::shared_ptr<HWidget>(srchW); }, [&] {
+            return TextInputField{ srchEdit, srchFoc, [](glm::vec2) { return false; }, [] {} };
+        } },
+    };
+    tc.init(d);
+
+    renEdit.setText("Table");
+    tc.setFocus(EFocusTarget::Rename);
+    check(tc.currentFocus() == EFocusTarget::Rename && renFoc && fw.imeOn && slate.focusedWidget() == renW,
+          "이름 바꾸기 들어감: 거울 값 · IME · HSlate 포커스");
+    const int changedBefore = renChanged, togglesBefore = fw.imeToggles;
+    fw.chars = { 'q' };
+    tc.releaseQuiet(EFocusTarget::Rename);
+    check(!renFoc && tc.currentFocus() == EFocusTarget::None, "releaseQuiet: 거울 값 꺼짐 · 포커스 없음");
+    check(!slate.focusedWidget(), "releaseQuiet: HSlate 포커스(정본)도 비움");
+    check(fw.imeOn && fw.imeToggles == togglesBefore, "releaseQuiet: IME 는 그대로(예전 동작, 끌지는 사용자 결정)");
+    check(fw.chars.size() == 1 && renChanged == changedBefore && renEdit.isAllSelected() && renEdit.text == "Table",
+          "releaseQuiet: 문자 큐 · onChanged · 선택 · 글 그대로");
+
+    // 다른 칸이 포커스일 때 부르면 그 칸은 건드리지 않습니다.
+    tc.setFocus(EFocusTarget::Search);
+    tc.releaseQuiet(EFocusTarget::Rename);
+    check(srchFoc && slate.focusedWidget() == srchW && tc.currentFocus() == EFocusTarget::Search,
+          "다른 칸 포커스 중 releaseQuiet(Rename): 검색 칸 포커스 유지");
+    tc.setFocus(EFocusTarget::None);
+}
+
+// M3b: 여러 OS 창. 키는 키보드 창에서 읽고, 칸은 그 칸이 있는 창에 키보드가 있을 때만 받습니다. IME 는 칸이 있는 창만 켭니다.
+static void testKeyboardWindow() {
+    std::printf("keyboard window (M3b)\n");
+    FakeWindow mainW, floatW;   // 0 = 메인, 3 = 떠 있는 창
+    IWindow*   wp = &mainW;
+    HSlateContext slate;
+    HTextEditState srchEdit, conEdit;
+    bool srchFoc = false, conFoc = false;
+    int  deleted = 0;
+    int  kb = 0;              // 지금 키보드 창
+    int  outlinerWin = 3;     // 검색 칸(아웃라이너)이 있는 창
+    auto srchW = HNew(SSearchBox), conW = HNew(SSearchBox);
+    srchW->focusable(true); conW->focusable(true);
+    TextInputController tc;
+    TextInputController::Deps d;
+    d.window = &wp;
+    d.slate  = &slate;
+    d.onDeleteSelection = [&] { ++deleted; };
+    d.textFields = {
+        { EFocusTarget::Search, [&] { return std::shared_ptr<HWidget>(srchW); }, [&] {
+            return TextInputField{ srchEdit, srchFoc, [](glm::vec2 p) { return p.x >= 0.f && p.x < 100.f && p.y >= 0.f && p.y < 20.f; },
+                                   [] {} };
+        } },
+        { EFocusTarget::Console, [&] { return std::shared_ptr<HWidget>(conW); }, [&] {
+            return TextInputField{ conEdit, conFoc, [](glm::vec2) { return true; }, [] {} };
+        } },
+    };
+    d.keyboardWindow = [&] { return kb; };
+    d.windowOfFocus  = [&](EFocusTarget t) { return t == EFocusTarget::Search ? outlinerWin : 0; };
+    d.windowById     = [&](int id) -> IWindow* { return id == 0 ? (IWindow*)&mainW : id == 3 ? (IWindow*)&floatW : nullptr; };
+    d.windowIds      = [] { return std::vector<int>{ 0, 3 }; };
+    tc.init(d);
+    auto step = [&] { tc.tickInput(); mainW.endFrame(); floatW.endFrame(); };
+
+    // IME 는 칸이 있는 창만.
+    tc.setFocus(EFocusTarget::Search);
+    check(srchFoc && floatW.imeOn && !mainW.imeOn, "떠 있는 창의 칸에 포커스: IME 는 그 창만 켬");
+    check(tc.focusWindow() == 3, "focusWindow = 칸이 있는 창");
+    // 좌표 판정은 그 창 좌표로만.
+    check(tc.focusWidgetContains(3, 10.f, 10.f) && !tc.focusWidgetContains(0, 10.f, 10.f) && !tc.focusWidgetContains(10.f, 10.f),
+          "focusWidgetContains: 칸이 있는 창 좌표만 맞음(메인 좌표는 같은 자리여도 칸 밖)");
+
+    // 키보드가 메인이면 그 칸은 글자를 받지 않음(메인의 글자는 버림).
+    mainW.chars = { 'a', 'b' };
+    step();
+    check(srchEdit.text.empty() && mainW.chars.empty(), "키보드 = 메인: 떠 있는 창의 칸은 받지 않고 메인 글자는 버림");
+    mainW.tap(HInput::KEY_ESCAPE);
+    step();
+    check(tc.currentFocus() == EFocusTarget::Search, "키보드 = 메인: 메인의 Esc 는 다른 창의 칸을 끝내지 않음");
+
+    // 키보드가 떠 있는 창으로 오면 받음.
+    kb = 3;
+    floatW.chars = { 'h', 'i' };
+    step();
+    check(srchEdit.text == "hi", "키보드 = 떠 있는 창: 그 창 글자가 칸에 들어감");
+    floatW.comp = "x";
+    floatW.rect[0] = -1.f;
+    srchEdit.caretRect = { 40.f, 5.f, 2.f, 14.f };
+    step();
+    check(floatW.rect[0] == 40.f && mainW.rect[0] == 0.f, "IME 후보 창 자리는 칸이 있는 창에 맞춤");
+    floatW.comp.clear();
+    step();
+
+    // 창이 바뀔 때 눌려 있던 키는 엣지로 잡지 않음: 메인에서 Enter 를 누른 채 떠 있는 창으로 → Enter 엣지 없음.
+    kb = 0;
+    step();
+    floatW.down[HInput::KEY_ENTER] = true;
+    kb = 3;
+    tc.tickInput();   // endFrame 없이(누른 채)
+    check(tc.currentFocus() == EFocusTarget::Search, "키보드 창이 바뀌는 순간 이미 눌려 있던 Enter 는 확정으로 안 잡음");
+    floatW.down[HInput::KEY_ENTER] = false;
+    tc.tickInput();
+    floatW.tap(HInput::KEY_ENTER);
+    step();
+    check(tc.currentFocus() == EFocusTarget::None && !srchFoc, "그다음 새로 누른 Enter 는 확정(포커스 놓음)");
+    check(!floatW.imeOn && !mainW.imeOn, "포커스 없음: 모든 창의 IME 끔");
+
+    // 포커스 없음: 키보드 창의 Delete 가 선택 삭제(떠 있는 창에서도 편집 단축키).
+    floatW.tap(HInput::KEY_DELETE);
+    step();
+    check(deleted == 1, "포커스 없음 + 키보드 = 떠 있는 창: 그 창의 Delete 가 선택 삭제");
+    mainW.tap(HInput::KEY_DELETE);
+    step();
+    check(deleted == 1, "키보드가 떠 있는 창이면 메인의 Delete 는 읽지 않음");
+
+    // 메인에 있는 칸(콘솔)은 메인 키보드일 때만.
+    tc.setFocus(EFocusTarget::Console);
+    check(mainW.imeOn && !floatW.imeOn, "메인 칸: IME 는 메인만");
+    floatW.chars = { 'z' };
+    step();
+    check(conEdit.text.empty() && floatW.chars.empty(), "키보드 = 떠 있는 창: 메인 칸은 받지 않음");
+    kb = 0;
+    mainW.chars = { 'q' };
+    step();
+    check(conEdit.text == "q", "키보드 = 메인: 메인 칸이 받음");
+
+    // 패널이 메인으로 돌아오면(창 번호 0) 같은 칸이 메인 키보드로 받음.
+    tc.setFocus(EFocusTarget::Search);
+    outlinerWin = 0;
+    mainW.chars = { 'k' };
+    step();
+    check(srchEdit.text.size() >= 1 && srchEdit.text.back() == 'k', "칸이 메인으로 오면 메인 키보드로 받음");
+    tc.setFocus(EFocusTarget::None);
+}
+
+// H3a → H3b: 디테일 글 칸(PropertyTextEdit) — Enter 확정 · Esc 취소 · 바깥(포커스 잃음) 확정(H3b, UE · 숫자 칸과 같음), 같은 값은 확정하지 않음.
+static void testPropertyTextEdit() {
+    std::printf("property text field (H3a, H3b outside = commit)\n");
+    FakeWindow fw;
+    IWindow*   wp = &fw;
+    HSlateContext slate;
+    PropertyTextEdit pe;
+    std::string value = "patrol";
+    int commits = 0, changes = 0;
+    auto w = HNew(SEditableText);
+    w->focusable(true);
+    auto other = HNew(SSearchBox);
+    other->focusable(true);
+    HTextEditState otherEdit;
+    bool otherFoc = false;
+    TextInputController tc;
+    TextInputController::Deps d;
+    d.window = &wp;
+    d.slate  = &slate;
+    d.textFields = {
+        { EFocusTarget::Search, [&] { return std::shared_ptr<HWidget>(other); }, [&] {
+            return TextInputField{ otherEdit, otherFoc, [](glm::vec2) { return false; }, [] {} };
+        } },
+        { EFocusTarget::TextField, [&] { return std::shared_ptr<HWidget>(w); }, [&] {
+            return pe.field([&] { ++changes; }, [](glm::vec2) { return false; });
+        } },
+    };
+    tc.init(d);
+    auto step = [&] { tc.tickInput(); fw.endFrame(); };
+    auto begin = [&] {
+        pe.prepare("row", [&] { return value; }, [&](const std::string& t) { value = t; ++commits; });
+        return tc.setFocusWidget(w);
+    };
+    tc.setFocusWidget(w);
+    check(!pe.focused() && tc.currentFocus() == EFocusTarget::None, "편집할 행이 없으면 들어가지 않음(onBegin 거절)");
+    check(begin() && pe.focused() && pe.editing("row") && tc.currentFocus() == EFocusTarget::TextField, "행 편집 시작 = TextField 포커스");
+    check(pe.edit().text == "patrol" && pe.edit().isAllSelected(), "지금 값 · 전체 선택");
+    step();
+    fw.chars = { 'g', 'u', 'a', 'r', 'd' };
+    step();
+    check(pe.edit().text == "guard" && value == "patrol", "치는 동안 값은 그대로");
+    fw.tap(HInput::KEY_ENTER);
+    step();
+    check(value == "guard" && commits == 1 && !pe.focused() && pe.key().empty() && tc.currentFocus() == EFocusTarget::None,
+          "Enter = 확정 한 번 · 편집 끝");
+    // Esc 취소
+    check(begin(), "다시 시작");
+    step();
+    fw.chars = { 'x' };
+    step();
+    fw.tap(HInput::KEY_ESCAPE);
+    step();
+    check(value == "guard" && commits == 1 && !pe.focused() && pe.key().empty(), "Esc = 취소(값 그대로)");
+    // 바깥 누름(다른 칸으로 포커스 이동 · 포커스 해제) = 확정(H3b: UE · 숫자 칸과 같음. H3a 에서는 취소였음)
+    begin();
+    step();
+    fw.chars = { 'y' };
+    step();
+    tc.setFocus(EFocusTarget::Search);
+    check(value == "y" && commits == 2 && !pe.focused() && otherFoc && pe.key().empty(), "다른 칸으로 = 확정(한 번)");
+    begin();
+    step();
+    fw.chars = { 'z' };
+    step();
+    tc.setFocus(EFocusTarget::None);
+    check(value == "z" && commits == 3 && !pe.focused(), "포커스 해제(바깥 누름) = 확정");
+    // 바깥으로 나가도 같은 값이면 확정하지 않음
+    begin();
+    step();
+    tc.setFocus(EFocusTarget::None);
+    check(value == "z" && commits == 3, "같은 값으로 나가면 기록 없음");
+    // Esc 는 여전히 취소(나감보다 먼저 표시해 둠) · 다음 편집에 남지 않음
+    begin();
+    step();
+    fw.chars = { 'q' };
+    step();
+    fw.tap(HInput::KEY_ESCAPE);
+    step();
+    check(value == "z" && commits == 3 && !pe.focused(), "Esc = 취소(나감 확정 없음)");
+    begin();
+    step();
+    fw.chars = { 'r' };
+    step();
+    tc.setFocus(EFocusTarget::None);
+    check(value == "r" && commits == 4, "Esc 다음 편집의 바깥 누름은 다시 확정");
+    // Enter 뒤의 포커스 해제가 한 번 더 확정하지 않음
+    begin();
+    step();
+    fw.chars = { 's' };
+    step();
+    fw.tap(HInput::KEY_ENTER);
+    step();
+    check(value == "s" && commits == 5, "Enter 확정은 한 번(뒤따르는 나감은 확정 안 함)");
+    // 같은 값 Enter 는 확정하지 않음(Undo 기록 없음)
+    begin();
+    step();
+    fw.tap(HInput::KEY_ENTER);
+    step();
+    check(commits == 5 && !pe.focused(), "같은 값 Enter 는 확정 안 함");
+    check(changes > 0, "포커스가 바뀔 때마다 행 다시 만들기 알림");
+    // 조용히 놓기(행이 사라짐)
+    begin();
+    tc.releaseQuiet(EFocusTarget::TextField);
+    pe.forget();
+    check(!pe.focused() && tc.currentFocus() == EFocusTarget::None && commits == 5, "행이 사라지면 조용히 놓음(확정 없음)");
+}
+
+// H3b: 디테일 속성 검색 — 이름 맞춤 · 문화권(보이는 이름 · 영어 원문) · 묶음 접기.
+static void testDetailsSearch() {
+    std::printf("details property search (H3b)\n");
+    check(!hdsearch::active("") && !hdsearch::active("   ") && hdsearch::active(" a "), "빈 글 · 공백만 = 검색 아님");
+    check(hdsearch::matches("", "Intensity", "Intensity"), "빈 검색어 = 모두 맞음");
+    check(hdsearch::matches("int", "Intensity", "Intensity") && hdsearch::matches("INT", "Intensity", "Intensity"), "부분 글 · 대소문자 무시");
+    check(!hdsearch::matches("radius", "Intensity", "Intensity"), "맞지 않음");
+    check(hdsearch::matches("max dist", "Max Distance", "Max Distance") && !hdsearch::matches("max zz", "Max Distance", "Max Distance"),
+          "낱말이 모두 맞아야 함(순서 무관)");
+    check(hdsearch::matches("dist max", "Max Distance", "Max Distance"), "낱말 순서 무관");
+    // 한국어 문화권: 보이는 이름 = 위치, 영어 원문 = Location. 둘 다로 찾음.
+    check(hdsearch::matches("위치", "위치", "Location") && hdsearch::matches("loc", "위치", "Location"), "문화권 이름 · 영어 이름 모두");
+    check(hdsearch::matches("위 loc", "위치", "Location"), "낱말마다 어느 이름이든");
+    check(!hdsearch::matches("회전", "위치", "Location"), "다른 한국어 이름은 맞지 않음");
+    check(hdsearch::sectionExpanded(true, 2, false) && !hdsearch::sectionExpanded(true, 0, true), "검색 중: 맞는 행이 있으면 펼침 · 없으면 접음");
+    check(hdsearch::sectionExpanded(false, 0, true) && !hdsearch::sectionExpanded(false, 5, false), "검색 아님: 사용자가 정한 접힘 그대로");
+    check(!hdsearch::showInfoLine(true) && hdsearch::showInfoLine(false), "검색 중 읽기 정보 줄 숨김");
+    check(hdsearch::showNoMatch(true, 0) && !hdsearch::showNoMatch(true, 1) && !hdsearch::showNoMatch(false, 0), "맞는 행 없음 알림");
+}
+
 int main() {
     testUtf8();
     testGraphemes();
     testWordsNfcCase();
     testEditState();
     testController();
+    testFocusWidgets();
+    testReleaseQuiet();
+    testKeyboardWindow();
+    testPropertyTextEdit();
+    testDetailsSearch();
     testHText();
     testGatherAndCoverage();
     testSceneNames();

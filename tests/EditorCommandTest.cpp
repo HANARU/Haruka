@@ -6,12 +6,17 @@
 // 중심으로 돌아야 하며, 복사한 글은 다른 프로그램의 글과 구별되어야 합니다.
 // 실행: build/Release/HarukaEditCmdTest.exe
 #include "../src/editor/EditorCommands.hpp"
+#include "../src/editor/EditorCommandRegistry.hpp"
+#include "../src/editor/EditorMenuModel.hpp"
 #include "../src/editor/EditorTheme.hpp"
 #include "../src/editor/EditTools.hpp"
+#include "../src/editor/AssetPickerModel.hpp"
+#include "../src/editor/ColorPickerModel.hpp"
 #include "../src/sceneio/PrefabRules.hpp"
 #include "../src/scene/World.hpp"
 #include "../src/scene/ComponentRegistry.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -92,7 +97,636 @@ public:
     }
 };
 
+
+// ── H2b: 명령 레지스트리 · 단축키 표 · 메뉴 모델 ─────────────────────────────────────────────────────────────────────
+// 예전(H2a 까지) EditorApp::tickShortcuts 의 if 사다리를 그대로 옮긴 기준입니다. 결과 = 실행할 동작 이름 · 끌기 알림.
+// 새 레지스트리(heditorcmd::defaultSpecs + resolveShortcut)가 모든 입력 조합에서 이것과 같아야 합니다.
+struct OldShortcutIn {
+    bool z, y, s, f, o, n, d;   // 이번 프레임 엣지
+    bool ctrl, shift, modal, cam, text, drag;
+};
+struct OldShortcutOut {
+    std::string id;
+    bool notice = false;
+};
+OldShortcutOut oldTickShortcuts(const OldShortcutIn& k) {
+    OldShortcutOut r;
+    if (k.modal) return r;
+    if (k.cam) return r;
+    if (k.f && !k.ctrl && !k.text) { r.id = "View.FrameSelected"; return r; }
+    if (!k.ctrl) return r;
+    if (k.drag) {
+        if (k.s || k.d || k.o || k.n) r.notice = true;
+        return r;
+    }
+    if (k.d && !k.text) { r.id = "Edit.Duplicate"; return r; }
+    if (k.s) { r.id = k.shift ? "File.SaveSceneAs" : "File.SaveScene"; return r; }
+    if (k.o) { r.id = "File.OpenScene"; return r; }
+    if (k.n) { r.id = "File.NewScene"; return r; }
+    if (k.f) { r.id = "Outliner.FocusSearch"; return r; }
+    if (k.text) return r;
+    if (k.z && !k.shift)            r.id = "Edit.Undo";
+    else if (k.y || (k.z && k.shift)) r.id = "Edit.Redo";
+    return r;
+}
+
+void testCommandRegistry() {
+    std::printf("\n== H2b-1. 명령 레지스트리: 정의 · 실행 가능 · 체크 · 단축키 글 ==\n");
+    EditorCommandRegistry reg;
+    heditorcmd::addDefaultSpecs(reg);
+    check(reg.size() == heditorcmd::defaultSpecs().size(), "정의 표를 모두 등록(" + std::to_string(reg.size()) + ")");
+    // 메뉴에 보이던 단축키 글(예전 EditorApp::buildMenus 의 문자열)과 chord 에서 만든 글이 같음
+    const std::pair<const char*, const char*> shown[] = {
+        { "File.NewScene", "Ctrl+N" }, { "File.OpenScene", "Ctrl+O" }, { "File.SaveScene", "Ctrl+S" },
+        { "File.SaveSceneAs", "Ctrl+Shift+S" }, { "Edit.Undo", "Ctrl+Z" }, { "Edit.Redo", "Ctrl+Y" },
+        { "Edit.Copy", "Ctrl+C" }, { "Edit.Paste", "Ctrl+V" }, { "Edit.Duplicate", "Ctrl+D" },
+        { "Edit.Delete", "Del" }, { "View.FrameSelected", "F" }, { "View.GizmoSize", "" }, { "Actor.AddEmpty", "" },
+    };
+    int textOk = 0;
+    for (const auto& [id, sc] : shown) textOk += reg.shortcutText(id) == sc ? 1 : 0;
+    check(textOk == (int)std::size(shown), "메뉴 단축키 글 = 예전 글 13개(chord 에서 만듦)");
+    // 동작이 없으면 실행 불가
+    check(!reg.canExecute("File.SaveScene") && !reg.execute("File.SaveScene"), "동작을 붙이기 전에는 실행 안 함");
+    check(!reg.bind("No.Such", [] {}), "없는 id 에는 붙지 않음");
+    int saved = 0, undone = 0;
+    bool canUndo = false;
+    reg.bind("File.SaveScene", [&] { ++saved; });
+    reg.bind("Edit.Undo", [&] { ++undone; }, [&] { return canUndo; });
+    check(reg.execute("File.SaveScene") && saved == 1, "실행");
+    check(!reg.canExecute("Edit.Undo") && !reg.execute("Edit.Undo") && undone == 0, "canExecute 거짓이면 실행 안 함");
+    canUndo = true;
+    check(reg.execute("Edit.Undo") && undone == 1, "canExecute 참이 되면 실행");
+    bool on = false;
+    EditorCommand lang;
+    lang.id = "View.Language.ko";
+    lang.label = HText::fromString("ko");
+    lang.execute = [] {};
+    lang.isChecked = [&] { return on; };
+    reg.add(lang);
+    check(reg.hasCheck("View.Language.ko") && !reg.isChecked("View.Language.ko"), "체크 명령 · 꺼짐");
+    on = true;
+    check(reg.isChecked("View.Language.ko") && !reg.hasCheck("File.SaveScene"), "체크 켜짐 · 체크 없는 명령");
+    const size_t before = reg.size();
+    lang.label = HText::fromString("Korean");
+    reg.add(lang);
+    check(reg.size() == before && reg.label("View.Language.ko") == "Korean", "같은 id 는 그 자리에서 바뀜(우선순위 유지)");
+    // polled 키 = 예전 tickShortcuts 가 엣지를 세던 7개(Z Y S F O N D), 표시 전용(Delete · C · V)은 빠짐
+    std::vector<int> keys = reg.polledKeys();
+    std::sort(keys.begin(), keys.end());
+    std::vector<int> want = { HInput::KEY_Z, HInput::KEY_Y, HInput::KEY_S, HInput::KEY_F, HInput::KEY_O, HInput::KEY_N, HInput::KEY_D };
+    std::sort(want.begin(), want.end());
+    check(keys == want, "단축키 엣지를 세는 키 = 예전 7개(Delete · Ctrl+C · Ctrl+V 는 글 칸 처리기 몫)");
+}
+
+void testShortcutTable() {
+    std::printf("\n== H2b-2. 단축키 표가 예전과 같음(모든 입력 조합) ==\n");
+    EditorCommandRegistry reg;
+    heditorcmd::addDefaultSpecs(reg);
+    int mismatch = 0, total = 0;
+    std::vector<std::string> reached;
+    for (uint32_t m = 0; m < (1u << 13); ++m) {
+        OldShortcutIn k{};
+        k.z = m & 1; k.y = m & 2; k.s = m & 4; k.f = m & 8; k.o = m & 16; k.n = m & 32; k.d = m & 64;
+        k.ctrl = m & 128; k.shift = m & 256; k.modal = m & 512; k.cam = m & 1024; k.text = m & 2048; k.drag = m & 4096;
+        const OldShortcutOut want = oldTickShortcuts(k);
+        EditorShortcutInput in;
+        in.keyEdge = [&k](int key) {
+            switch (key) {
+                case HInput::KEY_Z: return k.z;
+                case HInput::KEY_Y: return k.y;
+                case HInput::KEY_S: return k.s;
+                case HInput::KEY_F: return k.f;
+                case HInput::KEY_O: return k.o;
+                case HInput::KEY_N: return k.n;
+                case HInput::KEY_D: return k.d;
+                default: return false;
+            }
+        };
+        in.ctrl = k.ctrl; in.shift = k.shift; in.modal = k.modal; in.cameraMode = k.cam; in.textFocus = k.text; in.editDrag = k.drag;
+        const EditorShortcutResult got = reg.resolveShortcut(in);
+        const std::string gotId = got.command ? got.command->id : std::string{};
+        ++total;
+        if (gotId != want.id || got.dragNotice != want.notice) {
+            if (mismatch < 5)
+                std::printf("    차이: 입력 %u 예전 '%s'(%d) 지금 '%s'(%d)\n", m, want.id.c_str(), (int)want.notice, gotId.c_str(),
+                            (int)got.dragNotice);
+            ++mismatch;
+        }
+        if (!gotId.empty() && std::find(reached.begin(), reached.end(), gotId) == reached.end()) reached.push_back(gotId);
+    }
+    check(mismatch == 0, "8,192 조합(키 엣지 7 · Ctrl · Shift · 대화상자 · 카메라 비행 · 글 칸 · 끄는 중) 모두 같음(차이 " +
+                             std::to_string(mismatch) + ")");
+    check(reached.size() == 9, "닿는 명령 9개(F · Ctrl+D · S · Shift+S · O · N · F · Z · Y)");
+    // 대표 줄(표의 몇 줄을 사람이 읽을 수 있게)
+    auto one = [&](int key, bool ctrl, bool shift, bool text, bool drag) {
+        EditorShortcutInput in;
+        in.keyEdge = [key](int k2) { return k2 == key; };
+        in.ctrl = ctrl; in.shift = shift; in.textFocus = text; in.editDrag = drag;
+        const EditorShortcutResult r = reg.resolveShortcut(in);
+        return (r.command ? r.command->id : std::string("-")) + (r.dragNotice ? "!" : "");
+    };
+    check(one(HInput::KEY_Z, true, true, false, false) == "Edit.Redo", "Ctrl+Shift+Z = Redo");
+    check(one(HInput::KEY_F, false, false, true, false) == "-", "글 칸 포커스 중 F 는 맞추기 안 함");
+    check(one(HInput::KEY_F, true, false, true, false) == "Outliner.FocusSearch", "Ctrl+F 는 글 칸 중에도 검색 칸으로");
+    check(one(HInput::KEY_S, true, false, true, false) == "File.SaveScene", "Ctrl+S 는 글 칸 중에도 저장(예전과 같음)");
+    check(one(HInput::KEY_D, true, false, false, true) == "-!", "끄는 중 Ctrl+D 는 막고 알림");
+    check(one(HInput::KEY_Z, true, false, false, true) == "-", "끄는 중 Ctrl+Z 는 알림 없이 막음");
+    check(one(HInput::KEY_F, false, false, false, true) == "View.FrameSelected", "끄는 중에도 F(Ctrl 없음)는 맞추기(예전과 같음)");
+}
+
+void testShortcutAndMenuSameCommand() {
+    std::printf("\n== H2b-3. 단축키 · 메뉴 · 툴바가 같은 명령 ==\n");
+    EditorCommandRegistry reg;
+    heditorcmd::addDefaultSpecs(reg);
+    std::vector<std::string> ran;
+    bool hasSel = false;
+    for (const EditorCommand& c : heditorcmd::defaultSpecs()) {
+        const std::string id = c.id;
+        reg.bind(id, [&ran, id] { ran.push_back(id); },
+                 (id == "Edit.Duplicate" || id == "Edit.Copy") ? std::function<bool()>([&hasSel] { return hasSel; })
+                                                                : std::function<bool()>());
+    }
+    // 단축키 Ctrl+S → 실행
+    EditorShortcutInput in;
+    in.keyEdge = [](int k) { return k == HInput::KEY_S; };
+    in.ctrl = true;
+    const EditorShortcutResult r = reg.resolveShortcut(in);
+    if (r.command) reg.execute(r.command->id);
+    // 메뉴 항목(명령 id) → 행 → 실행
+    const std::vector<EditorMenuEntry> file = { EditorMenuEntry::heading("Save"), EditorMenuEntry::cmd("File.SaveScene") };
+    const std::vector<EditorMenuRow> rows = hmenu::resolve(file, &reg);
+    check(rows.size() == 2 && rows[1].label == "Save Scene" && rows[1].shortcut == "Ctrl+S" && rows[1].icon == "save",
+          "메뉴 행의 글 · 단축키 · 아이콘은 명령에서");
+    reg.execute(file[(size_t)rows[1].entry].command);
+    check(ran.size() == 2 && ran[0] == "File.SaveScene" && ran[1] == "File.SaveScene", "단축키 Ctrl+S 와 메뉴 Save Scene 이 같은 명령을 부름");
+    // 비활성: canExecute 거짓이면 메뉴 행이 꺼지고 단축키도 실행하지 않음
+    const std::vector<EditorMenuRow> dup = hmenu::resolve({ EditorMenuEntry::cmd("Edit.Duplicate") }, &reg);
+    check(dup.size() == 1 && !dup[0].enabled && !hmenu::selectable(dup[0]), "선택이 없으면 Duplicate 행은 꺼짐(흐리게)");
+    EditorShortcutInput d;
+    d.keyEdge = [](int k) { return k == HInput::KEY_D; };
+    d.ctrl = true;
+    const EditorShortcutResult rd = reg.resolveShortcut(d);
+    check(rd.command && rd.command->id == "Edit.Duplicate" && !reg.execute(rd.command->id) && ran.size() == 2,
+          "Ctrl+D 는 같은 명령을 고르지만 canExecute 거짓이라 아무것도 안 함(예전 duplicateSelection 의 빈 선택과 같음)");
+    hasSel = true;
+    check(hmenu::resolve({ EditorMenuEntry::cmd("Edit.Duplicate") }, &reg)[0].enabled && reg.execute("Edit.Duplicate"),
+          "선택이 생기면 켜지고 실행");
+    check(reg.execute("Play.Play") && ran.back() == "Play.Play", "툴바 Play 도 레지스트리 명령");
+    // 정의되지 않은 명령 id 는 메뉴에 나오지 않음
+    check(hmenu::resolve({ EditorMenuEntry::cmd("Nope") }, &reg).empty(), "없는 명령은 행이 생기지 않음");
+}
+
+void testMenuModel() {
+    std::printf("\n== H2b-4. 메뉴 모델: 키보드 이동 · 하위 메뉴 · 비활성 ==\n");
+    using E = EditorMenuEntry;
+    using K = hmenu::Key;
+    using A = hmenu::Act;
+    int hits = 0;
+    const std::vector<E> entries = {
+        E::heading("A"),
+        E::act("one", [&] { ++hits; }),
+        E::act("off", [&] { ++hits; }, false),
+        E::separator(),
+        E::heading("B"),
+        E::submenu("sub", { E::act("x", [] {}) }),
+        E::submenu("empty", {}),
+        E::act("two", [&] { ++hits; }),
+    };
+    const std::vector<EditorMenuRow> rows = hmenu::resolve(entries, nullptr);
+    // 두 번째 소제목 앞 구분선은 이미 있으므로 더하지 않음 → 8행
+    check(rows.size() == 8, "행 8개(이미 구분선이 있으면 소제목 앞 자동 구분선 없음)");
+    const std::vector<EditorMenuRow> rows2 = hmenu::resolve({ E::heading("A"), E::act("a", [] {}), E::heading("B"), E::act("b", [] {}) }, nullptr);
+    check(rows2.size() == 5 && rows2[2].kind == hmenu::Kind::Separator && rows2[2].entry == -1, "두 번째 소제목 앞에 구분선 자동");
+    check(!hmenu::selectable(rows[0]) && hmenu::selectable(rows[1]) && !hmenu::selectable(rows[2]) && !hmenu::selectable(rows[3]),
+          "소제목 · 꺼진 항목 · 구분선은 고를 수 없음");
+    check(!hmenu::selectable(rows[6]), "빈 하위 메뉴는 꺼짐");
+    check(hmenu::firstSelectable(rows) == 1, "처음 고를 수 있는 행 = one");
+    check(hmenu::step(rows, 1, +1) == 5, "↓: one → sub(꺼진 항목 · 구분선 · 소제목 건너뜀)");
+    check(hmenu::step(rows, 5, +1) == 7, "↓: sub → two(빈 하위 메뉴 건너뜀)");
+    check(hmenu::step(rows, 7, +1) == 1, "↓: 끝에서 처음으로 돎");
+    check(hmenu::step(rows, 1, -1) == 7, "↑: 처음에서 끝으로 돎");
+    check(hmenu::step(rows, -1, -1) == 7, "강조가 없을 때 ↑ = 마지막");
+    check(hmenu::step(hmenu::resolve({ E::heading("H"), E::act("x", [] {}, false) }, nullptr), -1, +1) == -1,
+          "고를 행이 없으면 -1");
+    // decide
+    check(hmenu::decide(K::Enter, 1, &rows[1], true) == A::Activate, "Enter: 명령 실행");
+    check(hmenu::decide(K::Enter, 1, &rows[5], true) == A::OpenSub, "Enter: 하위 메뉴 열기");
+    check(hmenu::decide(K::Enter, 1, &rows[2], true) == A::None, "Enter: 꺼진 항목은 무동작");
+    check(hmenu::decide(K::Enter, 1, nullptr, true) == A::None, "Enter: 강조 없음 = 무동작");
+    check(hmenu::decide(K::Right, 1, &rows[5], true) == A::OpenSub, "→: 하위 메뉴 열기");
+    check(hmenu::decide(K::Right, 1, &rows[1], true) == A::NextMenu, "→: 메뉴 줄의 다음 메뉴");
+    check(hmenu::decide(K::Right, 1, &rows[1], false) == A::None, "→: 오른쪽 누름 메뉴는 무동작");
+    check(hmenu::decide(K::Right, 1, &rows[6], true) == A::NextMenu && hmenu::decide(K::Enter, 1, &rows[6], true) == A::None,
+          "꺼진(빈) 하위 메뉴는 → · Enter 로 열지 않음");
+    check(hmenu::decide(K::Left, 2, &rows[1], true) == A::CloseSub, "←: 하위 메뉴 안이면 닫기");
+    check(hmenu::decide(K::Left, 1, &rows[1], true) == A::PrevMenu, "←: 맨 위면 이전 메뉴");
+    check(hmenu::decide(K::Escape, 2, nullptr, true) == A::CloseSub && hmenu::decide(K::Escape, 1, nullptr, true) == A::Close,
+          "Esc: 한 단계씩(하위 → 부모, 맨 위 → 전체)");
+    check(hmenu::decide(K::Up, 1, nullptr, false) == A::MoveUp && hmenu::decide(K::Down, 3, &rows[5], true) == A::MoveDown, "↑ ↓ 이동");
+    hmenu::Key pk;
+    check(hmenu::parseKey("esc", pk) && pk == K::Escape && !hmenu::parseKey("tab", pk), "키 이름 읽기");
+    // 체크 · 단축키(그 자리 동작)
+    E chk = E::act("c", [] {});
+    chk.checked = [] { return true; };
+    chk.shortcut = "Ctrl+Q";
+    const std::vector<EditorMenuRow> r3 = hmenu::resolve({ chk }, nullptr);
+    check(r3.size() == 1 && r3[0].hasCheck && r3[0].checked && r3[0].shortcut == "Ctrl+Q", "그 자리 동작의 체크 · 단축키 글");
+    check(hits == 0, "풀기(resolve)는 동작을 부르지 않음");
+}
+
 } // namespace
+
+// ── H3a: 속성 기본값 · 되돌리기 · 글 바꾸기 · 새 종류(String · Vec3 · Color) ─────────────────────────────────────────
+class H3Comp : public Component {
+public:
+    float       speed = 1.f;
+    bool        loud  = false;
+    int         mode  = 0;
+    std::string tag;
+    glm::vec3   offset{ 0.f };
+    glm::vec4   tint{ 1.f, 1.f, 1.f, 1.f };
+    int         committed = 0;
+    const char* typeName() const override { return "H3Comp"; }
+    std::vector<PropDesc> buildProps() override {
+        auto* p = this;
+        return { makePropFloat("Speed", PropColor::Neutral, 0.1f, [p] { return p->speed; }, [p](float v) { p->speed = std::max(0.f, v); })
+                     .withDefault(1.f),
+                 makePropToggle("Loud", [p] { return p->loud; }, [p](bool v) { p->loud = v; }).withDefault(false),
+                 makePropEnum("Mode", { "A", "B", "C" }, [p] { return p->mode; }, [p](int v) { p->mode = v; }).withDefault(0.f),
+                 XPROP_String(p, "Tag", tag).withDefault(""),
+                 makePropVec3("Offset", 0.01f, [p] { return p->offset; }, [p](const glm::vec3& v) { p->offset = v; }, PropUnit::Offset)
+                     .withDefault(glm::vec3(0.f)),
+                 makePropColor("Tint", [p] { return p->tint; }, [p](const glm::vec4& v) { p->tint = glm::clamp(v, 0.f, 1.f); }, true)
+                     .withDefault(glm::vec4(1.f)),
+                 makePropFloat("NoDefault", PropColor::Neutral, 0.1f, [p] { return p->speed * 2.f; }, [](float) {}) };
+    }
+    void onPropsCommitted() override { ++committed; }
+};
+
+// ── H3b: 에셋 경로 칸 · 색 선택기 ───────────────────────────────────────────────────────────────────────────────
+class H3bComp : public Component {
+public:
+    std::string model;
+    std::string sound;
+    glm::vec3   color{ 1.f, 0.5f, 0.25f };
+    int         reloads = 0;
+    int         committed = 0;
+    const char* typeName() const override { return "H3bComp"; }
+    std::vector<PropDesc> buildProps() override {
+        auto* p = this;
+        return { makePropAssetPath("Model", "Model", [p] { return p->model; },
+                                   [p](const std::string& v) { if (v != p->model) { p->model = v; ++p->reloads; } }),
+                 makePropAssetPath("File", "Sound,Sound Cue", [p] { return p->sound; }, [p](const std::string& v) { p->sound = v; }),
+                 makePropColor("Color", [p] { return glm::vec4(p->color, 1.f); },
+                               [p](const glm::vec4& v) { p->color = glm::clamp(glm::vec3(v), glm::vec3(0.f), glm::vec3(1.f)); }) };
+    }
+    void onPropsCommitted() override { ++committed; }
+};
+
+const PropDesc* findPd(const std::vector<PropDesc>& v, const char* label);
+
+void testAssetField() {
+    std::printf("\n== H3b-1. 에셋 경로 칸: 종류 거르기 · 검색 · 선택 · 비우기 · Undo 한 단계 ==\n");
+    hcb::ContentIndex idx;
+    idx.build({ "models/model.glb", "models/hands/TestGlove_L.glb", "models/Crate.gltf", "audio/Test_Chime.wav",
+                "audio/Music.ogg", "audio/Alarm.hcue", "scenes/A.hscene", "prefabs/Lamp.hprefab", "notes.txt" },
+              {});
+    const auto kModel = hasset::kindsOf("Model");
+    const auto kSound = hasset::kindsOf("Sound, Sound Cue");
+    check(kModel.size() == 1 && kModel[0] == hcb::AssetKind::Model, "종류 이름 하나(Model)");
+    check(kSound.size() == 2 && kSound[1] == hcb::AssetKind::Cue, "쉼표 · 공백으로 둘(Sound · Sound Cue)");
+    check(hasset::kindsOf("Nope").empty() && hasset::kindsOf("").empty(), "모르는 이름 · 빈 글 = 모든 종류");
+    auto models = hasset::buildList(idx, kModel, "");
+    check(models.size() == 3 && models[0].name == "Crate" && models[1].name == "model" && models[2].name == "TestGlove_L",
+          "Model 만 3개 · 이름 순(대소문자 무시)");
+    auto sounds = hasset::buildList(idx, kSound, "");
+    check(sounds.size() == 3 && sounds[0].name == "Alarm", "Sound + Sound Cue 3개(큐 포함)");
+    auto all = hasset::buildList(idx, {}, "");
+    check(all.size() == 8, "빈 종류 = 에셋 모두(기타 · 폴더 제외, " + std::to_string(all.size()) + ")");
+    check(hasset::buildList(idx, kModel, "GLOVE").size() == 1, "검색: 대소문자 무시");
+    check(hasset::buildList(idx, kModel, "test l").size() == 1 && hasset::buildList(idx, kModel, "test x").empty(), "검색: 낱말 모두 맞아야 함");
+    check(hasset::buildList(idx, kModel, "hands").empty(), "검색: 폴더 경로는 보지 않음(UE 와 같음)");
+    check(hasset::indexOf(models, "/Game/models/model.glb") == 1 && hasset::indexOf(models, "/Game/x.glb") == -1, "지금 값 자리");
+    check(hasset::step(3, -1, +1) == 0 && hasset::step(3, -1, -1) == 2 && hasset::step(3, 2, +1) == 2 && hasset::step(3, 0, -1) == 0 &&
+              hasset::step(0, 0, 1) == -1,
+          "↑ ↓: 끝에서 멈춤 · 고른 것 없으면 처음/끝");
+    check(hasset::acceptsPath(kModel, "/Game/models/Crate.gltf") && !hasset::acceptsPath(kModel, "/Game/audio/Test_Chime.wav") &&
+              !hasset::acceptsPath(kModel, "") && hasset::acceptsPath(kSound, "/Game/audio/Alarm.hcue"),
+          "끌어 놓기: 종류가 맞을 때만 받음");
+    check(hasset::displayName("/Game/models/hands/TestGlove_L.glb") == "TestGlove_L" && hasset::displayName("").empty(), "칸에 보일 이름");
+
+    World w;
+    HCommandStack st;
+    Actor* a = w.spawnActor("a");
+    auto* comp = a->addComponent<H3bComp>();
+    Actor* b = w.spawnActor("b");
+    auto* cb = b->addComponent<H3bComp>();
+    auto setPath = [&](const std::string& v) {
+        return hcmd::commitPropChange(w, a, comp, { cb }, [&] {
+            hcmd::withProp(*comp, "Model", PropDesc::AssetPath, [&](const PropDesc& pd) { pd.setS(v); });
+            hcmd::PropValue e; e.label = "Model"; e.kind = PropDesc::AssetPath; e.s = v;
+            hcmd::setProp(*cb, e);
+        }, st);
+    };
+    check(setPath("/Game/models/model.glb") && comp->model == "/Game/models/model.glb" && cb->model == comp->model && comp->reloads == 1 &&
+              comp->committed == 1,
+          "고르기 = 값 · 함께 고른 액터 · 다시 읽기 한 번 · 확정 훅");
+    check(st.canUndo(), "Undo 기록");
+    st.undo();
+    check(comp->model.empty() && cb->model.empty() && !st.canUndo(), "Undo 한 번에 두 액터 모두 이전 값(한 단계)");
+    st.redo();
+    check(comp->model == "/Game/models/model.glb" && cb->model == comp->model, "Redo");
+    const uint64_t tok = st.stateToken();
+    check(!setPath("/Game/models/model.glb") && st.stateToken() == tok, "같은 값은 기록 없음");
+    check(setPath("") && comp->model.empty(), "비우기 = 빈 경로");
+    st.undo();
+    check(comp->model == "/Game/models/model.glb", "비우기 Undo 한 단계");
+    auto props = comp->buildProps();
+    const PropDesc& pm = *findPd(props, "Model");
+    check(pm.kind == PropDesc::AssetPath && std::string(pm.assetType) == "Model" && !pm.hasDefault, "AssetPath 종류 · 기본값 없음");
+    check(hprop::valueText(pm) == "/Game/models/model.glb" && hprop::setFromText(pm, "/Game/models/Crate.gltf") &&
+              comp->model == "/Game/models/Crate.gltf",
+          "복사 · 붙여넣기 글 = 경로");
+}
+
+void testColorMath() {
+    std::printf("\n== H3b-2. 색 변환: RGB ↔ HSV · 선형 ↔ sRGB · 16진수 ==\n");
+    float worstHsv = 0.f, worstSrgb = 0.f;
+    for (int r = 0; r <= 8; ++r)
+        for (int g = 0; g <= 8; ++g)
+            for (int b = 0; b <= 8; ++b) {
+                const glm::vec3 c{ r / 8.f, g / 8.f, b / 8.f };
+                const glm::vec3 back = hcolor::hsvToRgb(hcolor::rgbToHsv(c));
+                worstHsv = std::max(worstHsv, glm::length(back - c));
+                const glm::vec3 lin = hcolor::srgbToLinear(c);
+                worstSrgb = std::max(worstSrgb, glm::length(hcolor::linearToSrgb(lin) - c));
+            }
+    check(worstHsv < 1e-5f, "RGB → HSV → RGB 왕복 729색 최대 오차 " + std::to_string(worstHsv));
+    check(worstSrgb < 1e-5f, "sRGB → 선형 → sRGB 왕복 729색 최대 오차 " + std::to_string(worstSrgb));
+    const glm::vec3 red = hcolor::rgbToHsv({ 1.f, 0.f, 0.f }), green = hcolor::rgbToHsv({ 0.f, 1.f, 0.f });
+    const glm::vec3 blue = hcolor::rgbToHsv({ 0.f, 0.f, 1.f }), mag = hcolor::rgbToHsv({ 1.f, 0.f, 1.f });
+    check(red.x == 0.f && std::abs(green.x - 120.f) < 1e-4f && std::abs(blue.x - 240.f) < 1e-4f && std::abs(mag.x - 300.f) < 1e-4f,
+          "색상 0 · 120 · 240 · 300 도");
+    check(hcolor::rgbToHsv({ 0.5f, 0.5f, 0.5f }, 77.f).x == 77.f && hcolor::rgbToHsv({ 0.f, 0.f, 0.f }, 33.f).x == 33.f,
+          "회색 · 검정은 색상 힌트를 그대로");
+    const glm::vec3 hdr = hcolor::rgbToHsv({ 4.f, 2.f, 0.f });
+    check(std::abs(hdr.z - 4.f) < 1e-5f && std::abs(hdr.y - 1.f) < 1e-5f && glm::length(hcolor::hsvToRgb(hdr) - glm::vec3(4.f, 2.f, 0.f)) < 1e-4f,
+          "HDR(V > 1) 왕복");
+    check(std::abs(hcolor::srgbToLinear(0.5f) - 0.214041f) < 1e-5f && std::abs(hcolor::linearToSrgb(0.214041f) - 0.5f) < 1e-5f &&
+              std::abs(hcolor::srgbToLinear(0.04f) - 0.04f / 12.92f) < 1e-7f,
+          "sRGB 0.5 = 선형 0.2140 · 선형 구간");
+    glm::vec4 v;
+    bool alpha = true;
+    check(hcolor::parseHex("#FF8000", v, &alpha) && !alpha && std::abs(v.r - 1.f) < 1e-6f && std::abs(v.g - 128.f / 255.f) < 1e-6f &&
+              v.b == 0.f && v.a == 1.f,
+          "#RRGGBB");
+    check(hcolor::parseHex("ff800080", v, &alpha) && alpha && std::abs(v.a - 128.f / 255.f) < 1e-6f, "RRGGBBAA(소문자)");
+    check(hcolor::parseHex("F80", v, &alpha) && !alpha && std::abs(v.g - 136.f / 255.f) < 1e-6f, "짧은 RGB(F → FF)");
+    check(hcolor::parseHex(" 0x00FF00 ", v) && v.g == 1.f, "0x · 앞뒤 공백");
+    const glm::vec4 keep = v;
+    check(!hcolor::parseHex("GG0000", v) && !hcolor::parseHex("12345", v) && !hcolor::parseHex("", v) && v == keep, "틀린 모양 거절(값 그대로)");
+    int worstHex = 0;
+    for (int i = 0; i < 256; ++i) {
+        glm::vec4 c;
+        char buf[8];
+        std::snprintf(buf, sizeof(buf), "%02X%02X%02X", i, 255 - i, (i * 7) & 255);
+        hcolor::parseHex(buf, c);
+        if (hcolor::toHex(c, false) != buf) ++worstHex;
+    }
+    check(worstHex == 0, "16진수 → 값 → 16진수 256가지 같음");
+}
+
+void testColorPicker() {
+    std::printf("\n== H3b-3. 색 선택기: 색 공간 · 확정 = Undo 한 단계 · 취소 = 원래 값 ==\n");
+    hcolorpick::State lin;
+    lin.open({ 0.215861f, 0.215861f, 0.215861f, 1.f }, 3, false);
+    check(lin.hex() == "808080", "선형 값의 16진수는 sRGB(선형 0.2159 = #808080)");
+    check(lin.setHex("FF0000") && std::abs(lin.value.r - 1.f) < 1e-6f && lin.value.g == 0.f, "16진수 넣기(선형 칸)");
+    check(lin.setHex("808080") && std::abs(lin.value.r - 0.215861f) < 1e-4f, "16진수 #80 → 선형 0.2159(sRGB 128/255)");
+    hcolorpick::State sr;
+    sr.open({ 0.5f, 0.5f, 0.5f, 1.f }, 3, true);
+    check(sr.hex() == "808080" && std::abs(sr.displayValue().r - 0.214041f) < 1e-5f, "sRGB 칸: 16진수는 그대로 · 그리는 색은 선형");
+    check(sr.setHex("FF8000") && std::abs(sr.value.g - 128.f / 255.f) < 1e-6f, "sRGB 칸 16진수 넣기는 바꾸지 않음");
+    hcolorpick::State st;
+    st.open({ 1.f, 0.f, 0.f, 1.f }, 3, false);
+    st.setHue(120.f);
+    check(glm::length(glm::vec3(st.value) - glm::vec3(0.f, 1.f, 0.f)) < 1e-5f, "색상 막대 120 도 = 초록");
+    st.setPlane(0.f, 0.f);
+    check(glm::length(glm::vec3(st.value) - glm::vec3(1.f)) < 1e-5f && std::abs(st.hsv.x - 120.f) < 1e-4f, "채도 0 = 흰색, 색상 120 기억");
+    st.setPlane(1.f, 0.f);
+    check(glm::length(glm::vec3(st.value) - glm::vec3(0.f, 1.f, 0.f)) < 1e-5f, "채도를 다시 올리면 같은 색상");
+    st.setPlane(1.f, 1.f);
+    check(glm::length(glm::vec3(st.value)) < 1e-6f && std::abs(st.hsv.x - 120.f) < 1e-4f, "명도 0 = 검정, 색상 기억");
+    st.setValue({ 0.f, 0.f, 0.f, 1.f });
+    st.setPlane(1.f, 0.f);
+    check(glm::length(glm::vec3(st.value) - glm::vec3(0.f, 1.f, 0.f)) < 1e-5f, "검정에서 명도를 올려도 같은 색상");
+    hcolorpick::State hd;
+    hd.open({ 4.f, 2.f, 0.f, 1.f }, 3, false);
+    check(std::abs(hd.vScale - 4.f) < 1e-5f && hd.planeMarker().y < 1e-5f && hd.hex() == "FFFF00" &&
+              hd.displayValue() == glm::vec4(1.f, 1.f, 0.f, 1.f),
+          "HDR: 판 세로 범위 = V(4) · 16진수 · 그리는 색은 0 ~ 1 로 자름");
+    hd.setPlane(1.f, 0.5f);
+    check(std::abs(hd.hsv.z - 2.f) < 1e-5f, "HDR 판 가운데 = V 2");
+    hcolorpick::State al;
+    al.open({ 1.f, 1.f, 1.f, 0.5f }, 4, false);
+    check(al.hex() == "FFFFFF80" && al.setHex("00000040") && std::abs(al.value.a - 64.f / 255.f) < 1e-6f, "네 성분: 16진수 8자리 · 알파");
+    al.setAlpha(1.2f);
+    check(al.value.a == 1.f && std::abs(al.alphaMarker()) < 1e-6f, "알파 0 ~ 1 로 자름 · 막대 위 = 불투명");
+    hcolorpick::State three;
+    three.open({ 1.f, 1.f, 1.f, 0.3f }, 3, false);
+    three.setAlpha(0.1f);
+    check(three.value.a == 1.f && three.hex().size() == 6, "세 성분: 알파 없음(6자리)");
+
+    // 세션: 연 동안 여러 번 바꿔도 확정은 Undo 한 단계, 취소는 원래 값(기록 없음)
+    World w;
+    HCommandStack stk;
+    Actor* a = w.spawnActor("a");
+    auto* comp = a->addComponent<H3bComp>();
+    Actor* b = w.spawnActor("b");
+    auto* cb = b->addComponent<H3bComp>();
+    cb->color = { 0.f, 0.f, 1.f };
+    auto setAll = [&](const glm::vec4& v) {
+        hcmd::withProp(*comp, "Color", PropDesc::Color, [&](const PropDesc& pd) { pd.setV(v); });
+        hcmd::withProp(*cb, "Color", PropDesc::Color, [&](const PropDesc& pd) { pd.setV(v); });
+    };
+    {
+        hcmd::PropSession s = hcmd::beginPropSession(*comp, { cb });
+        for (int i = 1; i <= 5; ++i) setAll({ i * 0.1f, 0.2f, 0.3f, 1.f });
+        const int c0 = comp->committed;
+        check(hcmd::endPropSession(w, a, comp, { cb }, s, stk) && comp->committed == c0 + 1, "확정 = 커맨드 · 확정 훅 한 번");
+        stk.undo();
+        check(glm::length(comp->color - glm::vec3(1.f, 0.5f, 0.25f)) < 1e-6f && glm::length(cb->color - glm::vec3(0.f, 0.f, 1.f)) < 1e-6f &&
+                  !stk.canUndo(),
+              "Undo 한 번에 두 액터 모두 연 때의 값(끈 다섯 번이 한 단계)");
+        stk.redo();
+        check(std::abs(comp->color.r - 0.5f) < 1e-6f && std::abs(cb->color.r - 0.5f) < 1e-6f, "Redo = 마지막 값");
+    }
+    {
+        const uint64_t tok = stk.stateToken();
+        const glm::vec3 ca = comp->color, cbb = cb->color;
+        hcmd::PropSession s = hcmd::beginPropSession(*comp, { cb });
+        setAll({ 0.9f, 0.9f, 0.9f, 1.f });
+        hcmd::cancelPropSession(comp, { cb }, s);
+        check(comp->color == ca && cb->color == cbb && stk.stateToken() == tok, "취소 = 두 액터 모두 원래 값 · 기록 없음");
+        hcmd::PropSession s2 = hcmd::beginPropSession(*comp, {});
+        check(!hcmd::endPropSession(w, a, comp, {}, s2, stk) && stk.stateToken() == tok, "바꾸지 않고 확정 = 기록 없음");
+    }
+}
+
+const PropDesc* findPd(const std::vector<PropDesc>& v, const char* label) {
+    for (const PropDesc& pd : v) if (std::string(pd.label) == label) return &pd;
+    return nullptr;
+}
+
+void testPropDefaults() {
+    std::printf("\n== H3a-1. 속성 기본값 비교 · 되돌리기 ==\n");
+    H3Comp c;
+    auto props = c.buildProps();
+    const PropDesc& sp = *findPd(props, "Speed");
+    const PropDesc& lo = *findPd(props, "Loud");
+    const PropDesc& md = *findPd(props, "Mode");
+    const PropDesc& tg = *findPd(props, "Tag");
+    const PropDesc& of = *findPd(props, "Offset");
+    const PropDesc& ti = *findPd(props, "Tint");
+    const PropDesc& nd = *findPd(props, "NoDefault");
+    check(sp.hasDefault && sp.defF == 1.f && lo.hasDefault && !lo.defB && md.hasDefault && md.defI == 0, "Float · Toggle · Enum 기본값");
+    check(tg.kind == PropDesc::String && tg.hasDefault && tg.defS.empty(), "String 종류 · 기본값 빈 글");
+    check(of.kind == PropDesc::Vec3 && of.components == 3 && of.defV == glm::vec4(0.f), "Vec3 종류 · 기본값 0");
+    check(ti.kind == PropDesc::Color && ti.components == 4 && ti.defV == glm::vec4(1.f), "Color(RGBA) 종류 · 기본값 흰색");
+    check(!nd.hasDefault && hprop::isDefault(nd) && !hprop::canReset(nd), "기본값 없는 칸은 늘 기본값(되돌릴 것 없음)");
+    check(hprop::isDefault(sp) && hprop::isDefault(tg) && hprop::isDefault(of) && hprop::isDefault(ti), "처음엔 모두 기본값");
+    c.speed = 1.f + 5e-7f;
+    check(hprop::isDefault(sp), "float 잡음(5e-7)은 기본값으로 봄");
+    c.speed = 1.001f;
+    check(!hprop::isDefault(sp) && hprop::canReset(sp), "1.001 은 기본값과 다름");
+    c.tag = "guard"; c.offset = { 0.f, 2.f, 0.f }; c.tint = { 1.f, 1.f, 1.f, 0.5f }; c.loud = true; c.mode = 2;
+    check(!hprop::isDefault(tg) && !hprop::isDefault(of) && !hprop::isDefault(ti) && !hprop::isDefault(lo) && !hprop::isDefault(md),
+          "글 · 성분(Y 하나) · 알파 · 토글 · 열거가 다르면 다름");
+    for (const PropDesc& pd : props) hprop::resetToDefault(pd);
+    check(c.speed == 1.f && !c.loud && c.mode == 0 && c.tag.empty() && c.offset == glm::vec3(0.f) && c.tint == glm::vec4(1.f),
+          "resetToDefault 가 세터로 기본값을 넣음");
+    // Color(RGB) 는 알파를 비교하지 않음
+    {
+        glm::vec4 rgb{ 0.2f, 0.4f, 0.6f, 1.f };
+        PropDesc col = makePropColor("C", [&rgb] { return rgb; }, [&rgb](const glm::vec4& v) { rgb = v; }).withDefault(glm::vec3(0.2f, 0.4f, 0.6f));
+        rgb.a = 0.f;
+        check(col.components == 3 && hprop::isDefault(col) && col.defV.a == 1.f, "RGB 색 칸은 알파를 보지 않음(기본 알파 1)");
+    }
+    // withDefault 의 종류별 해석
+    {
+        bool b = false;
+        PropDesc t = makePropToggle("T", [&b] { return b; }, [&b](bool v) { b = v; }).withDefault(true);
+        enum class EE { X, Y, Z };
+        int e = 0;
+        PropDesc en = makePropEnum("E", { "X", "Y", "Z" }, [&e] { return e; }, [&e](int v) { e = v; }).withDefault(EE::Z);
+        uint64_t g = 7;
+        PropDesc ar = makePropActorRef("R", [&g] { return g; }, [&g](uint64_t v) { g = v; });
+        check(t.defB && en.defI == 2 && ar.hasDefault && ar.defG == 0 && hprop::canReset(ar), "토글 true · 열거 열거값 · 액터 참조는 늘 없음(0)");
+    }
+
+    std::printf("\n== H3a-2. 값 글(복사 · 붙여넣기) ==\n");
+    c.speed = 2.5f; c.offset = { 1.f, -2.f, 0.5f }; c.tint = { 1.f, 0.5f, 0.25f, 1.f }; c.mode = 1; c.loud = true; c.tag = "a b";
+    check(hprop::valueText(sp) == "2.5" && hprop::valueText(lo) == "True" && hprop::valueText(md) == "B" && hprop::valueText(tg) == "a b",
+          "수 · 토글 · 열거 항목 · 글");
+    check(hprop::valueText(of) == "(X=1,Y=-2,Z=0.5)" && hprop::valueText(ti) == "(R=1,G=0.5,B=0.25,A=1)", "성분 글 (X=..) · (R=..)");
+    check(hprop::setFromText(of, "(X=3,Y=4,Z=5)") && c.offset == glm::vec3(3.f, 4.f, 5.f), "성분 글 붙여넣기");
+    check(hprop::setFromText(of, "Y=9") && c.offset == glm::vec3(3.f, 9.f, 5.f), "이름 있는 성분 하나만(나머지 그대로)");
+    check(hprop::setFromText(of, " 1, 2 ,3 ") && c.offset == glm::vec3(1.f, 2.f, 3.f), "괄호 · 이름 없는 수 셋");
+    check(!hprop::setFromText(of, "(X=1,Q=2)") && !hprop::setFromText(of, "abc") && !hprop::setFromText(of, "(X=1,Y=2,Z=3,W=4)") &&
+          c.offset == glm::vec3(1.f, 2.f, 3.f), "모르는 성분 · 글 · 넘치는 성분은 거절(값 그대로)");
+    check(hprop::setFromText(ti, "(R=0,G=0,B=1,A=0.5)") && c.tint == glm::vec4(0.f, 0.f, 1.f, 0.5f), "색 RGBA 붙여넣기");
+    check(hprop::setFromText(sp, "4") && c.speed == 4.f && !hprop::setFromText(sp, "4x") && !hprop::setFromText(sp, "") && c.speed == 4.f,
+          "수: 꼬리 쓰레기 · 빈 글 거절");
+    check(hprop::setFromText(lo, "false") && !c.loud && hprop::setFromText(lo, "TRUE") && c.loud && !hprop::setFromText(lo, "yes"), "토글 글");
+    check(hprop::setFromText(md, "C") && c.mode == 2 && hprop::setFromText(md, "0") && c.mode == 0 && !hprop::setFromText(md, "3") &&
+          !hprop::setFromText(md, "Q"), "열거: 항목 글 · 번호, 범위 밖 거절");
+    check(hprop::setFromText(tg, "  x  ") && c.tag == "  x  ", "글은 그대로(앞뒤 공백 유지)");
+
+    std::printf("\n== H3a-3. 되돌리기 · 붙여넣기는 Undo 한 단계 ==\n");
+    {
+        World w;
+        HCommandStack st;
+        Actor* a = w.spawnActor("a");
+        auto* comp = a->addComponent<H3Comp>();
+        comp->speed = 3.f;
+        comp->offset = { 0.f, 1.f, 0.f };
+        check(hcmd::resetPropToDefault(w, a, comp, {}, "Speed", PropDesc::Float, st) && comp->speed == 1.f && st.canUndo() &&
+                  comp->committed == 1,
+              "되돌림 · 커맨드 하나 · 확정 훅");
+        st.undo();
+        check(comp->speed == 3.f && !st.canUndo() && comp->offset == glm::vec3(0.f, 1.f, 0.f), "Undo 한 번에 이전 값(다른 칸은 그대로)");
+        st.redo();
+        check(comp->speed == 1.f, "Redo 로 다시 기본값");
+        const uint64_t tok = st.stateToken();
+        check(!hcmd::resetPropToDefault(w, a, comp, {}, "Speed", PropDesc::Float, st) && st.stateToken() == tok,
+              "이미 기본값이면 아무것도 쌓지 않음");
+        check(!hcmd::resetPropToDefault(w, a, comp, {}, "NoDefault", PropDesc::Float, st) && st.stateToken() == tok, "기본값 없는 칸은 거절");
+        check(!hcmd::resetPropToDefault(w, a, comp, {}, "Speed", PropDesc::Toggle, st) && st.stateToken() == tok, "종류가 다르면 거절");
+        check(hcmd::resetPropToDefault(w, a, comp, {}, "Offset", PropDesc::Vec3, st) && comp->offset == glm::vec3(0.f), "성분 칸 되돌리기");
+        st.undo();
+        check(comp->offset == glm::vec3(0.f, 1.f, 0.f), "성분 칸 Undo");
+
+        // 여러 액터: 주 선택 + 같은 컴포넌트를 한 번의 Undo 로
+        Actor* b = w.spawnActor("b");
+        auto* cb = b->addComponent<H3Comp>();
+        cb->speed = 7.f;
+        comp->speed = 5.f;
+        check(hcmd::resetPropToDefault(w, a, comp, { cb }, "Speed", PropDesc::Float, st) && comp->speed == 1.f && cb->speed == 1.f,
+              "함께 고른 액터도 되돌림");
+        st.undo();
+        check(comp->speed == 5.f && cb->speed == 7.f, "두 액터가 한 번의 Undo 로 돌아옴");
+        comp->speed = 1.f;
+        check(hcmd::resetPropToDefault(w, a, comp, { cb }, "Speed", PropDesc::Float, st) && cb->speed == 1.f && comp->speed == 1.f,
+              "주 선택이 이미 기본값이어도 다른 액터가 다르면 되돌림");
+
+        // 글 칸 확정(commitPropChange): 한 단계
+        const uint64_t t0 = st.stateToken();
+        check(hcmd::commitPropChange(w, a, comp, {}, [comp] { comp->tag = "guard"; }, st) && st.stateToken() != t0, "글 확정 = 커맨드 하나");
+        st.undo();
+        check(comp->tag.empty(), "글 확정 Undo");
+        const uint64_t t1 = st.stateToken();
+        check(!hcmd::commitPropChange(w, a, comp, {}, [] {}, st) && st.stateToken() == t1, "바뀐 것이 없으면 쌓지 않음");
+    }
+
+    std::printf("\n== H3a-4. 새 종류의 값 기억(Undo 스냅샷) · 성분 하나만 다른 액터에 ==\n");
+    {
+        H3Comp x;
+        x.tag = "t"; x.offset = { 1.f, 2.f, 3.f }; x.tint = { 0.1f, 0.2f, 0.3f, 0.4f };
+        const hcmd::PropValues v = hcmd::captureProps(x);
+        check(v.count(PropDesc::String) == 1 && v.count(PropDesc::Vec3) == 1 && v.count(PropDesc::Color) == 1, "글 · 성분 · 색을 뜸");
+        H3Comp y;
+        hcmd::applyProps(y, v);
+        check(y.tag == "t" && y.offset == x.offset && y.tint == x.tint && y.committed == 1, "다른 컴포넌트에 그대로 넣음(확정 훅 한 번)");
+        check(hcmd::captureProps(y) == v, "뜬 값이 같음(비교)");
+        y.offset = { 9.f, 9.f, 9.f };
+        check(hcmd::setPropComponent(y, "Offset", PropDesc::Vec3, 1, -1.f) && y.offset == glm::vec3(9.f, -1.f, 9.f), "성분 하나만 바꿈");
+        check(!hcmd::setPropComponent(y, "Offset", PropDesc::Color, 1, 0.f) && !hcmd::setPropComponent(y, "Nope", PropDesc::Vec3, 0, 0.f),
+              "종류 · 이름이 다르면 거절");
+        hcmd::PropValue e; e.label = "Tag"; e.kind = PropDesc::String; e.s = "zz";
+        check(hcmd::setProp(y, e) && y.tag == "zz", "setProp 이 글 칸에도 넣음");
+    }
+
+    std::printf("\n== H3a-5. 디테일 행 메뉴 명령(레지스트리) ==\n");
+    {
+        EditorCommandRegistry reg;
+        heditorcmd::addDefaultSpecs(reg);
+        bool canReset = false;
+        int resets = 0;
+        reg.bind("Details.ResetToDefault", [&resets] { ++resets; }, [&canReset] { return canReset; });
+        reg.bind("Details.CopyValue", [] {});
+        reg.bind("Details.PasteValue", [] {});
+        const std::vector<EditorMenuEntry> entries = { EditorMenuEntry::cmd("Details.ResetToDefault"), EditorMenuEntry::separator(),
+                                                       EditorMenuEntry::cmd("Details.CopyValue"), EditorMenuEntry::cmd("Details.PasteValue") };
+        std::vector<EditorMenuRow> rows = hmenu::resolve(entries, &reg);
+        check(rows.size() == 4 && rows[0].label == "Reset to Default" && !rows[0].enabled && rows[0].icon == "rotate-ccw" && rows[2].enabled,
+              "기본값과 같으면 Reset to Default 흐림");
+        check(hmenu::firstSelectable(rows) == 2 && !reg.execute("Details.ResetToDefault") && resets == 0, "흐린 항목은 건너뛰고 실행도 안 됨");
+        canReset = true;
+        rows = hmenu::resolve(entries, &reg);
+        check(rows[0].enabled && reg.execute("Details.ResetToDefault") && resets == 1, "다르면 켜지고 실행");
+        check(reg.shortcutText("Details.ResetToDefault").empty(), "단축키 없음(단축키 표에 영향 없음)");
+    }
+}
 
 int main() {
     std::printf("Haruka 편집 기본기 검산\n");
@@ -489,6 +1123,15 @@ int main() {
         check(near4(EditorTheme::axisY,         { 0.1500f, 0.5210f, 0.1022f, 1.f }), "axisY (#6CBF5A)");
         check(near4(EditorTheme::axisZ,         { 0.0742f, 0.2664f, 0.8714f, 1.f }), "axisZ (#4D8DF0)");
     }
+
+    testCommandRegistry();
+    testShortcutTable();
+    testShortcutAndMenuSameCommand();
+    testMenuModel();
+    testPropDefaults();
+    testAssetField();
+    testColorMath();
+    testColorPicker();
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
     return g_failed ? 1 : 0;

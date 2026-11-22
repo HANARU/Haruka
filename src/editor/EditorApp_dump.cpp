@@ -4,6 +4,9 @@
 #include "../platform/IWindow.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/World.hpp"
+#include "../core/FileUtil.hpp"
+#include <filesystem>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +19,17 @@ void EditorApp::setOptions(const EngineOptions& options) {
     cultureOverride_    = options.culture;
     uiSelect_           = options.uiSelect;
     uiOpenMenu_         = options.uiOpenMenu;
+    uiMenuKeys_.clear();
+    uiMenuKeyNext_ = 0;
+    for (size_t pos = 0; pos < options.uiMenuKeys.size();) {
+        const size_t comma = options.uiMenuKeys.find(',', pos);
+        const std::string name = options.uiMenuKeys.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+        hmenu::Key k;
+        if (hmenu::parseKey(name, k)) uiMenuKeys_.push_back(k);
+        else HLOG(LogEditorDump, Warning) << "--ui-menu-keys: unknown key '" << name << "'";
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
     uiBottomTab_        = options.uiBottomTab;
     uiLogCategories_    = options.uiLogCategories;
     uiOutlinerSearch_   = options.uiOutlinerSearch;
@@ -36,6 +50,19 @@ void EditorApp::setOptions(const EngineOptions& options) {
     uiContentDrag_     = options.uiContentDrag;
     uiContentDrop_     = options.uiContentDrop;
     uiAddComponentSearch_   = options.uiAddComponentSearch;
+    uiDetailsSet_           = options.uiDetailsSet;
+    uiDetailsCombo_         = options.uiDetailsCombo;
+    uiDetailsMenu_          = options.uiDetailsMenu;
+    uiDetailsEdit_          = options.uiDetailsEdit;
+    uiDetailsSplit_         = options.uiDetailsSplit;
+    uiDetailsAsset_         = options.uiDetailsAsset;
+    uiDetailsAssetSearch_   = options.uiDetailsAssetSearch;
+    uiDetailsColor_         = options.uiDetailsColor;
+    uiDetailsColorRgba_     = options.uiDetailsColorRgba;
+    uiDetailsColorHex_      = options.uiDetailsColorHex;
+    uiDetailsSearch_        = options.uiDetailsSearch;
+    uiDetailsDrop_          = options.uiDetailsDrop;
+    uiSaveSceneCopy_        = options.uiSaveSceneCopy;
     uiAddComponentCategory_ = options.uiAddComponentCategory;
     uiAddComponentDown_     = options.uiAddComponentDown;
     uiAddComponentCommit_   = options.uiAddComponentCommit;
@@ -53,6 +80,11 @@ void EditorApp::setOptions(const EngineOptions& options) {
     uiPick_             = options.uiPick;
     uiHover_            = options.uiHover;
     uiHoverActive_      = false;
+    uiFloatCycle_       = options.uiFloatCycle ? 1 : 0;
+    uiFloatInput_       = options.uiFloatInput;
+    layoutStatsMode_    = options.uiLayoutStats;
+    if (layoutStatsMode_ == 2) hslate::layoutCounters().cacheEnabled = false;
+    floatsHidden_       = options.hiddenWindow;
     if (!uiHover_.empty()) {
         const size_t comma = uiHover_.find(',');
         if (comma != std::string::npos) {
@@ -70,19 +102,40 @@ void EditorApp::setOptions(const EngineOptions& options) {
 }
 
 HTextEditState* EditorApp::focusedEdit() {
-    switch (currentFocus()) {
-        case EFocusTarget::Rename:    return &outlinerPanel_.renameEdit();
-        case EFocusTarget::Search:    return &outlinerPanel_.searchEdit();
-        case EFocusTarget::LogSearch: return &logPanel_.searchField().edit;
-        case EFocusTarget::Console:   return &logPanel_.consoleEdit();
-        case EFocusTarget::Dialog:    return &dialogEdit_;
-        case EFocusTarget::Picker:    return &componentPicker_.edit();
-        case EFocusTarget::ContentSearch: return &contentPanel_.searchEdit();
-        default:                      return nullptr;
+    // 글 칸은 등록 목록에서 찾습니다(H1a-2, 칸마다 줄을 더하지 않음). 대화상자는 따로입니다.
+    if (currentFocus() == EFocusTarget::Dialog) return &dialogEdit_;
+    return textInput_.focusedTextEdit();
+}
+
+// 배치 계측(H1b). tick 시작마다 직전 tick 이후의 차이를 한 프레임 값으로 셉니다(휠 · 입력 · 그리기 arrange 가 한 프레임).
+void EditorApp::sampleLayoutStats() {
+    const auto& st = slateRenderer_.context().layoutStats();
+    const uint64_t m = hslate::layoutCounters().measures;
+    if (lsFrames_ > 0 || lsPrevCalls_ > 0) {
+        const uint64_t dc = st.arrangeCalls - lsPrevCalls_, dr = st.arrangeRuns - lsPrevRuns_, dm = m - lsPrevMeasures_;
+        lsSumCalls_ += dc; lsSumRuns_ += dr; lsSumMeasures_ += dm;
+        lsMaxCalls_ = std::max(lsMaxCalls_, dc); lsMaxRuns_ = std::max(lsMaxRuns_, dr); lsMaxMeasures_ = std::max(lsMaxMeasures_, dm);
+        ++lsFrames_;
     }
+    lsPrevCalls_ = st.arrangeCalls; lsPrevRuns_ = st.arrangeRuns; lsPrevMeasures_ = m;
+    lsArrangeMs_ = st.arrangeMs;
+}
+
+void EditorApp::logLayoutStats() {
+    if (!layoutStatsMode_ || lsFrames_ == 0) return;
+    const double n = (double)lsFrames_;
+    char buf[320];
+    snprintf(buf, sizeof(buf),
+             "UI layout stats (%s): frames %llu | arrange calls avg %.2f max %llu | arranged avg %.2f max %llu | "
+             "measures avg %.1f max %llu | arrange ms total %.2f avg %.3f",
+             layoutStatsMode_ == 2 ? "nocache" : "cache", (unsigned long long)lsFrames_,
+             lsSumCalls_ / n, (unsigned long long)lsMaxCalls_, lsSumRuns_ / n, (unsigned long long)lsMaxRuns_,
+             lsSumMeasures_ / n, (unsigned long long)lsMaxMeasures_, lsArrangeMs_, lsArrangeMs_ / n);
+    HLOG(LogEditorDump, Log) << buf;
 }
 
 void EditorApp::onRunFinished() {
+    logLayoutStats();
     if (!dumpMode_ || !ctx_.window) return;
     if (!uiDumpPath_.empty()) {
         int fw = 1600, fh = 900;
@@ -92,6 +145,17 @@ void EditorApp::onRunFinished() {
             HLOG(LogEditorDump, Log) << "UI dump written: " << uiDumpPath_;
         else
             HLOG(LogEditorDump, Warning) << "UI dump failed: " << uiDumpPath_;
+        // 떠 있는 창마다 그 문맥을 <덤프>.float<번호>.txt 로 남깁니다(M3a). 메인 덤프 파일은 떠 있는 창이 없을 때와 같은 형식입니다.
+        for (const auto& w : floatWindows_.windows()) {
+            if (!w->window || !w->ctx) continue;
+            int aw = 0, ah = 0;
+            w->window->getFramebufferSize(aw, ah);
+            const std::string path = uiDumpPath_ + ".float" + std::to_string(w->floatId) + ".txt";
+            if (aw > 0 && ah > 0 && slateRenderer_.dumpElements(*w->ctx, glm::vec2((float)aw, (float)ah), path))
+                HLOG(LogEditorDump, Log) << "UI dump written: " << path;
+            else
+                HLOG(LogEditorDump, Warning) << "UI dump failed: " << path;
+        }
     }
     if (!viewportDumpPath_.empty()) {
         std::ofstream vf(viewportDumpPath_);
@@ -145,7 +209,7 @@ void EditorApp::applyDumpState() {
         else if (uiBottomTab_ == "GPU Stats"       || uiBottomTab_ == "gpu")     tab = 2;
         if (tab >= 0 && tab != bottomTab_) {
             bottomTab_   = tab;
-            bottomDirty_ = true;
+            requestBottomRebuild();
         }
     }
     if (uiLogCategories_) {
@@ -191,7 +255,7 @@ void EditorApp::applyDumpState() {
         }
     }
     // 글 칸 입력 흉내(글자 체계 T1 · T2). 숨은 창은 IME 를 켜지 않으므로 조합 글은 입력 처리기가 지우지 않습니다.
-    if (!uiType_.empty() || uiCaretLeft_ > 0 || uiSelectLeft_ > 0 || !uiImeCompose_.empty()) {
+    if (uiDetailsEdit_.empty() && (!uiType_.empty() || uiCaretLeft_ > 0 || uiSelectLeft_ > 0 || !uiImeCompose_.empty())) {
         if (!focusedEdit()) setTextFocus(EFocusTarget::Search);
         if (HTextEditState* st = focusedEdit()) {
             if (!uiType_.empty()) st->insert(uiType_);
@@ -258,13 +322,14 @@ void EditorApp::applyDumpState() {
                 else
                     HLOG(LogEditorDump, Warning) << "ui-content-drop: cannot drop " << path << " at " << at.x << "," << at.y;
             }
+            // 오른쪽 누름 메뉴는 콘텐츠 브라우저가 있는 창의 팝업 층에 뜹니다(H2a, 자리는 그 창 좌표).
             if (uiContentMenuSet_) {
                 if (!uiContentMenu_.empty()) contentPanel_.select(uiContentMenu_);
                 contextMenu_.open(glm::vec2{ 640.f, 640.f }, contentPanel_.contextItems(uiContentMenu_));
             }
         }
     }
-    if (uiAddComponent_ && ctx_.selected) {
+    if (uiAddComponent_ && ctx_.selected) {   // 팝업은 디테일이 있는 창의 팝업 층(H2a)
         // 디테일의 Add Component 단추를 누른 것과 같습니다. 단추 자리는 다음 배치 뒤에 정해지므로 팝업은 그때 그려집니다.
         detailsPanel_.rebuild();
         componentPicker_.open(ctx_.selected, detailsPanel_.addComponentButton());
@@ -314,5 +379,85 @@ void EditorApp::applyDumpState() {
         he.down     = false;
         slateRenderer_.handlePointerEvent(he);
         slateRenderer_.context().tickTooltip(1.0f);
+    }
+}
+
+// 디테일 속성 행 덤프(H3a). 선택을 바꾼 다음 프레임에 디테일이 다시 만들어지므로(tickSelectionSync) 그 뒤 프레임에 합니다. 그 전에 열면
+// 다시 만들 때 디테일이 연 메뉴 · 콤보가 닫힙니다(DetailsPanel::rebuild).
+void EditorApp::applyDetailsDumpState() {
+    // 디테일 속성 행(H3a): 값 넣기(되돌리기 화살표) · 열 나눔 · 콤보 · 행 메뉴 · 글 칸. 행은 지금 디테일을 다시 만든 뒤 이름으로 찾습니다.
+    const bool h3b = !uiDetailsAsset_.empty() || !uiDetailsColor_.empty() || !uiDetailsSearch_.empty() || !uiDetailsDrop_.empty();
+    if (ctx_.selected && (!uiDetailsSet_.empty() || !uiDetailsCombo_.empty() || !uiDetailsMenu_.empty() || !uiDetailsEdit_.empty() ||
+                          uiDetailsSplit_ >= 0.f || h3b)) {
+        // 속성 검색(H3b)은 칸 글을 넣은 것과 같습니다(목록을 다시 만들면 맞는 행만).
+        if (!uiDetailsSearch_.empty()) detailsPanel_.setSearch(uiDetailsSearch_);
+        detailsPanel_.rebuild();
+        if (uiDetailsSplit_ >= 0.f) detailsPanel_.columns()->nameFraction = std::clamp(uiDetailsSplit_, 0.f, 1.f);
+        for (size_t pos = 0; pos < uiDetailsSet_.size();) {
+            const size_t semi = uiDetailsSet_.find(';', pos);
+            const std::string one = uiDetailsSet_.substr(pos, semi == std::string::npos ? std::string::npos : semi - pos);
+            pos = semi == std::string::npos ? uiDetailsSet_.size() : semi + 1;
+            const size_t eq = one.find('=');
+            if (eq == std::string::npos) continue;
+            if (!detailsPanel_.dumpSetValue(one.substr(0, eq), one.substr(eq + 1)))
+                HLOG(LogEditorDump, Warning) << "--ui-details-set: no row or bad value '" << one << "'";
+            detailsPanel_.rebuild();   // 토글 · 열거가 행 목록을 바꿀 수 있음
+        }
+        syncEulerCache();
+        detailsPanel_.rebuild();
+        // 행 자리가 정해져야 메뉴를 그 행 위에 엽니다(다시 만든 위젯은 아직 배치 전, 디테일이 메인에 있을 때).
+        if (ctx_.window && dock_.floatOfPanel("Details") == 0) {
+            int fw = 1600, fh = 900;
+            ctx_.window->getFramebufferSize(fw, fh);
+            slateRenderer_.arrange({ (float)fw, (float)fh });
+        }
+        if (!uiDetailsCombo_.empty() && !detailsPanel_.dumpOpenCombo(uiDetailsCombo_))
+            HLOG(LogEditorDump, Warning) << "--ui-details-combo: no enum row '" << uiDetailsCombo_ << "'";
+        if (!uiDetailsMenu_.empty() && !detailsPanel_.dumpOpenRowMenu(uiDetailsMenu_))
+            HLOG(LogEditorDump, Warning) << "--ui-details-menu: no row '" << uiDetailsMenu_ << "'";
+        if (!uiDetailsEdit_.empty()) {
+            if (!detailsPanel_.dumpBeginEdit(uiDetailsEdit_))
+                HLOG(LogEditorDump, Warning) << "--ui-details-edit: no text row '" << uiDetailsEdit_ << "'";
+            else if (HTextEditState* st = focusedEdit()) {   // 글자 흉내(--ui-type · --ui-caret-left)는 이 칸에
+                if (!uiType_.empty()) st->insert(uiType_);
+                for (int i = 0; i < uiCaretLeft_; ++i) st->moveLeft(false, false);
+            }
+            detailsPanel_.rebuild();
+        }
+        // H3b: 에셋 칸에 끌어 놓기(행 가운데) · 고르기 팝업 · 색 선택기. 행 자리는 위 배치를 씁니다.
+        if (!uiDetailsDrop_.empty()) {
+            const size_t eq = uiDetailsDrop_.find('=');
+            const std::string row = uiDetailsDrop_.substr(0, eq), path = eq == std::string::npos ? std::string() : uiDetailsDrop_.substr(eq + 1);
+            if (!detailsPanel_.dumpDropAsset(row, path))
+                HLOG(LogEditorDump, Warning) << "--ui-details-drop: rejected '" << path << "' on row '" << row << "'";
+            else
+                HLOG(LogEditorDump, Log) << "--ui-details-drop: dropped '" << path << "' on row '" << row << "'";
+            detailsPanel_.rebuild();
+            if (ctx_.window && dock_.floatOfPanel("Details") == 0) {
+                int fw = 1600, fh = 900;
+                ctx_.window->getFramebufferSize(fw, fh);
+                slateRenderer_.arrange({ (float)fw, (float)fh });
+            }
+        }
+        if (!uiDetailsAsset_.empty()) {
+            if (!detailsPanel_.dumpOpenAssetPicker(uiDetailsAsset_))
+                HLOG(LogEditorDump, Warning) << "--ui-details-asset: no asset row '" << uiDetailsAsset_ << "'";
+            else if (!uiDetailsAssetSearch_.empty())
+                assetPicker_.setQuery(uiDetailsAssetSearch_);
+        }
+        if (!uiDetailsColor_.empty()) {
+            if (!detailsPanel_.dumpOpenColorPicker(uiDetailsColor_, uiDetailsColorRgba_))
+                HLOG(LogEditorDump, Warning) << "--ui-details-color: no color row '" << uiDetailsColor_ << "'";
+            else if (!uiDetailsColorHex_.empty() && !colorPicker_.setHex(uiDetailsColorHex_))
+                HLOG(LogEditorDump, Warning) << "--ui-details-color-hex: bad value '" << uiDetailsColorHex_ << "'";
+        }
+    }
+    // 씬 글을 다른 파일로(저장과 같은 글 = serializeWorld, 문서 · 원본 파일은 건드리지 않음). 열기 → 저장이 바이트 단위로 같은지 봅니다.
+    if (!uiSaveSceneCopy_.empty()) {
+        std::string err;
+        if (hfile::writeAtomic(std::filesystem::path(uiSaveSceneCopy_), serializeWorld(), &err))
+            HLOG(LogEditorDump, Log) << "--ui-save-scene-copy: wrote " << uiSaveSceneCopy_;
+        else
+            HLOG(LogEditorDump, Error) << "--ui-save-scene-copy: " << err;
     }
 }

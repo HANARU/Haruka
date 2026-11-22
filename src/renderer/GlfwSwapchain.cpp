@@ -106,15 +106,17 @@ void GlfwSwapchain::create() {
     // 실행 중에 프레젠트 모드와 이미지 수를 확인할 방법이 전혀 없었습니다.
     // 이 둘을 모르면 프레임 페이싱 논의가 전부 추측이 됩니다.
     {
-        auto& ft = gFrameTimings();
-        ft.presentMode = (int)pm;
-        ft.imageCount  = (int)images_.size();
+        if (!auxiliary_) {   // 계측 값은 메인 창 것입니다(보조 창이 덮어쓰면 프레임 페이싱 기록이 틀어짐)
+            auto& ft = gFrameTimings();
+            ft.presentMode = (int)pm;
+            ft.imageCount  = (int)images_.size();
+        }
         const char* pmName =
             pm == VK_PRESENT_MODE_IMMEDIATE_KHR    ? "IMMEDIATE"    :
             pm == VK_PRESENT_MODE_MAILBOX_KHR      ? "MAILBOX"      :
             pm == VK_PRESENT_MODE_FIFO_KHR         ? "FIFO(vsync)"  :
             pm == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "FIFO_RELAXED" : "UNKNOWN";
-        HLOG(LogRenderer, Log) << "Swapchain presentMode=" << pmName
+        HLOG(LogRenderer, Log) << (auxiliary_ ? "Aux swapchain presentMode=" : "Swapchain presentMode=") << pmName
                                << " images=" << images_.size()
                                << " extent=" << ext.width << "x" << ext.height;
     }
@@ -161,7 +163,7 @@ void GlfwSwapchain::recreate() {
 // ── Acquire / present ─────────────────────────────────────────────────────────
 
 VkResult GlfwSwapchain::acquireNextImage(VkSemaphore signal, uint32_t& outIndex) {
-    VkResult res = vkAcquireNextImageKHR(device_, handle_, UINT64_MAX,
+    VkResult res = vkAcquireNextImageKHR(device_, handle_, acquireTimeoutNs_,
                                           signal, VK_NULL_HANDLE, &outIndex);
     if (res == VK_ERROR_OUT_OF_DATE_KHR)
         dirty_ = true;

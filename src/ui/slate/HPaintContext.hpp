@@ -30,6 +30,11 @@ struct HDrawElement {
     // 클립 스택의 맨 위(조상 클립의 교집합)를 받아 둡니다(DEF-56).
     glm::vec4   clip      = {0,0,0,0};
     bool        clipped   = false;
+
+    // 그라데이션 사각형(H3b, 색 선택기): gradient 가 참이면 color 대신 네 모서리 색(왼쪽 위 · 오른쪽 위 · 오른쪽 아래 · 왼쪽 아래,
+    // 선형 RGBA)을 정점마다 넣어 사이를 선형으로 잇습니다. 잘리면 잘린 자리의 색을 같은 비율로 구합니다. Rect 종류에만 씁니다.
+    bool        gradient  = false;
+    glm::vec4   corner[4] = {};
 };
 
 // ── ClipRect 스택 항목 ────────────────────────────────────────────────────────
@@ -80,6 +85,9 @@ public:
     void drawBorder      (const HGeometry& geo, glm::vec4 color, float thickness);
     void drawRoundedRect (const HGeometry& geo, glm::vec4 color, float radius,
                           glm::vec4 borderColor = {0,0,0,0}, float borderWidth = 0.f);
+    // 네 모서리 색(왼쪽 위 · 오른쪽 위 · 오른쪽 아래 · 왼쪽 아래, 선형)을 잇는 사각형(H3b). 둥근 모서리 · 테두리는 없습니다.
+    void drawGradientRect(const HGeometry& geo, glm::vec4 topLeft, glm::vec4 topRight,
+                          glm::vec4 bottomRight, glm::vec4 bottomLeft);
     void drawShadow      (const HGeometry& geo, float radius, glm::vec2 offset,
                           float blur, glm::vec4 color);
     void drawTexture(const HGeometry& geo, VkImageView tex,

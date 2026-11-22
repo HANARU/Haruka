@@ -6,26 +6,26 @@
 class SBox : public HWidget {
 public:
     std::shared_ptr<SBox> content(std::shared_ptr<HWidget> w) {
-        child_ = std::move(w); return std::static_pointer_cast<SBox>(shared_from_this());
+        hslate::noteLayoutChange(); child_ = std::move(w); return std::static_pointer_cast<SBox>(shared_from_this());
     }
     std::shared_ptr<SBox> widthOverride(float w)  {
-        widthOverride_  = w; return std::static_pointer_cast<SBox>(shared_from_this());
+        hslate::noteLayoutChange(); widthOverride_  = w; return std::static_pointer_cast<SBox>(shared_from_this());
     }
     std::shared_ptr<SBox> heightOverride(float h) {
-        heightOverride_ = h; return std::static_pointer_cast<SBox>(shared_from_this());
+        hslate::noteLayoutChange(); heightOverride_ = h; return std::static_pointer_cast<SBox>(shared_from_this());
     }
     std::shared_ptr<SBox> hAlign(EHAlign a) {
-        hAlign_ = a; return std::static_pointer_cast<SBox>(shared_from_this());
+        hslate::noteLayoutChange(); hAlign_ = a; return std::static_pointer_cast<SBox>(shared_from_this());
     }
     std::shared_ptr<SBox> vAlign(EVAlign a) {
-        vAlign_ = a; return std::static_pointer_cast<SBox>(shared_from_this());
+        hslate::noteLayoutChange(); vAlign_ = a; return std::static_pointer_cast<SBox>(shared_from_this());
     }
     std::shared_ptr<SBox> padding(HPadding p) {
-        padding_ = p; return std::static_pointer_cast<SBox>(shared_from_this());
+        hslate::noteLayoutChange(); padding_ = p; return std::static_pointer_cast<SBox>(shared_from_this());
     }
 
     glm::vec2 computeDesiredSize() override {
-        glm::vec2 childDesired = child_ ? child_->computeDesiredSize() : glm::vec2(0.f);
+        glm::vec2 childDesired = child_ ? child_->desiredSize() : glm::vec2(0.f);
         glm::vec2 inner{ childDesired.x + padding_.totalH(),
                          childDesired.y + padding_.totalV() };
         return {
@@ -38,7 +38,7 @@ public:
         cachedGeo_ = allotted;
         if (!child_) return;
         HGeometry content = allotted.deflate(padding_);
-        glm::vec2 childSize = child_->computeDesiredSize();
+        glm::vec2 childSize = child_->desiredSize();
         float cx = content.alignH(childSize.x, hAlign_);
         float cy = content.alignV(childSize.y, vAlign_);
         glm::vec2 finalSize = (hAlign_ == EHAlign::Fill && vAlign_ == EVAlign::Fill)
@@ -72,6 +72,11 @@ public:
     HReply onScroll(const HPointerEvent& e) override {
         if (!cachedGeo_.contains(e.position)) return HReply::Unhandled();
         return child_ ? child_->onScroll(e) : HReply::Unhandled();
+    }
+
+    // 자식 하나(H1a-1). 그리는 순서 = 이 자식 하나.
+    void forEachChild(const std::function<void(const std::shared_ptr<HWidget>&)>& fn) override {
+        if (child_) fn(child_);
     }
 
 private:

@@ -1,4 +1,5 @@
 #include "GlfwWindow.hpp"
+#include "GlfwPlatform.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <iterator>
@@ -14,21 +15,32 @@
 #endif
 #include "../../core/Utf8.hpp"
 
-GlfwWindow::GlfwWindow(uint32_t w, uint32_t h, const std::string& t, bool hidden)
-    : width(w), height(h), title(t), hidden_(hidden) {}
+GlfwWindow::GlfwWindow(uint32_t w, uint32_t h, const std::string& t, bool hidden, bool aux)
+    : width(w), height(h), title(t), hidden_(hidden), aux_(aux) {}
 
 GlfwWindow::~GlfwWindow() {
     cleanup();
 }
 
 void GlfwWindow::init() {
-    glfwInit();
+    if (window) return;
+    // GLFW 수명은 GlfwPlatform 이 참조 수로 맡습니다(H0). 이 창이 사라져도 다른 창이 있으면 GLFW 는 끝나지 않습니다.
+    if (!platformAcquired_) {
+        if (!GlfwPlatform::acquire()) throw std::runtime_error("Failed to initialize GLFW");
+        platformAcquired_ = true;
+    }
+    // 창 힌트는 GLFW 전역이라 앞 창의 힌트가 다음 창에 남습니다. 만들기 전후로 기본값으로 되돌려 창마다 같은 출발점에서 정합니다.
+    glfwDefaultWindowHints();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     if (hidden_) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+    glfwDefaultWindowHints();
     if (!window) {
+        GlfwPlatform::release();
+        platformAcquired_ = false;
         throw std::runtime_error("Failed to create GLFW window");
     }
+    GlfwPlatform::addWindow(this);
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     glfwSetKeyCallback(window, keyCallback);
@@ -47,26 +59,48 @@ void GlfwWindow::init() {
     cursorArrow_   = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
     cursorHResize_ = glfwCreateStandardCursor(GLFW_HRESIZE_CURSOR);
     cursorVResize_ = glfwCreateStandardCursor(GLFW_VRESIZE_CURSOR);
+    cursorMove_    = glfwCreateStandardCursor(GLFW_RESIZE_ALL_CURSOR);
+    cursorNo_      = glfwCreateStandardCursor(GLFW_NOT_ALLOWED_CURSOR);
 }
 
 void GlfwWindow::cleanup() {
+    // 두 번 불려도 됩니다(엔진의 명시적 cleanup 뒤 소멸자). GLFW 를 끝내는 것은 마지막 창의 release 뿐입니다.
     if (window) {
         removeImeHook();
         glfwDestroyWindow(window);
         window = nullptr;
+        GlfwPlatform::removeWindow(this);
     }
     if (cursorArrow_)   { glfwDestroyCursor(cursorArrow_);   cursorArrow_   = nullptr; }
     if (cursorHResize_) { glfwDestroyCursor(cursorHResize_); cursorHResize_ = nullptr; }
     if (cursorVResize_) { glfwDestroyCursor(cursorVResize_); cursorVResize_ = nullptr; }
-    glfwTerminate();
+    if (cursorMove_)    { glfwDestroyCursor(cursorMove_);    cursorMove_    = nullptr; }
+    if (cursorNo_)      { glfwDestroyCursor(cursorNo_);      cursorNo_      = nullptr; }
+    if (platformAcquired_) {
+        platformAcquired_ = false;
+        GlfwPlatform::release();
+    }
 }
 
 void GlfwWindow::setCursorShape(int shape) {
     if (!window) return;
     GLFWcursor* cur = (shape == 1) ? cursorHResize_ :
                       (shape == 2) ? cursorVResize_ :
+                      (shape == 3) ? cursorMove_ :
+                      (shape == 4) ? cursorNo_ :
                                      nullptr;  // nullptr = default OS arrow
     glfwSetCursor(window, cur);
+#ifdef _WIN32
+    // 탭 끌기(M4)는 누른 창이 커서를 잡아 둔 채 창 밖으로 나갑니다. GLFW 는 커서가 이 창 내용 영역 안일 때만 모양을 바꾸고, 잡아 둔
+    // 동안에는 WM_SETCURSOR 도 오지 않으므로, 이 창이 커서를 잡고 있으면 OS 커서를 직접 바꿉니다(끌기 모양 3 · 4 와 그 뒤 화살표).
+    HWND hwnd = glfwGetWin32Window(window);
+    if (hwnd && GetCapture() == hwnd && (shape == 3 || shape == 4 || capturedShape_ != 0)) {
+        ::SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(shape == 3 ? 32646 : shape == 4 ? 32648 : 32512)));   // IDC_SIZEALL · IDC_NO · IDC_ARROW
+        capturedShape_ = (shape == 3 || shape == 4) ? shape : 0;
+    } else {
+        capturedShape_ = 0;
+    }
+#endif
 }
 
 bool GlfwWindow::shouldClose() const {
@@ -77,19 +111,63 @@ void GlfwWindow::setShouldClose(bool close) {
     glfwSetWindowShouldClose(window, close ? GLFW_TRUE : GLFW_FALSE);
 }
 
-void GlfwWindow::pollEvents() {
-    // 걸쇠와 누름 횟수는 이번 폴링에서 들어올 이벤트만 담아야 합니다. 비우고 나서 받습니다.
+void GlfwWindow::clearInputLatches() {
+    // 걸쇠와 누름 횟수는 이번 폴링에서 들어올 이벤트만 담아야 합니다. 펌프가 받기 직전에 비웁니다.
     std::fill(std::begin(keyLatch_), std::end(keyLatch_), false);
     std::fill(std::begin(buttonLatch_), std::end(buttonLatch_), false);
     std::fill(std::begin(keyPresses_), std::end(keyPresses_), uint8_t(0));
-    glfwPollEvents();
 }
 
-void GlfwWindow::waitEvents() {
-    std::fill(std::begin(keyLatch_), std::end(keyLatch_), false);
-    std::fill(std::begin(buttonLatch_), std::end(buttonLatch_), false);
-    std::fill(std::begin(keyPresses_), std::end(keyPresses_), uint8_t(0));
-    glfwWaitEvents();
+void GlfwWindow::pollEvents() { GlfwPlatform::pumpEvents(false); }
+
+void GlfwWindow::waitEvents() { GlfwPlatform::pumpEvents(true); }
+
+// ── 창 관리(H0, Docs/Editor_MultiWindow_Design.md) ─────────────────────────────────────────────
+bool GlfwWindow::getWindowPos(int& x, int& y) const {
+    x = y = 0;
+    if (!window) return false;
+    glfwGetWindowPos(window, &x, &y);
+    return true;
+}
+
+void GlfwWindow::setWindowPos(int x, int y) {
+    if (window) glfwSetWindowPos(window, x, y);
+}
+
+void GlfwWindow::setWindowSize(int w, int h) {
+    if (window && w > 0 && h > 0) glfwSetWindowSize(window, w, h);
+}
+
+float GlfwWindow::contentScale() const {
+    if (!window) return 1.f;
+    float sx = 1.f, sy = 1.f;
+    glfwGetWindowContentScale(window, &sx, &sy);
+    return sx > 0.f ? sx : 1.f;
+}
+
+bool GlfwWindow::isFocused() const {
+    return window && glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
+}
+
+void GlfwWindow::focus() {
+    // 숨은 창(덤프)은 사용자의 포커스를 가져가지 않습니다.
+    if (window && !hidden_) glfwFocusWindow(window);
+}
+
+void GlfwWindow::show(bool visible) {
+    if (!window) return;
+    // 숨은 창(--hidden-window · 덤프)은 끝까지 보이지 않아야 합니다(화면에 창을 띄우지 않는 실행 규칙).
+    if (visible && !hidden_) glfwShowWindow(window);
+    else if (!visible)       glfwHideWindow(window);
+}
+
+bool GlfwWindow::isIconified() const {
+    return window && glfwGetWindowAttrib(window, GLFW_ICONIFIED) == GLFW_TRUE;
+}
+
+void GlfwWindow::setMousePassthrough(bool enabled) {
+    // GLFW 3.4. 끌고 다니는 미리보기 창이 아래 창의 마우스를 가리지 않게 합니다.
+    if (window) glfwSetWindowAttrib(window, GLFW_MOUSE_PASSTHROUGH, enabled ? GLFW_TRUE : GLFW_FALSE);
 }
 
 void GlfwWindow::getFramebufferSize(int& w, int& h) const {
@@ -225,7 +303,7 @@ void GlfwWindow::mouseButtonCallback(GLFWwindow* w, int button, int action, int 
 }
 
 void GlfwWindow::activateCameraMode() {
-    if (cameraMode_) return;
+    if (cameraMode_ || aux_) return;   // 보조 창에는 3D 뷰포트가 없습니다.
     cameraMode_    = true;
     rFirstMouse    = true;
     capturedMouseX = lastMouseX;
@@ -483,6 +561,7 @@ void GlfwWindow::applyImeRect() {
 // GLFW 표준 매핑(SDL 게임 컨트롤러 DB)으로 읽습니다. 쓰던 패드가 붙어 있는 동안은 그대로, 빠지면 번호가 가장 작은 패드로 넘어갑니다.
 bool GlfwWindow::readGamepad(HGamepadState& out) {
     out = {};
+    if (aux_) return false;   // 게임패드는 메인 창이 읽습니다(보조 창이 읽으면 연결 로그가 겹침).
     bool isPad[hgamepad::kMaxPads] = {};
     for (int j = 0; j < hgamepad::kMaxPads; ++j) isPad[j] = glfwJoystickIsGamepad(GLFW_JOYSTICK_1 + j) == GLFW_TRUE;
     const int jid = hgamepad::pick(padJid_, isPad);

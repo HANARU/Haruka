@@ -23,11 +23,11 @@ public:
     std::shared_ptr<SCollapseSection> title(std::string t)
         { title_ = std::move(t); return self(); }
     std::shared_ptr<SCollapseSection> body(std::shared_ptr<HWidget> w)
-        { body_ = std::move(w); return self(); }
+        { hslate::noteLayoutChange(); body_ = std::move(w); return self(); }
     std::shared_ptr<SCollapseSection> expanded(bool e)
-        { expanded_ = e; return self(); }
+        { if (expanded_ != e) hslate::noteLayoutChange(); expanded_ = e; return self(); }
     std::shared_ptr<SCollapseSection> headerHeight(float h)
-        { headerH_ = h; return self(); }
+        { hslate::noteLayoutChange(); headerH_ = h; return self(); }
     std::shared_ptr<SCollapseSection> fontSize(float f)
         { fontSize_ = f; return self(); }
     std::shared_ptr<SCollapseSection> style(const Style& s)
@@ -42,7 +42,7 @@ public:
     glm::vec2 computeDesiredSize() override {
         float h = headerH_;
         if (expanded_ && body_)
-            h += body_->computeDesiredSize().y;
+            h += body_->desiredSize().y;
         return { 0.f, h };
     }
 
@@ -102,6 +102,7 @@ public:
             } else if (hdrArmed_) {
                 hdrArmed_ = false;
                 expanded_ = !expanded_;
+                hslate::noteLayoutChange();
                 if (onToggle_) onToggle_(expanded_);
             }
             return HReply::Handled();
@@ -122,6 +123,12 @@ public:
         if (expanded_ && body_ && body_->cachedGeometry().contains(e.position))
             return body_->onScroll(e);
         return HReply::Unhandled();
+    }
+
+    // 펼쳐져 있을 때만 body 를 넘깁니다(H1a-1). 접힌 body 는 배치 · 그리기에 들어가지 않아
+    // geometry 가 낡았기 때문입니다.
+    void forEachChild(const std::function<void(const std::shared_ptr<HWidget>&)>& fn) override {
+        if (expanded_ && body_) fn(body_);
     }
 
 private:

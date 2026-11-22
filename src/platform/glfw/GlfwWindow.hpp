@@ -7,7 +7,8 @@
 
 class GlfwWindow : public IWindow {
 public:
-    GlfwWindow(uint32_t width, uint32_t height, const std::string& title, bool hidden = false);
+    // aux = 보조 창(createAuxWindow, H0): 3D 뷰포트가 없는 UI 창이라 카메라 모드와 게임패드를 쓰지 않습니다.
+    GlfwWindow(uint32_t width, uint32_t height, const std::string& title, bool hidden = false, bool aux = false);
     ~GlfwWindow() override;
 
     void init() override;
@@ -15,6 +16,9 @@ public:
 
     bool shouldClose() const override;
     void setShouldClose(bool close) override;
+    // 둘 다 GlfwPlatform::pumpEvents 를 부릅니다. 등록된 모든 창의 걸쇠를 비우고 모든 창의 이벤트를 받으므로, 창이 여럿이어도
+    // 프레임마다 한 창(메인)에서 한 번만 부릅니다. 보조 창의 pollEvents 를 또 부르면 펌프가 두 번 돌아, 앞 펌프에서 걸린
+    // 누름(한 프레임 안의 누름 · 뗌, DEF-82)과 반복 횟수(DEF-58)가 읽히기 전에 지워집니다.
     void pollEvents() override;
     void waitEvents() override;
     
@@ -23,6 +27,17 @@ public:
     void setTitle(const std::string& title) override;
     bool wasResized() const override;
     void resetResizedFlag() override;
+
+    // 창 관리(H0). 숨은 창도 OS 창은 있으므로 위치 · 크기 · 배율은 실제 값입니다.
+    bool  getWindowPos(int& x, int& y) const override;
+    void  setWindowPos(int x, int y) override;
+    void  setWindowSize(int w, int h) override;
+    float contentScale() const override;
+    bool  isFocused() const override;
+    void  focus() override;
+    void  show(bool visible) override;
+    bool  isIconified() const override;
+    void  setMousePassthrough(bool enabled) override;
 
     bool providesSurface() const override { return true; }
     VkSurfaceKHR createSurface(VkInstance instance) override;
@@ -56,6 +71,10 @@ public:
     bool readGamepad(HGamepadState& out) override;
 
 private:
+    friend class GlfwPlatform;
+    // 걸쇠 · 누름 횟수를 비웁니다. GlfwPlatform::pumpEvents 가 glfwPollEvents 직전에 모든 창에 대해 부릅니다.
+    void clearInputLatches();
+
     static void framebufferResizeCallback(GLFWwindow* w, int width, int height);
     static void keyCallback(GLFWwindow* w, int key, int scancode, int action, int mods);
     static void mouseButtonCallback(GLFWwindow* w, int button, int action, int mods);
@@ -67,6 +86,8 @@ private:
     uint32_t height;
     std::string title;
     bool hidden_ = false;
+    bool aux_    = false;
+    bool platformAcquired_ = false;   // GlfwPlatform::acquire 가 성공했고 아직 release 하지 않음
     int  padJid_ = -1;   // 지금 쓰는 게임패드의 GLFW 조이스틱 번호(D2), 없으면 -1
 
     GLFWwindow* window  = nullptr;
@@ -114,4 +135,7 @@ private:
     GLFWcursor* cursorArrow_   = nullptr;
     GLFWcursor* cursorHResize_ = nullptr;
     GLFWcursor* cursorVResize_ = nullptr;
+    GLFWcursor* cursorMove_    = nullptr;   // 3: 탭을 놓으면 새 창(M4)
+    GLFWcursor* cursorNo_      = nullptr;   // 4: 놓아도 거부(M4)
+    int         capturedShape_ = 0;         // 커서를 잡아 둔 동안 OS 커서에 직접 넣은 끌기 모양(0 = 없음)
 };

@@ -20,7 +20,7 @@ public:
     };
 
     std::shared_ptr<SToggleButton> content(std::shared_ptr<HWidget> w)
-        { child_ = std::move(w); return self(); }
+        { hslate::noteLayoutChange(); child_ = std::move(w); return self(); }
     std::shared_ptr<SToggleButton> onClick(ClickFn fn)
         { onClick_ = std::move(fn); return self(); }
     std::shared_ptr<SToggleButton> isActive(IsActiveFn fn)
@@ -31,10 +31,10 @@ public:
     std::shared_ptr<SToggleButton> activeColor (glm::vec4 c) { style_.active    = c; return self(); }
     std::shared_ptr<SToggleButton> activeBarColor(glm::vec4 c) { style_.activeBar = c; return self(); }
     std::shared_ptr<SToggleButton> cornerRadius  (float     r) { style_.cornerRadius = r; return self(); }
-    std::shared_ptr<SToggleButton> padding     (HPadding  p) { pad_     = p; return self(); }
+    std::shared_ptr<SToggleButton> padding     (HPadding  p) { hslate::noteLayoutChange(); pad_     = p; return self(); }
 
     glm::vec2 computeDesiredSize() override {
-        glm::vec2 cd = child_ ? child_->computeDesiredSize() : glm::vec2(0.f);
+        glm::vec2 cd = child_ ? child_->desiredSize() : glm::vec2(0.f);
         return { cd.x + pad_.totalH(), cd.y + pad_.totalV() };
     }
 
@@ -95,6 +95,11 @@ public:
         isHovered_ = enabled.get() && cachedGeo_.contains(e.position);
         if (!e.down || !enabled.get()) armed_ = false;   // 눌린 채 리빌드되어 남은 상태를 정리
         return HReply::Unhandled();
+    }
+
+    // 자식 하나(H1a-1). 그리는 순서 = 이 자식 하나.
+    void forEachChild(const std::function<void(const std::shared_ptr<HWidget>&)>& fn) override {
+        if (child_) fn(child_);
     }
 
 private:

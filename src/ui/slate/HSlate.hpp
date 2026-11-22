@@ -23,3 +23,6 @@
 #include "widgets/SSearchBox.hpp"
 #include "widgets/SEditableText.hpp"
 #include "widgets/SScrollBox.hpp"
+#include "widgets/SMenuAnchor.hpp"
+#include "widgets/SVectorField.hpp"
+#include "widgets/SPropertyRow.hpp"

@@ -36,10 +36,13 @@
 #include "VulkanDeviceHooks.hpp"
 #include "VulkanBaseline.hpp"
 #include "RenderExtensionRegistry.hpp"
+#include "WindowTargetLogic.hpp"
 #include "../core/EngineSettings.hpp"
 
 class HSlateRenderer;
+class HSlateContext;
 struct TexSourceData;
+struct WindowTarget;   // 보조 OS 창 출력 하나(Renderer_window.cpp, 다중 OS 창 M2)
 
 inline const std::vector<const char*> kValidationLayers = {
     "VK_LAYER_KHRONOS_validation"
@@ -79,6 +82,12 @@ public:
     // 없어 거른 것과 상한을 넘어 뺀 것입니다(DEF-33).
     struct FrameStats  { uint32_t drawCalls=0, instances=0, culled=0, transparentDraws=0, dropped=0,
                          lights=0, lightsTotal=0; };
+
+    // 보조 창 목록(WindowTarget)이 불완전 형이라 생성 · 소멸을 Renderer_window.cpp 에 둡니다.
+    Renderer();
+    ~Renderer();
+    Renderer(const Renderer&)            = delete;
+    Renderer& operator=(const Renderer&) = delete;
 
     // deviceHooks 가 있으면 Vulkan 인스턴스 · 장치를 그쪽(OpenXR)에 맡깁니다. 헤드셋이 고른 GPU 가
     // 창에 그릴 수 없으면 직접 고르고 xrCompatible() 이 false 가 됩니다.
@@ -188,6 +197,38 @@ public:
     VkFormat getSwapFormat() const { return swapchain_->format(); }
 
     void setUIRenderer(HSlateRenderer* r);
+
+    // ── 보조 OS 창 출력 (다중 OS 창 M2, 2026-11-21, Docs/Editor_MultiWindow_Design.md D2 · D3) ─────────────
+    // 3D 화면 없이 HSlate UI 만 그리는 창입니다. 메인 창 경로(swapchain_)는 그대로이고, 보조 창은 이 목록으로 따로 다룹니다.
+    // 목록이 비어 있으면 drawFrame 의 보조 창 코드는 모두 건너뜁니다(게임 실행 파일 · Android · 창 없는 실행 · XR 은 늘 비어 있음).
+    // 에디터만 부릅니다. 그리기는 setUIRenderer 로 받은 HSlateRenderer(글꼴 아틀라스 · 정점 버퍼 · 파이프라인 공유)가 합니다.
+    //  - 프레임 펜스 · 제출은 메인과 하나를 같이 씁니다. 창마다 acquire 세마포어(슬롯별) · 표시 세마포어 · 이미지별 펜스를 둡니다.
+    //  - acquire 는 타임아웃 0 입니다. 준비된 이미지가 없으면 그 창은 그 프레임을 건너뜁니다(메인 루프를 그 창 주사율에 묶지 않음).
+    //  - 표시 방식은 MAILBOX → IMMEDIATE → FIFO, 표시는 창마다 따로(메인 먼저), 실패하면 그 창만 다시 만듭니다.
+    //  - 그리기 목록 해시가 직전에 표시한 것과 같으면 acquire · 기록 · 표시를 모두 건너뜁니다. 최소화한 창도 건너뜁니다.
+    //  - 크기가 바뀌면 그 창의 스왑체인 · UI 프레임버퍼만 다시 만듭니다(장치 대기). 메인 recreateSwapChain 은 쓰지 않습니다.
+    // 표면이 메인 표시 큐 패밀리로 표시할 수 없거나, 스왑체인 형식이 UI 렌더러 형식과 다르면 만들지 않고 경고한 뒤 0 을
+    // 돌려줍니다. 창 없는 실행 · UI 렌더러가 없을 때도 0 입니다.
+    uint32_t addWindowTarget(IWindow* win);
+    uint32_t windowTargetCount() const;
+    // 장치가 쉬기를 기다린 뒤 프레임버퍼 · 세마포어 → 스왑체인 → 표면 순으로 없앱니다. OS 창(IWindow)은 부른 쪽이 **그 뒤에**
+    // 없앱니다(표면이 창보다 먼저 사라져야 함). 이벤트 펌프 밖(프레임 사이)에서 부릅니다. 없는 번호는 무시합니다.
+    void     removeWindowTarget(uint32_t id);
+    // 그릴 문맥. nullptr 이면 그 창은 그리지 않습니다(이미 표시한 화면이 남음). 문맥은 창보다 오래 살아야 합니다.
+    void     setWindowUi(uint32_t id, HSlateContext* ctx);
+    // 해시가 같아도 다음 프레임에 다시 그리게 합니다(예: 창이 가려졌다 드러남을 OS 가 알려 줄 때).
+    void     requestWindowRedraw(uint32_t id);
+    struct WindowTargetStats {
+        uint64_t presented = 0;          // 표시 요청이 받아들여진 횟수
+        uint64_t acquired  = 0;          // 이미지를 받은 횟수
+        uint64_t skippedUnchanged = 0;   // 해시가 같아 건너뜀
+        uint64_t skippedNotReady  = 0;   // 타임아웃 0 acquire 가 이미지를 못 받음
+        uint64_t skippedNoArea    = 0;   // 최소화
+        uint64_t recreated        = 0;   // 스왑체인을 다시 만든 횟수(처음 만들기 제외)
+        uint64_t budgetCleared    = 0;   // 정점 예산 때문에 지우기만 함
+    };
+    // 없는 번호면 모두 0 입니다.
+    WindowTargetStats windowTargetStats(uint32_t id) const;
 
     // ── 월드 UI 패널 출력 (3D UI P1a, UIPanelPass.hpp) ─────────────────────────
     // 월드의 UIPanelComponent 는 렌더러가 프레임마다 모아 텍스처를 맞추고 그립니다(gatherUIPanels). 아래는 그 밖의
@@ -472,6 +513,30 @@ private:
 
     // ── UI overlay ────────────────────────────────────────────────────────────
     HSlateRenderer* uiRenderer_ = nullptr;
+
+    // ── 보조 OS 창 (다중 OS 창 M2, Renderer_window.cpp) ───────────────────────────
+    std::vector<std::unique_ptr<WindowTarget>> windowTargets_;
+    uint32_t nextWindowTargetId_ = 1;
+    // 프레임마다 다시 쓰는 제출 세마포어 목록(메인 + acquire 한 보조 창, 할당은 처음 몇 프레임만).
+    hwin::SubmitSemaphores submitSems_;
+    WindowTarget* findWindowTarget(uint32_t id) const;
+    // 스왑체인 만들기 · 다시 만들기(장치 대기 포함). 실패하면 그 창을 멈추고(failed) false.
+    bool rebuildWindowTarget(WindowTarget& t, bool first);
+    void destroyWindowTarget(WindowTarget& t);
+    void destroyWindowFramebuffers(WindowTarget& t);
+    bool buildWindowFramebuffers(WindowTarget& t);
+    // drawFrame 안에서: 메인 acquire 뒤 · 프레임 펜스 리셋 전에 창마다 그리기 목록 → 해시 → acquire(타임아웃 0) → 이미지 펜스 대기.
+    void prepareWindowTargets(uint32_t fi, VkFence frameFence);
+    // UI 기록 자리에서: acquire 한 창을 그 창 프레임버퍼에 기록합니다(아틀라스는 그 전에 한 번 올림).
+    void recordWindowTargets(VkCommandBuffer cmd, uint32_t fi);
+    // 제출 뒤: acquire 한 창을 하나씩 표시합니다(메인 표시 뒤).
+    void presentWindowTargets();
+    bool anyWindowAcquired() const;
+    // 멈추지 않았고 · 문맥이 있고 · 넓이가 있는 보조 창이 있는지(메인이 최소화된 프레임의 판정, M3a).
+    bool anyWindowDrawable() const;
+    // 메인 창이 최소화된 비 XR 프레임: 3D · 메인 UI 없이 보조 창 UI 만 기록 · 제출 · 표시합니다(M3a). 받은 창이 없으면 프레임 펜스를
+    // 리셋하지 않고 돌아갑니다(다음 프레임이 같은 슬롯을 그대로 씀).
+    void drawAuxOnlyFrame();
 
     // ── 월드 UI 패널 (3D UI P1a) ──────────────────────────────────────────────
     UIPanelPass     panels_;

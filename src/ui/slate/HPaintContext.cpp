@@ -43,6 +43,22 @@ void HPaintContext::drawRoundedRect(const HGeometry& geo, glm::vec4 color, float
     elements.push_back(e);
 }
 
+void HPaintContext::drawGradientRect(const HGeometry& geo, glm::vec4 topLeft, glm::vec4 topRight,
+                                     glm::vec4 bottomRight, glm::vec4 bottomLeft) {
+    HDrawElement e;
+    e.type      = HDrawElement::Type::Rect;
+    e.rect      = {geo.position.x, geo.position.y, geo.size.x, geo.size.y};
+    e.color     = (topLeft + topRight + bottomRight + bottomLeft) * 0.25f;   // 덤프 · 배치 판정용 평균
+    e.gradient  = true;
+    e.corner[0] = topLeft;
+    e.corner[1] = topRight;
+    e.corner[2] = bottomRight;
+    e.corner[3] = bottomLeft;
+    e.layer     = layerBase_;
+    applyClip(e);
+    elements.push_back(e);
+}
+
 void HPaintContext::drawShadow(const HGeometry& geo, float radius, glm::vec2 offset,
                                float blur, glm::vec4 color) {
     HDrawElement e;

@@ -17,6 +17,9 @@ public:
 
     glm::vec2 computeDesiredSize() override { return { 0.f, 0.f }; }
 
+    // 입력을 통과시키므로 히트 테스트에서도 빠집니다(H1a-1). 끌기 중 아래 패널이 그대로 걸립니다.
+    bool hitTestVisible() const override { return false; }
+
     void paint(HPaintContext& ctx, const HGeometry& /*geo*/) override {
         if (!active || rect.size.x < 1.f || rect.size.y < 1.f) return;
         ctx.drawRect(rect, fill);

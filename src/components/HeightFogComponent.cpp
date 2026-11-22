@@ -9,19 +9,18 @@ std::vector<PropDesc> HeightFogComponent::buildProps() {
     auto* p = this;
     return {
         makePropFloat("Density", PropColor::Neutral, 0.001f,
-            [p]{ return p->density; }, [p](float v){ p->density = std::clamp(v, 0.f, kMaxDensity); }),
+            [p]{ return p->density; }, [p](float v){ p->density = std::clamp(v, 0.f, kMaxDensity); }).withDefault(0.02f),
         makePropFloat("Height Falloff", PropColor::Neutral, 0.01f,
-            [p]{ return p->heightFalloff; }, [p](float v){ p->heightFalloff = std::clamp(v, 0.001f, kMaxFalloff); }),
-        makePropFloat("Color R", PropColor::Red, 0.01f,
-            [p]{ return p->color.r; }, [p](float v){ p->color.r = std::clamp(v, 0.f, 100.f); }),
-        makePropFloat("Color G", PropColor::Green, 0.01f,
-            [p]{ return p->color.g; }, [p](float v){ p->color.g = std::clamp(v, 0.f, 100.f); }),
-        makePropFloat("Color B", PropColor::Blue, 0.01f,
-            [p]{ return p->color.b; }, [p](float v){ p->color.b = std::clamp(v, 0.f, 100.f); }),
+            [p]{ return p->heightFalloff; }, [p](float v){ p->heightFalloff = std::clamp(v, 0.001f, kMaxFalloff); }).withDefault(0.2f),
+        // 안개 색(선형 HDR, 0 ~ 100, H3a 에서 색 칸 하나로).
+        makePropColor("Color",
+            [p]{ return glm::vec4(p->color, 1.f); },
+            [p](const glm::vec4& v){ p->color = glm::clamp(glm::vec3(v), glm::vec3(0.f), glm::vec3(100.f)); },
+            false, false, 0.01f, PropUnit::Scalar).withDefault(glm::vec3(0.45f, 0.52f, 0.6f)),
         makePropFloat("Start Distance", PropColor::Neutral, 0.1f,
-            [p]{ return p->startDistance; }, [p](float v){ p->startDistance = std::max(0.f, v); }, PropUnit::Size),
+            [p]{ return p->startDistance; }, [p](float v){ p->startDistance = std::max(0.f, v); }, PropUnit::Size).withDefault(0.f),
         makePropFloat("Max Opacity", PropColor::Neutral, 0.01f,
-            [p]{ return p->maxOpacity; }, [p](float v){ p->maxOpacity = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio),
+            [p]{ return p->maxOpacity; }, [p](float v){ p->maxOpacity = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio).withDefault(1.f),
     };
 }
 

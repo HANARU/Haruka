@@ -78,6 +78,17 @@ const char* kindFallback(AssetKind k) {
     }
 }
 
+} // namespace
+
+// 디테일 에셋 칸 · 고르기 팝업(H3b)도 같은 종류 아이콘 · 색을 씁니다.
+namespace hcbui {
+glm::vec4   kindColor(hcb::AssetKind k)    { return ::kindColor(k); }
+const char* kindIcon(hcb::AssetKind k)     { return ::kindIcon(k); }
+const char* kindFallback(hcb::AssetKind k) { return ::kindFallback(k); }
+} // namespace hcbui
+
+namespace {
+
 // 콘텐츠 브라우저에서 소리 파일을 지정(2026-10-15). setFile 이 이전 소리를 놓아 주므로 값 문자열을 다시 읽는
 // 일반 경로(readField) 대신 이것으로 되돌립니다. 액터는 ID 로 찾습니다(EditorCommands.hpp 머리말).
 struct AudioFileCmd : ICommand {
@@ -135,8 +146,9 @@ void ContentBrowserPanel::buildTab(SVerticalBox& content) {
     toolbarHost_ = HNew(SBorder)->background(EditorTheme::transparent)->padding(HPadding{ s(4.f), s(3.f) });
     filterHost_  = HNew(SBorder)->background(EditorTheme::transparent)->padding(HPadding{ s(6.f), s(2.f) });
 
-    searchBox_ = HNew(SSearchBox);
-    searchBox_->style(EditorUiKit::searchBoxStyle(s(1.f)))
+    searchBox_ = HReuse(searchBoxKeep_);
+    searchBox_->focusable(true)
+        ->style(EditorUiKit::searchBoxStyle(s(1.f)))
         ->placeholder(HTEXT("Editor.Content", "SearchHint", "Search assets...").toString())
         ->edit(&searchEdit_)
         ->focused([this] { return searchFocused_; })
@@ -513,44 +525,47 @@ void ContentBrowserPanel::copyPath(const std::string& path) {
     if (deps_.logCat) HLOG(*deps_.logCat, Log) << "Copied path: " << path;
 }
 
-std::vector<EditorContextMenu::Item> ContentBrowserPanel::contextItems(const std::string& path) {
-    using Item = EditorContextMenu::Item;
-    std::vector<Item> items;
+std::vector<EditorMenuEntry> ContentBrowserPanel::contextItems(const std::string& path) {
+    // H2b: 메뉴 모델(EditorMenuEntry). 항목은 그 자리 경로에 묶인 동작이고, 예전 "이 항목 위에 구분선" 은 구분선 항목입니다.
+    using E = EditorMenuEntry;
+    std::vector<E> items;
     if (path.empty()) {
         const std::string f = folder_;
-        items.push_back({ HTEXT("Editor.Content", "Menu.ShowFolder", "Show in Explorer").toString(), [this, f] { showInExplorer(f); } });
-        items.push_back({ HTEXT("Editor.Content", "Menu.Refresh", "Refresh").toString(), [this] { scanAll(); } });
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.ShowFolder", "Show in Explorer").toString(), [this, f] { showInExplorer(f); }));
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.Refresh", "Refresh").toString(), [this] { scanAll(); }));
         return items;
     }
     if (index_.hasFolder(path)) {
-        items.push_back({ HTEXT("Editor.Content", "Menu.OpenFolder", "Open").toString(), [this, path] { navigate(path); } });
-        items.push_back({ HTEXT("Editor.Content", "Menu.ShowInExplorer", "Show in Explorer").toString(), [this, path] { showInExplorer(path); }, true, true });
-        items.push_back({ HTEXT("Editor.Content", "Menu.CopyPath", "Copy Path").toString(), [this, path] { copyPath(path); } });
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.OpenFolder", "Open").toString(), [this, path] { navigate(path); }));
+        items.push_back(E::separator());
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.ShowInExplorer", "Show in Explorer").toString(), [this, path] { showInExplorer(path); }));
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.CopyPath", "Copy Path").toString(), [this, path] { copyPath(path); }));
         return items;
     }
     const hcb::Item* it = index_.find(path);
     if (!it) return items;
     switch (it->kind) {
         case AssetKind::Scene:
-            items.push_back({ HTEXT("Editor.Content", "Menu.OpenScene", "Open Scene").toString(), [this, path] { activate(path); } });
+            items.push_back(E::act(HTEXT("Editor.Content", "Menu.OpenScene", "Open Scene").toString(), [this, path] { activate(path); }));
             break;
         case AssetKind::Model:
         case AssetKind::Prefab:
-            items.push_back({ HTEXT("Editor.Content", "Menu.Place", "Place in Scene").toString(), [this, path] { activate(path); } });
+            items.push_back(E::act(HTEXT("Editor.Content", "Menu.Place", "Place in Scene").toString(), [this, path] { activate(path); }));
             break;
         case AssetKind::Audio:
         case AssetKind::Cue: {
-            items.push_back({ HTEXT("Editor.Content", "Menu.Play", "Play").toString(), [this, path] { activate(path); } });
+            items.push_back(E::act(HTEXT("Editor.Content", "Menu.Play", "Play").toString(), [this, path] { activate(path); }));
             const bool canAssign = deps_.ctx && deps_.ctx->selected && !(deps_.isEditorCam && deps_.isEditorCam(deps_.ctx->selected));
-            items.push_back({ HTEXT("Editor.Content", "Menu.Assign", "Assign to Selected Actor").toString(), [this, path] { assignSound(path); }, canAssign });
+            items.push_back(E::act(HTEXT("Editor.Content", "Menu.Assign", "Assign to Selected Actor").toString(), [this, path] { assignSound(path); }, canAssign));
             break;
         }
         default: break;
     }
-    items.push_back({ HTEXT("Editor.Content", "Menu.AssetActions", "References, Rename, Move...").toString(),
-                      [this, path] { if (deps_.onAssetActions) deps_.onAssetActions(path); }, true, !items.empty() });
-    items.push_back({ HTEXT("Editor.Content", "Menu.ShowInExplorer", "Show in Explorer").toString(), [this, path] { showInExplorer(path); } });
-    items.push_back({ HTEXT("Editor.Content", "Menu.CopyPath", "Copy Path").toString(), [this, path] { copyPath(path); } });
+    if (!items.empty()) items.push_back(E::separator());
+    items.push_back(E::act(HTEXT("Editor.Content", "Menu.AssetActions", "References, Rename, Move...").toString(),
+                           [this, path] { if (deps_.onAssetActions) deps_.onAssetActions(path); }));
+    items.push_back(E::act(HTEXT("Editor.Content", "Menu.ShowInExplorer", "Show in Explorer").toString(), [this, path] { showInExplorer(path); }));
+    items.push_back(E::act(HTEXT("Editor.Content", "Menu.CopyPath", "Copy Path").toString(), [this, path] { copyPath(path); }));
     return items;
 }
 

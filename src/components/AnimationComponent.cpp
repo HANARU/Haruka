@@ -322,13 +322,13 @@ std::vector<PropDesc> AnimationComponent::buildProps() {
             if (i >= 0 && i < (int)p->optionNames_.size()) p->clip = p->optionNames_[(size_t)i];
             p->applyPreview();
         }));
-    props.push_back(XPROP_Toggle(p, "Auto Play", autoPlay));
-    props.push_back(XPROP_Toggle(p, "Loop", loop));
-    props.push_back(XPROP_Float(p, "Speed", PropColor::Neutral, 0.01f, speed));
-    props.push_back(XPROP_Toggle(p, "Root Motion", rootMotion));
+    props.push_back(XPROP_Toggle(p, "Auto Play", autoPlay).withDefault(true));
+    props.push_back(XPROP_Toggle(p, "Loop", loop).withDefault(true));
+    props.push_back(XPROP_Float(p, "Speed", PropColor::Neutral, 0.01f, speed).withDefault(1.f));
+    props.push_back(XPROP_Toggle(p, "Root Motion", rootMotion).withDefault(false));
     props.push_back(makePropFloat("Preview Time", PropColor::Neutral, 0.01f,
         [p] { return p->previewTime; },
-        [p](float v) { p->previewTime = std::max(0.f, v); p->applyPreview(); }));
+        [p](float v) { p->previewTime = std::max(0.f, v); p->applyPreview(); }).withDefault(0.f));
     return props;
 }
 

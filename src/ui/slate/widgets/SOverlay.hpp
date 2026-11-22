@@ -17,6 +17,7 @@ public:
                                        EHAlign ha = EHAlign::Fill,
                                        EVAlign va = EVAlign::Fill,
                                        HPadding pad = {}) {
+        hslate::noteLayoutChange();
         slots_.push_back({ std::move(w), ha, va, pad });
         return std::static_pointer_cast<SOverlay>(shared_from_this());
     }
@@ -24,7 +25,7 @@ public:
     glm::vec2 computeDesiredSize() override {
         glm::vec2 maxSize{ 0.f, 0.f };
         for (auto& s : slots_) {
-            glm::vec2 d = s.widget->computeDesiredSize();
+            glm::vec2 d = s.widget->desiredSize();
             maxSize.x = std::max(maxSize.x, d.x + s.padding.totalH());
             maxSize.y = std::max(maxSize.y, d.y + s.padding.totalV());
         }
@@ -35,7 +36,7 @@ public:
         cachedGeo_ = allotted;
         for (auto& s : slots_) {
             HGeometry inner = allotted.deflate(s.padding);
-            glm::vec2 childSize = s.widget->computeDesiredSize();
+            glm::vec2 childSize = s.widget->desiredSize();
             float cx = inner.alignH(childSize.x, s.hAlign);
             float cy = inner.alignV(childSize.y, s.vAlign);
             float cw = (s.hAlign == EHAlign::Fill) ? inner.size.x : childSize.x;
@@ -87,6 +88,12 @@ public:
                 if (auto r = slots_[i].widget->onScroll(e); r.handled) return r;
         }
         return HReply::Unhandled();
+    }
+
+    // 슬롯을 그리는 순서(앞 슬롯 먼저)대로 넘깁니다(H1a-1).
+    void forEachChild(const std::function<void(const std::shared_ptr<HWidget>&)>& fn) override {
+        for (auto& s : slots_)
+            if (s.widget) fn(s.widget);
     }
 
 private:

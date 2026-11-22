@@ -120,6 +120,9 @@ inline constexpr glm::vec4 badgePrefab   = axisY;
 inline constexpr glm::vec4 prefabInstance = badgePrefab;
 inline constexpr glm::vec4 prefabOverride = accentHover;
 inline constexpr glm::vec4 logCategory   = srgb(0x8CA6C8);   // 로그 카테고리 열
+// 디테일 속성 행(H3a): 포인터가 올라간 행 바탕 · 기본값 되돌리기 화살표(UE 의 노란 화살표).
+inline constexpr glm::vec4 propertyRowHover = srgb(0x262628);
+inline constexpr glm::vec4 resetArrow       = warn;
 
 // ── D2 모서리 · 테두리 · 그림자 토큰 (1x 기준 px, UI 배율 s() 를 곱해 사용) ────
 inline constexpr float     radiusInput   = 2.f;

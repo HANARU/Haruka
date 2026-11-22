@@ -975,13 +975,19 @@ void Engine::tickFrame(FrameState& f) {
     if (!f.minimized) {
         HPROF_SCOPE("Frontend.Tick");
         frontend_->tick(f.dt);
+    } else {
+        // 최소화 중에도 떠 있는 에디터 창은 보이므로, 그 창의 닫기 · 생성 · 파괴는 계속 처리합니다(M3a). 그리기는 렌더러가 보조 창만
+        // 그리는 프레임으로 합니다(hwin::chooseDesktopFrame).
+        frontend_->tickWhileMinimized(f.dt);
     }
     // 디버그 선은 한 프레임용입니다. 에디터는 tick 에서 앞 프레임의 선을 가져가 그리므로, 그 뒤 · 월드 틱 전에
     // 비웁니다. 예전에는 에디터만 비워, 에디터가 없거나(게임 실행 파일) 최소화로 에디터 tick 을 건너뛰면 선이
     // 끝없이 쌓였습니다(2026-10-19).
     hdebug::lines().clear();
     nav_.drawDebug();   // nav.debug 가 켜졌을 때만 선을 더함(에디터 뷰포트가 그림)
-    HInputSystem::get().update(f.dt, *window_, frontend_->isTextInputActive());
+    // 글 입력 중이거나(DEF-67) 앞단이 게임 입력을 막으면(D7: Play 중 떠 있는 에디터 창에 포커스) 키를 모두 뗀 것으로 봅니다.
+    const bool gameInputBlocked = frontend_->blocksGameInput();
+    HInputSystem::get().update(f.dt, *window_, frontend_->isTextInputActive() || gameInputBlocked);
     if (f.playing) {
         {
             ScopedCpuTimer tw(gFrameTimings().worldTick);
@@ -1007,7 +1013,7 @@ void Engine::tickFrame(FrameState& f) {
         HPROF_SCOPE("WorldUi.Pointers");
         const bool xrLiveNow = xr_ && xr_->hasSession();
         WorldUiDriver::PointerInput pin;
-        pin.mouseActive = f.playing && !f.minimized && !headless_ && !xrLiveNow;
+        pin.mouseActive = f.playing && !f.minimized && !headless_ && !xrLiveNow && !gameInputBlocked;
         pin.xrActive    = f.playing && xrLiveNow;
         pin.mx = f.mx; pin.my = f.my; pin.lmb = f.lmb; pin.winW = f.winW; pin.winH = f.winH; pin.dt = f.dt;
         worldUi_.updatePointers(*frontend_, world_, physics_, *renderer_, pin);

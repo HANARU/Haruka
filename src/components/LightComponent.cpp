@@ -37,51 +37,49 @@ std::vector<PropDesc> LightComponent::buildProps() {
     // 새 타입에 맞춰 다시 구성됩니다(UE 처럼 무관한 필드는 숨김).
     props.push_back(makePropEnum("Type", {"Directional", "Point", "Spot"},
         [p]{ return (int)p->lightType; },
-        [p](int v){ p->lightType = static_cast<LightType>(v); }));
+        [p](int v){ p->lightType = static_cast<LightType>(v); }).withDefault(LightType::Directional));
 
     props.push_back(makePropFloat("Intensity", PropColor::Neutral, 0.01f,
         [p]{ return p->intensity; },
-        [p](float v){ p->intensity = std::max(0.f, v); }, PropUnit::Size));
+        [p](float v){ p->intensity = std::max(0.f, v); }, PropUnit::Size).withDefault(3.f));
 
-    props.push_back(makePropFloat("R", PropColor::Red,   0.01f,
-        [p]{ return p->color.r; }, [p](float v){ p->color.r = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
-    props.push_back(makePropFloat("G", PropColor::Green, 0.01f,
-        [p]{ return p->color.g; }, [p](float v){ p->color.g = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
-    props.push_back(makePropFloat("B", PropColor::Blue,  0.01f,
-        [p]{ return p->color.b; }, [p](float v){ p->color.b = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+    // 색(선형 RGB 틴트, H3a 에서 R · G · B 세 칸을 색 칸 하나로).
+    props.push_back(makePropColor("Color",
+        [p]{ return glm::vec4(p->color, 1.f); },
+        [p](const glm::vec4& v){ p->color = glm::clamp(glm::vec3(v), glm::vec3(0.f), glm::vec3(1.f)); }).withDefault(glm::vec3(1.f)));
 
     // 색온도: 토글이 켜졌을 때만 Kelvin 행을 노출(addBoolRow 도 변경 시 재구성).
     props.push_back(makePropToggle("Use Temperature",
-        [p]{ return p->useTemperature; }, [p](bool v){ p->useTemperature = v; }));
+        [p]{ return p->useTemperature; }, [p](bool v){ p->useTemperature = v; }).withDefault(false));
     if (useTemperature)
         props.push_back(makePropFloat("Temperature", PropColor::Neutral, 50.f,
             [p]{ return p->temperatureK; },
-            [p](float v){ p->temperatureK = std::clamp(v, 1000.f, 15000.f); }));
+            [p](float v){ p->temperatureK = std::clamp(v, 1000.f, 15000.f); }).withDefault(6500.f));
 
     // Attenuation Radius 는 Point/Spot 에서만 의미가 있습니다(방향광은 무한 원거리).
     if (lightType != LightType::Directional)
         props.push_back(makePropFloat("Attenuation Radius", PropColor::Neutral, 0.1f,
             [p]{ return p->attenuationRadius; },
-            [p](float v){ p->attenuationRadius = std::max(kMinAttenuationRadius, v); }, PropUnit::Size));
+            [p](float v){ p->attenuationRadius = std::max(kMinAttenuationRadius, v); }, PropUnit::Size).withDefault(10.f));
 
     // Cone Angle 은 Spot 전용.
     if (lightType == LightType::Spot) {
         props.push_back(makePropFloat("Inner Cone Angle", PropColor::Neutral, 0.5f,
             [p]{ return p->innerConeAngle; },
-            [p](float v){ p->innerConeAngle = std::clamp(v, 0.f, 89.f); }, PropUnit::Angle));
+            [p](float v){ p->innerConeAngle = std::clamp(v, 0.f, 89.f); }, PropUnit::Angle).withDefault(15.f));
         props.push_back(makePropFloat("Outer Cone Angle", PropColor::Neutral, 0.5f,
             [p]{ return p->outerConeAngle; },
-            [p](float v){ p->outerConeAngle = std::clamp(v, 0.f, 89.f); }, PropUnit::Angle));
+            [p](float v){ p->outerConeAngle = std::clamp(v, 0.f, 89.f); }, PropUnit::Angle).withDefault(30.f));
     }
 
     // Cast Shadows 는 실제로 방향광만 섀도맵을 던지므로 Directional 에서만 노출(오해 방지).
     if (lightType == LightType::Directional)
         props.push_back(makePropToggle("Cast Shadows",
-            [p]{ return p->castShadows; }, [p](bool v){ p->castShadows = v; }));
+            [p]{ return p->castShadows; }, [p](bool v){ p->castShadows = v; }).withDefault(true));
     if (lightType == LightType::Directional)
         props.push_back(makePropFloat("Contact Shadow Length", PropColor::Neutral, 0.01f,
             [p]{ return p->contactShadowLength; },
-            [p](float v){ p->contactShadowLength = std::clamp(v, 0.f, 2.f); }, PropUnit::Size));
+            [p](float v){ p->contactShadowLength = std::clamp(v, 0.f, 2.f); }, PropUnit::Size).withDefault(0.f));
     hchan::addProps(props, &lightChannels);   // 라이트 채널(2026-11-17)
 
     return props;

@@ -7,6 +7,7 @@
 #include "../ui/slate/widgets/SCheckBox.hpp"
 #include "../ui/slate/widgets/SCollapseSection.hpp"
 #include "../ui/slate/widgets/SNumberField.hpp"
+#include "../ui/slate/widgets/SPropertyRow.hpp"
 #include "../ui/slate/widgets/SScrollBox.hpp"
 #include "../ui/slate/widgets/SSearchBox.hpp"
 #include "../ui/slate/widgets/STabBar.hpp"
@@ -56,6 +57,11 @@ public:
     std::shared_ptr<HWidget> icon(const std::string& name, float iconPx, glm::vec4 color,
                                   const std::string& fallback = "", float fallbackFont = 12.f) const;
 
+    // 열거 콤보 단추(H3a, UE 의 SComboBox 닫힌 모양): 왼쪽에 지금 값, 오른쪽에 아래 화살표. 폭은 놓인 자리를 채웁니다.
+    std::shared_ptr<SButton> comboButton(const std::string& text, float fontSize, std::function<void()> onClick) const;
+    // 기본값 되돌리기 화살표(H3a, UE 의 노란 되돌리기 화살표). visible 이 거짓이면 숨김(자리는 행이 늘 비워 둠).
+    std::shared_ptr<SButton> resetArrow(std::function<bool()> visible, std::function<void()> onClick) const;
+
     // 폭을 넘는 텍스트를 ".." 로 줄입니다(이분 탐색 + 폰트 실측).
     std::string ellipsizeText(const std::string& text, float maxPx, float fontPx) const;
     static float       textWidth(const std::string& t, float px);
@@ -94,6 +100,11 @@ public:
             EditorTheme::lineDivider, EditorTheme::borderPopup, EditorTheme::borderThin,
             EditorTheme::radiusInput * scale
         };
+    }
+    // 디테일 속성 행(H3a): hover 바탕 · 열 나눔선 · 끌기 강조 · 끌기 자리 · 이름 열과 값 열 사이.
+    static constexpr SPropertyRow::Style propertyRowStyle(float scale = 1.f) {
+        return { EditorTheme::propertyRowHover, EditorTheme::withAlpha(EditorTheme::lineDivider, 0.6f), EditorTheme::accentHover,
+                 4.f * scale, EditorTheme::space8 * scale };
     }
     static constexpr SCollapseSection::Style collapseSectionStyle() {
         return {

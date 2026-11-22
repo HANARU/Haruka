@@ -79,6 +79,14 @@ public:
     std::shared_ptr<SNumberField> fontSize(float f)       { fontSize_   = f;             return self(); }
     std::shared_ptr<SNumberField> onDragBegin(CallbackFn fn) { beginFn_ = std::move(fn); return self(); }
     std::shared_ptr<SNumberField> onDragEnd  (CallbackFn fn) { endFn_   = std::move(fn); return self(); }
+    // 왼쪽 끝 색 띠(H3a, SVectorField 의 X · Y · Z 성분 표시, UE 의 빨강 · 초록 · 파랑 띠). width 는 배율을 곱한 px, 0 이면 없음.
+    std::shared_ptr<SNumberField> axisBar(glm::vec4 c, float width) { barColor_ = c; barWidth_ = width; return self(); }
+    // 값 글을 칸 안으로 잘라 그립니다(H3a, 좁은 성분 칸에서 긴 수가 옆 칸에 겹치지 않게). 기본은 예전처럼 자르지 않음.
+    std::shared_ptr<SNumberField> clipText(bool on)        { clipText_ = on; return self(); }
+    // 끌기 힌트("< >")를 그리지 않습니다(H3a, 좁은 성분 칸). 기본은 그림.
+    std::shared_ptr<SNumberField> dragHint(bool on)        { dragHint_ = on; return self(); }
+    bool isEditing() const { return editing_; }
+    bool isDraggingValue() const { return isDragging_; }
 
     // ── 인라인 편집 (EditorApp이 키 입력을 라우팅) ────────────────────────────
     static SNumberField* focusedField() { return sFocused_; }
@@ -88,6 +96,9 @@ public:
 
     const std::string& editBuffer() const { return editBuf_; }
 
+    // 아래 onChar(unsigned) 가 HWidget::onChar(const HCharEvent&) 를 가리지 않게 합니다(H1a-1).
+    // 지금 숫자 칸의 글자는 TextInputController 가 onChar(unsigned) 로 넣습니다.
+    using HWidget::onChar;
     void onChar(unsigned int cp) {
         if ((cp >= '0' && cp <= '9') || cp == '.' || cp == '-' || cp == '+') {
             if (selAll_) { editBuf_.clear(); selAll_ = false; }   // 전체 선택 → 교체
@@ -144,23 +155,38 @@ public:
                 ctx.drawBorder(geo, borderCol, bw);
         }
 
+        // 색 띠(H3a). 띠 폭만큼 라벨 · 값이 오른쪽으로 밀립니다.
+        const float barW = (barWidth_ > 0.f) ? std::min(barWidth_, geo.size.x) : 0.f;
+        if (barW > 0.f) {
+            HGeometry bg2;
+            bg2.position = geo.position;
+            bg2.size     = { barW, geo.size.y };
+            bg2.scale    = geo.scale;
+            ctx.drawRect(bg2, barColor_);
+        }
+        if (clipText_) ctx.pushClip(geo);
+        // 자르는 칸(H3a)은 글을 세로 가운데에 둡니다(STextBlock 과 같은 글 높이 = 크기 x 1.2). 예전 칸은 위에서부터 그대로.
+        const float textH = clipText_ ? std::min(geo.size.y, fontSize_ * 1.2f) : geo.size.y;
+        const float textY = geo.position.y + (clipText_ ? (geo.size.y - textH) * 0.5f : 0.f);
+
         // 라벨 폭은 실측 — "FovY"처럼 긴 라벨이 값과 겹치지 않도록
         float labelW = 0.f;
         if (!label_.empty() && ctx.fonts())
             labelW = ctx.fonts()->measureText(label_, fontSize_) + 8.f;
+        labelW += barW;
 
         if (!label_.empty()) {
             HGeometry lg;
-            lg.position = { geo.position.x + 4.f, geo.position.y };
-            lg.size     = { labelW, geo.size.y };
+            lg.position = { geo.position.x + 4.f + barW, textY };
+            lg.size     = { labelW - barW, textH };
             lg.scale    = geo.scale;
             ctx.drawText(lg, label_, fontSize_, hasLabelColor_ ? labelColor_ : style_.labelDefault);
         }
 
         // Value text (편집 중에는 입력 버퍼 + 커서)
         HGeometry vg;
-        vg.position = { geo.position.x + 4.f + labelW, geo.position.y };
-        vg.size     = { geo.size.x - labelW - 8.f, geo.size.y };
+        vg.position = { geo.position.x + 4.f + labelW, textY };
+        vg.size     = { geo.size.x - labelW - 8.f, textH };
         vg.scale    = geo.scale;
         if (editing_) {
             if (selAll_ && !editBuf_.empty()) {
@@ -179,7 +205,7 @@ public:
         }
 
         // 호버 시 드래그 어포던스 (◀ ▶ — 좌우 드래그로 값 변경)
-        if (!editing_ && (isHovered_ || isDragging_)) {
+        if (dragHint_ && !editing_ && (isHovered_ || isDragging_)) {
             float hintW = ctx.fonts() ? ctx.fonts()->measureText("< >", fontSize_) : 18.f;
             HGeometry hg;
             hg.position = { geo.position.x + geo.size.x - hintW - 5.f, geo.position.y };
@@ -187,6 +213,7 @@ public:
             hg.scale    = geo.scale;
             ctx.drawText(hg, "< >", fontSize_, style_.dragHint);
         }
+        if (clipText_) ctx.popClip();
     }
 
     HReply onMouseButton(const HPointerEvent& e) override {
@@ -267,6 +294,10 @@ private:
     glm::vec4   labelColor_    = {0.85f, 0.85f, 0.85f, 1.f};
     bool        hasLabelColor_ = false;
     Style       style_;
+    glm::vec4   barColor_ { 0.f };
+    float       barWidth_  = 0.f;
+    bool        clipText_  = false;
+    bool        dragHint_  = true;
 
     CallbackFn  beginFn_;
     CallbackFn  endFn_;

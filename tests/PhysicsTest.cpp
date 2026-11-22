@@ -57,6 +57,12 @@ void setProp(RigidBodyComponent* rb, const char* label, float v) {
         if (std::string(pd.label) == label && pd.setF) { pd.setF(v); return; }
     std::printf("  (no property '%s')\n", label);
 }
+// 성분 칸(H3a: Half Extent · Center 는 X · Y · Z 세 칸을 하나로 합친 Vec3)의 성분 하나를 디테일 패널처럼 바꿉니다.
+void setPropAxis(RigidBodyComponent* rb, const char* label, int axis, float v) {
+    for (auto& pd : rb->buildProps())
+        if (std::string(pd.label) == label && pd.getV && pd.setV) { glm::vec4 c = pd.getV(); c[axis] = v; pd.setV(c); return; }
+    std::printf("  (no property '%s')\n", label);
+}
 
 // 로컬 바운드만 알리는 시험용 컴포넌트입니다. GPU 메시 없이 바닥 찾기(hxr::floorBelow)를 시험합니다.
 class BoundsOnly : public Component {
@@ -165,7 +171,7 @@ int main() {
         check(before != kNoBody, "상자 바디가 만들어짐");
 
         for (int i = 1; i <= 10; ++i) {          // 숫자 칸 드래그: 세터가 연달아 불림
-            setProp(s.boxRb, "HalfX", 0.5f + 0.01f * (float)i);
+            setPropAxis(s.boxRb, "Half Extent", 0, 0.5f + 0.01f * (float)i);
             run(ps, 1);
         }
         check(s.boxRb->bodyId_ == before, "드래그 동안 바디가 그대로 (재생성 0회)");
@@ -190,6 +196,7 @@ int main() {
         // 프로퍼티 스냅샷 undo 는 모든 실수 세터를 다시 부릅니다(값은 그대로인 것도 포함).
         for (auto& pd : s.boxRb->buildProps())
             if (pd.setF && pd.getF) pd.setF(pd.getF());
+            else if (pd.setV && pd.getV) pd.setV(pd.getV());   // 성분 칸(H3a)도 Undo 는 세터를 다시 부름
         s.boxRb->onPropsCommitted();
         check(s.boxRb->bodyId_ == id, "값이 그대로인 세터 재호출(undo)은 바디를 다시 만들지 않음");
 
@@ -596,7 +603,7 @@ int main() {
         // 편집으로 오프셋을 바꾸면 바디를 다시 만듦
         const uint32_t before = rb->bodyId_;
         for (auto& pd : rb->buildProps())
-            if (std::string(pd.label) == "CenterY" && pd.setF) pd.setF(0.f);
+            if (std::string(pd.label) == "Center" && pd.getV && pd.setV) { glm::vec4 c = pd.getV(); c.y = 0.f; pd.setV(c); }
         rb->onPropsCommitted();
         run(ps, 1);
         PhysicsSystem::RaycastHit hit2;

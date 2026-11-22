@@ -82,6 +82,9 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
     // 글꼴(D4): 엔진 콘텐츠의 Pretendard(보통 · 굵게, OFL). 없으면 아틀라스가 시스템 글꼴로 내려갑니다. 한글 글리프가 들어가도록
     // 에디터 아틀라스는 2048 x 1024 입니다(게임 쪽 3D 패널은 기본 크기).
     slateRenderer_.fontAtlas().setAtlasHeight(1024);
+    // 슬롯 정점 버퍼: 에디터는 메인 오버레이 · 월드 패널 · 보조 OS 창이 한 슬롯 버퍼에 이어 씁니다(다중 OS 창 M2, 근거는
+    // Docs/Editor_MultiWindow_Design.md 6절 M2). 게임 실행 파일의 패널 UI 는 기본 크기 그대로입니다.
+    slateRenderer_.setSlotVertexCapacity(kEditorSlotVerts);
     slateRenderer_.init(renderer.getDevice(), renderer.getPhysDevice(),
                         renderer.getSwapFormat(), renderer.pushDescriptorFn(), beginCmd, endCmd,
                         "/Engine/Fonts/Pretendard-Regular.ttf");
@@ -104,7 +107,8 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
         [this] { return dock_.contains("Viewport"); },
         [this] { return currentFocus() == EFocusTarget::None; },
         [this] { return vpToolbar_.fbRect(); },
-        [this](glm::vec2 p) { return logPanel_.popupContains(p) || componentPicker_.popupContains(p) || contextMenu_.popupContains(p); },
+        // 메인 문맥 팝업 층의 열린 팝업 영역(H2a, 예전 로그 · Add Component · 오른쪽 메뉴 popupContains 셋). 메뉴는 위 isMenusOpen 이 막음.
+        [this](glm::vec2 p) { return slateRenderer_.context().popups().contains(p); },
         [this](const Actor* a) { return isSelected(a); },
         [this](Actor* a) { selectOnly(a); },
         [this](Actor* a) { toggleSelect(a); },
@@ -112,10 +116,13 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
         [this] { beginGroupDrag(); },
         [this] { updateGroupDrag(); },
         [this] { groupDrag_.clear(); },
-        [this](const Transform& before, const Transform& after) { commitGizmoDrag(before, after); }
+        [this](const Transform& before, const Transform& after) { commitGizmoDrag(before, after); },
+        [this] { return menuKeyCapture_; }   // 열린 메뉴가 키를 받는 동안 Q · W · E · R 막기(H2b)
     });
     viewport_.spawnEditorCamera(world);
 
+    // 명령 레지스트리(H2b): 메뉴 · 툴바 · 단축키가 같은 명령 id 를 부릅니다. 패널 · 메뉴를 만들기 전에 정의 · 동작을 채웁니다.
+    registerCommands();
     initPanels();
 
     contentPanel_.scanAll();
@@ -126,13 +133,16 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
     rebuildBottomPanel();
 
     renderer.setUIRenderer(&slateRenderer_);
+    // 떠 있는 도크 창(M3a): 렌더러 대상은 UI 렌더러를 등록한 뒤에만 만들 수 있으므로 여기서 처음 맞춥니다.
+    initFloatWindows();
+    syncFloatWindows();
     hotReloader_.start(happ::inExeDir("shaders").string(), renderer);
     startAssetWatch();
     HLOG(LogEditor, Log) << "Ready. Press Play to run game simulation.";
 }
 
 void EditorApp::initPanels() {
-    dock_.init({
+    EditorDock::Deps dockDeps{
         &ui_, &panelReg_, &LogEditor, &uiLayout_,
         [] { return happ::inWriteRoot("Config/editor_layout.txt").string(); },
         [] { std::error_code ec; fs::create_directories(happ::inWriteRoot("Config"), ec); },
@@ -141,25 +151,43 @@ void EditorApp::initPanels() {
             const EFocusTarget f = currentFocus();
             if ((!outlinerVis && (f == EFocusTarget::Search || f == EFocusTarget::Rename)) ||
                 (!bottomVis   && (f == EFocusTarget::LogSearch || f == EFocusTarget::Console || f == EFocusTarget::ContentSearch)) ||
-                (!detailsVis  && f == EFocusTarget::NumberField))
+                (!detailsVis  && (f == EFocusTarget::NumberField || f == EFocusTarget::TextField)))
                 setTextFocus(EFocusTarget::None);
             if (!bottomVis) logPanel_.closePopup();
-            if (!detailsVis) componentPicker_.close();
-            if (!bottomVis) contextMenu_.close();
+            if (!detailsVis) { componentPicker_.close(); assetPicker_.close(); colorPicker_.confirm(); }
+            // 오른쪽 메뉴 · 콤보는 연 패널이 닫히면 닫습니다(H3a: 디테일 행 메뉴 · 열거 콤보도 이 메뉴).
+            if ((!bottomVis && contextMenu_.panel() == "Bottom") || (!detailsVis && contextMenu_.panel() == "Details"))
+                contextMenu_.close();
+            // 팝업은 그 패널이 있는 창 문맥의 팝업 층에 있습니다(H2a). 패널이 다른 창으로 옮겨 가면 옛 창에 남은 팝업을 닫습니다.
+            closePopupsLeftBehind();
         },
-        [this] { outlinerPanel_.cancelDrag(); }
-    });
-    menus_.init(&ui_, kMenuBarH);
+        [this] { outlinerPanel_.cancelDrag(); },
+        [this](int winId) { raiseWindow(winId); },
+        [this](int floatId, int& x, int& y, int& w, int& h) {
+            hwinplace::Rect r;
+            if (!floatWindows_.readRect(floatId, r)) return false;
+            x = r.x; y = r.y; w = r.w; h = r.h;
+            return true;
+        }
+    };
+    fillDockWindowDeps(dockDeps);   // 창을 넘는 탭 끌기(M4): 화면 자리 · 앞뒤 순서 · 작업 영역 끼우기
+    dock_.init(std::move(dockDeps));
+    menus_.init(&ui_, kMenuBarH, &slateRenderer_.context(), &commands_);
+    // 한 창에서 팝업을 열면 다른 창의 팝업은 닫습니다(H2a, UE 도 메뉴는 한 번에 하나). 떠 있는 창 문맥은 만들 때 같은 훅을 겁니다.
+    slateRenderer_.context().popups().setPushHook([this](HPopupLayer::Handle) { dismissPopupsExcept(0); });
+    // 같은 창 안에서도 루트 팝업은 한 번에 하나입니다(H2b, UE FMenuStack): 새 팝업이 뜨면 그 창의 다른 팝업(과 하위)은 닫힙니다.
+    slateRenderer_.context().popups().setSingleRoot(true);
     toolbar_.init({
         &ui_, &ctx_,
         [this] { return playState_ == EPlayState::Playing; },
         [this] { return playState_ == EPlayState::Paused;  },
-        [this] { beginPlay(); },
-        [this] { if (playState_ != EPlayState::Editor) pausePlay(); },
-        [this] { if (playState_ != EPlayState::Editor) stopPlay();  },
-        [this] { saveScene(); },
-        [this] { openSceneDialog(); },
-        [this] { contentPanel_.scanAll(); rebuildBottomPanel(); }
+        // 툴바 단추도 명령 레지스트리의 같은 명령을 부릅니다(H2b, 모양은 그대로).
+        [this] { commands_.execute("Play.Play"); },
+        [this] { commands_.execute("Play.Pause"); },
+        [this] { commands_.execute("Play.Stop"); },
+        [this] { commands_.execute("File.SaveScene"); },
+        [this] { commands_.execute("File.OpenScene"); },
+        [this] { commands_.execute("Content.Refresh"); }
     });
     vpToolbar_.init({
         &ui_, &ctx_, &gizmoMode_, &worldSpace_, &snap_, &camSpeed_,
@@ -186,13 +214,15 @@ void EditorApp::initPanels() {
         [this] {
             setTextFocus(currentFocus() == EFocusTarget::Search ? EFocusTarget::None
                                                                 : EFocusTarget::Search);
-        }
+        },
+        [this] { textInput_.releaseQuiet(EFocusTarget::Rename); }
     });
-    textInput_.init({
+    // 글 칸 포커스(H1a-2): 어느 칸인가는 에디터 문맥의 HSlate 포커스 위젯이 정본입니다. 누르면 포커스는 끕니다. 에디터는
+    // 입력 순서(바깥 누름으로 포커스 해제 → 팝업 바깥 → … → UI, Docs/Editor_MultiWindow_Design.md 5절)와 위젯의 onClick 으로
+    // 포커스를 정하는데, 히트 경로로 고르는 규칙은 지금 마우스 전달과 다를 수 있기 때문입니다(H1a-1 보고).
+    slateRenderer_.context().setClickToFocus(false);
+    TextInputController::Deps textDeps{
         &ctx_.window,
-        [this] { return outlinerPanel_.renameField(); },
-        [this] { return outlinerPanel_.searchField(); },
-        [this] { return logPanel_.searchField(); },
         [this](glm::vec2 p) { return detailsPanel_.scrollContains(p); },
         [this] { return (bool)modal_; },
         [this] { return dialogFocused_; },
@@ -207,16 +237,36 @@ void EditorApp::initPanels() {
         [this] { triggerModalDefault(); },
         [this] { triggerModalCancel(); },
         [this] { menus_.close(); },
-        [this] { if (!outlinerVisible_) dock_.showPanel("Outliner"); },
+        [this] { bringPanelForward("Outliner", outlinerVisible_); },
         [this] { return editDragActive(); },
-        [this] { deleteSelection(); },
-        [this] { copySelection(); },
-        [this] { pasteClipboard(); },
-        [this] { return logPanel_.consoleField(); },
-        [this] { return componentPicker_.field(); },
-        [this] { return contentPanel_.searchField(); }
-    });
-    detailsPanel_.init({ &ui_, &ctx_, &cmdStack_, &cachedEuler_, &undoSnapshot_,
+        // 포커스 없음일 때의 Delete · Ctrl+C · Ctrl+V 는 메뉴와 같은 명령(H2b).
+        [this] { commands_.execute("Edit.Delete"); },
+        [this] { commands_.execute("Edit.Copy"); },
+        [this] { commands_.execute("Edit.Paste"); },
+        &slateRenderer_.context(),
+        {
+            { EFocusTarget::Rename,        [this] { return outlinerPanel_.renameWidget(); },  [this] { return outlinerPanel_.renameField(); } },
+            { EFocusTarget::Search,        [this] { return outlinerPanel_.searchWidget(); },  [this] { return outlinerPanel_.searchField(); } },
+            { EFocusTarget::LogSearch,     [this] { return logPanel_.searchWidget(); },       [this] { return logPanel_.searchField(); } },
+            { EFocusTarget::Console,       [this] { return logPanel_.consoleWidget(); },      [this] { return logPanel_.consoleField(); } },
+            { EFocusTarget::Picker,        [this] { return componentPicker_.searchWidget(); }, [this] { return componentPicker_.field(); } },
+            { EFocusTarget::ContentSearch, [this] { return contentPanel_.searchWidget(); },   [this] { return contentPanel_.searchField(); } },
+            // 디테일 글 칸(H3a): 이름표 없는 새 글 칸(TextField). 편집 중인 행 하나가 이 칸을 씁니다.
+            { EFocusTarget::TextField,     [this] { return detailsPanel_.stringWidget(); },   [this] { return detailsPanel_.stringField(); } },
+            // H3b: 디테일 속성 검색 칸 · 에셋 고르기 팝업 검색 칸 · 색 선택기 16진수 칸(모두 디테일이 있는 창).
+            { EFocusTarget::TextField,     [this] { return detailsPanel_.searchWidget(); },   [this] { return detailsPanel_.searchField(); } },
+            { EFocusTarget::TextField,     [this] { return assetPicker_.searchWidget(); },    [this] { return assetPicker_.field(); } },
+            { EFocusTarget::TextField,     [this] { return colorPicker_.hexWidget(); },       [this] { return colorPicker_.hexField(); } },
+        }
+    };
+    // 여러 OS 창(M3b): 키보드는 포커스 창에서 읽고, 칸은 그 칸이 있는 창에 키보드가 있을 때만 받습니다.
+    textDeps.keyboardWindow = [this] { return keyboardWindowId(); };
+    textDeps.windowOfFocus  = [this](EFocusTarget t) { return windowOfFocusTarget(t); };
+    textDeps.windowById     = [this](int id) { return windowById(id); };
+    textDeps.windowIds      = [this] { return windowIds(); };
+    textDeps.isKeyboardCaptured = [this] { return menuKeyCapture_; };   // 열린 메뉴가 키를 받음(H2b)
+    textInput_.init(std::move(textDeps));
+    DetailsPanel::Deps detailsDeps{ &ui_, &ctx_, &cmdStack_, &cachedEuler_, &undoSnapshot_,
                          &LogEditor,
                          [this](const std::string& path, const std::string& text) {
                              refreshPrefab(path, text);
@@ -227,11 +277,51 @@ void EditorApp::initPanels() {
                              openActorPicker(title, current, std::move(pick));
                          },
                          [this] { outlinerPanel_.markDirty(); },
-                         [this](Actor* a, const std::shared_ptr<HWidget>& anchor) { componentPicker_.toggle(a, anchor); } });
+                         [this](Actor* a, const std::shared_ptr<HWidget>& anchor) {
+                             // 팝업은 디테일이 있는 창의 팝업 층에 뜹니다(H2a, 떠 있는 창 포함).
+                             componentPicker_.toggle(a, anchor);
+                         } };
+    // H3a: 속성 행 오른쪽 메뉴 · 열거 콤보는 오른쪽 메뉴와 같은 메뉴(EditorContextMenu, 연 패널 = Details)이고 디테일이 있는 창 문맥에 뜹니다.
+    detailsDeps.openMenu = [this](glm::vec2 at, std::vector<EditorMenuEntry> entries) {
+        contextMenu_.open(at, std::move(entries), "Details");
+    };
+    detailsDeps.openCombo = [this](const std::shared_ptr<HWidget>& anchor, std::vector<EditorMenuEntry> entries, int highlight) {
+        contextMenu_.openBelow(anchor, std::move(entries), "Details", highlight);
+    };
+    detailsDeps.isComboOpen = [this](const HWidget* w) { return contextMenu_.isOpenBelow(w); };
+    detailsDeps.closeMenu   = [this] { if (contextMenu_.isOpen() && contextMenu_.panel() == "Details") contextMenu_.close(); };
+    detailsDeps.focusText   = [this](const std::shared_ptr<HWidget>& w) { textInput_.setFocusWidget(w); };
+    detailsDeps.releaseTextQuiet = [this] { textInput_.releaseQuietWidget(detailsPanel_.stringWidget()); };
+    // H3b: 에셋 고르기 · 콘텐츠 브라우저에서 찾기 · 색 선택기(디테일이 있는 창 문맥).
+    detailsDeps.openAssetPicker = [this](const std::shared_ptr<HWidget>& anchor, const std::string& type, const std::string& current,
+                                         std::function<void(const std::string&)> pick) {
+        assetPicker_.toggle(anchor, type, current, std::move(pick));
+    };
+    detailsDeps.closeAssetPicker   = [this] { assetPicker_.close(); };
+    detailsDeps.browseToAsset      = [this](const std::string& path) { browseToAsset(path); };
+    detailsDeps.openColorPicker    = [this](const std::shared_ptr<HWidget>& anchor, ColorPickerPopup::Target t) {
+        colorPicker_.toggle(anchor, std::move(t));
+    };
+    detailsDeps.confirmColorPicker = [this] { colorPicker_.confirm(); };
+    detailsDeps.releaseSearchQuiet = [this] { textInput_.releaseQuietWidget(detailsPanel_.searchWidget()); };
+    detailsPanel_.init(std::move(detailsDeps));
+    assetPicker_.init({ &ui_,
+                        [this]() -> const hcb::ContentIndex* { return &contentPanel_.index(); },
+                        [this](const std::shared_ptr<HWidget>& w) { textInput_.setFocusWidget(w); },
+                        [this] { textInput_.releaseQuietWidget(assetPicker_.searchWidget()); },
+                        [this] { setTextFocus(EFocusTarget::None); },
+                        [this] { return panelPopupContext("Details"); } });
+    colorPicker_.init({ &ui_,
+                        [this] { return panelPopupContext("Details"); },
+                        [this](const std::shared_ptr<HWidget>& w) { textInput_.setFocusWidget(w); },
+                        [this] { textInput_.releaseQuietWidget(colorPicker_.hexWidget()); },
+                        [this] { setTextFocus(EFocusTarget::None); } });
     componentPicker_.init({ &ui_, &ctx_,
                             [this](EFocusTarget t) { setTextFocus(t); },
                             [this](Actor* a, int entry) { detailsPanel_.addComponentUndoable(a, entry); },
-                            [this] { return detailsPanel_.addComponentButton(); } });
+                            [this] { return detailsPanel_.addComponentButton(); },
+                            [this] { textInput_.releaseQuiet(EFocusTarget::Picker); },
+                            [this] { return panelPopupContext("Details"); } });
     contentPanel_.init({
         &ui_, &ctx_, &cmdStack_, &LogEditor,
         [this] { return doc_.path(); },
@@ -251,12 +341,15 @@ void EditorApp::initPanels() {
         &contextMenu_,
         dumpMode_
     });
-    contextMenu_.init(&ui_);
+    // 콘텐츠 브라우저의 오른쪽 메뉴, 디테일 속성 행의 오른쪽 메뉴 · 열거 콤보(H3a). 연 패널이 있는 창 문맥에 뜹니다.
+    contextMenu_.init(&ui_, [this](const std::string& panel) { return panelPopupContext(panel.c_str()); }, &commands_);
     gpuStatsPanel_.init(&ui_, &ctx_, &vpTimings_, dumpMode_);
     logPanel_.init(&ui_, &LogEditor, kMenuBarH, dumpMode_, [this] {
         setTextFocus(currentFocus() == EFocusTarget::LogSearch ? EFocusTarget::None
                                                                : EFocusTarget::LogSearch);
     });
+    // Categories 팝업은 로그 패널이 있는 창의 팝업 층에 뜹니다(H2a).
+    logPanel_.setPopupContext([this] { return panelPopupContext("Bottom"); });
     // 콘솔 줄(Docs/Gameplay_Tools.md D9): 엔진의 CVar 레지스트리(월드 서비스)로 실행하고 결과는 Console 분류 로그로 남깁니다.
     logPanel_.setConsole(
         [this](const std::string& line) -> std::string {
@@ -279,6 +372,12 @@ void EditorApp::cleanup() {
         ctx_.world->setService<hprefablink::PrefabSourceCache>(nullptr);
     hotReloader_.stop();
     assetWatcher_.stop();
+    // 떠 있는 창: 배치는 위에서 저장했고(그때 OS 창 자리를 읽음), 보조 창 프레임버퍼가 UI 렌더러의 창 패스를 쓰므로 그보다 먼저 없앱니다.
+    floatWindows_.destroyAll();
+    // UI 파이프라인 · 버퍼를 지우기 전에 마지막 프레임 제출이 끝나기를 기다립니다. 예전에는 보조 창 정리(removeWindowTarget 의 장치
+    // 대기)가 있을 때만 우연히 기다려, 떠 있는 창 없는 Debug 자동 실행이 종료 중 검증 오류 6개(사용 중인 파이프라인 · 버퍼 · 프레임버퍼
+    // 파괴)로 exit 3 을 냈습니다(M3a 확인 중 발견).
+    if (ctx_.renderer && ctx_.renderer->getDevice() != VK_NULL_HANDLE) vkDeviceWaitIdle(ctx_.renderer->getDevice());
     slateRenderer_.cleanup();
 }
 
@@ -367,6 +466,7 @@ void EditorApp::tickSelectionSync(int actorCount) {
 
 void EditorApp::tick(float dt) {
     if (!ctx_.world) return;
+    if (layoutStatsMode_) sampleLayoutStats();
 
     // 플레이 시작·끝 처리(게임 모듈)에서 표시 대상이 파괴됐다면, 아래 tickRenameInput 의
     // 숫자 칸 확정이 낡은 접근자를 부르기 전에 디테일 패널부터 다시 만듭니다(DEF-92).
@@ -410,11 +510,17 @@ void EditorApp::tick(float dt) {
         if (!viewport_.inViewport(mx, my, (float)wW, (float)wH)) scroll = 0.f;
     }
     viewport_.tickCamera(dt, scroll);
+    // D7(M3b): Play 중 떠 있는 창에 키보드가 있으면 게임 카메라 시선도 막습니다(키는 엔진이 HInputSystem 에서 막음).
+    if (blocksGameInput()) HInputSystem::get().setLookDelta(0.f, 0.f);
     if (!pendingCulture_.empty()) {
         const std::string c = std::move(pendingCulture_);
         pendingCulture_.clear();
         applyCulture(c, true);
     }
+    // 열린 메뉴의 키(H2b)를 글 칸 · 단축키보다 먼저 봅니다. 메뉴가 키보드를 쥐면 그 둘은 이번 프레임 키를 받지 않습니다.
+    tickMenuKeys();
+    // 색 선택기 Esc(H3b): 디테일 창 키보드의 Esc 엣지. 글 칸 · 숫자 칸이 포커스였으면 그 Esc 는 그 칸 몫(칸만 나감)이라 보지 않습니다.
+    const bool pickerEscFocus = currentFocus() != EFocusTarget::None || menuKeyCapture_;
     textInput_.tickInput();
     tickShortcuts();
     flushModal();
@@ -442,17 +548,32 @@ void EditorApp::tick(float dt) {
     vpToolbar_.tick();
     statusBar_.tick(logPanel_.tick(bottomTab_ == 1));
     componentPicker_.tick();   // 대상 액터가 사라지거나 선택이 바뀌면 닫음
+    {
+        const int dw = dock_.floatOfPanel("Details");
+        IWindow* w = windowById(dw);
+        const bool escDown = w && keyboardWindowId() == dw && w->isKeyDown(HInput::KEY_ESCAPE);
+        colorPicker_.tick(escDown && !prevPickerEsc_ && !pickerEscFocus && !modal_);
+        prevPickerEsc_ = escDown;
+    }
     contentPanel_.tick(bottomTab_ == 0);
 
     if (dumpMode_ && !dumpStateApplied_ && dumpFrameCount_ >= 1) {
         applyDumpState();
         dumpStateApplied_ = true;
     }
+    if (dumpMode_ && dumpStateApplied_ && !detailsDumpApplied_ && dumpFrameCount_ >= 3) {
+        applyDetailsDumpState();
+        detailsDumpApplied_ = true;
+    }
     ++dumpFrameCount_;
 
     // 단축키·메뉴 액션처럼 위젯 이벤트를 거치지 않고 상태만 바뀌는 경로도 여기서 소진합니다.
     flushChromeRebuilds();
     slateRenderer_.context().tickTooltip(dumpMode_ ? (uiHoverActive_ ? 1.0f : 0.f) : dt);
+    // 떠 있는 창의 툴팁(M3b: 그 창에서 호버). 덤프는 시간을 흘리지 않습니다(덤프 기준이 툴팁 없음).
+    for (const auto& w : floatWindows_.windows())
+        if (w->ctx) w->ctx->tickTooltip(dumpMode_ ? 0.f : dt);
+    tickFloatCycle();
 }
 
 // ── buildWidgetTree ────────────────────────────────────────────────────────────
@@ -559,7 +680,7 @@ void EditorApp::buildWidgetTree() {
     // ── Register panels (신규 위젯도 add 한 줄이면 도킹 대상 — 확장성 seam) ──────
     // 제목은 지금 문화권 글(글자 체계 T3). 패널 id 는 레이아웃 파일 · 코드가 쓰는 이름이라 번역하지 않습니다.
     panelReg_.add("Outliner", HTEXT("Editor.Panels", "Outliner", "Outliner").toString(),      outlinerPanel);
-    panelReg_.add("Viewport", HTEXT("Editor.Panels", "Viewport", "Viewport").toString(),      viewportPanel, /*closable=*/false);
+    panelReg_.add("Viewport", HTEXT("Editor.Panels", "Viewport", "Viewport").toString(),      viewportPanel, /*closable=*/false, /*floatable=*/false);
     panelReg_.add("Details",  HTEXT("Editor.Panels", "Details", "Details").toString(),       detailsPanel);
     panelReg_.add("Bottom",   HTEXT("Editor.Panels", "ContentDrawer", "Content Drawer").toString(), bottomPanel);
 
@@ -582,10 +703,13 @@ void EditorApp::buildWidgetTree() {
     // ── Dock host + root ───────────────────────────────────────────────────────
     auto dockHost      = dock_.buildHost();
     auto dockOverlay   = dock_.resetOverlay();
-    auto menuPopupHost = menus_.resetPopupHost();
-    auto logPopupHost = logPanel_.resetPopupHost();
-    auto pickerHost   = componentPicker_.resetPopupHost();
-    auto menuHost     = contextMenu_.resetPopupHost();
+    // 팝업(로그 Categories · Add Component · 오른쪽 메뉴 · 메뉴 드롭다운)은 루트 오버레이의 호스트가 아니라 문맥의 팝업 층에 뜹니다
+    // (H2a). 트리를 다시 만들면 예전 resetPopupHost 처럼 메뉴 드롭다운만 남기고 닫습니다(드롭다운은 아래 rebuildPopup 이 다시 만듦).
+    logPanel_.resetPopup();
+    componentPicker_.resetPopup();
+    assetPicker_.resetPopup();
+    colorPicker_.resetPopup();
+    contextMenu_.resetPopup();
     auto dragHost     = contentPanel_.resetDragHost();
     modalHost_     = HNew(BR)->background(EditorTheme::transparent);
     auto statusBar = statusBar_.build();
@@ -599,92 +723,168 @@ void EditorApp::buildWidgetTree() {
         ->addSlot(statusBar, VR::ESizeRule::Fixed, s(kStatusBarH));
     auto root = HNew(SOverlay);
     root->addSlot(rootStack);
-    root->addSlot(logPopupHost);
-    root->addSlot(pickerHost);
-    root->addSlot(menuHost);
     root->addSlot(dragHost);
-    root->addSlot(menuPopupHost);
     root->addSlot(dockOverlay);
     root->addSlot(outlinerPanel_.resetDropOverlay());
     root->addSlot(modalHost_);   // 맨 위: 대화상자가 떠 있으면 모든 누름을 받습니다
-    slateRenderer_.setRootWidget(root);
+    // 루트를 바꿔도 글 칸 포커스는 이어집니다(예전과 같음: 확정 · 취소 없음, H1a-2). 글 칸 위젯은 패널이 HReuse 로 같은
+    // 객체를 쓰므로 그 위젯에 포커스를 되돌립니다. Add Component 팝업은 resetPopup 이 이미 포커스를 놓았습니다.
+    textInput_.preserveFocusAcross([&] { slateRenderer_.setRootWidget(root); });
 
     dock_.rebuildArea();
     menus_.rebuildPopup();
     rebuildModal();
 }
 
-// ── Menu bar (Phase 1) ───────────────────────────────────────────────────────────
+// ── Menu bar (Phase 1 · H2b 메뉴 모델 · 명령 레지스트리) ───────────────────────────────────────────────────────
+// 구성(H2b, UE5 에디터 메뉴를 따라 소제목으로 묶음. 예전 → 새 대응은 Docs/Editor_MultiWindow_Design.md 6절 H2b):
+//   File   : Scene(New · Open) | Save(Save · Save As)
+//   Edit   : History(Undo · Redo) | Edit(Copy · Paste · Duplicate · Delete) | Configuration(Language ▸ · Audio Output)
+//   Actor  : Create(Add Empty) | Hierarchy(Attach To Prev Selected · Detach Selected)
+//   View   : Viewport(Frame Selected · Gizmo Size)
+//   Window : Panels(등록된 패널, 열림 체크) | Layout(Reset Layout)
+// 메뉴 이름(메뉴 줄 단추)은 예전과 같습니다. 항목 글 · 단축키 · 켜짐 · 체크는 명령에서 읽습니다.
 void EditorApp::buildMenus() {
-    std::vector<EditorMenus::Def> defs;
-    // 글은 지금 문화권(글자 체계 T3), 단축키는 오른쪽 열(번역 안 함).
-    defs.push_back({ HTEXT("Editor.Menu", "File", "File").toString(), {
-        { HTEXT("Editor.Menu", "File.NewScene", "New Scene").toString(),     [this]{ newScene(); }, {}, "Ctrl+N" },   // 카메라만 남기고 비움
-        { HTEXT("Editor.Menu", "File.OpenScene", "Open Scene...").toString(),  [this]{ openSceneDialog(); }, {}, "Ctrl+O" },
-        { HTEXT("Editor.Menu", "File.SaveScene", "Save Scene").toString(),    [this]{ saveScene(); }, {}, "Ctrl+S" },
-        { HTEXT("Editor.Menu", "File.SaveSceneAs", "Save Scene As...").toString(), [this]{ saveSceneAs(); }, {}, "Ctrl+Shift+S" },
-    }, 0.f });
-    defs.push_back({ HTEXT("Editor.Menu", "Edit", "Edit").toString(), {
-        { HTEXT("Editor.Menu", "Edit.Undo", "Undo").toString(),          [this]{ undo(); }, {}, "Ctrl+Z" },
-        { HTEXT("Editor.Menu", "Edit.Redo", "Redo").toString(),          [this]{ redo(); }, {}, "Ctrl+Y" },
-        { HTEXT("Editor.Menu", "Edit.Copy", "Copy").toString(),          [this]{ copySelection(); }, {}, "Ctrl+C" },
-        { HTEXT("Editor.Menu", "Edit.Paste", "Paste").toString(),         [this]{ pasteClipboard(); }, {}, "Ctrl+V" },
-        { HTEXT("Editor.Menu", "Edit.Duplicate", "Duplicate").toString(), [this]{ duplicateSelection(); }, {}, "Ctrl+D" },
-        { HTEXT("Editor.Menu", "Edit.Delete", "Delete").toString(),       [this]{ deleteSelection(); }, {}, "Del" },
-        { HTEXT("Editor.Menu", "Edit.FrameSelected", "Frame Selected").toString(), [this]{ frameSelection(); }, {}, "F" },
-        // 기즈모 크기(카메라 거리 배율)를 작게 0.08 · 보통 0.12 · 크게 0.18 로 돌립니다. 툴바는 폭 사다리 때문에 칩을 더하지 않습니다.
-        { HTEXT("Editor.Menu", "Edit.GizmoSize", "Gizmo Size (S/M/L)").toString(),      [this]{
-            const float f = viewport_.gizmo().sizeFactor();
-            const float n = f < 0.10f ? 0.12f : (f < 0.15f ? 0.18f : 0.08f);
-            viewport_.gizmo().setSizeFactor(n);
-            HLOG(LogEditor, Log) << "Gizmo size " << (n < 0.10f ? "small" : (n < 0.15f ? "medium" : "large"));
-        } },
-        { HTEXT("Editor.Menu", "Edit.AudioOutput", "Audio Output...").toString(),         [this]{ openAudioOutputDialog(); } },
-    }, 0.f });
-    defs.push_back({ HTEXT("Editor.Menu", "Actor", "Actor").toString(), {
-        { HTEXT("Editor.Menu", "Actor.AddEmpty", "Add Empty").toString(), [this]{
-            if (!ctx_.world) return;
-            selectOnly(ctx_.world->spawnActor(outlinerPanel_.nextActorName()));
-            recordActorCreation({ ctx_.selected });
-        } },
-        // 부모 바꾸기는 아웃라이너에서 행을 끌어 놓는 것이 기본이고(2026-10-15), 메뉴도 남겨 둡니다. 둘 다 월드 자세를
-        // 유지하고 Undo 됩니다. 부모는 "직전에 선택했던 액터", 자식은 "지금 선택한 액터"입니다.
-        { HTEXT("Editor.Menu", "Actor.AttachToPrev", "Attach To Prev Selected").toString(), [this]{
-            Actor* child  = ctx_.selected;
-            Actor* parent = prevSelected2_;
-            if (!child || !parent || child == parent) return;
-            if (!reparentUndoable(child, parent))
-                HLOG(LogEditor, Warning) << "Cannot attach '" << child->name << "' under '" << parent->name
-                                         << "' (an actor cannot go under itself or its child)";
-        } },
-        { HTEXT("Editor.Menu", "Actor.Detach", "Detach Selected").toString(), [this]{
-            if (!ctx_.selected || ctx_.selected == viewport_.cameraActor()) return;
-            reparentUndoable(ctx_.selected, nullptr);
-        } },
-    }, 0.f });
-    std::vector<EditorMenus::Item> viewItems = {
-        { HTEXT("Editor.Menu", "View.ResetLayout", "Reset Layout").toString(), [this]{ dock_.buildDefaultLayout(); dock_.rebuildArea(); dock_.saveLayout(); } },
-    };
+    using E = EditorMenuEntry;
     // 언어(글자 체계 T3-10). 고르면 다음 프레임에 표를 읽고 UI 를 다시 만듭니다(누른 단추가 처리 중에 사라지지 않게).
+    std::vector<E> languages;
     for (const htext::CultureInfo& c : htext::knownCultures()) {
         const std::string code = c.code;
-        viewItems.push_back({ HTEXT("Editor.Menu", "View.Language", "Language").toString() + ": " + c.nativeName,
-                              [this, code] { pendingCulture_ = code; },
-                              [code] { return htext::culture() == code; } });
+        EditorCommand cmd;
+        cmd.id        = "View.Language." + code;
+        cmd.label     = HText::fromString(c.nativeName);
+        cmd.execute   = [this, code] { pendingCulture_ = code; };
+        cmd.isChecked = [code] { return htext::culture() == code; };
+        commands_.add(std::move(cmd));
+        languages.push_back(E::cmd("View.Language." + code));
     }
-    defs.push_back({ HTEXT("Editor.Menu", "View", "View").toString(), std::move(viewItems), 0.f });
     // 등록된 패널을 등록 순서로 보입니다(DEF-69). 열린 패널은 체크 표시가 붙고, 누르면 그 탭을
     // 앞으로 가져옵니다. 탭의 x 로 닫은 패널은 여기서 다시 엽니다.
-    std::vector<EditorMenus::Item> windowItems;
+    std::vector<E> panels;
     for (const std::string& id : panelReg_.order()) {
         const PanelDef* def = panelReg_.find(id);
         if (!def) continue;
-        windowItems.push_back({ def->title,
-                                [this, id] { dock_.showPanel(id); },
-                                [this, id] { return dock_.contains(id); } });
+        EditorCommand cmd;
+        cmd.id        = "Window.Panel." + id;
+        cmd.label     = HText::fromString(def->title);
+        cmd.execute   = [this, id] { dock_.showPanel(id); };
+        cmd.isChecked = [this, id] { return dock_.contains(id); };
+        commands_.add(std::move(cmd));
+        panels.push_back(E::cmd("Window.Panel." + id));
     }
-    defs.push_back({ HTEXT("Editor.Menu", "Window", "Window").toString(), std::move(windowItems), 0.f });
+
+    std::vector<EditorMenus::Def> defs;
+    defs.push_back({ HTEXT("Editor.Menu", "File", "File").toString(), {
+        E::heading(HTEXT("Editor.Menu", "Section.Scene", "Scene").toString()),
+        E::cmd("File.NewScene"),
+        E::cmd("File.OpenScene"),
+        E::heading(HTEXT("Editor.Menu", "Section.Save", "Save").toString()),
+        E::cmd("File.SaveScene"),
+        E::cmd("File.SaveSceneAs"),
+    }, 0.f });
+    defs.push_back({ HTEXT("Editor.Menu", "Edit", "Edit").toString(), {
+        E::heading(HTEXT("Editor.Menu", "Section.History", "History").toString()),
+        E::cmd("Edit.Undo"),
+        E::cmd("Edit.Redo"),
+        E::heading(HTEXT("Editor.Menu", "Section.Edit", "Edit").toString()),
+        E::cmd("Edit.Copy"),
+        E::cmd("Edit.Paste"),
+        E::cmd("Edit.Duplicate"),
+        E::cmd("Edit.Delete"),
+        E::heading(HTEXT("Editor.Menu", "Section.Configuration", "Configuration").toString()),
+        E::submenu(HTEXT("Editor.Menu", "View.Language", "Language").toString(), std::move(languages), "globe"),
+        E::cmd("Edit.AudioOutput"),
+    }, 0.f });
+    defs.push_back({ HTEXT("Editor.Menu", "Actor", "Actor").toString(), {
+        E::heading(HTEXT("Editor.Menu", "Section.Create", "Create").toString()),
+        E::cmd("Actor.AddEmpty"),
+        E::heading(HTEXT("Editor.Menu", "Section.Hierarchy", "Hierarchy").toString()),
+        E::cmd("Actor.AttachToPrev"),
+        E::cmd("Actor.Detach"),
+    }, 0.f });
+    defs.push_back({ HTEXT("Editor.Menu", "View", "View").toString(), {
+        E::heading(HTEXT("Editor.Menu", "Section.Viewport", "Viewport").toString()),
+        E::cmd("View.FrameSelected"),
+        E::cmd("View.GizmoSize"),
+    }, 0.f });
+    std::vector<E> window;
+    window.push_back(E::heading(HTEXT("Editor.Menu", "Section.Panels", "Panels").toString()));
+    for (E& e : panels) window.push_back(std::move(e));
+    window.push_back(E::heading(HTEXT("Editor.Menu", "Section.Layout", "Layout").toString()));
+    window.push_back(E::cmd("Window.ResetLayout"));
+    defs.push_back({ HTEXT("Editor.Menu", "Window", "Window").toString(), std::move(window), 0.f });
     menus_.setDefs(std::move(defs));
+}
+
+// ── 명령 동작 (H2b) ─────────────────────────────────────────────────────────────────────────────────────────
+// canExecute 는 그 동작이 아무 일도 하지 않는 경우와 같게 둡니다(단축키 동작이 예전과 같도록, EditorCommandRegistry.hpp).
+// 메뉴는 canExecute 가 거짓인 항목을 흐리게 그립니다.
+void EditorApp::registerCommands() {
+    heditorcmd::addDefaultSpecs(commands_);
+    auto hasRoots = [this] { return !selectionRoots().empty(); };
+    commands_.bind("File.NewScene",    [this] { newScene(); });   // 카메라만 남기고 비움
+    commands_.bind("File.OpenScene",   [this] { openSceneDialog(); });
+    commands_.bind("File.SaveScene",   [this] { saveScene(); });
+    commands_.bind("File.SaveSceneAs", [this] { saveSceneAs(); });
+    commands_.bind("Edit.Undo", [this] { undo(); },
+                   [this] { return cmdStack_.canUndo() && !viewport_.gizmo().isDragging(); });
+    commands_.bind("Edit.Redo", [this] { redo(); },
+                   [this] { return cmdStack_.canRedo() && !viewport_.gizmo().isDragging(); });
+    commands_.bind("Edit.Copy",      [this] { copySelection(); },      [this, hasRoots] { return ctx_.window && hasRoots(); });
+    commands_.bind("Edit.Paste",     [this] { pasteClipboard(); });    // 클립보드가 비면 경고 로그(예전과 같음)
+    commands_.bind("Edit.Duplicate", [this] { duplicateSelection(); }, hasRoots);
+    commands_.bind("Edit.Delete",    [this] { deleteSelection(); },
+                   [this, hasRoots] { return ctx_.world && ctx_.assets && hasRoots(); });
+    // 디테일 속성 행 오른쪽 메뉴(H3a). 메뉴를 연 행에 대해 동작하고, 되돌릴 것이 없으면(기본값과 같음 · 기본값 없음) 흐립니다.
+    commands_.bind("Details.ResetToDefault", [this] { detailsPanel_.resetMenuRow(); detailsPanel_.markDirty(); },
+                   [this] { return detailsPanel_.menuRowCanReset(); });
+    commands_.bind("Details.CopyValue", [this] { if (ctx_.window) ctx_.window->setClipboardText(detailsPanel_.menuRowText()); },
+                   [this] { return ctx_.window && detailsPanel_.menuRowCanCopy(); });
+    commands_.bind("Details.PasteValue", [this] {
+        const std::string text = ctx_.window ? ctx_.window->getClipboardText() : std::string();
+        if (!detailsPanel_.pasteMenuRow(text))
+            HLOG(LogEditor, Warning) << "Paste: the clipboard text does not fit this property";
+        detailsPanel_.markDirty();
+    }, [this] { return ctx_.window && detailsPanel_.menuRowCanPaste(); });
+    commands_.bind("View.FrameSelected", [this] { frameSelection(); },
+                   [this] { return viewport_.cameraActor() && viewport_.camera() && !ctx_.selection.empty(); });
+    // 기즈모 크기(카메라 거리 배율)를 작게 0.08 · 보통 0.12 · 크게 0.18 로 돌립니다. 툴바는 폭 사다리 때문에 칩을 더하지 않습니다.
+    commands_.bind("View.GizmoSize", [this] {
+        const float f = viewport_.gizmo().sizeFactor();
+        const float n = f < 0.10f ? 0.12f : (f < 0.15f ? 0.18f : 0.08f);
+        viewport_.gizmo().setSizeFactor(n);
+        HLOG(LogEditor, Log) << "Gizmo size " << (n < 0.10f ? "small" : (n < 0.15f ? "medium" : "large"));
+    });
+    commands_.bind("Edit.AudioOutput", [this] { openAudioOutputDialog(); });
+    commands_.bind("Actor.AddEmpty", [this] {
+        selectOnly(ctx_.world->spawnActor(outlinerPanel_.nextActorName()));
+        recordActorCreation({ ctx_.selected });
+    }, [this] { return ctx_.world != nullptr; });
+    // 부모 바꾸기는 아웃라이너에서 행을 끌어 놓는 것이 기본이고(2026-10-15), 메뉴도 남겨 둡니다. 둘 다 월드 자세를
+    // 유지하고 Undo 됩니다. 부모는 "직전에 선택했던 액터", 자식은 "지금 선택한 액터"입니다.
+    commands_.bind("Actor.AttachToPrev", [this] {
+        Actor* child  = ctx_.selected;
+        Actor* parent = prevSelected2_;
+        if (!reparentUndoable(child, parent))
+            HLOG(LogEditor, Warning) << "Cannot attach '" << child->name << "' under '" << parent->name
+                                     << "' (an actor cannot go under itself or its child)";
+    }, [this] { return ctx_.selected && prevSelected2_ && ctx_.selected != prevSelected2_; });
+    commands_.bind("Actor.Detach", [this] { reparentUndoable(ctx_.selected, nullptr); },
+                   [this] { return ctx_.selected && ctx_.selected != viewport_.cameraActor(); });
+    commands_.bind("Window.ResetLayout", [this] { dock_.buildDefaultLayout(); dock_.rebuildArea(); dock_.saveLayout(); });
+    // Ctrl+F → 아웃라이너 검색창 포커스 (기존 검색어는 전체 선택 → 바로 교체 가능). 아웃라이너가
+    // 닫혀 있거나 가려진 탭이면 먼저 앞으로 꺼냅니다. 그러지 않으면 보이지 않는 검색창으로 타이핑이 들어갑니다.
+    // 아웃라이너가 떠 있는 창에 있으면 그 창을 앞으로 가져온 뒤 포커스를 줍니다(M3b). 글자는 그 창이 OS 포커스를 받은 뒤부터
+    // 들어갑니다(칸은 그 칸이 있는 창에 키보드가 있을 때만 받음).
+    commands_.bind("Outliner.FocusSearch", [this] {
+        bringPanelForward("Outliner", outlinerVisible_);
+        setTextFocus(EFocusTarget::Search);
+    });
+    // 툴바(모양 그대로, 같은 명령 id).
+    commands_.bind("Play.Play",  [this] { beginPlay(); });
+    commands_.bind("Play.Pause", [this] { pausePlay(); }, [this] { return playState_ != EPlayState::Editor; });
+    commands_.bind("Play.Stop",  [this] { stopPlay(); },  [this] { return playState_ != EPlayState::Editor; });
+    commands_.bind("Content.Refresh", [this] { contentPanel_.scanAll(); rebuildBottomPanel(); });
 }
 
 // ── Play state ─────────────────────────────────────────────────────────────────
@@ -764,9 +964,23 @@ void EditorApp::flushChromeRebuilds() {
     detailsPanel_.flushRebuild();
     logPanel_.flushRebuilds(bottomTab_ == 1);
     componentPicker_.flushRebuild();
+    assetPicker_.flushRebuild();
+    colorPicker_.flushRebuild();
     if (bottomTab_ == 0) contentPanel_.flushRebuild();
     contextMenu_.flushRebuild();
-    if (bottomDirty_) { bottomDirty_ = false; rebuildBottomPanel(); }
+    // HSlate 지연 변경 큐(H1b). 지금은 하단 패널 리빌드(requestBottomRebuild)만 여기로 옮겼고, 예전 bottomDirty_ 와
+    // 같은 맨 끝 자리입니다. 나머지 패널의 지연 플래그는 소진 순서 · 조건(DEF-83 누름 보류, 앵커 배치 대기 등)이 있어
+    // 위 줄에 그대로 둡니다.
+    slateRenderer_.context().flushDeferred();
+}
+
+void EditorApp::requestBottomRebuild() {
+    if (bottomRebuildQueued_) return;
+    bottomRebuildQueued_ = true;
+    slateRenderer_.context().deferred([this] {
+        bottomRebuildQueued_ = false;
+        rebuildBottomPanel();
+    });
 }
 
 // ── rebuildLog ─────────────────────────────────────────────────────────────────
@@ -800,7 +1014,7 @@ void EditorApp::rebuildBottomPanel() {
     // 포커스도 풉니다. 풀지 않으면 보이지 않는 검색창으로 타이핑이 계속 들어갑니다.
     logPanel_.releaseTab(bottomTab_ == 1);
     contentPanel_.releaseTab(bottomTab_ == 0);   // 콘텐츠 탭이면 아래 buildTab 이 다시 잡음(검색 포커스 유지)
-    contextMenu_.close();
+    if (contextMenu_.panel() == "Bottom") contextMenu_.close();   // 디테일이 연 메뉴(H3a)는 그대로
     if (bottomTab_ != 1 && (currentFocus() == EFocusTarget::LogSearch || currentFocus() == EFocusTarget::Console))
         setTextFocus(EFocusTarget::None);
 
@@ -840,89 +1054,143 @@ void EditorApp::redo() {
 bool EditorApp::editDragActive() const { return viewport_.gizmo().isDragging() || SNumberField::anyPressed(); }
 
 // ── tickShortcuts ──────────────────────────────────────────────────────────────
-// 표준 단축키: Ctrl+Z(undo) / Ctrl+Y·Ctrl+Shift+Z(redo) / Ctrl+S(씬 저장)
+// 표준 단축키(Ctrl+Z · Ctrl+Y · Ctrl+S …)는 명령 레지스트리의 chord 로 정하고(H2b), 고른 명령을 레지스트리로 실행합니다. 어느 키가
+// 어느 명령인지 · 조건(대화상자 · 카메라 비행 · 글 칸 · 끄는 중)은 예전 이 함수의 if 사다리와 같습니다(EditorCommandRegistry.hpp,
+// 시험 editor_commands 가 모든 입력 조합으로 대조).
 void EditorApp::tickShortcuts() {
     if (!ctx_.window) return;
-    IWindow& win = *ctx_.window;
+    // 키는 키보드 창(OS 포커스가 있는 창, 없으면 메인)에서 읽습니다(M3b). 떠 있는 창에서도 Ctrl+S · Ctrl+Z · F 가 됩니다(4절 6).
+    // 카메라 모드(RMB 비행)는 메인 창의 상태입니다.
+    IWindow* kw = windowById(keyboardWindowId());
+    IWindow& win = kw ? *kw : *ctx_.window;
+    IWindow& mainWin = *ctx_.window;
 
-    bool zNow = win.isKeyDown(HInput::KEY_Z);
-    bool yNow = win.isKeyDown(HInput::KEY_Y);
-    bool sNow = win.isKeyDown(HInput::KEY_S);
-    bool fNow = win.isKeyDown(HInput::KEY_F);
-    bool oNow = win.isKeyDown(HInput::KEY_O);
-    bool nNow = win.isKeyDown(HInput::KEY_N);
-    bool dNow = win.isKeyDown(HInput::KEY_D);
-    bool dEdge = dNow && !prevDDown_;
-    prevDDown_ = dNow;
-    bool zEdge = zNow && !prevZDown_;
-    bool yEdge = yNow && !prevYDown_;
-    bool sEdge = sNow && !prevSDown_;
-    bool fEdge = fNow && !prevFDown_;
-    bool oEdge = oNow && !prevODown_;
-    bool nEdge = nNow && !prevNDown_;
-    prevZDown_ = zNow;
-    prevYDown_ = yNow;
-    prevSDown_ = sNow;
-    prevFDown_ = fNow;
-    prevODown_ = oNow;
-    prevNDown_ = nNow;
+    // 엣지는 조건과 상관없이 매 프레임 잽니다(예전과 같음: 막힌 동안 누른 키가 풀린 뒤 엣지로 잡히지 않게).
+    if (prevShortcutKeys_.empty())
+        for (int key : commands_.polledKeys()) prevShortcutKeys_.push_back({ key, false });
+    std::vector<int> edges;
+    for (auto& [key, prev] : prevShortcutKeys_) {
+        const bool now = win.isKeyDown(key);
+        if (now && !prev) edges.push_back(key);
+        prev = now;
+    }
+    // 열린 메뉴가 키보드를 쥐고 있으면(H2b) 단축키는 받지 않습니다.
+    if (menuKeyCapture_) return;
 
-    if (modal_) return;                                   // 대화상자가 떠 있으면 단축키를 받지 않습니다
-    if (win.isCameraModeActive()) return;                 // WASD 비행 중 충돌 방지
-    // F — 선택 대상으로 화면 맞추기(Ctrl+F 는 아웃라이너 검색)
-    if (fEdge && !win.isCtrlDown() && currentFocus() == EFocusTarget::None) { frameSelection(); return; }
-    if (!win.isCtrlDown()) return;
+    EditorShortcutInput in;
+    in.keyEdge    = [&edges](int key) { return std::find(edges.begin(), edges.end(), key) != edges.end(); };
+    in.ctrl       = win.isCtrlDown();
+    in.shift      = win.isShiftDown();
+    in.modal      = modal_ != nullptr;                  // 대화상자가 떠 있으면 단축키를 받지 않습니다
+    in.cameraMode = mainWin.isCameraModeActive();       // WASD 비행 중 충돌 방지
+    in.textFocus  = currentFocus() != EFocusTarget::None;
     // 기즈모 · 숫자 칸을 끄는 동안에는 씬을 바꾸거나 저장하는 단축키를 받지 않습니다(Undo · Redo 와 같은 규칙). Ctrl+D 는
     // 주 선택을 새 액터로 바꿔 끄기 결과가 새 액터의 커맨드로 쌓이고(DEF-132), Ctrl+S 는 끄기 중간 값을 파일에 넣어 저장
     // 표지가 어긋납니다(DEF-133). 열기 · 새 씬도 끄는 대상을 없애므로 함께 막습니다.
-    if (editDragActive()) {
-        if (sEdge || dEdge || oEdge || nEdge) {
-            HLOG(LogEditor, Log) << "Finish the drag first (shortcut ignored while dragging a gizmo or a value)";
+    in.editDrag   = editDragActive();
+    const EditorShortcutResult r = commands_.resolveShortcut(in);
+    if (r.dragNotice)
+        HLOG(LogEditor, Log) << "Finish the drag first (shortcut ignored while dragging a gizmo or a value)";
+    if (r.command) commands_.execute(r.command->id);
+}
+
+// ── 메뉴 키보드 조작 (H2b) ─────────────────────────────────────────────────────────────────────────────────────
+int EditorApp::menuWindowId() {
+    if (menus_.isOpen()) return 0;   // 상단 메뉴는 메인 창에만 있음
+    if (contextMenu_.isOpen()) {
+        const HSlateContext* c = contextMenu_.targetContext();
+        if (!c) return -1;
+        if (c == &slateRenderer_.context()) return 0;
+        for (const auto& w : floatWindows_.windows())
+            if (w->ctx && w->ctx.get() == c) return w->floatId;
+    }
+    return -1;
+}
+
+void EditorApp::tickMenuKeys() {
+    static constexpr int kKeys[6] = { HInput::KEY_UP, HInput::KEY_DOWN, HInput::KEY_LEFT, HInput::KEY_RIGHT,
+                                      HInput::KEY_ENTER, HInput::KEY_ESCAPE };
+    static constexpr hmenu::Key kMap[6] = { hmenu::Key::Up, hmenu::Key::Down, hmenu::Key::Left, hmenu::Key::Right,
+                                            hmenu::Key::Enter, hmenu::Key::Escape };
+    const int kb = keyboardWindowId();
+    IWindow* kw = windowById(kb);
+    // 엣지는 늘 잽니다. 키보드 창이 바뀌면 그 창의 지금 상태로 다시 심습니다(다른 창의 눌림이 엣지로 잡히지 않게, 글 칸과 같은 규칙).
+    std::vector<hmenu::Key> keys;
+    if (kw) {
+        const bool reseed = kb != menuKeyWin_;
+        menuKeyWin_ = kb;
+        for (int i = 0; i < 6; ++i) {
+            const bool now  = kw->isKeyDown(kKeys[i]);
+            const bool edge = now && !prevMenuKeys_[i] && !reseed;
+            prevMenuKeys_[i] = now;
+            // ↑ ↓ 는 누르고 있으면 OS 자동 반복으로 거듭 움직입니다(편집 키와 같은 규칙, DEF-58).
+            int n = edge ? 1 : 0;
+            if (!reseed && i < 2) n = std::max(n, kw->keyPressCount(kKeys[i]));
+            for (int k = 0; k < n; ++k) keys.push_back(kMap[i]);
         }
-        return;
     }
-    if (dEdge && currentFocus() == EFocusTarget::None) { duplicateSelection(); return; }
-
-    if (sEdge) { if (win.isShiftDown()) saveSceneAs(); else saveScene(); return; }
-    if (oEdge) { openSceneDialog(); return; }
-    if (nEdge) { newScene(); return; }
-
-    // Ctrl+F → 아웃라이너 검색창 포커스 (기존 검색어는 전체 선택 → 바로 교체 가능). 아웃라이너가
-    // 닫혀 있거나 가려진 탭이면 먼저 앞으로 꺼냅니다. 그러지 않으면 보이지 않는 검색창으로 타이핑이 들어갑니다.
-    if (fEdge) {
-        if (!outlinerVisible_) dock_.showPanel("Outliner");
-        setTextFocus(EFocusTarget::Search);
-        return;
+    const int mw = menuWindowId();
+    menuKeyCapture_ = mw >= 0 && mw == kb;
+    // 시험 대본 키(그 창이 키보드 창이고 메뉴의 창일 때만) · 덤프 키(--ui-menu-keys, 메뉴가 떠 있을 때 한 프레임에 하나).
+    bool scripted = false;
+    if (!scriptMenuKeys_.empty()) {
+        const auto [win, k] = scriptMenuKeys_.front();
+        scriptMenuKeys_.erase(scriptMenuKeys_.begin());
+        if (mw >= 0 && win == mw && win == kb) {   // 실제 키와 같은 규칙: 그 창이 키보드 창이고 메뉴가 그 창에 있을 때
+            keys.push_back(k);
+            scripted = true;
+            HLOG(LogEditor, Log) << "--ui-float-input: menu key on window " << win;
+        } else {
+            HLOG(LogEditor, Log) << "--ui-float-input: key for window " << win << " ignored (menu window " << mw
+                                 << ", keyboard window " << kb << ")";
+        }
     }
-
-    // 텍스트 입력 중에는 씬 undo/redo가 직관에 어긋나므로 차단
-    if (currentFocus() != EFocusTarget::None) return;   // 텍스트 입력 중에는 단축키를 막습니다
-
-    bool shift = win.isShiftDown();
-    if (zEdge && !shift)                 undo();
-    else if (yEdge || (zEdge && shift))  redo();
+    const bool menuShown = (menus_.isOpen() && menus_.popupShown()) || (contextMenu_.isOpen() && contextMenu_.popupContext());
+    if (dumpMode_ && menuShown && uiMenuKeyNext_ < uiMenuKeys_.size()) {
+        keys.push_back(uiMenuKeys_[uiMenuKeyNext_++]);
+        scripted = true;
+    }
+    if (!menuKeyCapture_ && !scripted) return;
+    for (hmenu::Key k : keys) {
+        if (menus_.isOpen())            menus_.handleKey(k);
+        else if (contextMenu_.isOpen()) contextMenu_.handleKey(k);
+    }
 }
 
 // ── handleInput ────────────────────────────────────────────────────────────────
 void EditorApp::handleInput(float mouseX, float mouseY,
                              bool leftDown, bool leftJustUp,
                              float scrollDelta, float winW, float winH) {
+    // 떠 있는 창의 이번 프레임 포인터(M3b). 메인 처리가 콘텐츠 끌기(떠 있는 콘텐츠 브라우저 → 메인 뷰포트)에 쓰므로 먼저 읽습니다.
+    readFloatPointers();
+    // 시험 대본에 메인 포인터 단계가 있으면(M4: 메인 탭을 창 밖 · 떠 있는 창으로 끌기) 메인 포인터도 대본 값입니다.
+    if (mainScripted_) {
+        mouseX     = mainSim_.pos.x;
+        mouseY     = mainSim_.pos.y;
+        leftDown   = mainSim_.left;
+        leftJustUp = mainSimPrevLeft_ && !mainSim_.left;
+        mainSimPrevLeft_ = mainSim_.left;
+    }
+    handleInputEvents(mouseX, mouseY, leftDown, leftJustUp, scrollDelta, winW, winH);
+    // 떠 있는 창마다 같은 순서로(M3b). 메인의 조기 return 과 상관없이 돕니다.
+    handleFloatInputs();
+    // 위젯 콜백(펼침·눈·삭제)은 리빌드를 직접 하지 않고 플래그만 세웁니다. 슬롯 순회 도중 clearSlots 가 돌면 지금 실행
+    // 중인 버튼과 그 std::function 자체가 파괴되기 때문입니다. 소진은 이벤트 디스패치가 전부 끝난 뒤, 이 프레임의
+    // drawFrame 전에 합니다. 예전에는 handleInput 의 조기 return 때문에 스코프 가드(DeferredRebuildGuard)의 소멸자로
+    // 했고, H1b 에서 본문을 handleInputEvents 로 떼어 같은 자리에서 부릅니다.
+    outlinerPanel_.flushRebuild();
+    flushChromeRebuilds();
+    // 떠 있는 창의 OS 닫기 · 생성 · 파괴(M3a). 이번 프레임의 입력이 도크 배치를 바꿨을 수 있으므로 그리기 직전, 이벤트 펌프 밖입니다.
+    syncFloatWindows();
+}
+
+void EditorApp::handleInputEvents(float mouseX, float mouseY,
+                                  bool leftDown, bool leftJustUp,
+                                  float scrollDelta, float winW, float winH) {
     if (dumpMode_ && uiHoverActive_) {
         mouseX = uiHoverPos_.x;
         mouseY = uiHoverPos_.y;
     }
-    // 위젯 콜백(펼침·눈·삭제)은 리빌드를 직접 하지 않고 플래그만 세웁니다. 슬롯 순회
-    // 도중 clearSlots 가 돌면 지금 실행 중인 버튼과 그 std::function 자체가 파괴되기
-    // 때문입니다. 이 함수에는 조기 return 이 여러 개라 소진은 스코프 가드로 합니다.
-    // 소멸자는 이벤트 디스패치가 전부 끝난 뒤, 이 프레임의 drawFrame 전에 돕니다.
-    struct DeferredRebuildGuard {
-        EditorApp* self;
-        ~DeferredRebuildGuard() {
-            self->outlinerPanel_.flushRebuild();
-            self->flushChromeRebuilds();
-        }
-    } deferredRebuildGuard{ this };
-
     // 디테일 패널이 보여 주던 액터가 에디터 tick 뒤(게임 tick·게임 모듈)에 파괴됐다면,
     // 이벤트를 보내기 전에 패널부터 다시 만듭니다. 낡은 패널의 칸에 누름·드래그·확정이
     // 닿으면 해제된 액터와 컴포넌트를 읽고 씁니다(DEF-92). 아래 포커스 해제의 확정도
@@ -938,55 +1206,83 @@ void EditorApp::handleInput(float mouseX, float mouseY,
         slateRenderer_.arrange({ (float)fw, (float)fh });
     }
 
+    // 패널의 포인터 판정은 그 패널이 있는 창의 포인터로만 합니다(M3b, hwininput::panelGetsPointer). 떠 있는 창에 있는 패널은
+    // handleFloatInput 이 그 창 좌표 · 버튼으로 같은 일을 합니다. 패널이 메인에 있거나 닫혀 있으면 예전과 같습니다.
+    const bool outlinerHere   = hwininput::panelGetsPointer(dock_.floatOfPanel("Outliner"), 0);
+    const bool bottomHere     = hwininput::panelGetsPointer(dock_.floatOfPanel("Bottom"), 0);
+    const bool outlinerInMain = dock_.panelActiveInMain("Outliner");
+    const bool bottomInMain   = dock_.panelActiveInMain("Bottom");
     // 아웃라이너 목록 리빌드 보류(DEF-83)는 버튼을 떼면 풉니다. 거는 곳은 아래 UI 디스패치입니다.
-    if (!leftDown) outlinerPanel_.releasePressHeld();
+    if (!leftDown && outlinerHere) outlinerPanel_.releasePressHeld();
     // 아웃라이너 행 끌어 놓기(부모 바꾸기). 누른 행 버튼의 클릭과 함께 돕니다.
-    outlinerPanel_.tickDrag(mouseX, mouseY, leftDown, prevLeftDown_, (bool)modal_, outlinerVisible_);
+    if (outlinerHere) outlinerPanel_.tickDrag(mouseX, mouseY, leftDown, prevLeftDown_, (bool)modal_, outlinerInMain);
 
     // 편집 중에 다른 곳을 누르면 편집을 끝냅니다. 이 처리가 스플리터·탭·기즈모의 조기
     // return 보다 **앞**에 있어야 합니다. 뒤에 있으면 그 경로들이 커밋을 건너뛰어 편집
     // 모드가 갇히고, 나중에 누른 Enter 가 낡은 값으로 기즈모 결과를 덮어씁니다.
     if (leftDown && !prevLeftDown_ && currentFocus() != EFocusTarget::None &&
-        !focusWidgetContains(mouseX, mouseY)) {
+        !focusWidgetContains(0, mouseX, mouseY)) {
         setTextFocus(EFocusTarget::None);
     }
 
-    // Categories 팝업 바깥을 누르면 닫기만 하고 클릭은 그대로 흘려보냅니다. 전면 캐처로 받으면
-    // 그 클릭이 닫기에만 쓰여 삼켜집니다(메뉴 팝업의 DEF-64). 팝업 제거는 지연 플래그로
-    // 프레임 끝에 일어나므로, 이번 프레임의 디스패치는 팝업이 있는 상태에서 판정됩니다.
+    // 팝업 바깥(H2a: 메인 문맥 팝업 층). 로그 Categories · Add Component · 오른쪽 메뉴(PassThrough) 바깥을 누르면 닫기만 하고 클릭은
+    // 그대로 흘려보냅니다. 전면 캐처로 받으면 그 클릭이 닫기에만 쓰여 삼켜집니다(메뉴 팝업의 DEF-64). 메뉴 드롭다운(Consume)은 층이
+    // 배경 누름을 먹고 닫습니다. 다른 창(떠 있는 창)의 팝업은 이 창을 누르면 모두 닫습니다.
+    HPopupLayer& mainPopups = slateRenderer_.context().popups();
     if (leftDown && !prevLeftDown_) {
-        logPanel_.handleOutsideClick(glm::vec2{ mouseX, mouseY });
-        componentPicker_.handleOutsideClick(glm::vec2{ mouseX, mouseY });
-        contextMenu_.handleOutsideClick(glm::vec2{ mouseX, mouseY });
+        mainPopups.dismissOutside(glm::vec2{ mouseX, mouseY }, 0);
+        dismissPopupsExcept(0);
     }
-    // 오른쪽 누름: 열린 메뉴 밖이면 닫고, 콘텐츠 브라우저 위면 그 자리의 메뉴를 엽니다(2026-11-21).
+    // 오른쪽 누름: 열린 메뉴 밖이면 닫고(오른쪽 메뉴만 오른쪽 누름으로 닫힘), 콘텐츠 브라우저 위면 그 자리의 메뉴를 엽니다(2026-11-21).
     {
         const bool rightDown = ctx_.window && ctx_.window->isMouseButtonDown(HInput::MOUSE_BUTTON_RIGHT);
         if (rightDown && !prevRightDown_) {
             const glm::vec2 p{ mouseX, mouseY };
-            contextMenu_.handleOutsideClick(p);
-            if (!modal_ && bottomTab_ == 0) contentPanel_.openContextMenuAt(p);
+            mainPopups.dismissOutside(p, 1);
+            dismissPopupsExcept(0);
+            if (!modal_ && bottomTab_ == 0 && bottomInMain) contentPanel_.openContextMenuAt(p);
+            // 디테일 속성 행(H3a): Reset to Default · Copy · Paste.
+            if (!modal_ && dock_.panelActiveInMain("Details") && hwininput::panelGetsPointer(dock_.floatOfPanel("Details"), 0))
+                detailsPanel_.openRowMenuAt(p);
         }
         prevRightDown_ = rightDown;
-        if (contextMenu_.isOpen() && ctx_.window && ctx_.window->isKeyDown(HInput::KEY_ESCAPE)) contextMenu_.close();
+        // Esc: closeOnEscape 팝업(오른쪽 메뉴)을 닫습니다. Add Component 는 검색 칸의 Esc(onCancel)가 닫습니다.
+        if (!mainPopups.empty() && ctx_.window && ctx_.window->isKeyDown(HInput::KEY_ESCAPE)) mainPopups.dismissOnEscape();
     }
     // 콘텐츠 브라우저 끌어 놓기(2026-11-21): 에셋 보기의 항목을 누른 채 끌어 뷰포트에 놓습니다. 끄는 동안 커서 옆 이름표와
     // 놓일 자리 표시를 그리고, 놓으면 종류별로 놓습니다(Undo 가능). Esc 는 취소입니다.
     {
-        const glm::vec2 p{ mouseX, mouseY };
-        if (leftDown && !prevLeftDown_ && !modal_ && bottomTab_ == 0) contentPanel_.pointerPress(p);
-        if (!dumpDrag_) contentPanel_.pointerMove(p, leftDown);
+        glm::vec2 p{ mouseX, mouseY };
+        if (leftDown && !prevLeftDown_ && !modal_ && bottomTab_ == 0 && bottomInMain) contentPanel_.pointerPress(p);
+        if (!dumpDrag_ && bottomHere) contentPanel_.pointerMove(p, leftDown);
+        // 끄는 중에는 콘텐츠 브라우저가 있는 창의 포인터를 메인 좌표로 바꿔 씁니다(M3b: 떠 있는 콘텐츠 브라우저에서 끌어 메인 뷰포트에
+        // 놓기, OS 가 누른 창에 커서를 잡아 두어 창 밖 좌표도 옴). 메인이면 그대로입니다.
+        bool dragLeft = leftDown;
+        if (contentPanel_.dragging() && !bottomHere && !dumpDrag_ && !contentPointerInMain(mouseX, mouseY, leftDown, p, dragLeft)) {
+            contentPanel_.cancelDrag();   // 그 창이 사라짐
+        }
         if (contentPanel_.dragging()) {
             const std::string path = contentPanel_.dragPath();
             glm::vec3 point{ 0.f };
             Actor* hit = nullptr;
-            const bool can = !modal_ && contentPanel_.canDropInViewport(path) &&
-                             viewport_.dropPoint(mouseX, mouseY, winW, winH, point, &hit);
-            if (ctx_.window && ctx_.window->isKeyDown(HInput::KEY_ESCAPE) && !dumpDrag_) {
+            // 디테일 에셋 칸 위(H3b, 메인 창의 디테일만): 종류가 맞으면 그 칸에 넣고, 아니면 거부(커서 이름표 · 칸 테두리 빨강).
+            const bool overDetails = !modal_ && dock_.panelActiveInMain("Details") && detailsPanel_.overAssetRow(p);
+            const bool canDetails  = overDetails && detailsPanel_.canDropAsset(p, path);
+            const bool can = overDetails ? canDetails
+                                         : (!modal_ && contentPanel_.canDropInViewport(path) &&
+                                            viewport_.dropPoint(p.x, p.y, winW, winH, point, &hit));
+            detailsPanel_.setDropHover(p, path, overDetails && (dragLeft || dumpDrag_));
+            IWindow* kw = windowById(keyboardWindowId());
+            if (kw && kw->isKeyDown(HInput::KEY_ESCAPE) && !dumpDrag_) {
                 contentPanel_.cancelDrag();
-            } else if (!leftDown && !dumpDrag_) {
-                if (can) contentPanel_.dropInViewport(path, point, hit);
+                detailsPanel_.setDropHover(p, path, false);
+            } else if (!dragLeft && !dumpDrag_) {
+                if (overDetails) { if (canDetails) detailsPanel_.dropAsset(p, path); }
+                else if (can)    contentPanel_.dropInViewport(path, point, hit);
                 contentPanel_.cancelDrag();
+                detailsPanel_.setDropHover(p, path, false);
+            } else if (overDetails) {
+                contentPanel_.updateDragVisual(p, can);
             } else {
                 if (can) {
                     // 놓일 자리: 바닥 원 + 세운 선(화면에서 같은 크기로 보이게 카메라 거리에 비례). 소리를 소리 액터 위에 놓으면
@@ -1004,23 +1300,29 @@ void EditorApp::handleInput(float mouseX, float mouseY,
                 contentPanel_.updateDragVisual(p, can);
             }
         }
-        if (!contentPanel_.dragging()) contentPanel_.updateDragVisual(p, false);   // 이름표 지우기(한 번)
+        if (!contentPanel_.dragging()) {
+            contentPanel_.updateDragVisual(p, false);   // 이름표 지우기(한 번)
+            detailsPanel_.setDropHover(p, std::string(), false);   // 디테일 칸 테두리 강조 지우기(H3b, 바뀔 때만 다시 만듦)
+        }
     }
 
     // ── 메뉴 hover 전환 ──────────────────────────────────────────────────────────
     menus_.handleHoverSwitch(glm::vec2{ mouseX, mouseY });
+    // 드롭다운 · 오른쪽 메뉴의 행 hover: 하위 메뉴 열기 · 닫기, 강조(H2b).
+    menus_.hoverRows(glm::vec2{ mouseX, mouseY });
+    contextMenu_.hover(&slateRenderer_.context(), glm::vec2{ mouseX, mouseY });
 
     // 열린 팝업(메뉴 드롭다운과 그 캐처, Categories 패널) 위의 누름은 아래 스플리터·탭 판정보다
     // UI 가 먼저 받아야 합니다. 예전에는 File > Load Scene 행의 왼쪽 끝을 누르면 그 밑의 Outliner
     // 탭이 클릭을 가져가 메뉴가 열린 채로 남았습니다(DEF-64 의 우회 경로).
+    // 팝업 층(H2a): 열린 팝업 영역 안이거나 Consume 팝업(메뉴 드롭다운)이 열려 있으면 참. 메뉴는 열었지만 아직 층에 들어가기 전인
+    // 프레임도 있어 isOpen() 을 함께 봅니다(예전과 같음).
     const bool overPopup =
-        modal_ != nullptr || menus_.isOpen() ||
-        logPanel_.popupContains(glm::vec2{ mouseX, mouseY }) || componentPicker_.popupContains(glm::vec2{ mouseX, mouseY }) ||
-        contextMenu_.popupContains(glm::vec2{ mouseX, mouseY });
+        modal_ != nullptr || menus_.isOpen() || mainPopups.overPopup(glm::vec2{ mouseX, mouseY });
 
     // ── Dock splitter resize & tab drag ─────────────────────────────────────────
-    if (dock_.handleSplitterInput(mouseX, mouseY, leftDown, prevLeftDown_, overPopup, ctx_.window) ||
-        dock_.handleTabInput(mouseX, mouseY, leftDown, prevLeftDown_, overPopup, ctx_.window)) {
+    if (dock_.handleSplitterInput(0, mouseX, mouseY, leftDown, prevLeftDown_, overPopup, ctx_.window) ||
+        dock_.handleTabInput(0, mouseX, mouseY, leftDown, prevLeftDown_, overPopup, ctx_.window)) {
         prevLeftDown_ = leftDown;
         return;
     }
@@ -1044,7 +1346,7 @@ void EditorApp::handleInput(float mouseX, float mouseY,
 
     // ── UI event + actor pick ─────────────────────────────────────────────────
     if (!gizmoConsumed && leftDown && !prevLeftDown_) {
-        if (outlinerVisible_)
+        if (outlinerInMain)   // 메인에서 활성 탭일 때만(떠 있는 창이면 그 창 처리가 그 창 좌표로)
             outlinerPanel_.setPressHeldIfContains(glm::vec2{ mouseX, mouseY });
         e.button = 0; e.down = true;
         HReply r = slateRenderer_.handlePointerEvent(e);

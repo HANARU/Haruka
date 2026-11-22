@@ -699,3 +699,198 @@ msgstr "타일 보기"
 msgctxt "Editor.Content,Drag.CannotDrop"
 msgid "cannot drop here"
 msgstr "여기에 놓을 수 없음"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.Scene"
+msgid "Scene"
+msgstr "씬"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.Save"
+msgid "Save"
+msgstr "저장"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.History"
+msgid "History"
+msgstr "기록"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.Edit"
+msgid "Edit"
+msgstr "편집"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.Configuration"
+msgid "Configuration"
+msgstr "설정"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.Create"
+msgid "Create"
+msgstr "만들기"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.Hierarchy"
+msgid "Hierarchy"
+msgstr "계층"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.Viewport"
+msgid "Viewport"
+msgstr "뷰포트"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.Panels"
+msgid "Panels"
+msgstr "패널"
+
+#: src/editor/EditorApp.cpp
+msgctxt "Editor.Menu,Section.Layout"
+msgid "Layout"
+msgstr "배치"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.Command,Outliner.FocusSearch"
+msgid "Search Outliner"
+msgstr "아웃라이너 검색"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.Command,Play.Play"
+msgid "Play"
+msgstr "플레이"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.Command,Play.Pause"
+msgid "Pause"
+msgstr "일시 정지"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.Command,Play.Stop"
+msgid "Stop"
+msgstr "정지"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.Command,Content.Refresh"
+msgid "Refresh Content"
+msgstr "콘텐츠 새로 고침"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Tip.ResetToDefault"
+msgid "Reset to Default"
+msgstr "기본값으로 되돌리기"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Transform.Location"
+msgid "Location"
+msgstr "위치"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Transform.Rotation"
+msgid "Rotation"
+msgstr "회전"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Transform.Scale"
+msgid "Scale"
+msgstr "배율"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.Command,Details.ResetToDefault"
+msgid "Reset to Default"
+msgstr "기본값으로 되돌리기"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.Command,Details.CopyValue"
+msgid "Copy"
+msgstr "복사"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.Command,Details.PasteValue"
+msgid "Paste"
+msgstr "붙여넣기"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,SearchHint"
+msgid "Search Details"
+msgstr "디테일 검색"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,SearchNoMatch"
+msgid "No properties match '{0}'"
+msgstr "'{0}'에 맞는 속성이 없습니다"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Tip.ColorPicker"
+msgid "Open the color picker"
+msgstr "색 선택기 열기"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Tip.AssetPick"
+msgid "Choose an asset"
+msgstr "에셋 고르기"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Tip.AssetBrowse"
+msgid "Browse to Asset in Content Browser"
+msgstr "콘텐츠 브라우저에서 에셋 찾기"
+
+#: src/editor/DetailsPanel.cpp
+msgctxt "Editor.Details,Tip.AssetClear"
+msgid "Clear"
+msgstr "비우기"
+
+#: src/editor/AssetPicker.cpp
+msgctxt "Editor.Details,AssetSearchHint"
+msgid "Search assets..."
+msgstr "에셋 검색..."
+
+#: src/editor/AssetPicker.cpp
+msgctxt "Editor.Details,AssetCount"
+msgid "{0} items"
+msgstr "{0}개"
+
+#: src/editor/AssetPicker.cpp
+msgctxt "Editor.Details,AssetNoMatch"
+msgid "No matching asset"
+msgstr "맞는 에셋이 없습니다"
+
+#: src/editor/ColorPickerPopup.cpp
+msgctxt "Editor.ColorPicker,Title"
+msgid "Color Picker: {0}"
+msgstr "색 선택기: {0}"
+
+#: src/editor/ColorPickerPopup.cpp
+msgctxt "Editor.ColorPicker,Old"
+msgid "Old"
+msgstr "이전"
+
+#: src/editor/ColorPickerPopup.cpp
+msgctxt "Editor.ColorPicker,New"
+msgid "New"
+msgstr "새 색"
+
+#: src/editor/ColorPickerPopup.cpp
+msgctxt "Editor.ColorPicker,Tip.Old"
+msgid "Original color (click to restore)"
+msgstr "원래 색(누르면 되돌림)"
+
+#: src/editor/ColorPickerPopup.cpp
+msgctxt "Editor.ColorPicker,Tip.New"
+msgid "New color"
+msgstr "새 색"
+
+#: src/editor/ColorPickerPopup.cpp
+msgctxt "Editor.ColorPicker,HexSrgb"
+msgid "Hex (sRGB)"
+msgstr "16진수 (sRGB)"
+
+#: src/editor/ColorPickerPopup.cpp
+msgctxt "Editor.ColorPicker,OK"
+msgid "OK"
+msgstr "확인"
+
+#: src/editor/ColorPickerPopup.cpp
+msgctxt "Editor.ColorPicker,Cancel"
+msgid "Cancel"
+msgstr "취소"

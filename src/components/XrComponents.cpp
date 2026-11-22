@@ -29,10 +29,10 @@ std::vector<PropDesc> XrRigComponent::buildProps() {
     auto* p = this;
     return {
         makePropEnum("Height", { "Tracked (real)", "Fixed" },
-                     [p] { return p->trackedHeight ? 0 : 1; }, [p](int v) { p->trackedHeight = (v == 0); }),
+                     [p] { return p->trackedHeight ? 0 : 1; }, [p](int v) { p->trackedHeight = (v == 0); }).withDefault(0.f),
         makePropFloat("Eye Height", PropColor::Neutral, 0.01f, [p] { return p->eyeHeight; },
                       [p](float v) { p->eyeHeight = std::clamp(v, xr_rig::kMinEyeHeight, xr_rig::kMaxEyeHeight); },
-                      PropUnit::Offset),
+                      PropUnit::Offset).withDefault(xr_rig::kDefaultEyeHeight),
     };
 }
 
@@ -142,8 +142,8 @@ std::vector<PropDesc> TrackedPoseComponent::buildProps() {
     auto* p = this;
     return {
         makePropEnum("Source", { "Head", "Left Hand", "Right Hand" },
-                     [p] { return (int)p->source; }, [p](int v) { p->source = (ETrackedSource)std::clamp(v, 0, 2); }),
-        makePropToggle("Show Debug", [p] { return p->showDebug; }, [p](bool v) { p->showDebug = v; }),
+                     [p] { return (int)p->source; }, [p](int v) { p->source = (ETrackedSource)std::clamp(v, 0, 2); }).withDefault(ETrackedSource::Head),
+        makePropToggle("Show Debug", [p] { return p->showDebug; }, [p](bool v) { p->showDebug = v; }).withDefault(true),
     };
 }
 
@@ -379,14 +379,14 @@ std::vector<PropDesc> RigLocomotionComponent::buildProps() {
     auto* p = this;
     return {
         makePropFloat("Move Speed", PropColor::Neutral, 0.05f, [p] { return p->moveSpeed; },
-                      [p](float v) { p->moveSpeed = std::clamp(v, 0.f, 50.f); }),
+                      [p](float v) { p->moveSpeed = std::clamp(v, 0.f, 50.f); }).withDefault(2.f),
         makePropFloat("Snap Turn", PropColor::Neutral, 1.f, [p] { return p->snapTurnDeg; },
-                      [p](float v) { p->snapTurnDeg = std::clamp(v, 5.f, 180.f); }, PropUnit::Angle),
-        makePropToggle("Flying", [p] { return p->flying; }, [p](bool v) { p->flying = v; }),
+                      [p](float v) { p->snapTurnDeg = std::clamp(v, 5.f, 180.f); }, PropUnit::Angle).withDefault(45.f),
+        makePropToggle("Flying", [p] { return p->flying; }, [p](bool v) { p->flying = v; }).withDefault(false),
         makePropFloat("Look Sensitivity", PropColor::Neutral, 0.01f, [p] { return p->lookSensitivity; },
-                      [p](float v) { p->lookSensitivity = std::clamp(v, 0.01f, 2.f); }),
-        makePropToggle("Collide", [p] { return p->collide; }, [p](bool v) { p->collide = v; }),
-        makePropToggle("Teleport", [p] { return p->teleport; }, [p](bool v) { p->teleport = v; }),
+                      [p](float v) { p->lookSensitivity = std::clamp(v, 0.01f, 2.f); }).withDefault(0.15f),
+        makePropToggle("Collide", [p] { return p->collide; }, [p](bool v) { p->collide = v; }).withDefault(false),
+        makePropToggle("Teleport", [p] { return p->teleport; }, [p](bool v) { p->teleport = v; }).withDefault(true),
     };
 }
 
@@ -422,8 +422,8 @@ GrabbableComponent::~GrabbableComponent() {
 
 std::vector<PropDesc> GrabbableComponent::buildProps() {
     auto* p = this;
-    return { makePropToggle("Throwable", [p] { return p->throwable; }, [p](bool v) { p->throwable = v; }),
-             makePropToggle("Velocity Tracking", [p] { return p->velocityTracking; }, [p](bool v) { p->velocityTracking = v; }) };
+    return { makePropToggle("Throwable", [p] { return p->throwable; }, [p](bool v) { p->throwable = v; }).withDefault(true),
+             makePropToggle("Velocity Tracking", [p] { return p->velocityTracking; }, [p](bool v) { p->velocityTracking = v; }).withDefault(false) };
 }
 void GrabbableComponent::writeFields(ComponentFieldWriter& w) const {
     w.b("throwable", throwable);
@@ -664,7 +664,7 @@ void GrabInteractorComponent::tick(float dt) {
 std::vector<PropDesc> GrabInteractorComponent::buildProps() {
     auto* p = this;
     return { makePropFloat("Radius", PropColor::Neutral, 0.01f, [p] { return p->radius; },
-                           [p](float v) { p->radius = std::clamp(v, 0.01f, 1.f); }, PropUnit::Offset) };
+                           [p](float v) { p->radius = std::clamp(v, 0.01f, 1.f); }, PropUnit::Offset).withDefault(0.12f) };
 }
 void GrabInteractorComponent::writeFields(ComponentFieldWriter& w) const { w.f("radius", radius); }
 bool GrabInteractorComponent::readField(const std::string& key, const std::string& value) {

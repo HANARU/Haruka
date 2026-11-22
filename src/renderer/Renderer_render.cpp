@@ -1,3 +1,4 @@
+#include "WindowTarget.hpp"
 #include "Renderer.hpp"
 #include "../ui/slate/HSlateRenderer.hpp"
 #include "../geometry/MeshSource.hpp"
@@ -722,6 +723,11 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
     const bool desktop = swapchain_->hasArea();
     lastFrameDesktop_  = false;
     if (!desktop && !xrFrame) {
+        // 메인 창은 최소화됐지만 떠 있는 창이 보이면 그 창들만 그립니다(M3a, hwin::chooseDesktopFrame). 보조 창이 없으면(게임
+        // 실행 파일 · Android · 창 없는 실행) 목록이 비어 아래 예전 경로 그대로입니다.
+        if (!windowTargets_.empty() &&
+            hwin::chooseDesktopFrame(false, false, anyWindowDrawable()) == hwin::DesktopFrame::AuxOnly)
+            drawAuxOnlyFrame();
         // 창도 XR 이미지도 없습니다. Android 에서 세션이 READY 되기 전과 같은 정상 상태라 쉬어 가되, 한 번은 알립니다.
         if (headless_ && !nothingToDrawLogged_) {
             nothingToDrawLogged_ = true;
@@ -809,6 +815,9 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
         }
         imagesInFlight[imgIdx] = frameFence;
     }
+    // 보조 OS 창(다중 OS 창 M2): 메인 acquire 가 끝난 뒤(위의 이른 반환이 받은 보조 이미지를 버리지 않게) · 펜스 리셋 전에
+    // (이미지 펜스가 이 슬롯 펜스여도 이미 신호된 상태) 창마다 목록 → 해시 → acquire(타임아웃 0)를 합니다. 목록이 비면 아무것도 안 함.
+    if (!windowTargets_.empty()) prepareWindowTargets(fi, frameFence);
     vkResetFences(device, 1, &frameFence);
 
     // ── Extract: World를 읽는 유일한 구간 — 이후 기록은 view만 소비 ──────────
@@ -1091,9 +1100,13 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
     static_assert(HSlateRenderer::kFramesInFlight == MAX_FRAMES,
                   "HSlateRenderer vertex buffers must match MAX_FRAMES");
     bool uiPresented = false;
-    if (uiRenderer_ && desktop) {
+    const bool auxAcquired = !windowTargets_.empty() && anyWindowAcquired();
+    if ((uiRenderer_ && desktop) || auxAcquired) {
+        // 보조 창 기록 시간도 같은 uiRecord 칸에 들어갑니다. 메인 오버레이 record 가 아틀라스를 한 번 올리고(보조 창 목록은
+        // prepareWindowTargets 에서 이미 만들었음), 보조 창은 그 뒤에 기록합니다.
         ScopedCpuTimer t(ft.uiRecord);
-        uiPresented = uiRenderer_->record(cmd, imgIdx, swapchain_->extent(), fi);
+        if (uiRenderer_ && desktop) uiPresented = uiRenderer_->record(cmd, imgIdx, swapchain_->extent(), fi);
+        if (auxAcquired) recordWindowTargets(cmd, fi);
     }
     if (desktop && !uiPresented) {
         // UI 패스가 기록되지 않았으면(게임 실행 파일처럼 UI 가 없거나, UI 가 그릴 것 없이 일찍 돌아감) 표시 전 레이아웃
@@ -1117,17 +1130,22 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
     // ── Submit ────────────────────────────────────────────────────────────────
     // 데스크톱을 건너뛴 XR 프레임은 받은 스왑체인 이미지가 없어 기다릴 것도 알릴 것도 없습니다. 이미지별 세마포어는 데스크톱을
     // 그린 프레임에서만 읽습니다. 창이 없으면 이미지가 0장이라 예전에는 여기서 빈 목록을 읽었습니다(DEF-118).
-    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSemaphore waitSem   = desktop ? frames_.imageAvailSem(fi)    : VK_NULL_HANDLE;
+    // 보조 창은 이번 프레임에 acquire 한 것만 대기 · 신호 목록에 더합니다(받지 못한 창의 세마포어는 신호되지 않았음, D3).
+    // 메인이 첫 칸이고, 보조 창이 없으면 예전과 같은 한 쌍(또는 빈 목록)입니다.
     VkSemaphore signalSem = desktop ? frames_.renderDoneSem(imgIdx) : VK_NULL_HANDLE;
+    submitSems_.clear();
+    submitSems_.add(desktop, frames_.imageAvailSem(fi), signalSem);
+    if (auxAcquired)
+        for (const auto& t : windowTargets_)
+            submitSems_.add(t->acquired, t->imageAvail[fi], t->renderDone[t->imgIdx]);
     VkSubmitInfo si{};
     si.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    si.waitSemaphoreCount   = desktop ? 1u : 0u;
-    si.pWaitSemaphores      = desktop ? &waitSem : nullptr;
-    si.pWaitDstStageMask    = desktop ? &waitStage : nullptr;
+    si.waitSemaphoreCount   = (uint32_t)submitSems_.wait.size();
+    si.pWaitSemaphores      = submitSems_.wait.empty() ? nullptr : submitSems_.wait.data();
+    si.pWaitDstStageMask    = submitSems_.stages.empty() ? nullptr : submitSems_.stages.data();
     si.commandBufferCount   = 1; si.pCommandBuffers   = &cmd;
-    si.signalSemaphoreCount = desktop ? 1u : 0u;
-    si.pSignalSemaphores    = desktop ? &signalSem : nullptr;
+    si.signalSemaphoreCount = (uint32_t)submitSems_.signal.size();
+    si.pSignalSemaphores    = submitSems_.signal.empty() ? nullptr : submitSems_.signal.data();
     {
         ScopedCpuTimer t(ft.submit);
         if (vkQueueSubmit(graphicsQueue, 1, &si, frameFence) != VK_SUCCESS)
@@ -1160,11 +1178,16 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
     }
 
     // ── Present ───────────────────────────────────────────────────────────────
-    if (desktop) {
+    // 보조 창은 메인 다음에 창마다 따로 표시합니다(D2). 실패하면 그 창만 다시 만들게 표시합니다. 계측 칸은 프레임에 한 번
+    // 더하는 이동 평균이라 메인과 같은 구간 안에서 잽니다.
+    if (desktop || auxAcquired) {
         ScopedCpuTimer t(ft.present);
-        res = swapchain_->present(presentQueue, imgIdx, signalSem);
-        if (swapchain_->needsRecreation()) recreateSwapChain();
-        else if (res != VK_SUCCESS) throw std::runtime_error("Failed to present image!");
+        if (desktop) {
+            res = swapchain_->present(presentQueue, imgIdx, signalSem);
+            if (swapchain_->needsRecreation()) recreateSwapChain();
+            else if (res != VK_SUCCESS) throw std::runtime_error("Failed to present image!");
+        }
+        if (auxAcquired) presentWindowTargets();
     }
 
     frameIdx  = (frameIdx + 1) % MAX_FRAMES;

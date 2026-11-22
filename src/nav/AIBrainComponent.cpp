@@ -167,10 +167,13 @@ bool AIBrainComponent::readField(const std::string& key, const std::string& valu
 std::vector<PropDesc> AIBrainComponent::buildProps() {
     auto* p = this;
     return {
-        XPROP_FloatClamp(p, "Sight Radius", PropColor::Neutral, 0.1f, sightRadius, 0.f, 1000.f),
-        XPROP_FloatClamp(p, "Lose Radius", PropColor::Neutral, 0.1f, loseRadius, 0.f, 1000.f),
-        XPROP_FloatClamp(p, "Wait Time", PropColor::Neutral, 0.05f, waitTime, 0.f, 3600.f),
-        XPROP_FloatClamp(p, "Sense Interval", PropColor::Neutral, 0.01f, senseInterval, 0.02f, 60.f),
+        XPROP_FloatClamp(p, "Sight Radius", PropColor::Neutral, 0.1f, sightRadius, 0.f, 1000.f).withDefault(6.f),
+        XPROP_FloatClamp(p, "Lose Radius", PropColor::Neutral, 0.1f, loseRadius, 0.f, 1000.f).withDefault(9.f),
+        XPROP_FloatClamp(p, "Wait Time", PropColor::Neutral, 0.05f, waitTime, 0.f, 3600.f).withDefault(1.f),
+        XPROP_FloatClamp(p, "Sense Interval", PropColor::Neutral, 0.01f, senseInterval, 0.02f, 60.f).withDefault(0.2f),
+        // 태그 글 칸(H3a): 순찰점 · 쫓을 대상을 찾는 액터 태그. 비면 순찰 · 쫓기를 하지 않습니다.
+        XPROP_String(p, "Patrol Tag", patrolTag).withDefault(""),
+        XPROP_String(p, "Target Tag", targetTag).withDefault(""),
     };
 }
 

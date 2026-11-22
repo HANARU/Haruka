@@ -9,9 +9,9 @@ std::vector<PropDesc> ReflectionCaptureComponent::buildProps() {
     auto* p = this;
     return {
         makePropFloat("Influence Radius", PropColor::Neutral, 0.1f,
-            [p]{ return p->radius; }, [p](float v){ p->radius = std::clamp(v, kMinRadius, kMaxRadius); }, PropUnit::Size),
+            [p]{ return p->radius; }, [p](float v){ p->radius = std::clamp(v, kMinRadius, kMaxRadius); }, PropUnit::Size).withDefault(5.f),
         makePropFloat("Brightness", PropColor::Neutral, 0.01f,
-            [p]{ return p->intensity; }, [p](float v){ p->intensity = std::clamp(v, 0.f, 4.f); }, PropUnit::Ratio),
+            [p]{ return p->intensity; }, [p](float v){ p->intensity = std::clamp(v, 0.f, 4.f); }, PropUnit::Ratio).withDefault(1.f),
     };
 }
 

@@ -436,6 +436,7 @@ set(RUNTIME_SOURCES
     src/renderer/Renderer.cpp
     src/renderer/Renderer_swap.cpp
     src/renderer/Renderer_render.cpp
+    src/renderer/Renderer_window.cpp
     src/renderer/Renderer_capture.cpp
     src/renderer/GlfwSwapchain.cpp
     src/memory/HarukaAllocator.cpp
@@ -489,6 +490,8 @@ set(RUNTIME_SOURCES
 set(EDITOR_SOURCES
     src/editor/EditorApp.cpp
     src/editor/EditorApp_dump.cpp
+    src/editor/EditorApp_windows.cpp
+    src/editor/EditorFloatWindows.cpp
     src/editor/EditorUiKit.cpp
     src/editor/EditorIcons.cpp
     src/editor/EditorViewportController.cpp
@@ -504,7 +507,10 @@ set(EDITOR_SOURCES
     src/editor/GpuStatsPanel.cpp
     src/editor/OutputLogPanel.cpp
     src/editor/ComponentPicker.cpp
+    src/editor/AssetPicker.cpp
+    src/editor/ColorPickerPopup.cpp
     src/editor/EditorContextMenu.cpp
+    src/editor/EditorMenuView.cpp
     src/editor/ComponentVisualizers.cpp
     src/editor/EditorApp_scene.cpp
     src/editor/EditorApp_edit.cpp
@@ -570,6 +576,7 @@ else()
 
     list(APPEND RUNTIME_SOURCES
         src/platform/glfw/GlfwWindow.cpp
+        src/platform/glfw/GlfwPlatform.cpp
         src/xr/XrSystem.cpp
     )
     add_library(HarukaRuntime STATIC ${RUNTIME_SOURCES})
@@ -1045,6 +1052,17 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaInputTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- GLFW 플랫폼 수명 · 펌프 테스트 ---------------------------------------
+    # 숨은 창 둘로 GLFW 참조 수 수명(보조 창을 닫아도 메인 창이 삶)과 펌프 한 번에 모든 창의 걸쇠를 비우는지(DEF-82),
+    # 창 관리 함수를 확인합니다(다중 OS 창 H0, Docs/Editor_MultiWindow_Design.md). 창 시스템이 없으면 건너뜁니다.
+    add_executable(HarukaWindowTest tests/WindowPlatformTest.cpp)
+    target_link_libraries(HarukaWindowTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaWindowTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(MSVC)
+        target_compile_options(HarukaWindowTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaWindowTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 커맨드 스택 purge 테스트 --------------------------------------------
     # 헤더 전용이라 링크할 소스가 없습니다. 죽은 대상을 참조하는 커맨드가 undo/redo
     # 양쪽에서 걷히는지 검산합니다(컴포넌트만 제거되는 경로 포함).
@@ -1070,6 +1088,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     # 여러 액터 함께 움직이기, 클립보드 형식, 화면 맞추기 거리를 화면 없이 검산합니다(2026-10-15).
     add_executable(HarukaEditCmdTest
         tests/EditorCommandTest.cpp
+        src/core/HText.cpp
         src/editor/ActorSnapshot.cpp
         src/scene/World.cpp
         src/scene/TimerManager.cpp
@@ -1077,7 +1096,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/scene/Component.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaEditCmdTest PRIVATE glm::glm)
+    target_link_libraries(HarukaEditCmdTest PRIVATE glm::glm HarukaVfs)   # HText(H2b 명령 표의 글)이 번역 표 파일을 vfs 로 읽음
     target_include_directories(HarukaEditCmdTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaEditCmdTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
@@ -1398,6 +1417,14 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/scene/Actor.cpp
         # 에디터 아이콘(D3): SVG 읽기 · 래스터화
         src/editor/EditorIcons.cpp
+        # 다중 OS 창 M3a: 도크 창 단위(패널이 한 루트에만) · 떠 있는 창 수명(가짜 창 · 렌더러 호출 순서)
+        src/editor/EditorDock.cpp
+        src/editor/EditorUiKit.cpp
+        src/editor/EditorFloatWindows.cpp
+        src/editor/dock/DockTree.cpp
+        # H3a: 열거 콤보 = 오른쪽 메뉴와 같은 메뉴 위젯(키 · 체크 · 바깥 닫기)
+        src/editor/EditorContextMenu.cpp
+        src/editor/EditorMenuView.cpp
     )
     # 셰이더 · 글꼴을 가상 파일 시스템으로 읽습니다(2026-10-24).
     target_link_libraries(HarukaSlateTest PRIVATE Vulkan::Vulkan glm::glm HarukaVfs haruka_nanosvg)
@@ -1514,7 +1541,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     set(HARUKA_TESTS HarukaPakTest HarukaGltfTest HarukaGeometryTest HarukaActorTest HarukaCommandTest HarukaActorUndoTest
         HarukaLogTest HarukaAudioTest HarukaSlateTest HarukaPhysicsTest HarukaStereoTest HarukaInputTest HarukaBatchTest
         HarukaRenderExtTest HarukaSceneTest HarukaLightTest HarukaAssetCacheTest HarukaSceneDocTest HarukaEditCmdTest HarukaDockTest
-        HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest HarukaMathTest HarukaArchTest)
+        HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest HarukaMathTest HarukaArchTest
+        HarukaWindowTest)
     if(WIN32)
         list(APPEND HARUKA_TESTS HarukaVkImportTest)
     endif()
@@ -1555,6 +1583,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME math_common          COMMAND HarukaMathTest)
     add_test(NAME architecture_deps    COMMAND HarukaArchTest)
     add_test(NAME xr_input             COMMAND HarukaInputTest)
+    add_test(NAME window_platform      COMMAND HarukaWindowTest)
     add_test(NAME draw_batching        COMMAND HarukaBatchTest)
     add_test(NAME render_extensions    COMMAND HarukaRenderExtTest)
     add_test(NAME scene_components     COMMAND HarukaSceneTest)

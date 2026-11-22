@@ -174,6 +174,18 @@ void EditorApp::duplicateSelection() {
 }
 
 // ── 액터 참조 칸의 대상 고르기(참조 체계 R-7) ───────────────────────────────────────
+void EditorApp::browseToAsset(const std::string& path) {
+    if (path.empty()) return;
+    if (bottomTab_ != 0) { bottomTab_ = 0; rebuildBottomPanel(); }
+    // 패널이 닫혀 있거나 가려진 탭 · 떠 있는 창이면 앞으로(Ctrl+F 와 같은 규칙).
+    dock_.showPanel("Bottom");
+    contentPanel_.setSearch("");
+    contentPanel_.navigate(hcb::parentOf(path));
+    contentPanel_.select(path);
+    if (!contentPanel_.index().find(path))
+        HLOG(LogEditorEdit, Warning) << "Browse to asset: " << path << " is not in the content folder";
+}
+
 void EditorApp::openActorPicker(const std::string& title, uint64_t current, std::function<void(uint64_t)> pick) {
     if (!ctx_.world) return;
     const std::string none    = HTEXT("Editor.Details", "ActorRef.None", "None").toString();

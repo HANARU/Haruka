@@ -73,6 +73,9 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (a == "--ui-log-categories") o.uiLogCategories = true;
         else if (a == "--ui-play")           o.uiPlay          = true;
         else if (a == "--ui-local-space")    o.uiLocalSpace    = true;
+        else if (a == "--ui-float-cycle")    o.uiFloatCycle    = true;
+        else if (a == "--ui-layout-stats")   o.uiLayoutStats   = 1;
+        else if (valueOf(a, "--ui-float-input", v)) o.uiFloatInput = v;
         else if (valueOf(a, "--window-size", v)) {
             if (!parseSize(v, o.windowW, o.windowH)) unknown.push_back(a);
         }
@@ -98,6 +101,10 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         }
         else if (valueOf(a, "--ui-open-menu", v)) {
             if (!v.empty()) o.uiOpenMenu = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-menu-keys", v)) {
+            if (!v.empty()) o.uiMenuKeys = v;
             else unknown.push_back(a);
         }
         else if (valueOf(a, "--ui-bottom-tab", v)) {
@@ -140,6 +147,19 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (valueOf(a, "--ui-content-view", v))     o.uiContentView = v;
         else if (valueOf(a, "--ui-content-select", v))   o.uiContentSelect = v;
         else if (valueOf(a, "--ui-content-menu", v))     { o.uiContentMenu = v; o.uiContentMenuSet = true; }
+        else if (valueOf(a, "--ui-details-set", v))      o.uiDetailsSet = v;
+        else if (valueOf(a, "--ui-details-combo", v))    o.uiDetailsCombo = v;
+        else if (valueOf(a, "--ui-details-menu", v))     o.uiDetailsMenu = v;
+        else if (valueOf(a, "--ui-details-edit", v))     o.uiDetailsEdit = v;
+        else if (valueOf(a, "--ui-save-scene-copy", v)) o.uiSaveSceneCopy = v;
+        else if (valueOf(a, "--ui-details-split", v))    o.uiDetailsSplit = std::strtof(v.c_str(), nullptr);
+        else if (valueOf(a, "--ui-details-asset-search", v)) o.uiDetailsAssetSearch = v;
+        else if (valueOf(a, "--ui-details-asset", v))    o.uiDetailsAsset = v;
+        else if (a == "--ui-details-color-rgba")         o.uiDetailsColorRgba = true;
+        else if (valueOf(a, "--ui-details-color-hex", v)) o.uiDetailsColorHex = v;
+        else if (valueOf(a, "--ui-details-color", v))    o.uiDetailsColor = v;
+        else if (valueOf(a, "--ui-details-search", v))   o.uiDetailsSearch = v;
+        else if (valueOf(a, "--ui-details-drop", v))     o.uiDetailsDrop = v;
         else if (valueOf(a, "--ui-content-activate", v)) o.uiContentActivate = v;
         else if (valueOf(a, "--ui-content-drag", v))     o.uiContentDrag = v;
         else if (valueOf(a, "--ui-content-drop", v))     o.uiContentDrop = v;
@@ -194,6 +214,10 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         }
         else if (valueOf(a, "--ui-pick", v)) {
             if (!v.empty()) o.uiPick = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-layout-stats", v)) {
+            if (v == "nocache") o.uiLayoutStats = 2;
             else unknown.push_back(a);
         }
         else if (valueOf(a, "--ui-hover", v)) {

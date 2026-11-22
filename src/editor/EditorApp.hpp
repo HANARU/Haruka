@@ -6,7 +6,10 @@
 #include "EditorUiKit.hpp"
 #include "EditorIcons.hpp"
 #include "EditorDock.hpp"
+#include "EditorFloatWindows.hpp"
+#include "EditorWindowInput.hpp"
 #include "EditorMenus.hpp"
+#include "EditorCommandRegistry.hpp"
 #include "EditorChromePanels.hpp"
 #include "ViewportToolbar.hpp"
 #include "EditorViewportController.hpp"
@@ -17,8 +20,11 @@
 #include "GpuStatsPanel.hpp"
 #include "OutputLogPanel.hpp"
 #include "ComponentPicker.hpp"
+#include "AssetPicker.hpp"
+#include "ColorPickerPopup.hpp"
 #include "EditorContextMenu.hpp"
 #include "../core/HLog.hpp"
+#include "../platform/IWindow.hpp"
 #include "HCommandStack.hpp"
 #include "SceneDocument.hpp"
 #include "EditTools.hpp"
@@ -67,6 +73,8 @@ public:
     // 텍스트 입력(리네임·검색·숫자 칸)이 키보드를 쥐고 있는지. 게임 입력계가 이 동안 키를
     // 무시하는 데 씁니다(DEF-67).
     bool isTextInputActive() const override { return currentFocus() != EFocusTarget::None; }
+    // 결정 D7(M3b): Play 중 떠 있는 에디터 창에 OS 포커스가 있으면 게임 입력(키 · 마우스 시선 · 월드 패널 마우스)을 막습니다.
+    bool blocksGameInput() const override;
     bool isInEditor() const { return playState_ == EPlayState::Editor;  }
 
     void beginPlay();
@@ -80,6 +88,7 @@ public:
     void onRunFinished() override;
     void cleanup() override;
     void tick(float dt) override;
+    void tickWhileMinimized(float dt) override;
     void handleInput(float mx, float my, bool ldown, bool lup,
                      float scroll, float winW, float winH) override;
 
@@ -127,6 +136,9 @@ private:
     GpuStatsPanel       gpuStatsPanel_;
     OutputLogPanel      logPanel_;
     ComponentPicker     componentPicker_;   // 디테일의 Add Component 팝업(2026-11-21)
+    AssetPicker         assetPicker_;       // 디테일 에셋 경로 칸의 고르기 팝업(H3b)
+    ColorPickerPopup    colorPicker_;       // 디테일 색 칸의 색 선택기(H3b)
+    bool                prevPickerEsc_ = false;   // 색 선택기 Esc 엣지(디테일 창 키보드)
     EditorContextMenu   contextMenu_;       // 오른쪽 누름 메뉴(콘텐츠 브라우저, 2026-11-21)
 
     EditorContext  ctx_;
@@ -189,8 +201,15 @@ private:
     static constexpr float kMenuBarH   = EditorTheme::menuBarH;
     static constexpr float kStatusBarH = EditorTheme::rowH;
     void buildMenus();
-    bool bottomDirty_    = false;   // 하단 패널(콘텐츠 브라우저) 지연 리빌드
+    // 하단 패널(콘텐츠 브라우저) 지연 리빌드(H1b: HSlate 지연 변경 큐로 옮김). 여러 번 요청해도 한 번만 맡기며, 실행
+    // 자리는 예전 플래그와 같은 flushChromeRebuilds 의 맨 끝(flushDeferred)입니다.
+    bool bottomRebuildQueued_ = false;
+    void requestBottomRebuild();
     void flushChromeRebuilds();
+    // handleInput 의 본문입니다. 조기 return 이 여러 개라, 지연 리빌드 소진은 이 함수가 돌아온 뒤 handleInput 이
+    // 합니다(예전 DeferredRebuildGuard 의 소멸자와 같은 자리, H1b).
+    void handleInputEvents(float mouseX, float mouseY, bool leftDown, bool leftJustUp,
+                           float scrollDelta, float winW, float winH);
 
     // Gizmo mode & space
     int  gizmoMode_  = 1;   // 0=select, 1=move, 2=rotate, 3=scale
@@ -218,7 +237,8 @@ private:
     EFocusTarget currentFocus() const { return textInput_.currentFocus(); }
     void         setTextFocus(EFocusTarget t) { textInput_.setFocus(t); }
     void         previewSound(const std::string& path);   // 콘텐츠 브라우저 미리 듣기(2026-11-21)
-    bool         focusWidgetContains(float x, float y) const { return textInput_.focusWidgetContains(x, y); }
+    // winId 창의 좌표 (x, y) 가 포커스인 칸 위인지(M3b: 칸이 다른 창에 있으면 거짓).
+    bool         focusWidgetContains(int winId, float x, float y) const { return textInput_.focusWidgetContains(winId, x, y); }
 
     bool        outlinerVisible_ = true;
     // 직전 선택(= 지금 선택의 하나 앞). Actor 메뉴의 부착 액션이 부모로 씁니다.
@@ -245,13 +265,27 @@ private:
     EPlayState  playState_     = EPlayState::Editor;
     std::string worldSnapshot_;
 
+    // ── 명령 레지스트리 (H2b) ─────────────────────────────────────────────────
+    // 메뉴 · 툴바 · 단축키가 같은 명령 id 를 부릅니다(EditorCommandRegistry.hpp). 정의는 heditorcmd::defaultSpecs(), 동작은
+    // registerCommands() 가 붙입니다. Window 패널 · 언어 명령은 buildMenus() 가 그때의 목록으로 더합니다.
+    EditorCommandRegistry commands_;
+    void registerCommands();
+
     // ── Key edge tracking ─────────────────────────────────────────────────────
-    bool prevZDown_         = false;
-    bool prevYDown_         = false;
-    bool prevSDown_         = false;
-    bool prevFDown_         = false;
-    bool prevODown_         = false;
-    bool prevNDown_         = false;
+    // 단축키 키(레지스트리의 polled chord 키) 엣지. 키 → 직전 프레임 눌림(H2b, 예전 prevZDown_ 등 7개를 대신함).
+    std::vector<std::pair<int, bool>> prevShortcutKeys_;
+
+    // ── 메뉴 키보드 조작 (H2b) ─────────────────────────────────────────────────
+    // 상단 드롭다운 · 오른쪽 메뉴가 열려 있고 그 메뉴가 있는 창이 키보드 창이면, 그 프레임의 키는 메뉴 몫입니다(단축키 · 글 칸 ·
+    // 기즈모 키로 새지 않음). 키는 키보드 창(M3b)에서 읽고, 시험 대본(<창>:key@down)과 덤프(--ui-menu-keys)도 같은 길로 넣습니다.
+    void tickMenuKeys();
+    int  menuWindowId();                       // 열린 메뉴가 있는 창(없으면 -1)
+    bool menuKeyCapture_ = false;              // 이번 프레임 메뉴가 키보드를 쥠(tickMenuKeys 가 정함)
+    int  menuKeyWin_     = -1;                 // 엣지를 잰 키보드 창(바뀌면 다시 심음)
+    bool prevMenuKeys_[6] = {};                // ↑ ↓ ← → Enter Esc
+    std::vector<std::pair<int, hmenu::Key>> scriptMenuKeys_;   // 대본 키(창 번호, 키). 한 프레임에 하나
+    std::vector<hmenu::Key>                 uiMenuKeys_;       // --ui-menu-keys(덤프)
+    size_t                                  uiMenuKeyNext_ = 0;
 
     // ── Widget helpers (EditorUiKit 으로 위임) ──────────────────────────────────
     std::shared_ptr<HWidget> spacer() const { return ui_.spacer(); }
@@ -307,7 +341,6 @@ private:
     void beginGroupDrag();
     void updateGroupDrag();
     void commitGizmoDrag(const Transform& before, const Transform& after);
-    bool prevDDown_    = false;   // Ctrl+D 엣지
     // 액터 서브트리 생성 · 삭제를 Undo 로 되돌릴 수 있게 합니다(ActorPresenceCmd, 2026-10-15).
     // deleteActorUndoable 은 지우고 커맨드를 쌓고, recordActorCreation 은 이미 만든 루트들을 쌓습니다.
     void deleteActorUndoable(Actor* root);
@@ -336,6 +369,8 @@ private:
     void openSceneDialog();
     // 액터 참조 칸의 대상 고르기(참조 체계 R-7). 목록은 None + 아웃라이너 순서, 고르면 pick(GUID 값, 0 = 없음).
     void openActorPicker(const std::string& title, uint64_t current, std::function<void(uint64_t)> pick);
+    // 콘텐츠 브라우저를 그 에셋의 폴더로 열고 고릅니다(H3b, 디테일 에셋 칸의 찾기 단추 = UE 의 Browse to Asset).
+    void browseToAsset(const std::string& path);
     // 콘텐츠 브라우저의 "..." (참조 체계 A-5): 참조 목록 · 이름 바꾸기 · 옮기기.
     void openAssetActions(const std::string& path);
     void openAssetMoveDialog(const std::string& path);
@@ -426,6 +461,13 @@ private:
     std::string uiContentDrag_, uiContentDrop_;   // --ui-content-drag · drop=<path>@x,y
     bool        dumpDrag_ = false;              // 덤프가 끌기 화면을 고정함(놓지 않음)
     std::string uiAddComponentSearch_;
+    std::string uiDetailsSet_, uiDetailsCombo_, uiDetailsMenu_, uiDetailsEdit_;   // 디테일 속성 행 덤프(H3a)
+    bool        detailsDumpApplied_ = false;
+    void        applyDetailsDumpState();
+    float       uiDetailsSplit_ = -1.f;
+    std::string uiDetailsAsset_, uiDetailsAssetSearch_, uiDetailsColor_, uiDetailsColorHex_, uiDetailsSearch_, uiDetailsDrop_;   // H3b
+    bool        uiDetailsColorRgba_ = false;
+    std::string uiSaveSceneCopy_;   // --ui-save-scene-copy(H3a: 열기 → 저장 바이트 확인)
     std::string uiAddComponentCategory_;
     int         uiAddComponentDown_ = 0;
     bool        uiAddComponentCommit_ = false;
@@ -449,6 +491,73 @@ private:
     std::vector<LineVertex> lastEditorLines_;
     std::vector<LineVertex> lastGizmoTris_;
     void applyDumpState();
+
+    // ── 떠 있는 도크 창(다중 OS 창 M3a, EditorFloatWindows.hpp) ──────────────────────────────────────────────
+    // 도크 배치의 떠 있는 창(F 블록)마다 OS 창을 하나씩 띄워 그 안에 탭 줄과 패널을 그립니다. 이번 단계에서는 입력을 받지 않습니다(M3b).
+    // 창 생성 · 파괴와 OS 닫기 단추(D4) 처리는 syncFloatWindows 한곳에서, 이벤트 펌프 밖(handleInput 끝 · 최소화 중 tick 자리 ·
+    // init)에서 합니다. 메인이 --hidden-window 면 떠 있는 창도 숨깁니다.
+    EditorFloatWindows floatWindows_;
+    bool               floatsHidden_ = false;
+    int                uiFloatCycle_ = 0;   // --ui-float-cycle: 60 프레임째 모든 떠 있는 창에 OS 닫기, 90 프레임째 배치 다시 읽기
+    void initFloatWindows();
+    void syncFloatWindows();
+    void tickFloatCycle();
+
+    // ── 창별 입력(다중 OS 창 M3b, EditorApp_windows.cpp) ─────────────────────────────────────────────────────
+    // 창 번호: 0 = 메인, 1.. = 떠 있는 창(DockFloat::id). 키보드 창은 OS 포커스가 있는 떠 있는 창, 없으면 메인입니다(숨은 실행은 늘 메인).
+    int      keyboardWindowId() const;
+    IWindow* windowById(int id) const;
+    std::vector<int> windowIds() const;
+    // 글 칸 · 숫자 칸 대상이 있는 창(그 칸의 패널이 있는 창). 대화상자는 메인, Add Component 검색 칸은 디테일이 있는 창입니다(H2a).
+    int      windowOfFocusTarget(EFocusTarget t) const;
+    // ── 창별 팝업 층(H2a) ── 창 번호의 문맥(0 = 메인, 떠 있는 창은 OS 창이 아직 없으면 null), 패널이 있는 창의 문맥(팝업을 띄울 곳),
+    // 그 창 말고 모든 창의 팝업 닫기(다른 창을 누름 · 다른 창에서 팝업이 열림), 패널이 다른 창으로 옮겨 간 팝업 닫기.
+    HSlateContext* contextOfWindow(int id);
+    HSlateContext* panelPopupContext(const char* panelId);
+    void     dismissPopupsExcept(int winId);
+    void     closePopupsLeftBehind();
+    // 패널 단축키(Ctrl+F · F2): 그 패널이 떠 있는 창에 있으면 그 탭을 앞으로 + 창을 앞으로, 메인에서 가려졌으면 꺼냅니다.
+    void     bringPanelForward(const char* panelId, bool visible);
+    // handleInput 맨 앞: 떠 있는 창마다 이번 프레임 포인터를 읽고(시험 대본이 있으면 그 값), 패널마다 입력 창을 맞춥니다.
+    void     readFloatPointers();
+    // handleInput 의 메인 처리 뒤: 떠 있는 창마다 메인과 같은 순서(아웃라이너 끌기 → 포커스 해제 → 팝업 바깥(다른 창 팝업 · 이 창
+    // 팝업 층) → 오른쪽 메뉴 · Esc → 패널 끌기 · 누름 → overPopup → 스플리터 · 탭 → 휠 → UI, H2a)로 그 창 문맥에 보냅니다. 모달이
+    // 떠 있으면 받지 않습니다(D5).
+    void     handleFloatInputs();
+    void     handleFloatInput(EditorWindow& w);
+    // 콘텐츠 브라우저가 있는 창의 포인터를 메인 창 좌표로(끈 에셋을 메인 뷰포트에 놓기). 메인이면 그대로.
+    bool     contentPointerInMain(float mainX, float mainY, bool mainLeft, glm::vec2& outPos, bool& outLeft) const;
+    // ── 창을 넘는 탭 끌기(M4) ── 놓을 후보 창의 화면 자리 · 앞뒤 순서(EditorDock::Deps::dropWindows), 창 앞으로 가져오기(0 = 메인),
+    // 도크 Deps 의 창 관련 함수 채우기. 앞뒤 순서는 GLFW 에 Z 순서 API 가 없어 포커스를 받은 순서로 대신합니다(hdockdrag::FrontOrder).
+    std::vector<hdockdrag::DropWindow> dropWindows() const;
+    void     raiseWindow(int winId);
+    void     fillDockWindowDeps(EditorDock::Deps& d);
+    void     updateFrontOrder();
+    hdockdrag::FrontOrder               frontOrder_;
+    // 시험 대본의 메인 창 포인터(창 번호 0, M4). 대본에 메인 포인터 단계가 있을 때만 메인 handleInput 이 이 값을 씁니다.
+    hwininput::PointerSample            mainSim_;
+    bool                                mainSimFocused_ = false;
+    bool                                mainScripted_   = false;
+    bool                                mainSimPrevLeft_ = false;
+    void     logWindowRects(const char* why) const;
+    std::string                         uiFloatInput_;   // --ui-float-input(시험 대본)
+    std::vector<hwininput::ScriptStep>  floatScript_;
+    size_t                              floatScriptNext_ = 0;
+    int                                 loggedKeyboardWin_ = 0;
+    static constexpr uint32_t           kFloatScriptStartFrame = 4;
+
+    // ── 배치 계측(--ui-layout-stats[=nocache], H1b) ── 프레임(tick 사이)마다 메인 문맥의 arrange 호출 · 실제 배치 ·
+    // 측정 호출 수를 모아 실행 끝에 로그로 남깁니다. nocache 는 예전 방식(캐시 · 건너뛰기 없음)으로 돌려 전후를 잽니다.
+    int      layoutStatsMode_ = 0;
+    uint64_t lsFrames_ = 0, lsPrevCalls_ = 0, lsPrevRuns_ = 0, lsPrevMeasures_ = 0;
+    uint64_t lsSumCalls_ = 0, lsSumRuns_ = 0, lsSumMeasures_ = 0;
+    uint64_t lsMaxCalls_ = 0, lsMaxRuns_ = 0, lsMaxMeasures_ = 0;
+    double   lsArrangeMs_ = 0.0;
+    void sampleLayoutStats();
+    void logLayoutStats();
+
+    // 슬롯 정점 버퍼 크기(다중 OS 창 M2). 목록 하나의 상한(HSlateRenderer::maxVerts) 두 개분입니다.
+    static constexpr uint32_t kEditorSlotVerts = 2 * HSlateRenderer::maxVerts();
 
     // 에디터 색 토큰(EditorTheme 정본 별칭)
     static constexpr glm::vec4 kBgPanel   = EditorTheme::bgPanel;

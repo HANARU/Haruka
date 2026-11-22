@@ -40,6 +40,8 @@ const std::vector<const char*>& EditorIcons::names() {
         "settings", "file", "sun", "volume-2", "layers", "check",
         // 콘텐츠 브라우저(2026-11-21): 폴더 · 종류 아이콘 · 보기 바꾸기 · 뒤로
         "folder", "chevron-left", "music", "film", "layout-grid", "list", "package", "map", "image",
+        // 디테일 기본값 되돌리기(H3a)
+        "rotate-ccw",
     };
     return k;
 }

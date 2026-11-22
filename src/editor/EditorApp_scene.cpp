@@ -129,7 +129,7 @@ void EditorApp::openScene(const std::string& logicalPath) {
     sceneDiskHash_ = sceneTextHash(text);
     lastScene_ = logicalPath;
     saveEditorState();
-    bottomDirty_ = true;
+    requestBottomRebuild();
     // 에디터 카메라를 빼고 셉니다.
     const size_t count = ctx_.world->getActors().size() - (viewport_.cameraActor() ? 1 : 0);
     HLOG(LogEditorScene, Log) << "Scene opened: " << logicalPath << " (" << count << " actors)";
@@ -236,7 +236,7 @@ bool EditorApp::writeSceneTo(const std::string& logicalPath) {
     lastScene_ = logicalPath;
     saveEditorState();
     contentPanel_.scanScenes();
-    bottomDirty_ = true;   // 콘텐츠 브라우저의 SCENES 목록(지금 씬 강조)
+    requestBottomRebuild();   // 콘텐츠 브라우저의 SCENES 목록(지금 씬 강조)
     HLOG(LogEditorScene, Log) << "Scene saved: " << logicalPath;
     return true;
 }
@@ -362,7 +362,11 @@ void EditorApp::openModal(ModalSpec spec) {
     menus_.close();
     logPanel_.closePopup();
     componentPicker_.close();
+    assetPicker_.close();
+    colorPicker_.confirm();
     contextMenu_.close();
+    // 대화상자는 메인 창에 뜹니다(D5). 떠 있는 창에 키보드가 있으면 메인을 앞으로 가져와 키 입력이 대화상자로 가게 합니다(숨은 창은 그대로).
+    if (keyboardWindowId() != 0 && ctx_.window) ctx_.window->focus();
     modal_ = std::make_unique<ModalSpec>(std::move(spec));
     if (modal_->hasInput) setTextFocus(EFocusTarget::Dialog);
     modalDirty_ = true;
@@ -607,7 +611,7 @@ bool EditorApp::moveAsset(const std::string& from, const std::string& to) {
     if (!lastScene_.empty()) lastScene_ = hrefs::mapPath(plan, hvfs::toCanonical(lastScene_));
     saveEditorState();
     contentPanel_.scanAll();
-    bottomDirty_ = true;
+    requestBottomRebuild();
     detailsPanel_.markDirty();
     outlinerPanel_.markDirty();
     return true;

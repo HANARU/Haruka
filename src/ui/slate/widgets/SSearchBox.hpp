@@ -53,6 +53,12 @@ public:
         { icon_ = on; return self(); }
     std::shared_ptr<SSearchBox> style(const Style& s)
         { style_ = s; return self(); }
+    // 키보드 포커스를 받는 칸인가(H1a-2). 에디터 글 칸은 켜고, 어느 칸이 포커스인지는 HSlateContext 의 포커스
+    // 위젯이 정본입니다. 그리기의 강조는 지금처럼 focused() 람다가 정합니다.
+    std::shared_ptr<SSearchBox> focusable(bool on)
+        { focusable_ = on; return self(); }
+    bool supportsKeyboardFocus() const override { return focusable_; }
+    HTextEditState* editState() const { return edit_; }
 
     glm::vec2 computeDesiredSize() override { return { 0.f, 24.f }; }
     void onArrangeChildren(const HGeometry& allotted) override { cachedGeo_ = allotted; }
@@ -159,6 +165,7 @@ public:
 
 private:
     bool                      armed_ = false;   // 이 위젯 위에서 눌렸는가
+    bool                      focusable_ = false;
     AttrStr                   text_;
     std::string               placeholder_ = "Search...";
     float                     fontSize_    = 10.f;

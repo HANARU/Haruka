@@ -143,7 +143,8 @@ void EditorViewportController::tickHotkeys() {
     const bool drivingPlayer = deps_.ctx->world && CameraComponent::activeIn(*deps_.ctx->world) != editorCam_;
     const bool modalOpen     = deps_.isModalOpen && deps_.isModalOpen();
     const bool textFree      = !deps_.isTextInputFree || deps_.isTextInputFree();
-    if (deps_.ctx->window && textFree && !gizmo_.isDragging() &&
+    const bool menuKeys      = deps_.isKeyboardCaptured && deps_.isKeyboardCaptured();   // 열린 메뉴가 키를 받음(H2b)
+    if (deps_.ctx->window && textFree && !menuKeys && !gizmo_.isDragging() &&
         !deps_.ctx->window->isCameraModeActive() && !modalOpen && !drivingPlayer) {
         IWindow& win = *deps_.ctx->window;
         bool qNow = win.isKeyDown(HInput::KEY_Q);

@@ -212,25 +212,25 @@ std::vector<PropDesc> UIPanelComponent::buildProps() {
     auto* p = this;
     std::vector<PropDesc> props;
     props.push_back(makePropFloat("Width", PropColor::Red, 0.01f,
-        [p]{ return p->width; },  [p](float v){ p->width  = std::clamp(v, kMinSize, kMaxSize); }, PropUnit::Size));
+        [p]{ return p->width; },  [p](float v){ p->width  = std::clamp(v, kMinSize, kMaxSize); }, PropUnit::Size).withDefault(0.8f));
     props.push_back(makePropFloat("Height", PropColor::Green, 0.01f,
-        [p]{ return p->height; }, [p](float v){ p->height = std::clamp(v, kMinSize, kMaxSize); }, PropUnit::Size));
+        [p]{ return p->height; }, [p](float v){ p->height = std::clamp(v, kMinSize, kMaxSize); }, PropUnit::Size).withDefault(0.5f));
     props.push_back(makePropFloat("Pixels / m", PropColor::Neutral, 10.f,
         [p]{ return p->pixelsPerMeter; },
-        [p](float v){ p->pixelsPerMeter = std::clamp(v, kMinPixelsPerMeter, kMaxPixelsPerMeter); }));
+        [p](float v){ p->pixelsPerMeter = std::clamp(v, kMinPixelsPerMeter, kMaxPixelsPerMeter); }).withDefault(kDefaultPixelsPerMeter));
     props.push_back(makePropToggle("Two Sided",
-        [p]{ return p->twoSided; }, [p](bool v){ p->twoSided = v; }));
+        [p]{ return p->twoSided; }, [p](bool v){ p->twoSided = v; }).withDefault(false));
     props.push_back(makePropEnum("Placement", { "World", "Follow Head" },
         [p]{ return (int)p->placement; },
-        [p](int v){ p->placement = v == 1 ? Placement::FollowHead : Placement::World; }));
+        [p](int v){ p->placement = v == 1 ? Placement::FollowHead : Placement::World; }).withDefault(UIPanelComponent::Placement::World));
     props.push_back(makePropFloat("Follow Distance", PropColor::Neutral, 0.01f,
         [p]{ return p->followDistance; },
-        [p](float v){ p->followDistance = std::clamp(v, kMinFollowDistance, kMaxFollowDistance); }, PropUnit::Size));
+        [p](float v){ p->followDistance = std::clamp(v, kMinFollowDistance, kMaxFollowDistance); }, PropUnit::Size).withDefault(1.0f));
     props.push_back(makePropFloat("Follow Height", PropColor::Neutral, 0.01f,
         [p]{ return p->followHeight; },
-        [p](float v){ p->followHeight = std::clamp(v, -kMaxFollowHeight, kMaxFollowHeight); }, PropUnit::Offset));
+        [p](float v){ p->followHeight = std::clamp(v, -kMaxFollowHeight, kMaxFollowHeight); }, PropUnit::Offset).withDefault(-0.15f));
     props.push_back(makePropFloat("Brightness", PropColor::Neutral, 0.01f,
-        [p]{ return p->brightness; }, [p](float v){ p->brightness = std::clamp(v, kMinBrightness, 1.f); }));
+        [p]{ return p->brightness; }, [p](float v){ p->brightness = std::clamp(v, kMinBrightness, 1.f); }).withDefault(1.f));
     // 열거 칸은 등록된 이름 목록입니다. 목록에 없는 이름(모르는 내용)은 맨 앞에 그대로 보여 줍니다.
     // 이름 목록은 두 람다가 함께 붙잡아, 열거 칸이 가리키는 문자열이 칸보다 먼저 사라지지 않게 합니다.
     auto names = std::make_shared<std::vector<std::string>>(contentNames());

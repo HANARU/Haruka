@@ -1,4 +1,5 @@
 #include "Renderer.hpp"
+#include "WindowTarget.hpp"
 #include "LightingCalibration.hpp"
 #include "SkyIbl.hpp"
 #include "../core/AppPaths.hpp"
@@ -169,6 +170,9 @@ void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
 
 void Renderer::cleanup() {
     vkDeviceWaitIdle(device);
+    // 보조 OS 창(다중 OS 창 M2): 부른 쪽이 지우지 않은 창이 남았으면 여기서 표면까지 없앱니다(장치 · 인스턴스보다 먼저).
+    for (auto& t : windowTargets_) destroyWindowTarget(*t);
+    windowTargets_.clear();
     savePipelineCache();
     detachXrSwapchain(false);   // 보통은 엔진이 세션을 지우기 전에 이미 뗐습니다
     detachSyntheticEyes();      // Zone B 할당이라 할당자를 지우기 전에 놓습니다
@@ -981,6 +985,15 @@ void Renderer::setUIRenderer(HSlateRenderer* r) {
     if (!r && panelUi_ == uiRenderer_) panelUi_ = nullptr;
     uiRenderer_ = r;
     if (r) r->rebuildFramebuffers(swapchain_->extent(), swapchain_->imageViews());
+    // 보조 창 프레임버퍼는 UI 렌더러의 창 패스로 만듭니다. UI 렌더러가 바뀌면 다시 만들고, 없으면 그리지 않습니다.
+    if (!windowTargets_.empty()) {
+        vkDeviceWaitIdle(device);
+        for (auto& t : windowTargets_) {
+            destroyWindowFramebuffers(*t);
+            if (r && t->created && !t->failed) buildWindowFramebuffers(*t);
+            t->forced = true;
+        }
+    }
 }
 
 // ── 월드 UI 패널 (3D UI P1a) ──────────────────────────────────────────────────

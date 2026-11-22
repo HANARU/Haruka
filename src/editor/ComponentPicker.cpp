@@ -15,16 +15,31 @@ constexpr float kTitleH  = 24.f;
 constexpr int   kMaxRows = 12;
 } // namespace
 
-std::shared_ptr<SBorder> ComponentPicker::resetPopupHost() {
-    host_ = HNew(SBorder)->background(EditorTheme::transparent);
+void ComponentPicker::resetPopup() {
+    dismissPopup();
     open_ = false;
-    focused_ = false;
+    panelDirty_ = false;
+    listDirty_  = false;
+    if (deps_.releaseFocusQuiet) deps_.releaseFocusQuiet();
+    else                         focused_ = false;
     panel_.reset();
     search_.reset();
     scroll_.reset();
     list_.reset();
     title_.reset();
-    return host_;
+}
+
+HSlateContext* ComponentPicker::popupContext() const {
+    return (ctx_ && handle_ && ctx_->popups().isOpen(handle_)) ? ctx_ : nullptr;
+}
+
+void ComponentPicker::dismissPopup() {
+    ++serial_;
+    HSlateContext* c = popupContext();
+    const HPopupLayer::Handle h = handle_;
+    ctx_    = nullptr;
+    handle_ = 0;
+    if (c) c->dismissPopup(h);
 }
 
 Actor* ComponentPicker::target() const {
@@ -57,17 +72,7 @@ void ComponentPicker::close() {
     focused_ = false;
     open_ = false;
     panelDirty_ = true;
-}
-
-bool ComponentPicker::popupContains(glm::vec2 p) const {
-    return open_ && panel_ && panel_->cachedGeometry().contains(p);
-}
-
-void ComponentPicker::handleOutsideClick(glm::vec2 p) {
-    if (!open_) return;
-    if (popupContains(p)) return;
-    if (auto a = anchor_.lock(); a && a->cachedGeometry().contains(p)) return;   // 단추 자신이 토글
-    close();
+    dismissPopup();
 }
 
 void ComponentPicker::tick() {
@@ -155,12 +160,12 @@ void ComponentPicker::flushRebuild() {
 }
 
 void ComponentPicker::rebuildPanel() {
-    if (!host_) return;
     panel_.reset();
     auto anchor = anchor_.lock();
-    if (!open_ || !anchor || !deps_.ui) {
+    HSlateContext* c = (open_ && anchor && deps_.ui && deps_.popupContext) ? deps_.popupContext() : nullptr;
+    if (!c) {
         open_ = false;
-        host_->content(nullptr);
+        dismissPopup();
         search_.reset();
         scroll_.reset();
         list_.reset();
@@ -172,8 +177,9 @@ void ComponentPicker::rebuildPanel() {
     const float listH  = s(kRowH) * (float)kMaxRows;
     const float panelH = s(kSearchH) + s(kTitleH) + listH + s(6.f);
 
-    search_ = HNew(SSearchBox);
-    search_->style(EditorUiKit::searchBoxStyle(s(1.f)))
+    search_ = HReuse(searchKeep_);
+    search_->focusable(true)
+        ->style(EditorUiKit::searchBoxStyle(s(1.f)))
         ->placeholder(HTEXT("Editor.Details", "ComponentSearchHint", "Search components...").toString())
         ->edit(&edit_)
         ->focused([this] { return focused_; })
@@ -216,27 +222,30 @@ void ComponentPicker::rebuildPanel() {
             ->shadow({ 0.f, u.s(EditorTheme::shadowOffset.y) }, u.s(EditorTheme::shadowBlur), EditorTheme::shadowColor)
             ->padding(HPadding{ 0.f, s(2.f) })
             ->content(body));
-    // 팝업 아래로 누름 · 휠이 새지 않게 같은 크기의 빈 단추를 밑에 깝니다(로그 Categories 팝업과 같음).
-    auto absorber = HNew(SBox)->widthOverride(panelW)->heightOverride(panelH)->content(
-        HNew(SBorder)->onWheel([](float) { return true; })->content(
-            HNew(SButton)
-                ->normalColor(EditorTheme::transparent)->hoveredColor(EditorTheme::transparent)
-                ->pressedColor(EditorTheme::transparent)->content(u.spacer())));
-
-    // 자리: 단추 아래, 창 아래에 자리가 없으면 단추 위. 좌우는 단추 왼쪽에 맞추되 창 안으로.
-    const HGeometry& host = host_->cachedGeometry();
-    const HGeometry& btn  = anchor->cachedGeometry();
-    float top = btn.position.y + btn.size.y + s(2.f);
-    if (top + panelH > host.position.y + host.size.y) top = btn.position.y - panelH - s(2.f);
-    top = std::clamp(top, host.position.y, std::max(host.position.y, host.position.y + host.size.y - panelH));
-    const float left = std::clamp(btn.position.x + (btn.size.x - panelW) * 0.5f, host.position.x,
-                                  std::max(host.position.x, host.position.x + host.size.x - panelW));
-    const HPadding at{ left - host.position.x, top - host.position.y, 0.f, 0.f };
-    auto ov = HNew(SOverlay);
-    ov->addSlot(absorber, EHAlign::Left, EVAlign::Top, at);
-    ov->addSlot(panel,    EHAlign::Left, EVAlign::Top, at);
+    // 자리: 단추 아래, 창 아래에 자리가 없으면 단추 위. 좌우는 단추 가운데에 맞추되 창 안으로(팝업 층 Below · Center · Overflow =
+    // 예전 식 그대로). 팝업 아래로 누름 · 휠이 새지 않는 것과 바깥 누름 닫기(단추 위는 바깥이 아님 = 단추가 토글)는 팝업 층이 맡습니다.
+    HPopupLayer::Spec spec;
+    spec.content = panel;
+    spec.anchor  = HPopupRect::of(anchor->cachedGeometry());
+    spec.placement.side  = HPopupPlacement::Side::Below;
+    spec.placement.align = HPopupPlacement::Align::Center;
+    spec.placement.flip  = HPopupPlacement::Flip::Overflow;
+    spec.placement.clamp = true;
+    spec.placement.gap   = s(2.f);
+    spec.size            = { panelW, panelH };
+    spec.closeOnLeftOutside = true;
+    spec.anchorWidget       = anchor_;
+    dismissPopup();
+    const uint64_t serial = serial_;
+    spec.onDismissed = [this, serial] {
+        if (serial != serial_) return;
+        ctx_ = nullptr; handle_ = 0;
+        close();   // 바깥 누름 · 다른 창에서 열림 · 창 닫힘: 포커스를 놓고 다음 소진 때 위젯 참조를 정리
+    };
+    handle_ = c->pushPopup(std::move(spec));
+    ctx_    = handle_ ? c : nullptr;
+    if (!handle_) { close(); return; }
     panel_ = panel;
-    host_->content(ov);
     rebuildList();
 }
 

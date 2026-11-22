@@ -65,6 +65,9 @@ public:
     virtual bool readField(const std::string& /*key*/, const std::string& /*value*/) { return false; }
     // 블록의 값을 다 읽은 뒤 한 번 부릅니다. 에셋을 불러오는 것처럼 값 여러 개가 함께 필요한 일을 합니다.
     virtual void onFieldsLoaded(const ComponentLoadContext& /*ctx*/) {}
+    // 에디터가 디테일 패널에 이 컴포넌트를 보일 때 부릅니다(H3b). 에셋 경로 칸의 세터가 에셋을 다시 읽을 곳을 받아 둡니다(코드로 만든
+    // 컴포넌트는 onFieldsLoaded 를 거치지 않아 모름). 값은 바꾸지 않습니다.
+    virtual void bindLoadContext(const ComponentLoadContext& /*ctx*/) {}
     // 깨진 값을 알립니다(액터 이름 · 타입 · 이름 · 값). readField 구현이 씁니다.
     void reportBadField(const std::string& key, const std::string& value) const;
 

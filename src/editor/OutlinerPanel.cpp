@@ -21,8 +21,8 @@ std::shared_ptr<HWidget> OutlinerPanel::build() {
     using BR = SBorder;
 
     list_      = HNew(VR);
-    searchBox_ = HNew(SSearchBox);
-    auto outlinerSearch = searchBox_
+    auto outlinerSearch = HReuse(searchBox_)
+        ->focusable(true)
         ->style(EditorUiKit::searchBoxStyle(s(1.f)))
         ->placeholder(HTEXT("Editor.Outliner", "SearchHint", "Search...").toString())
         ->edit(&searchEdit_)
@@ -41,7 +41,7 @@ std::shared_ptr<HWidget> OutlinerPanel::build() {
             // 않습니다. 그동안은 목록 리빌드가 보류되어(DEF-83) 뗄 때 한꺼번에 튀기 때문입니다.
             ->addSlot(HNew(BR)->background(EditorTheme::transparent)->content(list_)
                 ->onWheel([this](float d) {
-                    if (deps_.ctx->window && deps_.ctx->window->isMouseButtonDown(HInput::MOUSE_BUTTON_LEFT))
+                    if (inputWindow() && inputWindow()->isMouseButtonDown(HInput::MOUSE_BUTTON_LEFT))
                         return true;
                     scrollTop_ = std::max(0, scrollTop_ + (d > 0.f ? -3 : 3));
                     dirty_     = true;
@@ -59,8 +59,17 @@ std::shared_ptr<HWidget> OutlinerPanel::build() {
 }
 
 std::shared_ptr<SDockOverlay> OutlinerPanel::resetDropOverlay() {
-    dropOverlay_ = HNew(SDockOverlay);
-    return dropOverlay_;
+    const bool usingMain = !dropOverlay_ || dropOverlay_ == mainDropOverlay_;
+    mainDropOverlay_ = HNew(SDockOverlay);
+    if (usingMain) dropOverlay_ = mainDropOverlay_;
+    return mainDropOverlay_;
+}
+
+void OutlinerPanel::useDropOverlay(const std::shared_ptr<SDockOverlay>& o) {
+    const std::shared_ptr<SDockOverlay>& next = o ? o : mainDropOverlay_;
+    if (next == dropOverlay_) return;
+    if (dropOverlay_) dropOverlay_->active = false;
+    dropOverlay_ = next;
 }
 
 void OutlinerPanel::revealActor(Actor* a) {
@@ -90,7 +99,7 @@ void OutlinerPanel::onActorDestroyed(Actor* a) {
     if (!a) return;
     collapsed_.erase(a->id);
     if (deps_.ctx->selected == a) {
-        renaming_ = false;
+        cancelRename();
         renameEdit_.clear();
     }
     dirty_ = true;
@@ -277,11 +286,12 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
     // Ctrl+클릭은 선택에 넣고 빼기, Shift+클릭은 주 선택부터 이 행까지(2026-10-15). 하나만 선택된 행을 다시 누르면
     // 선택이 풀리는 것은 개편 전부터의 동작이라 그대로 둡니다.
     auto selectRow = [this, id] {
-        renaming_ = false;
+        cancelRename();
         Actor* t = deps_.ctx->world->findById(id);
         if (!t) return;
-        const bool ctrl  = deps_.ctx->window && deps_.ctx->window->isCtrlDown();
-        const bool shift = deps_.ctx->window && deps_.ctx->window->isShiftDown();
+        IWindow* const win = inputWindow();
+        const bool ctrl  = win && win->isCtrlDown();
+        const bool shift = win && win->isShiftDown();
         if (ctrl)       { if (deps_.onToggleSelect) deps_.onToggleSelect(t); }
         else if (shift) { if (deps_.onSelectRange)  deps_.onSelectRange(t); }
         else if (deps_.ctx->selection.size() == 1 && deps_.ctx->selected == t) {
@@ -313,7 +323,7 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
         es.selection   = sel ? EditorTheme::accentHover : EditorTheme::accent;
         es.caret       = nameCol;
         es.caretWidth  = std::max(1.f, std::floor(s(1.f)));
-        nameWidget = HNew(SEditableText)->state(&renameEdit_)->focused([this] { return renaming_; })
+        nameWidget = HReuse(renameText_)->focusable(true)->state(&renameEdit_)->focused([this] { return renaming_; })
                          ->fontSize(s(14.f))->textHeight(s(18.f))->style(es);
     } else {
         nameWidget = HNew(STextBlock)->text(deps_.ui->ellipsizeText(a->name, nameW, s(14.f)))->fontSize(s(14.f))
@@ -419,7 +429,7 @@ void OutlinerPanel::addRow(const Row& r, float listW) {
                                            Actor* t = deps_.ctx->world ? deps_.ctx->world->findById(id) : nullptr;
                                            if (!t || (deps_.isEditorCam && deps_.isEditorCam(t))) return;
                                            if (deps_.ctx->selected == t) {
-                                               renaming_ = false;
+                                               cancelRename();
                                                if (deps_.onCancelGizmo) deps_.onCancelGizmo();
                                            }
                                            if (deps_.onDeleteActor) deps_.onDeleteActor(t);

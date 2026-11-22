@@ -29,6 +29,10 @@ public:
     std::shared_ptr<SEditableText> fontSize(float f)                      { fontSize_ = f; return self(); }
     std::shared_ptr<SEditableText> textHeight(float h)                    { textH_ = h; return self(); }
     std::shared_ptr<SEditableText> style(const Style& s)                  { style_ = s; return self(); }
+    // 키보드 포커스를 받는 칸인가(H1a-2, SSearchBox::focusable 과 같은 뜻).
+    std::shared_ptr<SEditableText> focusable(bool on)                     { focusable_ = on; return self(); }
+    bool supportsKeyboardFocus() const override { return focusable_; }
+    HTextEditState* editState() const { return state_; }
 
     glm::vec2 computeDesiredSize() override {
         const HFontAtlas* m = HFontAtlas::metrics();
@@ -142,6 +146,7 @@ private:
     float                 textH_    = 0.f;
     Style                 style_;
     bool                  dragging_ = false;
+    bool                  focusable_ = false;
 
     std::shared_ptr<SEditableText> self() { return std::static_pointer_cast<SEditableText>(shared_from_this()); }
 };

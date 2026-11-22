@@ -97,7 +97,7 @@ bool SkinnedMeshComponent::localBounds(glm::vec3& outMin, glm::vec3& outMax) con
 std::vector<PropDesc> SkinnedMeshComponent::buildProps() {
     auto* p = this;
     std::vector<PropDesc> props{
-        XPROP_Toggle(p, "Visible",     visible),
+        XPROP_Toggle(p, "Visible",     visible).withDefault(true),
         XPROP_Toggle(p, "Transparent", transparent),
     };
     hchan::addProps(props, &lightChannels);

@@ -69,6 +69,33 @@ std::shared_ptr<SButton> EditorUiKit::iconButton(const std::string& iconName, fl
         ->onClick(std::move(onClick));
 }
 
+std::shared_ptr<SButton> EditorUiKit::comboButton(const std::string& text, float fontSize, std::function<void()> onClick) const {
+    using HR = SHorizontalBox;
+    auto row = HNew(SHorizontalBox);
+    row->addSlot(HNew(STextBlock)->text(text)->fontSize(s(fontSize))->color(kTextBody)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                 HR::ESizeRule::Fill);
+    row->addSlot(icon("chevron-down", 12.f, kTextDim, "v", 11.f), HR::ESizeRule::Auto, 0.f, {}, EVAlign::Center);
+    return HNew(SButton)
+        ->style(buttonStyle(s(1.f)))
+        ->content(row)
+        ->padding(HPadding{ s(6.f), 0.f, s(4.f), 0.f })
+        ->hAlign(EHAlign::Fill)->vAlign(EVAlign::Fill)
+        ->normalColor(EditorTheme::ctlNormal)->hoveredColor(EditorTheme::ctlHover)
+        ->onClick(std::move(onClick));
+}
+
+std::shared_ptr<SButton> EditorUiKit::resetArrow(std::function<bool()> visible, std::function<void()> onClick) const {
+    auto b = HNew(SButton)
+        ->style(buttonStyle(s(1.f)))
+        ->content(icon("rotate-ccw", 12.f, EditorTheme::resetArrow, "<", 11.f))
+        ->padding(HPadding{ 0.f, 0.f })
+        ->normalColor(EditorTheme::transparent)->hoveredColor(EditorTheme::ctlHover)
+        ->cornerRadius(s(EditorTheme::radiusControl))
+        ->onClick(std::move(onClick));
+    if (visible) b->visibility.bind([visible] { return visible() ? EVisibility::Visible : EVisibility::Hidden; });
+    return b;
+}
+
 std::string EditorUiKit::ellipsizeText(const std::string& text, float maxPx, float fontPx) const {
     if (text.empty() || maxPx <= 1.f || !fonts) return text;
     if (fonts->measureText(text, fontPx) <= maxPx) return text;

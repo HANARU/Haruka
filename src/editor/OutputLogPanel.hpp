@@ -34,15 +34,22 @@ public:
     // 지연 리빌드 소진(팝업 · 행 문자열).
     void flushRebuilds(bool tabActive);
 
-    // 최상위 오버레이용 팝업 호스트(buildWidgetTree 에서 한 번 붙임).
-    std::shared_ptr<SBorder> resetPopupHost();
+    // Categories 팝업(H2a): Categories 단추를 감싼 SMenuAnchor 가 로그 패널이 있는 창 문맥의 팝업 층에 띄웁니다. fn 은 그 문맥을
+    // 돌려줍니다(null 이면 열지 않음). 바깥 누름 · 위치는 팝업 층이 맡습니다.
+    void setPopupContext(std::function<HSlateContext*()> fn) { popupContextFn_ = std::move(fn); }
+    // 위젯 트리를 다시 만들 때(buildWidgetTree): 팝업을 닫습니다(예전 resetPopupHost).
+    void resetPopup();
     void openPopup();
     void closePopup();
-    void handleOutsideClick(glm::vec2 mousePos);
-    bool popupContains(glm::vec2 pos) const;
+    bool isPopupOpen() const { return popupOpen_; }
+    // 지금 팝업이 떠 있는 문맥(층에 들어가 있을 때만).
+    HSlateContext* popupContext() const { return catAnchor_ ? catAnchor_->openContext() : nullptr; }
 
     // 텍스트 포커스 중재용 검색 칸 상태.
     SearchField searchField();
+    // 글 칸 포커스 위젯(H1a-2, TextFieldBinding::widget). 탭을 놓아도 같은 객체입니다.
+    std::shared_ptr<HWidget> searchWidget() const  { return searchBoxKeep_; }
+    std::shared_ptr<HWidget> consoleWidget() const { return consoleBoxKeep_; }
     // 콘솔 줄(2026-11-20, Docs/Gameplay_Tools.md D9). run 은 명령 한 줄을 실행해 결과 글을 돌려주는 쪽(EditorApp 이 CVar 레지스트리로 연결),
     // clicked 는 칸을 눌렀을 때(포커스 요청).
     void        setConsole(std::function<std::string(const std::string&)> run, std::function<void()> clicked);
@@ -84,6 +91,11 @@ private:
     std::function<std::string(const std::string&)> consoleRun_;
     std::function<void()>    consoleClicked_;
     std::shared_ptr<SSearchBox> consoleBox_;
+    // 글 칸 포커스 위젯(H1a-2). HSlate 포커스는 위젯을 약한 참조로 잡으므로, 다시 지을 때 새로 만들지 않고 HReuse 로
+    // 같은 객체를 처음 상태로 되돌려 씁니다. 처음 짓기 전에도(팝업 · 행이 아직 없음) 포커스를 받도록 만들 때부터 focusable 입니다.
+    // consoleBox_ · searchBox_ 는 탭이 보일 때만 이 객체를 가리킵니다(releaseTab 이 놓음, 판정 코드는 그대로).
+    std::shared_ptr<SSearchBox> consoleBoxKeep_ = HNew(SSearchBox)->focusable(true);
+    std::shared_ptr<SSearchBox> searchBoxKeep_  = HNew(SSearchBox)->focusable(true);
 public:
     // 콘솔 기록에서 위(-1) · 아래(+1)로 고릅니다(화살표 · --ui-console-recall).
     void stepHistory(int dir);
@@ -107,8 +119,9 @@ private:
     std::shared_ptr<SVerticalBox> rowsBox_;
     std::shared_ptr<SSearchBox>   searchBox_;
     std::shared_ptr<SButton>      catButton_;
-    std::shared_ptr<SBorder>      popupHost_;
-    std::shared_ptr<HWidget>      popupPanel_;
+    // Categories 단추를 감싸는 앵커(H2a). 탭을 다시 만들어도 같은 객체를 쓰고 자식만 바꿉니다(열린 팝업과의 연결 유지).
+    std::shared_ptr<SMenuAnchor>  catAnchor_;
+    std::function<HSlateContext*()> popupContextFn_;
     bool                          popupOpen_  = false;
     bool                          popupDirty_ = false;
 
@@ -120,9 +133,7 @@ private:
     std::shared_ptr<SVerticalBox> buildPopupList(const std::vector<HLogCategoryState*>& cats);
     void addPopupCategoryRow(SVerticalBox& list, HLogCategoryState* st,
                              float rowH, const glm::vec4& btnN, const glm::vec4& btnH);
-    void positionPopupPanel(const std::shared_ptr<HWidget>& panel,
-                            const std::shared_ptr<HWidget>& absorber,
-                            float panelW, float panelH);
+    std::shared_ptr<HWidget> buildPopupPanel();
     bool recordVisible(const HLogRecord& r, const std::string& needleLower) const;
     void setCategoryHidden(uint16_t index, bool hidden);
     void saveFilter() const;

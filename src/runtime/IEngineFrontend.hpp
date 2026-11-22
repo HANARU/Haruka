@@ -65,11 +65,17 @@ public:
 
     // ── 프레임 ──────────────────────────────────────────────────────────────────
     virtual void tick(float dt) = 0;
+    // 메인 창이 최소화된 프레임에 tick · handleInput 대신 부릅니다(DEF-106 규칙: 0 크기 배치를 하지 않음). 에디터는 떠 있는 창의 OS 닫기
+    // 단추 · 생성 · 파괴만 처리합니다(다중 OS 창 M3a). 기본은 아무것도 하지 않습니다(게임 실행 파일).
+    virtual void tickWhileMinimized(float /*dt*/) {}
     virtual void handleInput(float mx, float my, bool ldown, bool lup, float scroll, float winW, float winH) = 0;
     // (mx, my) 가 3D 화면 안인지. 오른쪽 버튼 끌기(카메라 · 시선)를 이 안에서만 시작합니다.
     virtual bool inViewport(float mx, float my, float winW, float winH) const = 0;
     // 텍스트 입력이 키보드를 쥐고 있으면 게임 입력이 키를 무시합니다(DEF-67).
     virtual bool isTextInputActive() const = 0;
+    // 게임 입력(키 · 마우스 시선 · 월드 패널 마우스)을 막는지(결정 D7, 다중 OS 창 M3b). 에디터는 Play 중 떠 있는 창에 OS 포커스가
+    // 있으면 참입니다(UE PIE 와 같음). 패드 · XR 컨트롤러는 막지 않습니다. 기본은 거짓(게임 실행 파일).
+    virtual bool blocksGameInput() const { return false; }
     virtual std::string windowTitle() const = 0;   // 창 제목 앞부분(엔진이 FPS 를 덧붙임)
     // XR 세션 동안 소리를 헤드셋 장치로 바꿀지(2026-10-16).
     virtual bool headsetAudioInVr() const = 0;

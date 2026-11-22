@@ -31,36 +31,32 @@ std::vector<PropDesc> ReverbZoneComponent::buildProps() {
     auto* p = this;
     std::vector<PropDesc> props;
     props.push_back(makePropToggle("Unbounded",
-        [p]{ return p->unbounded; }, [p](bool v){ p->unbounded = v; }));
+        [p]{ return p->unbounded; }, [p](bool v){ p->unbounded = v; }).withDefault(false));
     if (!unbounded) {
         props.push_back(makePropEnum("Shape", { "Box", "Sphere" },
-            [p]{ return (int)p->shape; }, [p](int v){ p->shape = (EReverbZoneShape)std::clamp(v, 0, 1); }));
+            [p]{ return (int)p->shape; }, [p](int v){ p->shape = (EReverbZoneShape)std::clamp(v, 0, 1); }).withDefault(EReverbZoneShape::Box));
         if (shape == EReverbZoneShape::Box) {
-            props.push_back(makePropFloat("HalfX", PropColor::Red, 0.05f,
-                [p]{ return p->halfExtent.x; }, [p](float v){ p->halfExtent.x = std::max(0.01f, v); }, PropUnit::Size));
-            props.push_back(makePropFloat("HalfY", PropColor::Green, 0.05f,
-                [p]{ return p->halfExtent.y; }, [p](float v){ p->halfExtent.y = std::max(0.01f, v); }, PropUnit::Size));
-            props.push_back(makePropFloat("HalfZ", PropColor::Blue, 0.05f,
-                [p]{ return p->halfExtent.z; }, [p](float v){ p->halfExtent.z = std::max(0.01f, v); }, PropUnit::Size));
+            props.push_back(XPROP_Vec3Min(p, "Half Extent", 0.05f, halfExtent, 0.01f, PropUnit::Size)
+                                .withDefault(glm::vec3(5.f, 3.f, 5.f)));
         } else {
             props.push_back(makePropFloat("Radius", PropColor::Neutral, 0.05f,
-                [p]{ return p->radius; }, [p](float v){ p->radius = std::max(0.01f, v); }, PropUnit::Size));
+                [p]{ return p->radius; }, [p](float v){ p->radius = std::max(0.01f, v); }, PropUnit::Size).withDefault(5.f));
         }
         props.push_back(makePropFloat("Blend Distance", PropColor::Neutral, 0.05f,
-            [p]{ return p->blendDistance; }, [p](float v){ p->blendDistance = std::max(0.f, v); }, PropUnit::Size));
+            [p]{ return p->blendDistance; }, [p](float v){ p->blendDistance = std::max(0.f, v); }, PropUnit::Size).withDefault(1.f));
     }
     props.push_back(makePropFloat("Priority", PropColor::Neutral, 1.f,
-        [p]{ return (float)p->priority; }, [p](float v){ p->priority = (int)std::lround(v); }));
+        [p]{ return (float)p->priority; }, [p](float v){ p->priority = (int)std::lround(v); }).withDefault(0.f));
     props.push_back(makePropFloat("Decay Time", PropColor::Neutral, 0.05f,
-        [p]{ return p->decayTime; }, [p](float v){ p->decayTime = std::clamp(v, hrev::kMinDecay, hrev::kMaxDecay); }));
+        [p]{ return p->decayTime; }, [p](float v){ p->decayTime = std::clamp(v, hrev::kMinDecay, hrev::kMaxDecay); }).withDefault(1.5f));
     props.push_back(makePropFloat("Damping", PropColor::Neutral, 0.01f,
-        [p]{ return p->damping; }, [p](float v){ p->damping = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+        [p]{ return p->damping; }, [p](float v){ p->damping = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio).withDefault(0.5f));
     props.push_back(makePropFloat("Width", PropColor::Neutral, 0.01f,
-        [p]{ return p->width; }, [p](float v){ p->width = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio));
+        [p]{ return p->width; }, [p](float v){ p->width = std::clamp(v, 0.f, 1.f); }, PropUnit::Ratio).withDefault(1.f));
     props.push_back(makePropFloat("Level", PropColor::Neutral, 0.01f,
-        [p]{ return p->level; }, [p](float v){ p->level = std::clamp(v, 0.f, kMaxLevel); }, PropUnit::Ratio));
+        [p]{ return p->level; }, [p](float v){ p->level = std::clamp(v, 0.f, kMaxLevel); }, PropUnit::Ratio).withDefault(1.f));
     props.push_back(makePropFloat("Fade Time", PropColor::Neutral, 0.05f,
-        [p]{ return p->fadeTime; }, [p](float v){ p->fadeTime = std::clamp(v, 0.f, kMaxFade); }));
+        [p]{ return p->fadeTime; }, [p](float v){ p->fadeTime = std::clamp(v, 0.f, kMaxFade); }).withDefault(0.5f));
     return props;
 }
 

@@ -8,41 +8,8 @@
 // 키 입력 등 플랫폼 입력 로그. 키 이벤트는 Verbose 라 기본 기록 수준(Log)에서는 남지 않습니다.
 inline constinit HLogCategory LogInput{ "Input", ELogVerbosity::Log };
 
-// Platform-agnostic input constants (values match GLFW/ASCII so no translation needed)
-namespace HInput {
-    constexpr int KEY_W = 87;
-    constexpr int KEY_A = 65;
-    constexpr int KEY_S = 83;
-    constexpr int KEY_D = 68;
-    constexpr int KEY_Q = 81;
-    constexpr int KEY_E = 69;
-    constexpr int KEY_R = 82;
-    constexpr int KEY_Z = 90;
-    constexpr int KEY_Y = 89;
-    constexpr int KEY_C = 67;
-    constexpr int KEY_V = 86;
-    constexpr int KEY_F = 70;
-    constexpr int KEY_N = 78;
-    constexpr int KEY_O = 79;
-    constexpr int KEY_X = 88;
-    constexpr int KEY_RIGHT = 262;  // GLFW_KEY_RIGHT (글자 체계 T1: 편집 칸 커서)
-    constexpr int KEY_LEFT  = 263;  // GLFW_KEY_LEFT
-    constexpr int KEY_HOME  = 268;  // GLFW_KEY_HOME
-    constexpr int KEY_END   = 269;  // GLFW_KEY_END
-    constexpr int KEY_LEFT_CTRL   = 341;  // GLFW_KEY_LEFT_CONTROL
-    constexpr int KEY_LEFT_SHIFT  = 340;  // GLFW_KEY_LEFT_SHIFT
-    constexpr int KEY_RIGHT_CTRL  = 345;  // GLFW_KEY_RIGHT_CONTROL
-    constexpr int KEY_RIGHT_SHIFT = 344;  // GLFW_KEY_RIGHT_SHIFT
-    constexpr int KEY_DELETE    = 261;  // GLFW_KEY_DELETE
-    constexpr int KEY_F2        = 291;  // GLFW_KEY_F2
-    constexpr int KEY_BACKSPACE = 259;  // GLFW_KEY_BACKSPACE
-    constexpr int KEY_ENTER     = 257;
-    constexpr int KEY_UP        = 265;  // GLFW_KEY_UP
-    constexpr int KEY_DOWN      = 264;  // GLFW_KEY_DOWN
-    constexpr int KEY_ESCAPE    = 256;  // GLFW_KEY_ESCAPE  // GLFW_KEY_ENTER
-    constexpr int MOUSE_BUTTON_LEFT  = 0;
-    constexpr int MOUSE_BUTTON_RIGHT = 1;
-}
+// 키 · 버튼 상수(HInput::KEY_*)는 InputKeys.hpp 에 있습니다(H2b: 창 없이 쓰는 명령 표 · 시험이 Vulkan 머리글 없이 씀).
+#include "InputKeys.hpp"
 
 class IWindow {
 public:
@@ -64,6 +31,22 @@ public:
     virtual void setTitle(const std::string& title) = 0;
     virtual bool wasResized() const = 0;
     virtual void resetResizedFlag() = 0;
+
+    // ── 창 관리(다중 OS 창 H0, 2026-11-21, Docs/Editor_MultiWindow_Design.md) ───────────────────────
+    // 에디터의 떠 있는 창(M2 ~ M4)이 씁니다. 모두 기본 구현이 있어 OS 창이 없는 구현(HeadlessWindow · AndroidWindow)은
+    // 고치지 않아도 됩니다. 기본값은 "화면 하나를 꽉 채운, 늘 포커스가 있는 창" 입니다.
+    // 내용 영역 왼쪽 위의 화면 좌표. 화면 좌표가 없는 창이면 0, 0 과 false.
+    virtual bool  getWindowPos(int& x, int& y) const { x = y = 0; return false; }
+    virtual void  setWindowPos(int /*x*/, int /*y*/) {}
+    virtual void  setWindowSize(int /*w*/, int /*h*/) {}
+    // 모니터 내용 배율(glfwGetWindowContentScale 의 x). 100 % 면 1.
+    virtual float contentScale() const { return 1.f; }
+    virtual bool  isFocused() const { return true; }
+    virtual void  focus() {}
+    virtual void  show(bool /*visible*/) {}
+    virtual bool  isIconified() const { return false; }
+    // 마우스가 이 창을 지나 아래 창으로 갑니다(GLFW 3.4 GLFW_MOUSE_PASSTHROUGH). 끌고 다니는 미리보기 창에 씁니다.
+    virtual void  setMousePassthrough(bool /*enabled*/) {}
 
     // 이 창이 Vulkan 표면을 주는지(2026-10-31, 패키징 2단계). 거짓이면 createSurface 는 VK_NULL_HANDLE,
     // getRequiredInstanceExtensions 는 빈 목록, getFramebufferSize 는 0x0 이고, 렌더러는 표면 · 스왑체인 없이 XR 스왑체인
@@ -106,7 +89,8 @@ public:
     virtual std::string getClipboardText() const = 0;
     virtual void setClipboardText(const std::string& text) = 0;
 
-    // Cursor shape: 0=arrow, 1=hresize (↔), 2=vresize (↕)
+    // Cursor shape: 0=arrow, 1=hresize (↔), 2=vresize (↕), 3=move(탭을 놓으면 새 창, M4), 4=not allowed(놓아도 거부, M4).
+    // 3 · 4 는 누른 창이 커서를 잡아 둔 동안 커서가 창 밖에 있어도 보여야 합니다(끄는 탭의 창 밖 미리보기).
     virtual void setCursorShape(int shape) = 0;
 
     // ── IME(글자 체계 T2, 2026-11-19, Docs/Text_System.md) ─────────────────────────────────────
