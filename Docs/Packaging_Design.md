@@ -251,7 +251,7 @@
 | 0 | 순수 헤더와 시험. `renderer/VulkanBaseline.hpp`(장치 계획 · 기능 체인 · 큐 계열 · 장치 함수 로드 · XR 범위), `renderer/BarrierCompat.hpp`(sync2 → 1.0 변환과 기록 분기), `memory/MemoryTypeSelect.hpp`(핵심 힙 · 지연 할당 타입 · 실패 문구), `xr/XrVersion.hpp`, `xr/SyntheticEyes.hpp` | |
 | 1 | 창 없는 뼈대. `IWindow::providesSurface`, `platform/headless/HeadlessWindow.hpp`, 빈 스왑체인(`NullSwapchain`, 0장 · 명목 R8G8B8A8_SRGB 64x64), 표면 없이 장치 고르기(표시 큐 · 스왑체인 확장 없음), 합성 눈(`attachSyntheticEyes` · `captureXrEye`), 자동 실행 옵션과 종료 코드. AndroidWindow 는 표면 없이 0x0 · 클립보드 구현 | DEF-118 · 103 해결, DEF-08 의 표면 부분 |
 | 2 | 배리어는 `RenderContext` 의 `transitionImage` · `pipelineBarrier` · `memoryBarrier` 로만(`hsync::record`). 기능 체인에서 Vulkan13Features 를 빼고 sync2 확장 구조체 하나만. 깊이 전환 삭제. UI 가 그리지 않은 프레임은 렌더러가 표시 전환 | DEF-04 · 120 해결 |
-| 3 | 인스턴스 1.1(XR 경로는 런타임 최댓값까지 올림, 2026-11-02 DEF-164), push descriptor 6곳을 `rc.vk.push` 로(HSlate 는 init 인자), XR 런타임 범위 판정, glslc `--target-env=vulkan1.0`, 가져오기 표 시험 | DEF-97 해결 |
+| 3 | 인스턴스 1.1(XR 경로는 런타임 최댓값까지 올림, 2026-11-02 DEF-164), push descriptor 6곳을 `rc.vk.push` 로(HSlate 는 init 인자), XR 런타임 범위 판정, glslc `--target-env=vulkan1.0`, 가져오기 표 시험(2026-11-23 E0a volk 전환 이후: 실행 파일 `vulkan-1.dll` 비어 있음 + `HarukaRuntime.lib` COFF 미해결 기호 검사) | DEF-97 해결 |
 | 4 | 핵심 힙은 1GB 를 한 번에 잡고 못 잡으면 이유와 함께 멈춤(축소 경로 삭제), MSAA 컬러는 지연 할당 타입이 있으면 핵심 힙 밖(`AllocZone::Dedicated`), 이미지 생성 실패 때 누수 정리 | DEF-42 · 06 해결 |
 
 **개발 옵션**(게임 실행 파일, 배포본에도 있음):
@@ -333,7 +333,7 @@ cmake --build build --config Release --target HarukaPak
 cmake -S . -B build/android -G Ninja -DCMAKE_TOOLCHAIN_FILE=<NDK>/build/cmake/android.toolchain.cmake
       -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-32 -DANDROID_STL=c++_static -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build/android --target HarukaGame
-python -I Packaging/android/package_apk.py        (ANDROID_HOME · JAVA_HOME 필요)
+Tools\run_python.bat Packaging/android/package_apk.py   (ANDROID_HOME · JAVA_HOME 필요, ThirdParty/Python 사용)
 ```
 
 **확인(PC)**:

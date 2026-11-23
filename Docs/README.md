@@ -19,6 +19,7 @@
 | [Architecture_Overview.md](Architecture_Overview.md) | 엔진 아키텍처 개요 |
 | [Layer_Architecture.md](Layer_Architecture.md) | 코어(Layer 1)와 도메인 경계, 단위 규약 |
 | [Engine_Structure_Design.md](Engine_Structure_Design.md) | 엔진 구조 안정화(2026-11-18 ~): 진단, 모듈 층과 include 방향(정본), core · scene · runtime 분할, 아키텍처 시험 · 허용 목록, 3단계 계획 |
+| [Engine_Install_Design.md](Engine_Install_Design.md) | 엔진 설치 · 프로젝트 생성(2026-11-23 ~, 초안): 엔진 폴더에서 한 번 빌드(정적 라이브러리 · CMake 패키지), 엔진 등록 · 프로젝트의 엔진 연결, 프로젝트 도구 · GenerateProject.bat |
 
 ## 활성 설계 정본
 

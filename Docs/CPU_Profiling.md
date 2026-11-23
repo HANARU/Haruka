@@ -102,7 +102,7 @@
 | 새 시험 `cpu_profiling` | 85 검사(P1-1 ~ P1-6, 추적 경로 · 기록기 · 콘솔 · 프레임 구간). 변이 확인: 정렬을 빼면 "같은 시작이면 부모 먼저" · "JSON 안 순서"가, 이스케이프를 빼면 "다시 읽힘"이 실패 |
 | 끈 번역 단위 | `ProfilerOffTest.cpp`(`HARUKA_PROFILER 0`)의 `constexpr` 함수 안에서 세 매크로를 쓰고 `static_assert` 통과, 매크로 식의 형이 `void`. 기록 중에 불러도 이벤트 0 |
 | 기본 장면 `--trace` | 120 프레임: 이벤트 3,491개, 스레드 6개(Main · IBL face 1 ~ 5), 파일 335 KB, `Frame` 스코프 121개(그린 120 + 루프를 끝내는 1). 스레드별 구간 어긋남 0 |
-| 시작 구간 | `Engine.Startup` 900 ms 중 `Startup.Renderer` 779 ms(Vulkan · 파이프라인 · `IBL.Bake` 9 ms + 면별 스레드 각 약 5 ms) · `Startup.Modules` 82 ms · `Startup.FirstScene` 36 ms(`Scene.Read`) |
+| 시작 구간 | `Engine.Startup` 900 ms 중 `Startup.Renderer` 779 ms(Vulkan · 파이프라인 · `IBL.Bake` 9 ms + 면별 스레드 각 약 5 ms) · `Startup.Modules` 82 ms · `Startup.FirstScene` 36 ms(`Scene.Read`). `Startup breakdown:` 한 줄 로그는 `renderer` 괄호 안에 `device · swapchain · alloc · poolCache · layouts · shadow · scene · ao · ibl · errMat · geom · post · pipelines · frames` 세부 ms 를 남기며, `Renderer.Init.*` HPROF 스코프와 1:1로 대응합니다(2026-11-23 E7) |
 | 씬 전환 `--switch-scene` | 에셋 워커 스레드 둘에 `Asset.Decode` 2건(합 16.7 ms), 메인에 `Asset.Pump` 90건 · `Scene.Read` 2건 |
 | `--trace-frames=100-200` | 프레임 100 을 그린 뒤 시작해 200 뒤 씀: `Frame` 99개(101 ~ 199, 시작 전에 열린 100 과 멈춘 뒤 닫힌 200 은 빠짐), 이벤트 2,898개(프레임당 약 29) |
 | 콘솔 | `--console-at=50:trace.start console.json` · `80:trace.stop` → `Frame` 29개. 기록 중 아닐 때 `trace.stop` · `..` 경로의 `trace.start` 는 알리고 거절 |

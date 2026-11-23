@@ -49,7 +49,11 @@ src 약 43,000줄, 모듈 17개(분할 전). include 를 모듈 단위로 세어
 | 조립 | `runtime` | Engine(루프) · 실행 옵션 · 앞단 · 게임 모듈 인터페이스 · ModuleManager · 셰이더 묶음 짝 확인 | sceneio 와 그 아래 |
 | 앞단 | `game` · `editor` | 게임 실행 파일 · 에디터 | runtime 과 그 아래(서로는 안 됨) |
 | 도구 | `tools` | HarukaPak 등 | core, vfs |
+| 프로젝트 관리 | `projectops` | `HarukaProjectOps`: 템플릿 복사·치환, 솔루션 생성, 최근 프로젝트 목록, 프로젝트 열기 판정 | core, vfs |
+| 런처 | `launcher` | `HarukaLauncher`: 프로젝트 생성·구성·열기 명령줄(E4) 및 창(E6) | core, math, vfs, platform, input, ui, projectops |
 | 진입점 | `main`(src/main.cpp · src/AndroidMain.cpp) | 실행 파일 진입점 | 모두 |
+
+- **`HarukaSim` 경계(E1b, 2026-11-23)**: `math`(헤더) · `vfs`(`HarukaVfs`) · `core` · `scene` · `geometry` · `vfx` · `physics` · `audio` · `nav`는 `HarukaSim` 정적 라이브러리로 묶여 `haruka_vulkan` · `glfw` · `openxr_loader` 없이 링크됩니다(`tests/ArchitectureRules.txt` 의 `sim_no_gfx` 규칙으로 `<volk.h>` · `<vulkan/...>` · `<GLFW/...>` · `<openxr/...>` 포함을 금지하고, `sim_link` 시험이 단독 링크를 검산). 나머지 `memory` · `platform` · `input` · `ui` · `renderer` · `xr` · `assets` · `components` · `sceneio` · `runtime`은 `HarukaRuntime` 에 남습니다.
 
 규칙의 근거:
 - **기반은 장면을 모릅니다.** 설정 파일 해석이 컴포넌트 필드 헤더를 쓰던 것을 `core/FieldParse.hpp` 로 떼어 냈습니다(2026-11-18).
@@ -338,14 +342,41 @@ Unity(`Assets/` · `ProjectSettings/` · `Library/` 캐시), Godot(`project.godo
 | P1 | `/Game/` 논리 경로 도입: vfs 가상 접두사 마운트, 옛 `assets/` 를 한 곳에서 `/Game/` 으로 바꿔 읽기, 묶음 파일 · `hproj::resolve` 양쪽 받기. 쓰는 쪽은 그대로 | 끝남(2026-11-19, `src/vfs/LogicalPath.hpp`) |
 | P2 | 쓰는 쪽을 `/Game/` 으로: 씬 v5 · 프리팹 v4, 저장소 씬 · 프리팹 변환, 코드 · 시험 · 묶음 설정의 경로 | 끝남(2026-11-19, 씬 7 · 프리팹 2 변환, 머리줄 · 참조 줄만) |
 | P3 | `.hproject` · `--project`, `Projects/Samples/` 로 이동(`Content/` · `Config/` · `Source/`), `haruka_add_project`, `Saved/` | 끝남(2026-11-19, P3a 이동 16파일 rename · `/Config/` 마운트, P3b `Saved/` · `IGameModule::onRegister` · UIPanel Demo 를 게임 모듈로) |
-| P4 | 패키징 이름을 `.hproject` 에서, 저장소 밖 프로젝트 확인, 새 프로젝트 만들기 | 끝남(2026-11-19, `src/tools/new_project.py`, 하위 프로젝트 옵션 `HARUKA_BUILD_SAMPLES` · `HARUKA_BUILD_TESTS` · `HARUKA_PACKAGE_GAME`) |
+| P4 | 패키징 이름을 `.hproject` 에서, 저장소 밖 프로젝트 확인, 새 프로젝트 만들기 | 끝남(2026-11-19, `src/tools/new_project.py` → E4에서 `HarukaLauncher`로 대체 후 삭제, 하위 프로젝트 옵션 `HARUKA_BUILD_SAMPLES` · `HARUKA_BUILD_TESTS` · `HARUKA_PACKAGE_GAME`) |
+| E1a | 라이브러리 구성 분리(`HarukaRuntime` · `HarukaEditor` · `HarukaGameFrontend` 정적 라이브러리, `haruka_add_project` 링크) | 끝남(2026-11-23) |
 
 지킬 것: 단계마다 기준 PNG 7장 · UI 덤프가 그대로여야 합니다. `/Game/...` 는 Android(POSIX)에서 절대 경로로 보이므로, vfs 는 마운트 접두사를
 절대 경로 판정보다 먼저 봅니다.
 
 확인(P4 뒤): 시험 28 · 검사 2,043, 경고 0(Release · Debug), 허용 0, 기준 PNG 7장 · LodProbe 두 장 · UI 덤프 38장면 그대로(P3a 의 로그 수 +2 줄
 제외), Android 빌드 통과(만든 매니페스트 `package="com.haruka.game"`). 게임 쓰기 루트는 `%LOCALAPPDATA%\<company>\<name>`(Samples:
-`Haruka\Samples`, 예전 `Haruka\HarukaGame`), 배포 zip `Samples-<버전>-win64`. 저장소 밖 시험 프로젝트(`new_project.py` 로 만듦)를
+`Haruka\Samples`, 예전 `Haruka\HarukaGame`), 배포 zip `Samples-<버전>-win64`. 저장소 밖 시험 프로젝트(E4부터 `HarukaLauncher new`로 만듦)를
 엔진을 하위 프로젝트로 빌드해 에디터(쓰기 루트 = 그 프로젝트 `Saved/`)와 게임(묶음)이 검증 0으로 돌았습니다. 남은 것: 옛
 `Packaging/android/AndroidManifest.xml`(틀 `.in` 으로 대체, 지울지 결정), 루트 `assets/` 의 빈 폴더 · 옛 캐시, 바깥 프로젝트의 Steam Audio 찾기
 (시험은 `-DHARUKA_STEAM_AUDIO=OFF`).
+
+## 15. 시뮬레이션 층(E1b, 2026-11-23)
+
+전용 서버 · 헤드리스 시뮬레이션이 렌더러 · Vulkan · 창 · XR 없이 링크될 수 있도록, `HarukaSim` 정적 라이브러리(`math` · `vfs` · `core` · `scene` · `geometry` · `vfx` · `physics` · `audio` · `nav`)를 `HarukaRuntime` 에서 분리했습니다. `Ktx2.cpp` 가 쓰던 `<vulkan/vulkan.h>` 는 `VkFormat` 규격 정수 상수 14개 자체 정의로 바꾸어 시뮬레이션 모듈의 그래픽/XR 외부 헤더 포함을 0으로 만들었습니다.
+
+아래 표는 `HarukaRuntime` 에 남은 상위 시뮬레이션/조립 모듈(`components` · `assets` · `sceneio` · `runtime`)이 `renderer` · `xr` · `ui` · `platform` · `memory` · `input` 으로 가는 결합 목록입니다(E1b에서는 목록만 정리하고 실제로 떼지 않음).
+
+| 파일 | 무엇을 쓰는가 | 서버에서 필요한가 | 떼는 방법 후보 | 크기 |
+|---|---|---|---|---|
+| `components/StaticMeshComponent.hpp/.cpp` | `MeshHandle*` · `MaterialHandle*` 포인터, `renderer/MeshHandle.hpp` | 아니오(충돌용 `CollisionMesh` 는 `geometry` 소속) | 렌더 핸들을 컴포넌트 밖(렌더러 표/프록시)으로 이동 | 중간 |
+| `components/SkinnedMeshComponent.hpp/.cpp` | `IRenderSkinSource`(`renderer/RenderSceneInput.hpp`), `MeshHandle*`/`MaterialHandle*` | 아니오(본 자세 계산은 `assets/Skin`) | `IRenderSkinSource` 구현을 렌더러/어댑터 쪽으로 분리 | 중간 |
+| `components/RenderExtract.hpp/.cpp` | `RenderSceneInput`(`renderer/RenderSceneInput.hpp`) 채우기 | 아니오 | 렌더러 또는 `renderer` 앞단 어댑터로 이동 | 작음 |
+| `components/UIPanelComponent.hpp/.cpp` | `RenderSceneInput`, `HSlateContext` · Slate 위젯(`ui/slate/*`) | 아니오 | 3D UI 위젯/렌더 추출을 UI/렌더 계층으로 분리 | 큼 |
+| `components/SubtitlePanel.hpp/.cpp` | `RenderSceneInput`, `HFontAtlas` · `HSlateContext` · Slate 위젯 | 아니오 | 자막 UI 위젯 생성·렌더 추출을 UI/렌더 계층으로 분리 | 중간 |
+| `components/HandPoseComponent.hpp/.cpp` | `xr/HandSkeleton.hpp`, `xr/GraspSolver.hpp`, `xr/HandInputMap.hpp`, `input/HInputSystem.hpp` | 부분적(플레이어 손 상태는 입력/XR) | 손 뼈대 데이터를 `scene`/`sim` 인터페이스로, 입력/XR 바인딩을 `xr` 로 | 큼 |
+| `components/XrComponents.cpp` | `xr/GraspSolver.hpp`, `input/HInputSystem.hpp` | 부분적(XR 잡기 상태) | XR 입력/잡기 풀이를 `xr` 컨트롤러로, 컴포넌트는 상태만 보관 | 큼 |
+| `assets/AssetManager.cpp` | `renderer/Renderer.hpp`, `renderer/Vertex.hpp`(GPU 메시·텍스처 업로드) | 부분적(충돌 메시 · 스켈레톤 등 CPU 에셋만) | GPU 업로드 인터페이스 뒤로 숨기고 CPU 로더만 시뮬레이션에 둠 | 큼 |
+| `assets/TextureCompression.cpp` | `<vulkan/vulkan.h>` (`VkFormat` 열거형) | 아니오(서버는 텍스처 압축/디코딩 불필요) | `Ktx2.cpp` 처럼 포맷 번호 상수화 또는 `renderer`/`tools` 쪽으로 분리 | 작음 |
+| `sceneio/SceneSerializer.cpp` · `PrefabLink.cpp` · `PrefabManager.cpp` | 직접 그래픽 include 없음, `components` · `assets` 에 의존 | 예(씬/프리팹 로드) | `components` · `assets` 의 렌더 결합이 풀리면 자연히 서버 사용 가능 | 중간 |
+| `runtime/Engine.hpp/.cpp` | `Renderer`, `IWindow`/`GlfwWindow`/`AndroidWindow`/`HeadlessWindow`, `XrSystem`, `HInputSystem`, `PlatformAlert` | 부분적(루프/틱 구조만) | `IRenderFrontend`/`ISimLoop` 분리 후 서버 전용 진입점 구성 | 큼 |
+| `runtime/EngineOptions.hpp/.cpp` | `platform/PlatformContext.hpp` | 부분적(명령줄 파싱) | `PlatformContext` 의존을 `Engine` 쪽으로 이동 | 작음 |
+| `runtime/FrameStats.cpp` | `platform/IWindow.hpp` | 아니오 | 창 제목/통계 표시를 플랫폼/뷰포트 계층으로 분리 | 작음 |
+| `runtime/IGameModule.hpp` | `renderer/RenderExtension.hpp` 주석 참조(직접 include 없음) | 예(게임 모듈 인터페이스) | 렌더 확장 등록을 선택적 콜백/서비스로 유지 | 작음 |
+| `runtime/WorldUiDriver.cpp` | `input/HInputSystem.hpp`, `renderer/Renderer.hpp` | 아니오 | UI 입력/포인터 구동을 UI/클라이언트 계층으로 분리 | 중간 |
+| `runtime/XrSessionController.hpp/.cpp` | `xr/XrSystem.hpp`, `input/HInputSystem.hpp`, `platform/IWindow.hpp`, `renderer/Renderer.hpp` | 아니오 | XR 세션 관리를 클라이언트 전용 모듈로 분리 | 중간 |
+| `runtime/XrViewOrigin.cpp` | `input/HInputSystem.hpp`, `xr/XrSystem.hpp` | 아니오 | XR 리그 원점 보정을 클라이언트 전용 모듈로 분리 | 작음 |

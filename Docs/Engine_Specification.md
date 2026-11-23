@@ -233,7 +233,7 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 ### 3-5. 외부 의존성
 
 라이브러리는 모두 CMake FetchContent 로 구성 시점에 내려받습니다. 미리 설치할 도구는 Visual Studio(MSVC), CMake 3.21 이상,
-Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포함)입니다.
+Git(FetchContent 가 저장소를 받을 때 씀)입니다. Vulkan SDK는 검증 레이어가 필요한 Debug 실행용 선택 사항입니다.
 
 | 라이브러리 | 버전 | 용도 |
 |---|---|---|
@@ -537,7 +537,7 @@ Git(FetchContent 가 저장소를 받을 때 씀), Vulkan SDK(1.4.x, `glslc` 포
 | `hand_skinning` | 108 | glTF 스킨 읽기 · CPU 스키닝 · OpenXR 손 뼈대 규약 · 손 자세 컴포넌트 · 컨트롤러 → 손가락 굽힘 |
 | `math_common` | 84 | `src/math` 기본 도형 · 판정 · 허용 오차, 감쇠 · 스프링 · 이징, 곡선, PCG32 · Perlin · 블루 노이즈, One Euro · 속도 추정, 두 뼈 IK · 스윙-트위스트, 아핀 역행렬(2026-11-17) |
 | `architecture_deps` | 30 | 모듈 include 방향(`tests/ArchitectureRules.txt`): 규칙 파일 · 모든 모듈에 규칙 · 표에 순환 없음 · 모듈마다 허용 방향 안 · 허용 목록이 줄기만 함([Engine_Structure_Design.md](Engine_Structure_Design.md) 4절), 정적 시스템 포인터 0 · 전역 싱글턴 목록(S3, 8절) |
-| `vulkan_imports` | 11 | 실행 파일이 vulkan-1.dll 에서 1.0 · 1.1 코어와 표면 · 스왑체인 함수만 가져옴(PE 가져오기 표, Windows) |
+| `vulkan_imports` | 12 | 실행 파일이 `vulkan-1.dll`을 가져오지 않음(PE 가져오기 표)과 `HarukaRuntime.lib` COFF 미해결 `vk` 기호가 1.0 · 1.1 코어 및 표면 · 스왑체인뿐임을 검산(Windows, E0a volk 전환 반영) |
 
 - 2026-10-14 이후 새로 만든 검사는 수정을 되돌리면 실패하는지 **변이로 확인**했습니다.
 - 화면 회귀는 에디터를 띄워 `PrintWindow` 로 찍은 뒤 뷰포트를 픽셀 단위로 비교하고, Vulkan 검증 레이어 메시지 0 과 `Clean exit` 를

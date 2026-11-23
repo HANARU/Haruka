@@ -31,17 +31,20 @@ GLFW 창(1600x900) 하나를 띄웁니다. 에디터 실행 파일(`HarukaEngine
 | OS | Windows x64. 빌드·실행 스크립트가 배치 파일이며 다른 OS에서 검증된 적 없음 |
 | 컴파일러 | MSVC. `build.bat`은 `Visual Studio 18 2026`을 기본 생성기로 쓰고, 해당 설치 경로가 없고 2022가 있으면 `Visual Studio 17 2022`로 내려갑니다(`-A x64` 고정) |
 | CMake | 3.21 이상(셰이더 include 의존성 추적에 depfile 을 씀) |
-| Vulkan SDK | 1.4.x(헤더 · `glslc`). 엔진 자체는 Vulkan 1.1 만 씁니다 |
+| Vulkan SDK (선택) | 검증 레이어용 선택 사항(빌드에는 불필요). 헤더 · volk · glslang은 구성 시 FetchContent로 받으며 엔진 자체는 Vulkan 1.1 만 씁니다 |
 | GPU 드라이버 | Vulkan 1.1 이상 + `VK_KHR_push_descriptor`. `synchronization2` · `samplerAnisotropy` 는 있으면 씁니다 |
 | VR(선택) | `--xr` 로 띄울 때만. PC VR OpenXR 런타임(Meta Quest Link 등)과 헤드셋. 없으면 경고를 남기고 데스크톱으로 계속합니다 |
 | 네트워크 | 첫 CMake 구성 시 필요(의존성을 FetchContent로 내려받음) |
 
-미리 설치할 도구는 Visual Studio(MSVC), CMake, Git, Vulkan SDK 입니다. glm 1.0.1, GLFW 3.4, tinygltf v2.9.3, stb, miniaudio 0.11.21, JoltPhysics v5.1.0, OpenXR-SDK release-1.1.63(로더 정적 링크), LZ4 v1.10.0 · xxHash v0.8.3(묶음 파일)은 CMake FetchContent가 구성 시점에 내려받으며 저장소에는 포함되어 있지 않습니다. HRTF(3D 소리의 앞뒤 · 위아래 단서)용 Steam Audio 4.8.1 은 공식 릴리스 ZIP(약 181MB)을 빌드 폴더마다 한 번 받아 SHA-256 을 확인하고 헤더 · 라이브러리만 풉니다(2026-11-06). 이미 받은 ZIP 은 `-DHARUKA_STEAM_AUDIO_ZIP=<경로>` 로 넘기고, 받지 않으려면 `-DHARUKA_STEAM_AUDIO=OFF`(3D 소리는 스테레오 패닝)로 구성합니다. 셰이더는 런타임이 아니라 빌드 시점에 `glslc`로 SPIR-V(그래픽스 셰이더 18개)로 컴파일되므로, `glslc`를 찾지 못하면 구성 단계에서 실패합니다.
+미리 설치할 도구는 Visual Studio(MSVC), CMake, Git 입니다(Vulkan SDK는 검증 레이어용 선택 사항). glm 1.0.1, GLFW 3.4, tinygltf v2.9.3, stb, miniaudio 0.11.21, JoltPhysics v5.1.0, OpenXR-SDK release-1.1.63(로더 정적 링크), LZ4 v1.10.0 · xxHash v0.8.3(묶음 파일), Vulkan-Headers · volk · glslang `vulkan-sdk-1.4.357.0`은 CMake FetchContent가 구성 시점에 내려받으며 저장소에는 포함되어 있지 않습니다. HRTF(3D 소리의 앞뒤 · 위아래 단서)용 Steam Audio 4.8.1 은 공식 릴리스 ZIP(약 181MB)을 빌드 폴더마다 한 번 받아 SHA-256 을 확인하고 헤더 · 라이브러리만 풉니다(2026-11-06). 이미 받은 ZIP 은 `-DHARUKA_STEAM_AUDIO_ZIP=<경로>` 로 넘기고, 받지 않으려면 `-DHARUKA_STEAM_AUDIO=OFF`(3D 소리는 스테레오 패닝)로 구성합니다. 셰이더는 런타임이 아니라 빌드 시점에 엔진이 함께 빌드한 `glslang`으로 SPIR-V(그래픽스 셰이더 22개)로 컴파일됩니다.
 
 ### 명령
 
 ```bat
-build.bat                 :: Release (기본)
+Setup.bat                 :: 처음 한 번: 도구 확인 → 동봉 Python 받기 → Debug·Release 구성·빌드 → 엔진 등록
+Setup.bat --unattended    :: 질문 없이 무인 실행
+
+build.bat                 :: Release 빠른 증분 빌드 (기본)
 build.bat Debug           :: Debug
 build.bat Release clean   :: CMake 캐시를 지우고 재구성
 
@@ -51,6 +54,17 @@ run.bat Release --xr              :: Play 동안 헤드셋에 그림(에디터 �
 run.bat Release --emulate-stereo  :: 헤드셋 없이 두 눈 경로 확인(뷰포트를 좌우로 나눔)
 
 cmake --build build --config Release --target PACKAGE   :: 게임 배포 ZIP(build\HarukaGame-<버전>-win64.zip)
+```
+
+`Setup.bat` 또는 엔진을 한 번 빌드하면 `build\` 아래에 CMake 패키지(`HarukaConfig.cmake`)와 `HarukaLauncher.exe`가 생성되고 `%LOCALAPPDATA%\Haruka\Engines.ini`에 엔진이 등록됩니다. `HarukaLauncher.exe`를 인자 없이 실행하면 최근 프로젝트 · 새 프로젝트(템플릿 선택, 이름/경로 검증) · 진행 로그를 보여주는 GUI 창이 열리며, 명령줄에서도 `Templates/Blank` 기반 프로젝트 생성과 `cmake/HarukaEngineFinder.cmake`를 통한 솔루션 구성을 수행할 수 있습니다. `Setup.bat --associate` 또는 `HarukaLauncher.exe associate`로 `.hproject` 파일 연결(사용자 범위 `HKCU`)을 등록할 수 있습니다.
+
+```bat
+build\Release\HarukaLauncher.exe                          :: GUI 런처 실행
+build\Release\HarukaLauncher.exe new <프로젝트 폴더> <프로젝트 이름>
+build\Release\HarukaLauncher.exe generate <프로젝트 폴더>
+cmake --build <프로젝트 폴더>\Build --config Release --parallel
+build\Release\HarukaLauncher.exe open <프로젝트 폴더>
+build\Release\HarukaLauncher.exe associate [--dry-run]   :: .hproject 파일 연결 (HKCU)
 ```
 
 `build.bat`은 `build\CMakeCache.txt`가 없을 때만 CMake를 구성합니다. 생성기나 옵션을 바꾸려면 `clean` 인자가 필요합니다. 전체 빌드 로그는 `Logs\build_log.txt`, error/fatal만 걸러낸 요약은 `Logs\build_error.txt`에 남습니다.
