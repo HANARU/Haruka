@@ -4,7 +4,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include <vulkan/vulkan.h>
+#include <volk.h>
 #include <vector>
 #include <optional>
 #include <string>
@@ -147,8 +147,10 @@ public:
     // ── 창 없는 실행 (2026-10-31, 패키징 2단계) ───────────────────────────────
     // 창이 표면을 주지 않으면(--headless · Quest) 스왑체인 없이 XR 이미지에만 그립니다.
     bool headless() const { return headless_; }
-    // 검증 레이어가 보고한 ERROR 수(Debug 빌드에서만 메신저가 있어 Release 는 늘 0). 창 없는 실행의 종료 코드에 씁니다.
+    // 검증 레이어가 보고한 ERROR 수(Debug 빌드에서 레이어가 켜졌을 때만 증가). 창 없는 실행의 종료 코드에 씁니다.
     static uint32_t validationErrorCount();
+    // 이번 실행에서 검증 레이어가 실제로 활성화되었는지(Debug라도 시스템에 레이어가 없으면 false).
+    static bool     isValidationActive();
     // 마지막 drawFrame 이 데스크톱 창에 그렸는지.
     bool lastFrameDesktop() const { return lastFrameDesktop_; }
     // 헤드셋 없이 XR 프레임 경로를 돌리는 합성 눈(--synthetic-eyes). 눈 크기 · 두 층 이미지 count 장을 만들어 XR 스왑체인처럼

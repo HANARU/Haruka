@@ -9,6 +9,7 @@
 #include <jni.h>
 #define XR_USE_PLATFORM_ANDROID
 #endif
+#include <volk.h>
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 #include "../core/TextUtf.hpp"
@@ -312,7 +313,7 @@ VkResult XrSystem::createVulkanInstance(const VkInstanceCreateInfo& ci, VkInstan
     Impl& m = *impl_;
     XrVulkanInstanceCreateInfoKHR xci{ XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR };
     xci.systemId               = m.systemId;
-    xci.pfnGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    xci.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
     xci.vulkanCreateInfo       = &ci;
     VkResult vr = VK_ERROR_INITIALIZATION_FAILED;
     if (!m.ok(m.createVkInstance(m.instance, &xci, &out, &vr), "xrCreateVulkanInstanceKHR"))
@@ -336,7 +337,7 @@ VkResult XrSystem::createVulkanDevice(VkPhysicalDevice physicalDevice,
     Impl& m = *impl_;
     XrVulkanDeviceCreateInfoKHR dci{ XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR };
     dci.systemId               = m.systemId;
-    dci.pfnGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    dci.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
     dci.vulkanPhysicalDevice   = physicalDevice;
     dci.vulkanCreateInfo       = &ci;
     VkResult vr = VK_ERROR_INITIALIZATION_FAILED;

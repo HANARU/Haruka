@@ -38,8 +38,10 @@ static constinit HLogCategory LogVulkan{ "Vulkan", ELogVerbosity::Log };
 
 // 검증 레이어 ERROR 수(2026-10-31). 창 없는 실행이 종료 코드로 알립니다. 메신저는 Debug 빌드에만 있습니다.
 static std::atomic<uint32_t> sValidationErrors{ 0 };
+static std::atomic<bool>     sValidationActive{ false };
 
 uint32_t Renderer::validationErrorCount() { return sValidationErrors.load(); }
+bool     Renderer::isValidationActive()   { return sValidationActive.load(); }
 
 static VkResult CreateDebugMessenger(VkInstance inst,
     const VkDebugUtilsMessengerCreateInfoEXT* ci,
@@ -220,7 +222,7 @@ void Renderer::cleanup() {
     vkDestroyCommandPool(device, cmdPool, nullptr);
     allocator.destroy();
     vkDestroyDevice(device, nullptr);
-    if (kEnableValidation) {
+    if (sValidationActive.load() && debugMessenger != VK_NULL_HANDLE) {
         auto fn = (PFN_vkDestroyDebugUtilsMessengerEXT)
             vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
         if (fn) fn(instance, debugMessenger, nullptr);
@@ -549,8 +551,18 @@ void Renderer::generateIBLCubemaps() {
 // ── Vulkan instance / device setup ────────────────────────────────────────────
 
 void Renderer::createInstance() {
-    if (kEnableValidation && !checkValidationLayerSupport())
-        throw std::runtime_error("Validation layers not available!");
+    bool wantValidation = kEnableValidation;
+    if (wantValidation && !checkValidationLayerSupport()) {
+        wantValidation = false;
+        static bool sWarnedNoValidation = false;
+        if (!sWarnedNoValidation) {
+            sWarnedNoValidation = true;
+            HLOG(LogRenderer, Warning)
+                << "Vulkan validation layer (" << kValidationLayers[0]
+                << ") not found; continuing without validation. Install the Vulkan SDK to enable validation layers.";
+        }
+    }
+    sValidationActive.store(wantValidation);
     VkApplicationInfo ai{};
     ai.sType            = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     ai.pApplicationName = "HarukaEngine";
@@ -568,7 +580,7 @@ void Renderer::createInstance() {
     ci.enabledExtensionCount   = (uint32_t)exts.size();
     ci.ppEnabledExtensionNames = exts.data();
     VkDebugUtilsMessengerCreateInfoEXT dci{};
-    if (kEnableValidation) {
+    if (wantValidation) {
         ci.enabledLayerCount   = (uint32_t)kValidationLayers.size();
         ci.ppEnabledLayerNames = kValidationLayers.data();
         dci.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -622,10 +634,11 @@ void Renderer::createInstance() {
     }
     if (r != VK_SUCCESS)
         throw std::runtime_error("Failed to create Vulkan instance!");
+    volkLoadInstanceOnly(instance);
 }
 
 void Renderer::setupDebugMessenger() {
-    if (!kEnableValidation) return;
+    if (!sValidationActive.load()) return;
     VkDebugUtilsMessengerCreateInfoEXT ci{};
     ci.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
@@ -760,12 +773,13 @@ void Renderer::createLogicalDevice() {
     if (!xrCompatible_) r = vkCreateDevice(physDevice, &ci, nullptr, &device);
     if (r != VK_SUCCESS)
         throw std::runtime_error("Failed to create logical device!");
+    volkLoadDevice(device);
     vkGetDeviceQueue(device, idx.graphics.value(), 0, &graphicsQueue);
     if (idx.present) vkGetDeviceQueue(device, *idx.present, 0, &presentQueue);
 
     // 확장 함수는 장치에서 KHR 이름으로만 받습니다(VulkanBaseline.hpp). 1.0 배리어는 로더가 언제나 내보내는 코어 함수입니다.
     std::string err;
-    if (!hvk::loadDeviceFns(device, &vkGetDeviceProcAddr, &vkCmdPipelineBarrier, devicePlan_, rc_.vk, &err))
+    if (!hvk::loadDeviceFns(device, vkGetDeviceProcAddr, vkCmdPipelineBarrier, devicePlan_, rc_.vk, &err))
         throw std::runtime_error("Vulkan device functions: " + err);
     if (rc_.vk.sync2) {
         HLOG(LogRenderer, Log) << "Barriers: " VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME;
@@ -802,7 +816,7 @@ bool Renderer::checkValidationLayerSupport() {
 
 std::vector<const char*> Renderer::getRequiredExtensions() {
     auto exts = window->getRequiredInstanceExtensions();
-    if (kEnableValidation) exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    if (sValidationActive.load()) exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     return exts;
 }
 

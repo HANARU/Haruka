@@ -128,8 +128,10 @@ bool Actor::removeComponent(Component* comp) {
     components.erase(it);
     hcore::bumpStructure();
     if (componentCache_.find(type) == componentCache_.end())
-        for (auto& c : components)
-            if (std::type_index(typeid(*c)) == type) { componentCache_.emplace(type, c.get()); break; }
+        for (auto& c : components) {
+            const Component* cp = c.get();
+            if (std::type_index(typeid(*cp)) == type) { componentCache_.emplace(type, c.get()); break; }
+        }
     return true;
 }
 
@@ -150,8 +152,10 @@ void Actor::moveComponent(Component* comp, size_t index) {
     // 같은 타입이 여럿이면 캐시는 "먼저 붙은 것"이라 순서가 바뀌면 다시 고릅니다.
     const std::type_index type(typeid(*comp));
     componentCache_.erase(type);
-    for (auto& c : components)
-        if (std::type_index(typeid(*c)) == type) { componentCache_.emplace(type, c.get()); break; }
+    for (auto& c : components) {
+        const Component* cp = c.get();
+        if (std::type_index(typeid(*cp)) == type) { componentCache_.emplace(type, c.get()); break; }
+    }
 }
 
 void Actor::attachTo(Actor* parent) {

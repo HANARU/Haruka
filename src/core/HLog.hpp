@@ -166,14 +166,20 @@ private:
     std::ostringstream  oss_;
 };
 
+// HLOG 매크로에서 if/else 없이 ?: 연산자로 지연 평가를 구현하기 위한 빈 수신자(-Wdangling-else 방지).
+struct Voidify {
+    void operator&(const Line&) const noexcept {}
+};
+
 } // namespace HLog
 
 // 꺼져 있으면 << 오른쪽 식을 평가하지 않습니다(비용은 atomic 읽기와 분기 하나).
-// if {} else 형태라 호출부를 감싼 바깥 if/else 와 결합이 꼬이지 않습니다.
+// ?: 연산자 형태라 호출부를 감싼 바깥 if/else 와 결합이 꼬이지 않습니다(-Wdangling-else 없음).
 // 켜진 로그는 힙 할당을 동반하므로, 매 프레임 경로에서는 Verbose 로만 남기십시오.
 #define HLOG(Cat, Verb)                                              \
-    if (!(Cat).isEnabled(ELogVerbosity::Verb)) {} else               \
-        HLog::Line((Cat), ELogVerbosity::Verb)
+    !(Cat).isEnabled(ELogVerbosity::Verb)                            \
+        ? (void)0                                                    \
+        : HLog::Voidify() & HLog::Line((Cat), ELogVerbosity::Verb)
 
 // 엔진 전역 카테고리. 서브시스템 카테고리는 각자의 헤더나 cpp 에 선언합니다.
 inline constinit HLogCategory LogEngine{ "Engine", ELogVerbosity::Log };

@@ -26,13 +26,36 @@ endif()
 if(MSVC)
     # Force English compiler diagnostics (suppress Korean locale output)
     set(ENV{VSLANG} 1033)
-    add_compile_options(/wd4865 /wd4100 /Wv:18)
 endif()
 
-# ── Vulkan ────────────────────────────────────────────────────────────────────
-find_package(Vulkan REQUIRED)
-
+# ── Vulkan (Headers + volk, E0a) ─────────────────────────────────────────────
 include(FetchContent)
+
+FetchContent_Declare(
+    vulkan_headers
+    GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+    GIT_TAG        vulkan-sdk-1.4.357.0
+    SOURCE_SUBDIR  _haruka_sources_only
+)
+FetchContent_Declare(
+    volk
+    GIT_REPOSITORY https://github.com/zeux/volk.git
+    GIT_TAG        vulkan-sdk-1.4.357.0
+    SOURCE_SUBDIR  _haruka_sources_only
+)
+FetchContent_MakeAvailable(vulkan_headers volk)
+
+add_library(haruka_vulkan STATIC ${volk_SOURCE_DIR}/volk.c)
+target_include_directories(haruka_vulkan PUBLIC
+    ${vulkan_headers_SOURCE_DIR}/include
+    ${volk_SOURCE_DIR}
+)
+target_compile_definitions(haruka_vulkan PUBLIC VK_NO_PROTOTYPES)
+if(WIN32)
+    target_compile_definitions(haruka_vulkan PRIVATE VK_USE_PLATFORM_WIN32_KHR)
+elseif(ANDROID)
+    target_compile_definitions(haruka_vulkan PRIVATE VK_USE_PLATFORM_ANDROID_KHR)
+endif()
 
 # ── GLM (both platforms) ──────────────────────────────────────────────────────
 FetchContent_Declare(
@@ -48,11 +71,24 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
     GIT_TAG        v2.9.3
 )
-set(TINYGLTF_BUILD_GL_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(TINYGLTF_BUILD_VALIDATOR   OFF CACHE BOOL "" FORCE)
-set(TINYGLTF_BUILD_BUILDER     OFF CACHE BOOL "" FORCE)
-set(TINYGLTF_INSTALL           OFF CACHE BOOL "" FORCE)
+set(TINYGLTF_BUILD_GL_EXAMPLES    OFF CACHE BOOL "" FORCE)
+set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(TINYGLTF_BUILD_VALIDATOR      OFF CACHE BOOL "" FORCE)
+set(TINYGLTF_BUILD_BUILDER        OFF CACHE BOOL "" FORCE)
+set(TINYGLTF_INSTALL              OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(tinygltf)
+if(TARGET tinygltf)
+    get_target_property(_tinygltf_inc tinygltf INTERFACE_INCLUDE_DIRECTORIES)
+    if(_tinygltf_inc)
+        set_target_properties(tinygltf PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_tinygltf_inc}")
+    endif()
+    if(NOT MSVC)
+        target_compile_options(tinygltf PRIVATE -w)
+    endif()
+endif()
+if(TARGET loader_example AND NOT MSVC)
+    target_compile_options(loader_example PRIVATE -w)
+endif()
 
 # ── stb (stb_truetype용) ───────────────────────────────────────────────────────
 FetchContent_Declare(
@@ -213,18 +249,78 @@ if(NOT ANDROID)
     endif()
 endif()
 
-# ── 셰이더 컴파일 (glslc → SPIR-V) ───────────────────────────────────────────
-find_program(GLSLC glslc
-    HINTS
-        "$ENV{VULKAN_SDK}/Bin"
-        "$ENV{VULKAN_SDK}/bin"
-        "C:/VulkanSDK/1.4.357.0/Bin"
-    REQUIRED
-)
+# ── 셰이더 컴파일 (Khronos glslang → SPIR-V, E0b) ────────────────────────────
+# 데스크톱 빌드는 FetchContent 로 받은 glslang-standalone 을 호스트 도구로 함께 빌드하고,
+# Android 빌드는 데스크톱 트리의 glslang 을 씁니다(HarukaPak 과 같은 방식).
+set(HARUKA_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+if(ANDROID)
+    set(_host_glslang_debug   ${CMAKE_CURRENT_SOURCE_DIR}/build/Debug/glslang${CMAKE_HOST_EXECUTABLE_SUFFIX})
+    set(_host_glslang_release ${CMAKE_CURRENT_SOURCE_DIR}/build/Release/glslang${CMAKE_HOST_EXECUTABLE_SUFFIX})
+    if(HARUKA_HOST_GLSLANG AND (NOT EXISTS "${HARUKA_HOST_GLSLANG}" OR
+       (HARUKA_HOST_GLSLANG STREQUAL _host_glslang_debug AND EXISTS "${_host_glslang_release}")))
+        unset(HARUKA_HOST_GLSLANG CACHE)
+    endif()
+    find_program(HARUKA_HOST_GLSLANG NAMES glslang glslangValidator
+        HINTS ${CMAKE_CURRENT_SOURCE_DIR}/build/Release ${CMAKE_CURRENT_SOURCE_DIR}/build/Debug
+        NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+    if(NOT HARUKA_HOST_GLSLANG OR NOT EXISTS "${HARUKA_HOST_GLSLANG}")
+        message(FATAL_ERROR "The Android build compiles shaders with the desktop glslang tool. Build it first "
+                            "(cmake --build build --config Release --target glslang-standalone) or pass -DHARUKA_HOST_GLSLANG=<path>. "
+                            "Now: '${HARUKA_HOST_GLSLANG}'")
+    endif()
+    set(GLSLANG_TOOL ${HARUKA_HOST_GLSLANG})
+    set(HARUKA_EXPECTED_GLSLANG_VERSION "16\\.4\\.0")
+    set(HOST_GLSLANG_STAMP ${HARUKA_GENERATED_DIR}/host_glslang_checked.stamp)
+    add_custom_command(
+        OUTPUT  ${HOST_GLSLANG_STAMP}
+        COMMAND ${CMAKE_COMMAND} -DTOOL=${HARUKA_HOST_GLSLANG} -DEXPECTED_VERSION=${HARUKA_EXPECTED_GLSLANG_VERSION} -DSTAMP=${HOST_GLSLANG_STAMP}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckHostGlslang.cmake
+        DEPENDS ${HARUKA_HOST_GLSLANG} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckHostGlslang.cmake
+        COMMENT "Checking that the desktop glslang version matches"
+        VERBATIM
+    )
+    set(GLSLANG_DEPENDS ${HARUKA_HOST_GLSLANG} ${HOST_GLSLANG_STAMP})
+else()
+    FetchContent_Declare(
+        glslang
+        GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+        GIT_TAG        vulkan-sdk-1.4.357.0
+    )
+    set(ENABLE_OPT                 OFF CACHE BOOL "" FORCE)
+    set(ENABLE_HLSL                OFF CACHE BOOL "" FORCE)
+    set(ENABLE_GLSLANG_BINARIES    ON  CACHE BOOL "" FORCE)
+    set(ENABLE_CTEST               OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING              OFF CACHE BOOL "" FORCE)
+    set(ALLOW_EXTERNAL_SPIRV_TOOLS OFF CACHE BOOL "" FORCE)
+    set(SKIP_GLSLANG_INSTALL       ON  CACHE BOOL "" FORCE)
+    # Debug 구성에서도 glslang 대상만 최적화(/O2, /RTC 제거)로 빌드해 셰이더 컴파일 속도를 유지합니다.
+    set(_haruka_saved_cxx_debug "${CMAKE_CXX_FLAGS_DEBUG}")
+    set(_haruka_saved_c_debug   "${CMAKE_C_FLAGS_DEBUG}")
+    if(MSVC)
+        foreach(_var CMAKE_CXX_FLAGS_DEBUG CMAKE_C_FLAGS_DEBUG)
+            string(REGEX REPLACE "/Od([^a-zA-Z0-9]|$)" "/O2\\1" ${_var} "${${_var}}")
+            string(REGEX REPLACE "/Ob0([^a-zA-Z0-9]|$)" "/Ob2\\1" ${_var} "${${_var}}")
+            string(REGEX REPLACE "/RTC[a-zA-Z0-9]*" "" ${_var} "${${_var}}")
+        endforeach()
+    endif()
+    FetchContent_MakeAvailable(glslang)
+    set(CMAKE_CXX_FLAGS_DEBUG "${_haruka_saved_cxx_debug}")
+    set(CMAKE_C_FLAGS_DEBUG   "${_haruka_saved_c_debug}")
+    if(MSVC)
+        foreach(_gt IN ITEMS GenericCodeGen MachineIndependent glslang glslang-default-resource-limits OSDependent SPIRV glslang-standalone)
+            if(TARGET ${_gt})
+                target_compile_options(${_gt} PRIVATE /utf-8)
+            endif()
+        endforeach()
+    endif()
+    set_target_properties(glslang-standalone PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    set(GLSLANG_TOOL    $<TARGET_FILE:glslang-standalone>)
+    set(GLSLANG_DEPENDS glslang-standalone)
+endif()
 
 set(SHADER_SRC_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_BIN_DIR  ${CMAKE_CURRENT_BINARY_DIR}/shaders)
-# glslc 의존성 파일(.d)은 실행 폴더로 복사되는 SHADER_BIN_DIR 밖에 둡니다.
+# glslang 의존성 파일(.d)은 실행 폴더로 복사되는 SHADER_BIN_DIR 밖에 둡니다.
 set(SHADER_DEP_DIR  ${CMAKE_CURRENT_BINARY_DIR}/shader_deps)
 # 실행 파일 옆 shaders/ (핫 리로드 감시 폴더). 셰이더 명령이 바뀐 .spv 를 바로 복사하므로
 # Shaders 타깃만 빌드해도 실행 중인 에디터가 다시 읽습니다. 에디터와 게임 실행 파일은 같은 폴더에 생기며,
@@ -276,11 +372,10 @@ foreach(F ${_spv_in_bin})
     endif()
 endforeach()
 
-# DEPFILE: glslc -MD 가 셰이더가 #include 한 파일 목록을 쓰고, CMake 가 그 목록으로 다시
+# DEPFILE: glslang --depfile 이 셰이더가 #include 한 파일 목록을 쓰고, CMake 가 그 목록으로 다시
 # 컴파일 여부를 정합니다(Visual Studio 생성기는 CMake 3.21 부터 지원). 이것이 없으면 include
 # 파일만 고쳤을 때 아무것도 다시 컴파일되지 않아 낡은 SPIR-V 가 배포됩니다(DEF-11).
-# --target-env=vulkan1.0: SPIR-V 1.0 으로 고정합니다(Vulkan 1.1 기준선, 2026-10-31 DEF-97). 지금 glslc 기본값과 같아
-# 결과물은 바뀌지 않지만, 도구 버전이나 플래그가 바뀌어 1.1 장치(Quest 2 · Pro)가 받을 수 없는 SPIR-V 1.4 이상이 나오는 것을 막습니다.
+# --target-env vulkan1.0: SPIR-V 1.0 으로 고정합니다(Vulkan 1.1 기준선, 2026-10-31 DEF-97).
 foreach(SHADER ${GLSL_SHADERS})
     set(IN  ${SHADER_SRC_DIR}/${SHADER})
     set(OUT ${SHADER_BIN_DIR}/${SHADER}.spv)
@@ -288,20 +383,20 @@ foreach(SHADER ${GLSL_SHADERS})
     if(SHADER_RUN_DIR)
         add_custom_command(
             OUTPUT  ${OUT}
-            COMMAND ${GLSLC} --target-env=vulkan1.0 -MD -MF ${DEP} ${IN} -I ${SHADER_SRC_DIR}/include -o ${OUT}
+            COMMAND ${GLSLANG_TOOL} -V --target-env vulkan1.0 --depfile ${DEP} -I${SHADER_SRC_DIR}/include -o ${OUT} ${IN}
             COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_RUN_DIR}
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OUT} ${SHADER_RUN_DIR}/${SHADER}.spv
-            DEPENDS ${IN}
+            DEPENDS ${IN} ${GLSLANG_DEPENDS}
             DEPFILE ${DEP}
-            COMMENT "glslc -> ${SHADER}.spv"
+            COMMENT "glslang -> ${SHADER}.spv"
         )
     else()
         add_custom_command(
             OUTPUT  ${OUT}
-            COMMAND ${GLSLC} --target-env=vulkan1.0 -MD -MF ${DEP} ${IN} -I ${SHADER_SRC_DIR}/include -o ${OUT}
-            DEPENDS ${IN}
+            COMMAND ${GLSLANG_TOOL} -V --target-env vulkan1.0 --depfile ${DEP} -I${SHADER_SRC_DIR}/include -o ${OUT} ${IN}
+            DEPENDS ${IN} ${GLSLANG_DEPENDS}
             DEPFILE ${DEP}
-            COMMENT "glslc -> ${SHADER}.spv"
+            COMMENT "glslang -> ${SHADER}.spv"
         )
     endif()
     list(APPEND SPIRV_OUTPUTS ${OUT})
@@ -312,7 +407,6 @@ endforeach()
 # HarukaPak 이 목록 파일(generated/haruka_shader_manifest.inc)로 적고 엔진(src/runtime/ShaderManifest.cpp)에 넣습니다. 해시는 묶음
 # 목차와 같은 XXH3-64 라 호스트 도구가 필요합니다. Android 구성은 HarukaPak 을 만들지 않으므로(기기용 실행 파일만 만듦) 데스크톱
 # 빌드의 HarukaPak 을 씁니다. 다른 위치의 도구는 -DHARUKA_HOST_PAK=<경로> 로 줍니다.
-set(HARUKA_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 set(SHADER_MANIFEST_INC  ${HARUKA_GENERATED_DIR}/haruka_shader_manifest.inc)
 if(ANDROID)
     # 캐시된 경로가 사라졌으면(빌드 폴더를 지움) 다시 찾습니다. find_program 은 캐시 값이 있으면 찾지 않습니다. 처음 구성할 때
@@ -561,6 +655,9 @@ else()
     set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(glfw)
+    if(MSVC AND TARGET glfw)
+        target_compile_options(glfw PRIVATE /utf-8 /wd4865 /wd4100 /Wv:18)
+    endif()
 
     # ── OpenXR (desktop only: PC VR, Quest Link) ──────────────────────────────
     # Khronos 공식 로더와 헤더입니다. 로더는 정적 라이브러리로 링크해 DLL 을 따로 옮기지 않습니다.
@@ -646,8 +743,9 @@ if(NOT ANDROID)
         src/core/HLog.cpp)
     add_executable(HarukaPak src/tools/HarukaPak.cpp src/core/HText.cpp src/core/AssetRefs.cpp ${HARUKA_TEXTURE_COOK_SOURCES}
                    ${UTF8_MANIFEST})
-    target_link_libraries(HarukaPak PRIVATE HarukaVfs tinygltf glm::glm meshoptimizer haruka_astcenc haruka_bc7enc)
-    target_include_directories(HarukaPak PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaPak PRIVATE haruka_vulkan HarukaVfs tinygltf glm::glm meshoptimizer haruka_astcenc haruka_bc7enc)
+    target_compile_definitions(HarukaPak PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+    target_include_directories(HarukaPak PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     haruka_target_defaults(HarukaPak)
     if(MSVC)
         set_target_properties(HarukaPak PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -719,6 +817,8 @@ OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
 WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
 OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ]=])
+haruka_notice_file("Vulkan-Headers (Apache-2.0 OR MIT License)" ${vulkan_headers_SOURCE_DIR}/LICENSE.md)
+haruka_notice_file("volk (MIT License)" ${volk_SOURCE_DIR}/LICENSE.md)
 haruka_notice_file("Jolt Physics (MIT License)" ${joltphysics_SOURCE_DIR}/LICENSE)
 haruka_notice_file("tinygltf (MIT License)" ${tinygltf_SOURCE_DIR}/LICENSE)
 string(REPLACE "<year> <copyright holders>" "2013-2019 Niels Lohmann <http://nlohmann.me>" _json "${_mit}")
@@ -764,6 +864,7 @@ haruka_notice_file("stb, including stb_image bundled with tinygltf (Public Domai
 # 텍스처 인코더(2026-11-21): 게임 실행 파일에는 들어가지 않고 묶음 도구(HarukaPak)만 씁니다. 묶음 안의 압축 텍스처는 그 도구의
 # 출력이라 고지 대상은 아니지만, 도구를 함께 배포할 때를 위해 적습니다.
 if(NOT ANDROID)
+    haruka_notice_file("glslang (multiple licenses, see LICENSE.txt)" ${glslang_SOURCE_DIR}/LICENSE.txt)
     haruka_notice_file("astc-encoder 5.7.1, used by the HarukaPak packaging tool only (Apache License 2.0)" ${astcenc_SOURCE_DIR}/LICENSE.txt)
     haruka_notice_file("bc7enc_rdo (bc7enc · bc7decomp · rgbcx), used by the HarukaPak packaging tool only (MIT License, chosen from MIT or Public Domain)"
         ${bc7enc_rdo_SOURCE_DIR}/LICENSE)
@@ -867,9 +968,9 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/scene/Component.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaStereoTest PRIVATE glm::glm)
-    # 합성 눈(xr/SyntheticEyes.hpp)이 RenderTypes.hpp 의 Vulkan 형을 쓰므로 헤더 경로만 둡니다(링크는 필요 없음).
-    target_include_directories(HarukaStereoTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaStereoTest PRIVATE glm::glm haruka_vulkan)
+    # 합성 눈(xr/SyntheticEyes.hpp)이 RenderTypes.hpp 의 Vulkan 형을 쓰므로 헤더 · 정의를 받습니다.
+    target_include_directories(HarukaStereoTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaStereoTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaStereoTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -947,10 +1048,10 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/scene/Component.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaLightTest PRIVATE glm::glm HarukaVfs Vulkan::Vulkan)
-    target_include_directories(HarukaLightTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR} ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaLightTest PRIVATE glm::glm HarukaVfs haruka_vulkan)
+    target_include_directories(HarukaLightTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR})
     if(MSVC)
-        target_compile_options(HarukaLightTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        target_compile_options(HarukaLightTest PRIVATE /W4 /utf-8 /wd4865 /wd4100 /Wv:18)
         set_target_properties(HarukaLightTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
@@ -975,9 +1076,9 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     # -- 렌더 확장 지점 테스트 -----------------------------------------------
     # 패스 레지스트리의 수명주기 순서와 지점별 호출을 화면 없이 검산합니다(DEF-17 · 18).
     add_executable(HarukaRenderExtTest tests/RenderExtensionTest.cpp)
-    target_link_libraries(HarukaRenderExtTest PRIVATE glm::glm)
-    # RenderExtension.hpp 가 Vulkan 형을 쓰므로 헤더 경로만 둡니다(링크는 필요 없음).
-    target_include_directories(HarukaRenderExtTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaRenderExtTest PRIVATE glm::glm haruka_vulkan)
+    # RenderExtension.hpp 가 Vulkan 형을 씁니다.
+    target_include_directories(HarukaRenderExtTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaRenderExtTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaRenderExtTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -987,7 +1088,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     # 장치 계획(1.1 · push descriptor 필수 · sync2 선택) · 기능 체인 · 함수 이름 · 큐 계열 · XR 범위를 창 · 장치 없이
     # 검산합니다(패키징 2단계, DEF-97). 헤더 전용이고 장치 함수는 가짜로 넘기므로 Vulkan 로더에 링크하지 않습니다.
     add_executable(HarukaVulkanBaselineTest tests/VulkanBaselineTest.cpp)
-    target_include_directories(HarukaVulkanBaselineTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaVulkanBaselineTest PRIVATE haruka_vulkan)
+    target_include_directories(HarukaVulkanBaselineTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaVulkanBaselineTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaVulkanBaselineTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -996,7 +1098,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     # -- 배리어 기록 분기 테스트 ----------------------------------------------
     # sync2 배리어의 1.0 변환표, 엔진이 쓰는 값 전수, 거부, KHR · 1.0 발행 분기를 검산합니다(DEF-04). 헤더 전용입니다.
     add_executable(HarukaBarrierTest tests/BarrierCompatTest.cpp)
-    target_include_directories(HarukaBarrierTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaBarrierTest PRIVATE haruka_vulkan)
+    target_include_directories(HarukaBarrierTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaBarrierTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaBarrierTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -1006,7 +1109,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     # 핵심 힙과 지연 할당 이미지의 메모리 타입 선택, 실패 문구를 Quest Pro · ReBAR 없는 PC 같은 메모리 표로 검산합니다
     # (DEF-42 · 06). 헤더 전용입니다.
     add_executable(HarukaMemoryTest tests/MemoryTypeTest.cpp)
-    target_include_directories(HarukaMemoryTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaMemoryTest PRIVATE haruka_vulkan)
+    target_include_directories(HarukaMemoryTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaMemoryTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaMemoryTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -1022,8 +1126,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/runtime/EngineOptions.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaHeadlessTest PRIVATE glm::glm HarukaVfs)   # 파이프라인 캐시 파일의 해시(DEF-153)
-    target_include_directories(HarukaHeadlessTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaHeadlessTest PRIVATE glm::glm HarukaVfs haruka_vulkan)   # 파이프라인 캐시 파일의 해시(DEF-153)
+    target_include_directories(HarukaHeadlessTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaHeadlessTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaHeadlessTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -1154,13 +1258,13 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/ui/slate/HPaintContext.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaTextTest PRIVATE Vulkan::Vulkan glm::glm HarukaVfs)
-    target_include_directories(HarukaTextTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR} ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaTextTest PRIVATE haruka_vulkan glm::glm HarukaVfs)
+    target_include_directories(HarukaTextTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR})
     # 번역 표가 소스의 HTEXT 키를 모두 덮는지 맞대어 봅니다(T3-8).
     target_compile_definitions(HarukaTextTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src"
                                                       HARUKA_ENGINE_CONTENT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Engine/Content")
     if(MSVC)
-        target_compile_options(HarukaTextTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        target_compile_options(HarukaTextTest PRIVATE /W4 /utf-8 /wd4865 /wd4100 /Wv:18)
         set_target_properties(HarukaTextTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
@@ -1226,8 +1330,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/scene/Component.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaAnimTest PRIVATE HarukaVfs tinygltf glm::glm meshoptimizer)
-    target_include_directories(HarukaAnimTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaAnimTest PRIVATE HarukaVfs tinygltf glm::glm meshoptimizer haruka_vulkan)
+    target_include_directories(HarukaAnimTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(HarukaAnimTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     if(MSVC)
         target_compile_options(HarukaAnimTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
@@ -1254,7 +1358,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     target_link_libraries(HarukaAccessTest PRIVATE HarukaRuntime)
     target_include_directories(HarukaAccessTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
-        target_compile_options(HarukaAccessTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        target_compile_options(HarukaAccessTest PRIVATE /W4 /utf-8 /wd4865 /wd4100 /Wv:18)
         set_target_properties(HarukaAccessTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
@@ -1294,8 +1398,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     # KTX2 쓰기 · 읽기(정상 · 손상), 형식 표, 장치 지원 판단(대체 경로), 밉 생성, 압축 → 풀기 PSNR 하한, 쿠킹 캐시, 시험 모델을
     # 쿠킹한 뒤 런타임 찾기가 모두 붙는지(열쇠 일치)를 GPU 없이 봅니다. 인코더는 묶음 도구와 같은 소스입니다.
     add_executable(HarukaTexTest tests/TextureCompressionTest.cpp ${HARUKA_TEXTURE_COOK_SOURCES})
-    target_link_libraries(HarukaTexTest PRIVATE HarukaVfs tinygltf glm::glm meshoptimizer haruka_astcenc haruka_bc7enc)
-    target_include_directories(HarukaTexTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaTexTest PRIVATE HarukaVfs tinygltf glm::glm meshoptimizer haruka_astcenc haruka_bc7enc haruka_vulkan)
+    target_include_directories(HarukaTexTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(HarukaTexTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     if(MSVC)
         target_compile_options(HarukaTexTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
@@ -1441,12 +1545,12 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/editor/EditorMenuView.cpp
     )
     # 셰이더 · 글꼴을 가상 파일 시스템으로 읽습니다(2026-10-24).
-    target_link_libraries(HarukaSlateTest PRIVATE Vulkan::Vulkan glm::glm HarukaVfs haruka_nanosvg)
+    target_link_libraries(HarukaSlateTest PRIVATE haruka_vulkan glm::glm HarukaVfs haruka_nanosvg)
     target_compile_definitions(HarukaSlateTest PRIVATE HARUKA_ENGINE_CONTENT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Engine/Content")
     target_include_directories(HarukaSlateTest PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR} ${Vulkan_INCLUDE_DIRS})
+        ${CMAKE_CURRENT_SOURCE_DIR}/src ${stb_SOURCE_DIR})
     if(MSVC)
-        target_compile_options(HarukaSlateTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        target_compile_options(HarukaSlateTest PRIVATE /W4 /utf-8 /wd4865 /wd4100 /Wv:18)
         set_target_properties(HarukaSlateTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
@@ -1474,9 +1578,9 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/scene/Component.cpp
         src/core/HLog.cpp
     )
-    target_link_libraries(HarukaPhysicsTest PRIVATE glm::glm Jolt)
-    # 리그 · 잡기 검사가 입력 시스템을 씁니다. IWindow.hpp 가 Vulkan 형을 쓰므로 헤더 경로만 둡니다.
-    target_include_directories(HarukaPhysicsTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaPhysicsTest PRIVATE glm::glm Jolt haruka_vulkan)
+    # 리그 · 잡기 검사가 입력 시스템을 씁니다. IWindow.hpp 가 Vulkan 형을 쓰므로 헤더 · 정의를 받습니다.
+    target_include_directories(HarukaPhysicsTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaPhysicsTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
         set_target_properties(HarukaPhysicsTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
@@ -1542,8 +1646,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/core/HLog.cpp
     )
     # 자동 맞춤 쥐기(손 쥐기 D)는 잡기(XrComponents) · Jolt 바디 판정을 함께 시험합니다.
-    target_link_libraries(HarukaHandTest PRIVATE HarukaVfs tinygltf glm::glm Jolt meshoptimizer)
-    target_include_directories(HarukaHandTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(HarukaHandTest PRIVATE HarukaVfs tinygltf glm::glm Jolt meshoptimizer haruka_vulkan)
+    target_include_directories(HarukaHandTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(HarukaHandTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     if(MSVC)
         target_compile_options(HarukaHandTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)

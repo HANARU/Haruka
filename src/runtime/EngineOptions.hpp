@@ -34,6 +34,7 @@ struct EngineOptions {
     std::string scenePath;
     bool        vkNoSync2     = false;   // --vk-no-sync2 : synchronization2 가 있어도 1.0 배리어로 기록(DEF-04 대체 경로 시험)
     bool        vkDedicatedMsaa = false; // --vk-dedicated-msaa : MSAA 컬러를 핵심 힙 밖 별도 할당으로(DEF-06 경로 시험)
+    bool        vkFailInit    = false;   // --vk-fail-init : volkInitialize 실패 경로를 흉내 냄(E0a 실패 길 시험)
     // --no-multiview : 두 눈의 메인 패스를 멀티뷰(viewMask 0b11)로 한 번에 그리지 않고 눈마다 그림(Quest 에서 이득 비교 ·
     // 멀티뷰 탓인지 가르는 진단, 2026-11-18). 장치의 멀티뷰 기능은 그래도 켭니다.
     bool        multiview     = true;

@@ -23,6 +23,9 @@
 #include "../core/DebugDraw.hpp"
 #include "../assets/GassetCache.hpp"
 #include "../vfs/Vfs.hpp"
+#include "../platform/PlatformAlert.hpp"
+#include <volk.h>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -306,6 +309,22 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     const EngineLimits limits = loadEngineLimits("Config/engine.ini");
     HLOG(LogEngine, Log) << "Limits: draw rows " << limits.maxDrawRows << ", lights " << limits.maxLights
                          << ", physics bodies " << limits.maxBodies << " (Config/engine.ini)";
+
+    // Vulkan 로더 초기화(E0a). 첫 Vulkan 호출(GLFW 로더 설정 · 인스턴스) 전에 한 번 부릅니다.
+    // 실패하면(드라이버 · vulkan-1.dll 없음) 로그에 남기고, 창이 있는 실행이면 알림 상자를 띄운 뒤 끝납니다.
+    {
+        const VkResult vr = options.vkFailInit ? VK_ERROR_INITIALIZATION_FAILED : volkInitialize();
+        if (vr != VK_SUCCESS) {
+            HLOG(LogEngine, Error) << "Failed to initialize Vulkan loader (volkInitialize returned VkResult "
+                                   << (int)vr << "); check GPU driver / vulkan-1.dll";
+            if (!options.hiddenWindow && !options.headless) {
+                hplat::showFatalError(
+                    "Haruka Engine",
+                    "Vulkan loader (vulkan-1.dll) could not be initialized.\nPlease install or update your GPU driver.");
+            }
+            throw std::runtime_error("Failed to initialize Vulkan loader (volkInitialize)");
+        }
+    }
 
     // 창(2026-10-31). Android 는 화면 표면이 없는 창이고, PC 의 게임 실행 파일은 --headless 면 OS 창 없이 돕니다. 에디터는
     // 창 없이는 쓸 수 없어(0x0 이면 Play 를 누를 수 없고 XR 세션도 열리지 않음) 무시합니다.
@@ -1242,8 +1261,9 @@ int Engine::finishRun() {
     }
     const uint32_t errors = Renderer::validationErrorCount();
     const int      code   = hopt::headlessExitCode(drawnFrames_, options_.frames, timedOut_, errors, blank);
+    const char*    validationNote = Renderer::isValidationActive() ? "" : " (not checked)";
     const std::string summary = "Run summary: drawn " + std::to_string(drawnFrames_) + "/" + std::to_string(options_.frames) +
-                                ", validation errors " + std::to_string(errors) + ", " + captureNote + ", exit code " +
+                                ", validation errors " + std::to_string(errors) + validationNote + ", " + captureNote + ", exit code " +
                                 std::to_string(code);
     if (code == hopt::kExitOk) { HLOG(LogEngine, Log) << summary; }
     else                       { HLOG(LogEngine, Error) << summary; }

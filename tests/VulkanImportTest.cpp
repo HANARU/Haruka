@@ -1,12 +1,16 @@
-// 실행 파일이 Vulkan 로더에서 가져오는 함수 이름의 검산입니다(DEF-97). 창도 GPU 도 필요 없습니다.
+// 실행 파일이 Vulkan 로더에 정적 링크되지 않고, 엔진 코드가 1.0 · 1.1 코어와 VK_KHR_surface · VK_KHR_swapchain 밖의
+// Vulkan 함수를 이름으로 부르지 않는지 검산합니다(DEF-97 · E0a). 창도 GPU 도 필요 없습니다.
 //
-// 이 테스트가 존재하는 이유: 엔진과 게임 코드는 한 실행 파일(Android 는 한 .so)에 링크됩니다. 어디선가 1.2 이상 코어 이름이나
-// 확장 이름(vkCmdPushDescriptorSet · vkCmdPipelineBarrier2 등)을 이름으로 부르면, PC 의 1.4 로더에서는 잘 돌지만 Quest 의
-// libvulkan(API 34)에서는 링크 · 로드가 막히고 1.1 장치에서는 빈 함수로 뛰어 멈춥니다. PC 에서 미리 잡으려고 실행 파일의
-// 가져오기 표를 읽어, vulkan-1.dll 에서 가져오는 이름이 1.0 · 1.1 코어와 VK_KHR_surface · VK_KHR_swapchain 뿐인지 봅니다.
-// 확장 함수는 vkGetDeviceProcAddr 로 받아야 합니다(VulkanBaseline.hpp).
+// 이 테스트가 존재하는 이유:
+//   (가) volk 전환 이후 HarukaEngine.exe · HarukaGame.exe 의 PE 가져오기 표에 vulkan-1.dll 이 없어야 합니다.
+//        (드라이버가 없어도 프로세스가 뜨고, 엔진이 volkInitialize() 실패를 잡아 안내한 뒤 종료할 수 있습니다.)
+//   (나) 엔진 정적 라이브러리(HarukaRuntime.lib)의 COFF 오브젝트(.obj)가 참조하는 미해결 외부 기호 중 vk[A-Z]... 이름을
+//        모아 vulkan_core.h 의 허용 목록(1.0 · 1.1 코어 + VK_KHR_surface · VK_KHR_swapchain)과 대조합니다.
+//        volk.h 는 모든 함수를 전역 포인터 변수로 선언하므로, 엔진 코드가 vkCmdPipelineBarrier2 등 1.2+ 함수를
+//        이름으로 부르면 해당 .obj 의 미해결 외부 기호에 나타나 이 시험이 잡습니다.
+//        확장 함수는 vkGetDeviceProcAddr 로 받아야 합니다(VulkanBaseline.hpp).
 //
-// 실행: HarukaVkImportTest <실행 파일>... <vulkan_core.h>
+// 실행: HarukaVkImportTest <exe>... <lib>... <vulkan_core.h>
 
 #include <algorithm>
 #include <cctype>
@@ -58,7 +62,7 @@ std::set<std::string> allowedFromHeader(const std::string& text) {
     return allowed;
 }
 
-// PE32+ 의 가져오기 디렉터리에서 dllName(대소문자 무시)이 주는 이름을 모읍니다. 서수 가져오기는 "#서수" 로 담습니다.
+// PE32+ 의 가져오기 디렉터리에서 dllName(대소문자 무시)이 주는 이름을 모읍니다.
 bool importsFrom(const std::vector<uint8_t>& pe, const std::string& dllName, std::vector<std::string>& names,
                  std::string& err) {
     auto u16 = [&](size_t o) -> uint32_t { return o + 2 <= pe.size() ? (uint32_t)(pe[o] | pe[o + 1] << 8) : 0; };
@@ -111,9 +115,9 @@ bool importsFrom(const std::vector<uint8_t>& pe, const std::string& dllName, std
 } // namespace
 
 int main(int argc, char** argv) {
-    std::printf("Haruka Vulkan 가져오기 표 검산\n");
-    if (argc < 3) {
-        std::printf("usage: HarukaVkImportTest <exe>... <vulkan_core.h>\n");
+    std::printf("Haruka Vulkan 로더 · 기호 검산 (E0a / DEF-97)\n");
+    if (argc < 4) {
+        std::printf("usage: HarukaVkImportTest <exe>... <lib>... <vulkan_core.h>\n");
         return 2;
     }
     std::vector<uint8_t> headerBytes;
@@ -134,24 +138,43 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc - 1; ++i) {
         const std::string exe = argv[i];
         const std::string name = exe.substr(exe.find_last_of("/\\") + 1);
-        std::printf("\n== %s ==\n", name.c_str());
+        std::printf("\n== (가) %s PE 가져오기 표 ==\n", name.c_str());
         std::vector<uint8_t> pe;
         std::vector<std::string> imports;
         std::string err;
         if (!readFile(exe, pe) || !importsFrom(pe, "vulkan-1.dll", imports, err)) {
-            check(false, name + ": 가져오기 표를 읽음 (" + (err.empty() ? "cannot read" : err) + ")");
+            check(false, name + ": PE 가져오기 표를 읽음 (" + (err.empty() ? "cannot read" : err) + ")");
             continue;
         }
-        check(imports.size() >= 50, name + ": vulkan-1.dll 에서 " + std::to_string(imports.size()) + "개를 가져옴");
+        for (const auto& n : imports) std::printf("    unexpected import: %s\n", n.c_str());
+        check(imports.empty(), name + ": vulkan-1.dll 을 가져오지 않음 (volk 동적 로드)");
+    }
+
+    for (const std::string& lib : libs) {
+        const std::string name = lib.substr(lib.find_last_of("/\\") + 1);
+        std::printf("\n== (나) %s COFF 미해결 Vulkan 기호 ==\n", name.c_str());
+        std::vector<uint8_t> ar;
+        std::set<std::string> syms;
+        size_t objCount = 0;
+        std::string err;
+        if (!readFile(lib, ar) || !undefinedVkSymbolsFromLib(ar, syms, objCount, err)) {
+            check(false, name + ": COFF 아카이브를 읽음 (" + (err.empty() ? "cannot read" : err) + ")");
+            continue;
+        }
+        const bool isRuntime = name.find("HarukaRuntime") != std::string::npos;
+        check(objCount >= (isRuntime ? 10u : 1u), name + ": COFF 오브젝트 " + std::to_string(objCount) + "개를 검사함");
+        if (isRuntime) {
+            check(syms.size() >= 30, name + ": 미해결 vk 기호 " + std::to_string(syms.size()) + "개를 찾음(30개 이상)");
+        }
         std::vector<std::string> bad;
-        for (const auto& n : imports) if (!allowed.count(n)) bad.push_back(n);
-        for (const auto& n : bad) std::printf("    not allowed: %s\n", n.c_str());
-        check(bad.empty(), name + ": 1.0 · 1.1 코어와 표면 · 스왑체인 밖의 이름을 가져오지 않음");
-        const bool core14 = std::find(imports.begin(), imports.end(), "vkCmdPushDescriptorSet") != imports.end();
-        const bool core13 = std::find(imports.begin(), imports.end(), "vkCmdPipelineBarrier2") != imports.end();
-        check(!core14 && !core13, name + ": vkCmdPushDescriptorSet(1.4) · vkCmdPipelineBarrier2(1.3) 를 가져오지 않음");
-        const bool gdpa = std::find(imports.begin(), imports.end(), "vkGetDeviceProcAddr") != imports.end();
-        check(gdpa, name + ": 확장 함수는 vkGetDeviceProcAddr 로 받음");
+        for (const auto& s : syms) if (!allowed.count(s)) bad.push_back(s);
+        for (const auto& s : bad) std::printf("    not allowed: %s\n", s.c_str());
+        check(bad.empty(), name + ": 1.0 · 1.1 코어와 표면 · 스왑체인 밖의 Vulkan 함수를 부르지 않음");
+        check(!syms.count("vkCmdPushDescriptorSet") && !syms.count("vkCmdPipelineBarrier2"),
+              name + ": vkCmdPushDescriptorSet(1.4) · vkCmdPipelineBarrier2(1.3) 를 부르지 않음");
+        if (isRuntime) {
+            check(syms.count("vkGetDeviceProcAddr") > 0, name + ": 확장 함수는 vkGetDeviceProcAddr 로 받음");
+        }
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

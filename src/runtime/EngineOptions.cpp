@@ -65,6 +65,7 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (a == "--synthetic-eyes") o.syntheticEyes = true;
         else if (a == "--vk-no-sync2")    o.vkNoSync2     = true;
         else if (a == "--vk-dedicated-msaa") o.vkDedicatedMsaa = true;
+        else if (a == "--vk-fail-init")   o.vkFailInit    = true;
         else if (a == "--no-multiview")   o.multiview     = false;
         else if (a == "--ssao")           o.ssao          = true;
         else if (a == "--no-ssao")        o.ssao          = false;
