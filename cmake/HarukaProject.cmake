@@ -161,9 +161,6 @@ function(haruka_add_project)
         )
         target_link_libraries(${HP_EDITOR_TARGET} PRIVATE ${_haruka_editor_lib})
         target_compile_definitions(${HP_EDITOR_TARGET} PRIVATE
-            HARUKA_EDITOR
-            HARUKA_PROJECT_DIR="${HP_PROJECT_DIR}"
-            HARUKA_ENGINE_CONTENT_DIR="${HARUKA_ENGINE_ROOT}/Engine/Content"
             HARUKA_PROJECT_NAME="${HP_DESC_name}"
             HARUKA_PROJECT_COMPANY="${HP_DESC_company}"
             HARUKA_PROJECT_PACKAGE_ID="${HP_DESC_packageId}"

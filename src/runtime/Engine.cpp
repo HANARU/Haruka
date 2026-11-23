@@ -164,19 +164,46 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     registerCoreComponents();
     registerXrComponents();   // 플레이어 리그 · 추적 자세 · 이동 · 잡기(2026-10-15)
 
-    // 프로젝트 루트(2026-10-15, P3a 2026-11-19). --project=<폴더> 또는 에디터 기본값(HARUKA_PROJECT_DIR)을 씁니다.
-    // 프로젝트 폴더가 있으면 *.hproject 를 읽어 검증하고(없으면 오류로 멈춤), <프로젝트>/Content 를 /Game/ 으로,
-    // <프로젝트>/Config 를 /Config/ 으로 마운트합니다.
+    for (const auto& msg : policy_.startupLogs) {
+        HLOG(LogEngine, Log) << msg;
+    }
+
+    auto failStartup = [&](const std::string& logMsg, const std::string& uiMsg, const char* exMsg) -> void {
+        HLOG(LogEngine, Error) << logMsg;
+        if (!options.hiddenWindow && !options.headless) {
+            hplat::showFatalError("Haruka Engine", uiMsg.c_str());
+        }
+        throw std::runtime_error(exMsg);
+    };
+
+    // 프로젝트 루트(2026-10-15, P3a 2026-11-19, E5 2026-11-23).
+    // 에디터(requireProject)는 실행 때 찾은 프로젝트가 없으면 실행 폴더 복사본으로 넘어가지 않고 멈춥니다.
+    if (policy_.requireProject && !policy_.projectResolveError.empty()) {
+        failStartup(policy_.projectResolveError, policy_.projectResolveError, "Failed to locate Haruka project");
+    }
+
     bool projectFolder = false;
     const bool explicitProject = !options.projectDir.empty();
     const std::string& rawProjectDir = !policy_.projectDir.empty() ? policy_.projectDir : options.projectDir;
     if (!rawProjectDir.empty()) {
         std::error_code ec;
         const std::filesystem::path project = rawProjectDir;
-        if (explicitProject || std::filesystem::is_directory(project, ec)) {
+        if (explicitProject || policy_.requireProject || std::filesystem::is_directory(project, ec)) {
+            if (!std::filesystem::is_directory(project, ec)) {
+                const std::string msg = "Project folder does not exist: " + project.generic_string();
+                if (policy_.requireProject) {
+                    failStartup(msg, msg, "Missing project folder");
+                }
+                HLOG(LogEngine, Error) << msg;
+                throw std::runtime_error("Missing project folder");
+            }
             const std::filesystem::path projFile = project_descriptor::findInDirectory(project);
             if (projFile.empty()) {
-                HLOG(LogEngine, Error) << "Project folder has no .hproject file: " << project.generic_string();
+                const std::string msg = "Project folder has no .hproject file: " + project.generic_string();
+                if (policy_.requireProject) {
+                    failStartup(msg, msg, "Missing .hproject in project folder");
+                }
+                HLOG(LogEngine, Error) << msg;
                 throw std::runtime_error("Missing .hproject in project folder");
             }
             ProjectDescriptor desc;
@@ -184,18 +211,30 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
             if (!project_descriptor::loadFromFile(projFile, desc, warnings, errors)) {
                 for (const auto& w : warnings) HLOG(LogEngine, Warning) << projFile.generic_string() << ": " << w;
                 for (const auto& e : errors)   HLOG(LogEngine, Error)   << projFile.generic_string() << ": " << e;
+                const std::string msg = "Invalid .hproject file: " + projFile.generic_string();
+                if (policy_.requireProject) {
+                    failStartup(msg, msg, "Invalid .hproject file");
+                }
                 throw std::runtime_error("Invalid .hproject file");
             }
             for (const auto& w : warnings) HLOG(LogEngine, Warning) << projFile.generic_string() << ": " << w;
             HLOG(LogEngine, Log) << "Project: " << desc.name << " (company '" << desc.company
                                  << "', packageId '" << desc.packageId << "', engineVersion '" << desc.engineVersion << "')";
             if (!std::filesystem::is_directory(project / "Content", ec)) {
-                HLOG(LogEngine, Error) << "Project folder has no Content directory: " << project.generic_string();
+                const std::string msg = "Project folder has no Content directory: " + project.generic_string();
+                if (policy_.requireProject) {
+                    failStartup(msg, msg, "Missing Content directory in project folder");
+                }
+                HLOG(LogEngine, Error) << msg;
                 throw std::runtime_error("Missing Content directory in project folder");
             }
             hproj::setRoot(project);
             projectFolder = true;
         }
+    }
+    if (policy_.requireProject && !projectFolder) {
+        const std::string msg = "Could not locate a Haruka project (.hproject). Pass --project=<folder or .hproject>.";
+        failStartup(msg, msg, "Failed to locate Haruka project");
     }
     if (projectFolder) {
         HLOG(LogEngine, Log) << "Asset root: project folder " << hproj::root().generic_string() << "/Content";
@@ -217,14 +256,25 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         if (std::filesystem::is_directory(happ::exeDir() / "Config", ec))
             hvfs::mountDirectoryAs(happ::exeDir() / "Config",  "/Config/", 0);
     }
-    // 엔진 콘텐츠(/Engine/, D3 2026-11-19): 앞단이 준 폴더(에디터 = <엔진>/Engine/Content), 없으면 실행 폴더의 Engine/Content.
+    // 엔진 콘텐츠(/Engine/, D3 2026-11-19, E5 2026-11-23):
+    // 에디터(requireEngineContent)는 프로젝트의 엔진 연결로 찾은 Engine/Content 가 없으면 멈춥니다.
     {
+        if (policy_.requireEngineContent && !policy_.engineResolveError.empty()) {
+            failStartup(policy_.engineResolveError, policy_.engineResolveError, "Failed to locate Haruka engine content");
+        }
         std::error_code ec;
         std::filesystem::path engineContent;
-        if (!policy_.engineContentDir.empty() && std::filesystem::is_directory(policy_.engineContentDir, ec))
+        if (!policy_.engineContentDir.empty() && std::filesystem::is_directory(policy_.engineContentDir, ec)) {
             engineContent = policy_.engineContentDir;
-        else if (std::filesystem::is_directory(happ::exeDir() / "Engine" / "Content", ec))
+        } else if (!policy_.requireEngineContent && std::filesystem::is_directory(happ::exeDir() / "Engine" / "Content", ec)) {
             engineContent = happ::exeDir() / "Engine" / "Content";
+        }
+        if (policy_.requireEngineContent && engineContent.empty()) {
+            const std::string msg = "Engine/Content directory not found (searched: '"
+                + (policy_.engineContentDir.empty() ? std::string("<none>") : policy_.engineContentDir)
+                + "'). Run Setup.bat in the engine folder or configure Haruka.user.ini.";
+            failStartup(msg, msg, "Missing Engine/Content directory");
+        }
         if (!engineContent.empty()) hvfs::mountDirectoryAs(engineContent, "/Engine/", 10);   // 마운트 목록 로그에 나옴
     }
     bool anyPack    = false;   // 게임 묶음을 하나라도 마운트함(셰이더 확인의 안내 문구가 이것을 봄)

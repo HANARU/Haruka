@@ -100,6 +100,7 @@ int main(int argc, char** argv) {
     std::unique_ptr<IEngineFrontend> frontend = createEngineFrontend(frontendConfig);
     std::vector<std::string> unknownArgs;
     const EngineOptions options = hopt::parse(std::vector<std::string>(argv + (argc > 0 ? 1 : 0), argv + argc), unknownArgs);
+    frontend->resolveRuntimePaths(options.projectDir);
     bool writeRootOk = false;
     if (!options.writeRoot.empty()) {
         writeRootOk = happ::setWriteRoot(options.writeRoot);
@@ -117,7 +118,7 @@ int main(int argc, char** argv) {
         }
         writeRootOk = happ::initWriteRoot(true, company, name);
     } else {
-        const std::string& projDir = !options.projectDir.empty() ? options.projectDir : frontend->policy().projectDir;
+        const std::string& projDir = !frontend->policy().projectDir.empty() ? frontend->policy().projectDir : options.projectDir;
         std::error_code ec;
         if (!projDir.empty() && std::filesystem::is_directory(projDir, ec))
             writeRootOk = happ::setWriteRoot(std::filesystem::path(projDir) / "Saved");

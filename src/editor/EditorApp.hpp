@@ -82,6 +82,8 @@ public:
     void stopPlay();
 
     // 에디터의 실행 규칙(editor/EditorFrontend.cpp): 프로젝트 폴더를 직접 읽고 쓰고, VR 은 --xr 로만, Play 동안만.
+    void   setFrontendConfig(const EngineFrontendConfig& config) { frontendConfig_ = config; }
+    void   resolveRuntimePaths(const std::string& cliProjectArg) override;
     Policy policy() const override;
     void setOptions(const EngineOptions& options) override;
     void init(Renderer& renderer, World& world, AssetManager& assets, IWindow& window) override;
@@ -569,6 +571,13 @@ private:
 
     // 슬롯 정점 버퍼 크기(다중 OS 창 M2). 목록 하나의 상한(HSlateRenderer::maxVerts) 두 개분입니다.
     static constexpr uint32_t kEditorSlotVerts = 2 * HSlateRenderer::maxVerts();
+
+    EngineFrontendConfig frontendConfig_;
+    std::string resolvedProjectDir_;
+    std::string resolvedEngineContentDir_;
+    std::string projectResolveError_;
+    std::string engineResolveError_;
+    std::vector<std::string> startupLogs_;
 
     // 에디터 색 토큰(EditorTheme 정본 별칭)
     static constexpr glm::vec4 kBgPanel   = EditorTheme::bgPanel;
