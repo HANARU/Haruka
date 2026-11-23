@@ -11,7 +11,8 @@ The pack (game.hpak) is not inside the APK yet. The Android build makes its own 
 Docs/Packaging_Design.md). The engine stops with a clear error if the pack on the device was built from other shaders.
 Reading the pack from inside the APK comes later (aapt2 -A <dir> -0 hpak).
 
-usage: python -I package_apk.py [--build <android build dir>] [--out <apk>]
+usage: Tools\run_python.bat Packaging/android/package_apk.py [--build <android build dir>] [--out <apk>]
+       (or ThirdParty/Python/python.exe -I Packaging/android/package_apk.py ...)
 Tools come from ANDROID_HOME (build-tools 36.0.0, platforms/android-34, ndk 30.0.16248370) and JAVA_HOME.
 """
 import argparse, os, shutil, subprocess, sys, tempfile, xml.etree.ElementTree as ET, zipfile

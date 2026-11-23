@@ -767,6 +767,40 @@ if(NOT ANDROID)
     if(MSVC)
         set_target_properties(HarukaPak PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
+
+    # ── 프로젝트 관리 라이브러리 · 런처 CLI (E4, Docs/Engine_Install_Design.md 5.5) ──
+    add_library(HarukaProjectOps STATIC src/projectops/ProjectOps.cpp)
+    target_include_directories(HarukaProjectOps PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(WIN32)
+        target_link_libraries(HarukaProjectOps PRIVATE shell32 advapi32 ole32)
+    endif()
+    haruka_target_defaults(HarukaProjectOps)
+
+    add_executable(HarukaLauncher
+        src/launcher/HarukaLauncherMain.cpp
+        src/core/HLog.cpp
+        src/core/HText.cpp
+        src/core/UserSettings.cpp
+        src/ui/slate/HSlateRenderer.cpp
+        src/ui/slate/HFontAtlas.cpp
+        src/ui/slate/HPaintContext.cpp
+        src/input/HInputSystem.cpp
+        src/platform/glfw/GlfwWindow.cpp
+        src/platform/glfw/GlfwPlatform.cpp
+        ${EXE_RESOURCES}
+    )
+    target_link_libraries(HarukaLauncher PRIVATE HarukaProjectOps HarukaVfs haruka_vulkan glfw glm::glm)
+    target_include_directories(HarukaLauncher PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_include_directories(HarukaLauncher SYSTEM PRIVATE ${stb_SOURCE_DIR})
+    target_compile_definitions(HarukaLauncher PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+    if(WIN32)
+        target_link_libraries(HarukaLauncher PRIVATE shell32)
+    endif()
+    haruka_target_defaults(HarukaLauncher)
+    if(MSVC)
+        set_target_properties(HarukaLauncher PROPERTIES
+            LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+    endif()
 endif()
 
 # ── 프로젝트 등록 (P3b: haruka_add_project / P4: 하위 프로젝트 지원) ──────────
@@ -1735,13 +1769,29 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaSpirvTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    add_executable(HarukaProjectOpsTest tests/ProjectOpsTest.cpp)
+    target_link_libraries(HarukaProjectOpsTest PRIVATE HarukaProjectOps)
+    target_compile_definitions(HarukaProjectOpsTest PRIVATE HARUKA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    haruka_target_defaults(HarukaProjectOpsTest)
+    if(MSVC)
+        set_target_properties(HarukaProjectOpsTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
+    # HarukaRuntime 을 링크하지 않고 glm::glm 을 직접 쓰는 독립 시험에도 같은 GLM 규약을 둡니다.
+    foreach(T HarukaGeometryTest HarukaActorTest HarukaStereoTest HarukaMathTest HarukaSceneTest HarukaLightTest
+              HarukaAssetCacheTest HarukaRenderExtTest HarukaHeadlessTest HarukaEditCmdTest HarukaActorUndoTest
+              HarukaTextTest HarukaAnimTest HarukaTexTest HarukaAudioTest HarukaSlateTest HarukaPhysicsTest
+              HarukaGltfTest HarukaHandTest)
+        target_compile_definitions(${T} PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+    endforeach()
+
     # 모든 시험 실행 파일이 엔진 · 도구와 같은 코드 페이지(UTF-8)에서 돕니다(DEF-121, 2026-10-31 검토). 예를 들어 소리 시험은
     # 임시 폴더의 경로를 std::string 으로 넘기는데, 매니페스트가 없으면 CP949 바이트가 되어 가상 파일 시스템이 찾지 못합니다.
     set(HARUKA_TESTS HarukaPakTest HarukaGltfTest HarukaGeometryTest HarukaActorTest HarukaCommandTest HarukaActorUndoTest
         HarukaLogTest HarukaAudioTest HarukaSlateTest HarukaPhysicsTest HarukaStereoTest HarukaInputTest HarukaBatchTest
         HarukaRenderExtTest HarukaSceneTest HarukaLightTest HarukaAssetCacheTest HarukaSceneDocTest HarukaEditCmdTest HarukaDockTest
         HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest HarukaMathTest HarukaArchTest
-        HarukaWindowTest HarukaSceneQualityTest)
+        HarukaWindowTest HarukaSceneQualityTest HarukaSpirvTest HarukaProjectOpsTest)
     if(WIN32)
         list(APPEND HARUKA_TESTS HarukaVkImportTest)
     endif()
@@ -1798,6 +1848,8 @@ add_test(NAME dock_tree            COMMAND HarukaDockTest)
     add_test(NAME memory_types         COMMAND HarukaMemoryTest)
     add_test(NAME headless_render      COMMAND HarukaHeadlessTest)
 add_test(NAME hand_skinning        COMMAND HarukaHandTest)
+    add_test(NAME spirv_version        COMMAND HarukaSpirvTest ${SHADER_BIN_DIR})
+    add_test(NAME project_ops          COMMAND HarukaProjectOpsTest)
     if(WIN32)
         add_test(NAME vulkan_imports   COMMAND HarukaVkImportTest $<TARGET_FILE:HarukaEngine> $<TARGET_FILE:HarukaGame>
                                                $<TARGET_FILE:HarukaSimLinkTest>

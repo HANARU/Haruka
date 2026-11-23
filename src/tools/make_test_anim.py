@@ -12,7 +12,7 @@
 TestMorph.glb: 스킨 없는 모프 메시(사각형 하나, 노드 이동 (1, 0, 0)). 타깃 Lift = 위 두 정점 +0.5 m Y, 기본 무게 0.25,
 클립 Lift(STEP 0 → 1 @0.5 s).
 
-사용: python -I src/tools/make_test_anim.py [출력 폴더]   (기본: 이 스크립트 기준 ../../Projects/Samples/Content/models/anim)
+사용: Tools\run_python.bat src/tools/make_test_anim.py [출력 폴더]   (기본: 이 스크립트 기준 ../../Projects/Samples/Content/models/anim)
 """
 import json
 import math

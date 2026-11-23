@@ -1,0 +1,6 @@
+# Haruka project descriptor
+name = {{NAME}}
+company = {{COMPANY}}
+packageId = {{PACKAGE_ID}}
+engineVersion = {{ENGINE_VERSION}}
+engine = haruka>=0.1

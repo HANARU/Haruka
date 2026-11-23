@@ -5,7 +5,7 @@ OpenXR 26관절 뼈대(src/xr/HandSkeleton.hpp 와 같은 이름 · 부모)와 �
 각 관절 노드의 로컬 축은 OpenXR 규약(+Z = 손가락 끝의 반대쪽, +Y = 손등 바깥, X = Y x Z)을 따릅니다.
 왼손은 오른손을 X 로 거울 대칭한 위치에서 축을 다시 계산합니다(음수 배율을 쓰지 않음).
 
-사용: python -I src/tools/make_test_gloves.py [출력 폴더]   (기본: 이 스크립트 기준 ../../assets/models/hands)
+사용: Tools\run_python.bat src/tools/make_test_gloves.py [출력 폴더]   (기본: 이 스크립트 기준 ../../assets/models/hands)
 """
 import json
 import math

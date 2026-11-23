@@ -7,7 +7,7 @@
   emissive 256² sRGB: 어두운 바탕에 빛나는 선
 판은 1 m x 1 m(XY 평면, +Z 를 봄)이고 4x4 칸으로 나눠 탄젠트를 함께 넣습니다. 최종 아트가 아니라 측정용 자리 표시입니다.
 
-사용: python -I src/tools/make_test_texture_model.py [출력 glb]
+사용: Tools\run_python.bat src/tools/make_test_texture_model.py [출력 glb]
       (기본: 이 스크립트 기준 ../../Projects/Samples/Content/models/TexProbe.glb)
 """
 import json

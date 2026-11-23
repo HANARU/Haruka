@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Build the Windows application icon from the master logo image.
 
-    python Docs/Logo/build_icon.py Docs/Logo/Logo_Final.png res/Haruka.ico
+    Tools\run_python.bat Docs/Logo/build_icon.py Docs/Logo/Logo_Final.png res/Haruka.ico
+    (requires Pillow in ThirdParty/Python)
 
 Needs Pillow.  The master is the source of truth for the artwork: Logo.pptx
 still holds the vector shapes, but the white interior disc that makes the logo
