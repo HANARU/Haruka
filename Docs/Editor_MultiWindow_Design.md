@@ -89,3 +89,62 @@ H2를 마친 뒤 결과 화면을 보고 설정 표 · 설정 창 · 특수 페�
 | H2b 메뉴 모델 · 명령 레지스트리 · 메뉴 키보드 · 재배치 | 구현 · 검증 (2026-11-22, 미커밋) | 명령 레지스트리 `EditorCommandRegistry`(`src/editor/EditorCommandRegistry.hpp`, EditorApp 소유 · 싱글턴 아님): `EditorCommand{id, label(HText), icon, chords, needsNoTextFocus, dragNotice, execute, canExecute, isChecked}`, 정의 표 `heditorcmd::defaultSpecs()`(등록 순서 = 단축키 우선순위) + `registerCommands()` 가 동작을 붙임, `execute` 는 canExecute 가 거짓이면 무동작(canExecute = 예전 동작이 아무 일도 안 하던 조건과 같게). `tickShortcuts` 는 `resolveShortcut`(키 엣지 · Ctrl · Shift · 대화상자 · 카메라 비행 · 글 칸 · 끄는 중)으로 명령을 고르고 레지스트리로 실행, 예전 if 사다리와 8,192 조합이 같음(시험). Delete · Ctrl+C · Ctrl+V 는 처리 자리 그대로(TextInputController) 같은 명령 id, 툴바 단추도 명령 id, 메뉴 단축키 글은 chord 에서. 키 상수를 `platform/InputKeys.hpp` 로 뗌(IWindow.hpp 가 include). 메뉴 모델 `EditorMenuEntry = Command(id · 그 자리 동작) | Heading | Separator | SubMenu`(`EditorMenuModel.hpp`, `hmenu::resolve` · `step` · `decide`), 위젯 `EditorMenuView`(상단 드롭다운 · 오른쪽 메뉴 공용: 체크 · 아이콘 칸, 단축키 열, 하위 메뉴 화살표, 꺼진 항목 흐림 · 누름 무반응, 하위 메뉴 = 층 push(parent) + Right · Overflow · clamp, hover 로 열고 다른 행 hover 로 닫음, 포인터가 움직일 때만 강조 이동), `EditorMenus::Item` · `EditorContextMenu::Item` 은 이 모델로 합침. 키보드: ↑ ↓(소제목 · 구분선 · 꺼진 항목 건너뜀, 돎) · Enter · →(하위 · 다음 메뉴) · ←(하위 닫기 · 이전 메뉴) · Esc(한 단계), 메뉴의 창이 키보드 창이면 그 프레임 키는 메뉴 몫(단축키 · 글 칸 · QWER 로 안 샘, `tickMenuKeys`), Alt · F10 · 가속 글자는 뺌. 재배치(메뉴 줄 이름 그대로): File(Scene | Save) · Edit(History | Edit | Configuration: Language ▸ · Audio Output) · Actor(Create | Hierarchy) · View(Viewport: Frame Selected · Gizmo Size) · Window(Panels | Layout: Reset Layout), 지운 항목 없음, 대응표 `Handoff/mw/H2b/menu_map.txt`. H2a 판단 반영: 에디터 문맥 팝업 층 `setSingleRoot(true)`(창 안 루트 팝업 하나), 팝업이 덮은 자리 툴팁 막기, 드롭다운 Overflow · clamp. 덤프 `--ui-open-menu=Edit/Language` · `--ui-menu-keys=`, 대본 `<창>:key@이름`. 검사 4,252(+64: `editor_commands` +53 · `slate_input` +11), 경고 R0 · D0 · Android 새 경고 0, base7 7장 같음, UI 덤프 72장면 중 64 `c_04` 와 같음 · 8 메뉴 장면 다름(드롭다운 · 오른쪽 메뉴 내용만, 팝업 앞 줄은 모두 같음) · vp 72 같음 · 검증 오류 0, 새 장면 8 → 새 기준 `h2b`, H2a 흉내 R · D 같음(메뉴 글 장면 · 고정한 in_outside 만 다름), 새 메뉴 흉내 16종 R · D rc 0 · 검증 오류 0, 변이 9개 모두 잡힘. 모니터 확인 남음 |
 | H3a 디테일 패널 기반(속성 종류 · 기본값 · 속성 행 · 콤보 · 성분 칸 · 되돌리기) | 구현 · 검증 (2026-11-22, 미커밋) | `PropDesc` 종류 String · Vec3 · Color(RGB/RGBA, `srgb` 표시 규칙) · AssetPath(데이터만) 추가(값 번호는 뒤에 붙여 예전 그대로), 기본값 `hasDefault` · `def*` · `withDefault(...)`(종류별 해석 · 열거값 템플릿), 공용 도우미 `hprop::isDefault · canReset · resetToDefault · valueText · setFromText`(1e-6 상대 오차, UE 복사 글 모양), 팩토리 `makePropString · makePropVec3 · makePropColor · makePropAssetPath`, 매크로 `XPROP_String · XPROP_Vec3Min`. 컴포넌트 21개 파일 기본값 채움(생성자 기본값이 분명한 칸만, 데이터 · 에셋이 정하는 Clip · Content · Transparent 제외, 액터 참조는 늘 없음), 손으로 둔 X · Y · Z / R · G · B 세 칸을 성분 칸 하나로(라이트 · 안개 · 데칼 · 기본 도형 재질 색, 데칼 크기, 파티클 중력, 잔향 · 강체 반 크기, 강체 중심, 조인트 Anchor · Axis · Connected Anchor, 내비 Extent, 단위 · step 은 예전 그대로), AI Brain 태그 글 칸 둘. 씬 직렬화(writeFields · readField)는 그대로. Undo: `PropValue` 에 글 · 성분, `hcmd::commitPropChange`(클릭 편집 한 단계) · `resetPropToDefault`(함께 고른 액터 포함 한 단계) · `setPropComponent`(성분 하나만 다른 액터에). 위젯(ui/slate): `SPropertyRow`(이름 열 \| 값 열 \| 되돌리기 자리, 열 나눔 비율 `HPropertyColumns` 패널 공유 · 끌기 ±4px, hover, 이름 ".." 줄임 + 툴팁) · `SVectorField`(SNumberField 셋/넷 + 색 띠) · `SColorSwatch`, `SNumberField` 에 색 띠 · 칸 자르기 · 세로 가운데 · 끌기 힌트 끄기(선택 사항). 콤보는 editor 쪽: 오른쪽 메뉴와 같은 `EditorContextMenu::openBelow`(→ `EditorMenuView`, 체크 · 지금 값 강조 · ↑↓ Enter Esc · 바깥 · 단추 토글 · 배치 전 단추는 다음 프레임), 메뉴는 연 패널을 열 때 받음(예전 Bottom 고정), 그래서 `menuWindowId` · 메뉴 키 · 떠 있는 창 문맥은 그대로 적용. 행 오른쪽 메뉴 Reset to Default · Copy · Paste = 레지스트리 명령 `Details.*`(canExecute 로 흐림), 되돌리기 화살표 = `rotate-ccw` 아이콘(lucide). 글 칸 = `PropertyTextEdit`(TextField 포커스, Enter 확정 · Esc 취소 · 바깥 취소 = 이름 바꾸기 규칙), `windowOfFocusTarget(TextField)` = 디테일 창. 디테일 다시 만들 때 디테일이 연 메뉴 · 콤보를 닫음, 여러 줄 읽기 정보 칸 높이를 줄 수만큼(예전 겹침). 덤프 `--ui-details-set · -combo · -menu · -edit · -split`, `--ui-save-scene-copy`. 검사 4,352(+100: `editor_commands` +47 · `slate_input` +41 · `text_system` +12, `physics_lifecycle` 는 옛 칸 이름 HalfX · CenterY 를 성분 칸으로 고침), 경고 R0 · D0 · Android 새 경고 0, base7 7장 같음, UI 덤프 기존 80장면 중 46 같음 · 34 디테일 안만 다름 · vp 80 같음 · 검증 오류 0, 새 장면 10 → 새 기준 `h3a`, 흉내 5종 R · D rc 0 · 검증 오류 0(디테일 든 덤프만 다름), LightingProbe 열기 → 저장 바이트 같음, 변이 8개 모두 잡힘. 모니터 확인 남음 |
 | H3b 디테일 보강(에셋 경로 칸 · 색 선택기 · 속성 검색) | 구현 · 검증 (2026-11-22, 미커밋) | 에셋 경로 칸 `[종류 아이콘 · 이름 · ▾][찾기][비우기]` + 고르기 팝업 `AssetPicker`(검색 칸 · 그 종류 목록 = 콘텐츠 색인 · 지금 값 체크 · ↑↓ Enter Esc · 바깥 닫기 · 칸 다시 누름 닫기, 디테일이 있는 창 팝업 층), 목록 계산 `AssetPickerModel.hpp`(`assetType` = 종류 이름 쉼표 목록, 이름 낱말 검색), 콘텐츠 브라우저 끌어 놓기(메인 창 디테일만, 종류가 다르면 거부 · 테두리 빨강), 찾기 = 콘텐츠 브라우저 그 폴더 · 고름. 옮긴 칸: StaticMesh `Model`(파일 메시만, `setModelPath` 가 다시 읽음), Audio `File`(`setFile`), NavMeshVolume `Data`(`loadData`), 남긴 칸: SkinnedMesh 모델 · 애니메이션 Clip · UI 패널 Content. 에셋 세터가 쓸 AssetManager 는 `Component::bindLoadContext`(디테일이 보일 때). 색 선택기 `ColorPickerPopup`(판 8×8 · 색상 막대 · 알파 막대 · 이전/새 견본 · RGB(A) · HSV · 16진수 sRGB · 확인/취소), 값 `ColorPickerModel.hpp`(저장 값 그대로 HSV, 16진수만 sRGB, 회색 · 검정에서 색상 기억, HDR 은 V > 1 · 판 범위 max(1, V)), Undo = 세션 `hcmd::PropSession`(확정 한 단계 · 취소 원래 값), 색 변환 `math/Color.hpp`, 그리기 `HPaintContext::drawGradientRect`(정점 색, 잘린 자리 쌍선형). 속성 검색: 디테일 위 검색 칸(TextField), 낱말 모두 · 문화권 이름 또는 영어 원문, TRANSFORM 접기 · 컴포넌트 머리 줄만 · 없으면 알림, 선택이 바뀌어도 유지, Esc 지움, `DetailsSearch.hpp`. H3a 판단 1: 글 칸 바깥 누름 = 확정(`TextInputField::onEscape` 로 Esc 취소와 구별). 검사 4,437(+85: `editor_commands` +54 · `text_system` +17 · `slate_input` +14), 경고 R0 · D0 · Android 새 경고 0, base7 7장 같음, UI 덤프 기존 90장면 모두 다름(디테일 위 검색 칸 33px) — 85 디테일 안만 · 5 디테일 행에 붙은 팝업(Add Component · 행 메뉴)이 33px 아래로, vp 90 같음, 107장면 rc 0 · 검증 오류 0, 새 장면 17 → 새 기준 `h3b`, 흉내 6종 R · D rc 0 · 검증 오류 0(H3a 와 글 같음, 새 `h3b` 흉내 5: 떠 있는 창 색 선택기 · 에셋 고르기 · 검색 · 끌어 놓기), LightingProbe 열기 → 저장 바이트 같음, 변이 11개 모두 잡힘. 모니터 확인 남음 |
+| B1 콘솔 명령 | 구현 · 검증 (2026-11-23, 미커밋) | `EditorApp::registerCommands()` 가 월드 서비스 `CVarRegistry` 에 `cmd <id>` · `cmd.list [filter]` 를 등록(에디터 전용, 게임 · Android 미등록). `heditorcmd::runConsoleCmd` · `suggestIds` · `formatCommandList` 순수 함수(`EditorCommandRegistry.hpp`): `cmd` 는 메뉴와 같은 `execute` 호출(`needsNoTextFocus` 등 단축키 조건 미적용), 없는 id 는 `LogConsole` 경고 + 앞부분/포함 최대 5개 추천, `canExecute` 거짓이면 실행 안 함, `cmd.list` 는 id 순(id · 라벨 · 단축키 · 실행 가능 여부) + id/라벨 거르기. |
+| B2 시험 · 품질 | 구현 · 검증 (2026-11-23, 미커밋) | `HarukaSceneQualityTest`(`scene_quality` ctest 추가): (1) `ComponentRegistry::get().entries()` 23종 전수 생성 · `buildProps()` 161개 `withDefault` 속성 `hprop::isDefault` 자동 대조 → 불일치 0건(GPU/에셋 제외 0종). (2) `AssetManager` null 렌더러 가드(`src/assets/AssetManager.cpp`) 추가 후 `Projects/Samples/Content/scenes/*.hscene` 14종 전체 2차 왕복(`SceneSerializer::readScene` → `writeScene` ×2) 바이트 일치 확인(14/14 일치, DEF-183 없음). (3) `build/chk/uidump.sh` `details_asset_picker_mesh` 에 `--ui-details-asset-search=test` 추가 → git 추적 모델만 표시(`b2` 대 `h3b`: 106 `[같음] [vp:같음]`, `details_asset_picker_mesh` 1만 `[다름] [vp:같음]`). ctest 46/46 · 검사 4,663(+214), 경고 R0 · D0, base7 7장 같음, 변이 3/3 잡힘. |
+
+## 7. 단계별 판단 확정 (2026-11-22 사용자 승인: 제안대로)
+
+각 단계의 설계 판단은 아래와 같이 정리합니다. 출처는 인계 자료의 단계 보고와 후속 작업 계획을 따릅니다.
+
+| 출처(단계 · 번호) | 내용 | 결정 | 근거 한 줄 |
+|---|---|---|---|
+| M3b 1 | 떠 있는 창 팝업 막기(당시 임시 제한, H2a에서 창별 팝업 층으로 해제) | 확정 | H2 전까지 안전한 우회로였고 H2a에서 계획대로 해제됨 |
+| M3b 2 | D7 Play 중 보조 창 포커스 시 패드 · XR 컨트롤러 입력은 유지 | 확정 | XR은 헤드셋 쪽 입력이므로 보조 창 포커스로 막으면 안 됨 |
+| M3b 3 | 글 칸 포커스 중 다른 창으로 OS 포커스 이동 시 칸 포커스 유지 · 입력만 중단 | 확정 | Windows 앱의 창별 포커스 기억과 같아 돌아오면 이어서 입력 가능 |
+| M3b 4 | QWER 기즈모 단축키는 메인 창이 키보드 창일 때만 동작 | 확정 | 뷰포트 조작은 메인 창 문맥에 속함 |
+| M4 1 | 탭 끄는 중 다른 창을 앞으로 가져오지 않고 놓은 뒤에만 앞으로 가져옴 | 확정 | GLFW가 포커스를 잃은 창의 버튼 뗌을 보내 끌기가 끊기는 것을 방지 |
+| M4 3 | 창 밖 탭 끌기 미리보기로 반투명 탭 창 대신 커서 모양 사용 | 확정 | 이동 · 금지 커서로 의사 전달이 충분하며 필요 시 나중에 보강 |
+| M4 4 | 떠 있는 창의 유일한 탭을 창 밖으로 끌면 새 창 생성 후 옛 창 닫기 | 확정 | 창 옮기기는 OS 제목 줄, 탭 떼기는 새 창 규칙으로 일관됨 |
+| M4 5 | 탭을 다른 창의 메뉴 줄 · 툴바 등 리프 아닌 곳에 놓으면 무동작 | 확정 | 잘못된 영역 놓기로 인한 의도치 않은 도킹 변경 방지 |
+| M4 6 | 콘텐츠 브라우저 → 메인 뷰포트 끌어 놓기 대상 창 판정을 가장 앞의 창으로 통일 | 확정 | 탭 끌기와 동일한 Z 순서(앞뒤) 규칙으로 일관성 유지 |
+| H2a 2 | 메인 창 누름 시 떠 있는 창 팝업 닫기 | 확정 | 활성 창 전환 시 열린 팝업을 정리하는 자연스러운 동작 |
+| H2a 3 | 팝업이 끌기 이름표 · 도크 표시 · 모달보다 위에 그려짐 | 확정 | 실제로 동시에 뜨는 경우가 없고 팝업 계층이 단순함 |
+| H2a 5 | `--ui-add-component` · `--ui-content-menu`가 떠 있는 창에도 열림 | 확정 | 창별 팝업 층 검증에 그대로 활용됨 |
+| H2a 6 | 아웃라이너 오른쪽 메뉴 없음(원래 없음) | 확정 | 기존 동작을 유지함 |
+| H2b 1 | 메뉴가 열린 동안 단축키 막기 | 확정 | UE와 동일하게 메뉴 키보드 조작 중 단축키 오작동 방지 |
+| H2b 2 | 메뉴 재배치(Frame Selected · Gizmo Size → View, Reset Layout → Window, Language → Edit > Configuration) | 확정 | 기능 성격에 맞는 메뉴 분류로 정리됨 |
+| H2b 3 | Tools · Help 메뉴 없음(넣을 항목 없음) | 확정 | 빈 메뉴를 만들지 않음 |
+| H2b 5 | 메뉴 모델의 그 자리 동작(`act`) 허용 | 확정 | 레지스트리 등록 없이 문맥 동작을 간결하게 연결함 |
+| H2b 6 | 소제목 · 구분선 · 비활성 항목 누름 시 메뉴 유지 | 확정 | UE 방식과 같으며 오조작으로 메뉴가 닫히지 않음 |
+| H3a 2 | 성분 칸에 X/Y/Z 글자 없이 색 띠만 표시 | 확정 | UE5 방식과 같아 좁은 칸에서도 가독성이 좋음 |
+| H3a 4 | 회전 기본값 0(회전한 액터는 되돌리기 화살표 표시) | 확정 | UE와 동일한 기본값 기준 |
+| H3a 5 | 합친 칸 이름 변경(HalfX → Half Extent 등, 씬 파일 무관) | 확정 | 직렬화 필드명이 아닌 UI 표시 이름만 변경됨 |
+| H3a 6 | 디테일 패널을 다시 만들 때 열린 콤보 · 행 메뉴 닫기 | 확정 | 위젯 재생성 시 낡은 팝업 앵커 참조 방지 |
+| H3b 2 | HDR 색(안개 등)은 별도 세기 칸 없이 명도 V > 1로 표현 | 확정 | 기존 저장 값 구조를 바꾸지 않고 HDR 색을 편집 가능 |
+| H3b 3 | 4성분 색 속성은 실제 컴포넌트에 없음(시험 값으로만 확인) | 확정 | 알파 막대 경로는 단위 시험으로 검증됨 |
+| H3b 4 | 에셋 검색은 이름만 검색 | 확정 | UE와 동일하며 빠른 필터링에 충분함 |
+| H3b 5 | 에셋 끌어 놓기 수신은 메인 창 디테일만 지원 | 확정 | 필요 시 이후 확장 가능하며 현재 구조로 충분함 |
+| H3b 6 | 같은 액터를 다시 만들 때 에셋 고르기 · 색 선택기는 열린 채 유지 | 확정 | 연속 편집 중 팝업이 닫히지 않도록 함 |
+| H3b 7 | StaticMesh `Model` 교체 시 `Transparent`를 새 메시 값으로 갱신 | 확정 | UE 방식과 같이 새 에셋 속성을 따름 |
+| H2a 1 | 같은 창 안에서도 루트 팝업은 한 번에 하나(UE 방식) | 반영(H2b) | `HPopupLayer::setSingleRoot`, 에디터 문맥에서 켬 |
+| H2a 4 | 팝업 밑 위젯의 툴팁이 팝업 위에 뜨지 않게 막기 | 반영(H2b) | 팝업 영역 위에서는 아래 위젯 툴팁을 띄우지 않음 |
+| H3a 1 | 글 칸 바깥 누름 = 확정(이름 바꾸기 칸은 그대로) | 반영(H3b) | UE · 숫자 칸과 같은 규칙 |
+| H2b 7 | 콘솔 `cmd <id>` · `cmd.list [filter]` 명령 연결 | 반영(B1) | 월드 서비스 `CVarRegistry`를 통해 에디터 명령 실행 · 목록 조회 구현 |
+| H3a 확신 낮음 | 손으로 채운 `withDefault` 기본값을 생성자 값과 자동 대조하는 시험 추가 | 반영(B2) | `HarukaSceneQualityTest`로 23종 · 161개 속성 자동 대조(불일치 0) |
+| H3b 참고 | 에셋 고르기 덤프 장면을 git 추적 콘텐츠만 보이도록 고정 | 반영(B2) | `details_asset_picker_mesh`에 검색어 `test` 추가해 로컬 폴더 의존 제거 |
+| H3a 확신 낮음 | 샘플 씬 14종 저장 2차 왕복(`readScene` → `writeScene` ×2) 확인 | 반영(B2) | 14종 모두 1차 · 2차 바이트 일치 확인(DEF-183 없음) |
+| M3a 2 | 메인 창 최소화 중 떠 있는 창 내용 갱신 여부 | 보류(화면 확인 뒤) | 현재는 DEF-106 규칙으로 tick을 건너뜀 |
+| M4 2 | 떠 있는 창을 메인 위에 둘지(Win32 소유 창 지정 여부) | 보류(화면 확인 뒤) | 현재는 독립 창이라 메인을 누르면 메인이 위로 올라옴 |
+| H2b 아이콘 | 메뉴 아이콘 일관성(Edit 메뉴 Delete에만 아이콘 있음 등) | 보류(화면 확인 뒤) | 화면을 보고 아이콘 추가 · 통일 여부를 정함 |
+| H2b 4 | Alt · F10 · 밑줄 가속 글자 지원 여부 | 보류(화면 확인 뒤) | 현재는 뺐으며 실제 키보드 사용감을 보고 필요 시 추가 |
+| H3a 3 | 디테일 이름 열 비율(기본 0.4) 저장 여부 | 보류(화면 확인 뒤) | `editor_state` 저장 필요성을 화면에서 확인 |
+| H3b 1 | 기본 도형 재질 색을 끄는 동안 뷰포트에 실시간 반영할지 여부 | 보류(화면 확인 뒤) | 현재는 확인 때만 반영(라이트 · 안개는 실시간) |
+
+### 사용자 화면 확인 뒤 결정할 것
+
+1. **M3a 2 (최소화 중 떠 있는 창 내용 갱신)**: 메인 창을 최소화한 상태에서 떠 있는 창을 볼 때 내용 갱신이 멈춘 것이 불편한지 확인해 결정합니다.
+2. **M4 2 (떠 있는 창을 메인 위에 둘지)**: 메인 창을 클릭했을 때 떠 있는 창이 뒤로 가는 동작이 불편해 Win32 소유 창으로 늘 메인 위에 둘지 확인해 결정합니다.
+3. **H2b (메뉴 아이콘 일관성)**: Edit 메뉴(Delete에만 아이콘 있음) 등 드롭다운 메뉴의 아이콘 배치를 보고 통일하거나 뺄지 결정합니다.
+4. **H2b 4 (Alt · F10 · 밑줄 가속 글자)**: 상단 메뉴 바를 마우스 없이 `Alt`/`F10`과 밑줄 글자로 여는 기능이 필요한지 화면에서 확인해 결정합니다.
+5. **H3a 3 (이름 열 비율 저장)**: 디테일 패널의 이름 열 너비(기본 0.4)를 조절한 뒤 재시작할 때 비율을 유지할 필요가 있는지 확인해 결정합니다.
+6. **H3b 1 (기본 도형 색 실시간 반영)**: 기본 도형 재질 색을 색 선택기로 끄는 동안 뷰포트에 즉시 반영할지, 지금처럼 확인 시 반영할지 확인해 결정합니다.
