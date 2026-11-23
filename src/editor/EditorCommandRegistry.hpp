@@ -22,6 +22,7 @@
 #include "../core/HText.hpp"
 #include "../platform/InputKeys.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -251,6 +252,91 @@ inline std::vector<EditorCommand> defaultSpecs() {
 
 inline void addDefaultSpecs(EditorCommandRegistry& r) {
     for (EditorCommand& c : defaultSpecs()) r.add(std::move(c));
+}
+
+// ── 콘솔 명령 처리 (B1, 순수 함수) ───────────────────────────────────────────────────────────────────────────
+inline std::string toLowerAscii(std::string_view s) {
+    std::string out(s);
+    for (char& c : out)
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    return out;
+}
+
+// 없는 id 를 쳤을 때 비슷한 id 를 앞부분 일치 우선 · 포함 순으로 최대 maxCount 개 고릅니다(id 사전순).
+inline std::vector<std::string> suggestIds(const EditorCommandRegistry& reg, std::string_view query, size_t maxCount = 5) {
+    std::vector<std::string> out;
+    if (query.empty() || maxCount == 0) return out;
+    std::vector<std::string> ids;
+    ids.reserve(reg.commands().size());
+    for (const EditorCommand& c : reg.commands()) ids.push_back(c.id);
+    std::sort(ids.begin(), ids.end());
+    const std::string q = toLowerAscii(query);
+    for (const std::string& id : ids) {
+        if (out.size() >= maxCount) break;
+        if (toLowerAscii(id).rfind(q, 0) == 0) out.push_back(id);
+    }
+    for (const std::string& id : ids) {
+        if (out.size() >= maxCount) break;
+        const std::string low = toLowerAscii(id);
+        if (low.rfind(q, 0) != 0 && low.find(q) != std::string::npos) out.push_back(id);
+    }
+    return out;
+}
+
+struct ConsoleCmdResult {
+    bool        executed = false;
+    bool        warning  = false;
+    std::string text;
+};
+
+// `cmd <id>`: 메뉴와 같은 경로(execute)로 실행합니다. 단축키 전용 조건(needsNoTextFocus 등)은 콘솔 입력 칸에 포커스가 있는
+// 상태에서 실행하므로 적용하지 않습니다.
+inline ConsoleCmdResult runConsoleCmd(EditorCommandRegistry& reg, const std::vector<std::string>& args) {
+    if (args.size() != 1) return { false, false, "usage: cmd <id>" };
+    const std::string& id = args[0];
+    if (!reg.has(id)) {
+        const std::vector<std::string> sim = suggestIds(reg, id, 5);
+        std::string msg = "unknown editor command '" + id + "'";
+        if (!sim.empty()) {
+            msg += " (did you mean: ";
+            for (size_t i = 0; i < sim.size(); ++i) {
+                if (i) msg += ", ";
+                msg += sim[i];
+            }
+            msg += ")";
+        }
+        return { false, true, std::move(msg) };
+    }
+    if (!reg.canExecute(id)) return { false, false, "cannot execute '" + id + "' right now" };
+    reg.execute(id);
+    return { true, false, "executed: " + id };
+}
+
+// `cmd.list [filter]`: 등록된 명령을 id 순으로 보입니다(한 줄: id · 지금 문화권 라벨 · 단축키 글 · 실행 가능 여부).
+inline std::string formatCommandList(const EditorCommandRegistry& reg, std::string_view filter = {}) {
+    std::vector<const EditorCommand*> sorted;
+    sorted.reserve(reg.commands().size());
+    for (const EditorCommand& c : reg.commands()) sorted.push_back(&c);
+    std::sort(sorted.begin(), sorted.end(), [](const EditorCommand* a, const EditorCommand* b) { return a->id < b->id; });
+
+    const std::string f = toLowerAscii(filter);
+    std::string out;
+    int count = 0;
+    for (const EditorCommand* c : sorted) {
+        const std::string lbl = c->label.toString();
+        if (!f.empty()) {
+            if (toLowerAscii(c->id).find(f) == std::string::npos &&
+                toLowerAscii(lbl).find(f) == std::string::npos)
+                continue;
+        }
+        const std::string sc = reg.shortcutText(c->id);
+        const bool can = reg.canExecute(c->id);
+        if (count++) out += '\n';
+        out += c->id + "  \"" + lbl + "\"  [" + (sc.empty() ? std::string("-") : sc) + "]  (" + (can ? "enabled" : "disabled") + ")";
+    }
+    if (count == 0)
+        return filter.empty() ? std::string("no editor commands") : "no editor commands matching '" + std::string(filter) + "'";
+    return out;
 }
 
 }  // namespace heditorcmd

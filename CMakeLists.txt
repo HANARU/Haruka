@@ -1178,6 +1178,18 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaRefTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- B2 품질 시험: 컴포넌트 속성 기본값 자동 대조 · 샘플 씬 2차 왕복 ----
+    add_executable(HarukaSceneQualityTest
+        tests/SceneQualityTest.cpp
+    )
+    target_link_libraries(HarukaSceneQualityTest PRIVATE HarukaRuntime)
+    target_include_directories(HarukaSceneQualityTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(HarukaSceneQualityTest PRIVATE HARUKA_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Projects/Samples")
+    if(MSVC)
+        target_compile_options(HarukaSceneQualityTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaSceneQualityTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # -- 링크된 프리팹 테스트(2026-11-21, Docs/Linked_Prefabs.md) -----------------
     # 인스턴스 블록 펼치기 · 결정적 GUID · 비교로 얻는 덮어쓰기 · 다시 펼침 · 중첩 2단 왕복 · 순환 거부 · 추가 · 삭제 · 링크 끊기 ·
     # 되돌리기 · 원본에 적용 · 옛 씬 · 프리팹을 창 · GPU 없이 검산합니다(메시 없는 액터만, 프리팹 글은 캐시 서비스에 넣음).
@@ -1542,7 +1554,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         HarukaLogTest HarukaAudioTest HarukaSlateTest HarukaPhysicsTest HarukaStereoTest HarukaInputTest HarukaBatchTest
         HarukaRenderExtTest HarukaSceneTest HarukaLightTest HarukaAssetCacheTest HarukaSceneDocTest HarukaEditCmdTest HarukaDockTest
         HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest HarukaMathTest HarukaArchTest
-        HarukaWindowTest)
+        HarukaWindowTest HarukaSceneQualityTest)
     if(WIN32)
         list(APPEND HARUKA_TESTS HarukaVkImportTest)
     endif()
@@ -1587,6 +1599,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME draw_batching        COMMAND HarukaBatchTest)
     add_test(NAME render_extensions    COMMAND HarukaRenderExtTest)
     add_test(NAME scene_components     COMMAND HarukaSceneTest)
+    add_test(NAME scene_quality        COMMAND HarukaSceneQualityTest)
     add_test(NAME light_selection      COMMAND HarukaLightTest)
     add_test(NAME asset_cache          COMMAND HarukaAssetCacheTest)
     add_test(NAME scene_document       COMMAND HarukaSceneDocTest)

@@ -1133,6 +1133,81 @@ int main() {
     testColorMath();
     testColorPicker();
 
+    std::printf("\n== B1. 콘솔에서 에디터 명령 실행 (cmd / cmd.list) ==\n");
+    {
+        EditorCommandRegistry reg;
+        heditorcmd::addDefaultSpecs(reg);
+        int frameRan = 0;
+        bool canUndo = false;
+        int undoRan = 0;
+        reg.bind("View.FrameSelected", [&] { ++frameRan; });
+        reg.bind("Edit.Undo", [&] { ++undoRan; }, [&] { return canUndo; });
+
+        // 1. 있는 id 실행 (needsNoTextFocus = true 여도 콘솔에서는 실행됨)
+        const auto r1 = heditorcmd::runConsoleCmd(reg, { "View.FrameSelected" });
+        check(r1.executed && !r1.warning && frameRan == 1 && r1.text.find("View.FrameSelected") != std::string::npos,
+              "cmd: 있는 id 실행 (needsNoTextFocus 무관)");
+
+        // 2. canExecute 거짓이면 실행하지 않고 불가 안내
+        const auto r2 = heditorcmd::runConsoleCmd(reg, { "Edit.Undo" });
+        check(!r2.executed && !r2.warning && undoRan == 0 && r2.text.find("cannot execute") != std::string::npos,
+              "cmd: canExecute 거짓이면 실행 안 함");
+
+        canUndo = true;
+        const auto r2b = heditorcmd::runConsoleCmd(reg, { "Edit.Undo" });
+        check(r2b.executed && undoRan == 1, "cmd: canExecute 참으로 바뀌면 실행됨");
+
+        // 3. 인자 오류
+        const auto rEmpty = heditorcmd::runConsoleCmd(reg, {});
+        check(!rEmpty.executed && rEmpty.text == "usage: cmd <id>", "cmd: 인자 없음 -> usage");
+
+        // 4. 없는 id -> 경고 + 비슷한 id 최대 5개(앞부분 일치 우선, 대소문자 무시)
+        const auto simPrefix = heditorcmd::suggestIds(reg, "view.", 5);
+        check(simPrefix.size() == 2 && simPrefix[0] == "View.FrameSelected" && simPrefix[1] == "View.GizmoSize",
+              "suggestIds: 대소문자 무시 앞부분 일치");
+
+        const auto simCap = heditorcmd::suggestIds(reg, "e", 5);
+        check(simCap.size() == 5 && simCap[0].rfind("Edit.", 0) == 0,
+              "suggestIds: 최대 5개 제한 · 앞부분 일치 우선");
+
+        const auto rMiss = heditorcmd::runConsoleCmd(reg, { "View.Frame" });
+        check(!rMiss.executed && rMiss.warning &&
+              rMiss.text.find("unknown editor command 'View.Frame'") != std::string::npos &&
+              rMiss.text.find("View.FrameSelected") != std::string::npos,
+              "cmd: 없는 id 면 경고 + 추천 목록");
+
+        const auto rNone = heditorcmd::runConsoleCmd(reg, { "zzzz_nope" });
+        check(!rNone.executed && rNone.warning && rNone.text.find("did you mean") == std::string::npos,
+              "cmd: 비슷한 id 가 없으면 추천 생략");
+
+        // 5. cmd.list 정렬 · 한 줄 구성(id · 라벨 · 단축키 · 실행 가능) · 거르기
+        const std::string allList = heditorcmd::formatCommandList(reg);
+        const size_t posActor = allList.find("Actor.AddEmpty");
+        const size_t posView  = allList.find("View.FrameSelected");
+        check(posActor != std::string::npos && posView != std::string::npos && posActor < posView,
+              "cmd.list: id 사전순 정렬");
+
+        const std::string viewList = heditorcmd::formatCommandList(reg, "view.");
+        check(viewList.find("View.FrameSelected") != std::string::npos &&
+              viewList.find("Frame Selected") != std::string::npos &&
+              viewList.find("[F]") != std::string::npos &&
+              viewList.find("(enabled)") != std::string::npos &&
+              viewList.find("View.GizmoSize") != std::string::npos &&
+              viewList.find("[-]") != std::string::npos &&
+              viewList.find("(disabled)") != std::string::npos &&
+              viewList.find("File.SaveScene") == std::string::npos,
+              "cmd.list: id 필터 · 한 줄 형식(id · 라벨 · 단축키 · 가능 여부)");
+
+        const std::string labelList = heditorcmd::formatCommandList(reg, "s/m/l");
+        check(labelList.find("View.GizmoSize") != std::string::npos &&
+              labelList.find("View.FrameSelected") == std::string::npos,
+              "cmd.list: 라벨 대소문자 무시 거르기");
+
+        const std::string emptyList = heditorcmd::formatCommandList(reg, "no_such_filter_xyz");
+        check(emptyList == "no editor commands matching 'no_such_filter_xyz'",
+              "cmd.list: 거른 결과 없음 안내");
+    }
+
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
     return g_failed ? 1 : 0;
 }

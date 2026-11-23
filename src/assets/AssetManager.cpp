@@ -134,10 +134,12 @@ size_t AssetManager::loadedModelCount() const {
 }
 
 void AssetManager::freePairs(std::vector<AssetPair>& pairs, bool isPrim) {
-    for (auto& p : pairs) {
-        for (MeshHandle* lm : p.lods) renderer->freeMesh(lm);
-        renderer->freeMesh(p.mesh);
-        if (!isPrim) renderer->freeMaterial(p.material);
+    if (renderer) {
+        for (auto& p : pairs) {
+            for (MeshHandle* lm : p.lods) renderer->freeMesh(lm);
+            renderer->freeMesh(p.mesh);
+            if (!isPrim) renderer->freeMaterial(p.material);
+        }
     }
     pairs.clear();
 }
@@ -185,21 +187,23 @@ std::vector<AssetPair> AssetManager::uploadModel(const std::string& key, const s
             p.bindVertices = std::make_shared<const std::vector<MeshSourceVertex>>(data.vertices);
         }
         auto tm = UpClock::now();
-        p.mesh      = renderer->uploadMesh(verts, data.indices, nullptr, data.cacheOrdered);
-        msMesh += since(tm);
-        tm = UpClock::now();
-        if (autoLod_ && !data.skin && p.mesh) {
-            for (const auto& lod : data.lods) {
-                if (MeshHandle* lm = renderer->uploadLodIndices(*p.mesh, lod.indices, data.cacheOrdered)) {
-                    p.lods.push_back(lm);
-                    p.lodScreenSizes.push_back(lod.screenSize);
+        if (renderer) {
+            p.mesh      = renderer->uploadMesh(verts, data.indices, nullptr, data.cacheOrdered);
+            msMesh += since(tm);
+            tm = UpClock::now();
+            if (autoLod_ && !data.skin && p.mesh) {
+                for (const auto& lod : data.lods) {
+                    if (MeshHandle* lm = renderer->uploadLodIndices(*p.mesh, lod.indices, data.cacheOrdered)) {
+                        p.lods.push_back(lm);
+                        p.lodScreenSizes.push_back(lod.screenSize);
+                    }
                 }
             }
+            msLod += since(tm);
+            p.material  = renderer->uploadMaterial(
+                data.albedo, data.normalMap, data.metalRough, data.ao, data.emissive);
         }
-        msLod += since(tm);
         p.collision = makeCollisionMesh(*src, data.indices);
-        p.material  = renderer->uploadMaterial(
-            data.albedo, data.normalMap, data.metalRough, data.ao, data.emissive);
         p.name      = std::move(data.name);
         p.isBlend   = data.isBlend;
         p.doubleSided = data.doubleSided;
@@ -234,6 +238,7 @@ std::vector<AssetPair> AssetManager::uploadModel(const std::string& key, const s
 // 모델을 올릴 때마다 텍스처 메모리를 남깁니다(D12). 압축 · 비압축 장 수 · 실제 바이트 · 같은 텍스처를 RGBA8 + 밉으로 올렸을 때의
 // 바이트 · 핵심 힙 Zone B 사용량. 텍스처 수가 바뀌지 않았으면 남기지 않습니다.
 void AssetManager::logTextureMemory(const std::string& key) {
+    if (!renderer) return;
     const Renderer::TextureMemory tm = renderer->textureMemory();
     if (tm.textures == lastLoggedTextures_) return;
     lastLoggedTextures_ = tm.textures;
@@ -278,8 +283,10 @@ bool AssetManager::reloadModel(const std::string& path, const RebindFn& rebind, 
     if (rebind) rebind(key, fresh);
 
     const hreload::RetireList rl = hreload::retireList(oldPairs, fresh);
-    for (MeshHandle* m : rl.meshes)        renderer->freeMesh(m);
-    for (MaterialHandle* m : rl.materials) renderer->freeMaterial(m);
+    if (renderer) {
+        for (MeshHandle* m : rl.meshes)        renderer->freeMesh(m);
+        for (MaterialHandle* m : rl.materials) renderer->freeMaterial(m);
+    }
     if (stats) {
         ++stats->models;
         stats->meshesRetired    += rl.meshes.size();
@@ -379,7 +386,7 @@ AssetPair AssetManager::acquirePrimitive(const PrimitiveDesc& descIn) {
     const MeshBounds mb = PrimitiveBuilder::analyticBounds(desc);
 
     AssetPair p;
-    p.mesh      = renderer->uploadMesh(verts, src.indices, &mb);
+    p.mesh      = renderer ? renderer->uploadMesh(verts, src.indices, &mb) : nullptr;
     p.collision = makeCollisionMesh(src.vertices, src.indices);
     p.material  = defaultPrimitiveMaterial();
     p.name      = key;
@@ -438,7 +445,7 @@ MaterialHandle* AssetManager::primitiveMaterial(uint32_t rgba8, float metallic, 
                         255 };
 
     TexSourceData none;   // normal / ao / emissive 는 uploadMaterial 의 기본값을 씁니다
-    MaterialHandle* m = renderer->uploadMaterial(albedo, none, metalRough, none, none);
+    MaterialHandle* m = renderer ? renderer->uploadMaterial(albedo, none, metalRough, none, none) : nullptr;
     primMaterials[key] = m;
     return m;
 }
@@ -452,7 +459,8 @@ void AssetManager::clear() {
     cache.clear();
     modelInfo_.clear();
 
-    for (auto& [key, m] : primMaterials) renderer->freeMaterial(m);
+    if (renderer)
+        for (auto& [key, m] : primMaterials) renderer->freeMaterial(m);
     primMaterials.clear();
 }
 
@@ -484,7 +492,7 @@ MaterialHandle* AssetManager::primitiveCheckerMaterial() {
     metalRough.data = { 0, 153, 0, 255 };   // G=roughness 0.6, B=metallic 0
 
     TexSourceData none;
-    MaterialHandle* m = renderer->uploadMaterial(albedo, none, metalRough, none, none);
+    MaterialHandle* m = renderer ? renderer->uploadMaterial(albedo, none, metalRough, none, none) : nullptr;
     primMaterials[key] = m;
     return m;
 }

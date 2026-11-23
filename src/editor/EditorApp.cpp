@@ -885,6 +885,28 @@ void EditorApp::registerCommands() {
     commands_.bind("Play.Pause", [this] { pausePlay(); }, [this] { return playState_ != EPlayState::Editor; });
     commands_.bind("Play.Stop",  [this] { stopPlay(); },  [this] { return playState_ != EPlayState::Editor; });
     commands_.bind("Content.Refresh", [this] { contentPanel_.scanAll(); rebuildBottomPanel(); });
+
+    // 콘솔에서 에디터 명령 실행(B1): 에디터 전용. 게임 실행 파일 · Android 에는 EditorApp 이 없어 등록되지 않습니다.
+    if (CVarRegistry* cv = ctx_.world ? ctx_.world->service<CVarRegistry>() : nullptr) {
+        cv->addCommand("cmd", "cmd <id>: execute an editor command by id (editor only)",
+                       [this](const std::vector<std::string>& args) -> std::string {
+                           const heditorcmd::ConsoleCmdResult r = heditorcmd::runConsoleCmd(commands_, args);
+                           if (r.warning) {
+                               HLOG(LogConsole, Warning) << r.text;
+                               return {};
+                           }
+                           return r.text;
+                       });
+        cv->addCommand("cmd.list", "cmd.list [filter]: list editor commands sorted by id, optionally filtered by id or label (editor only)",
+                       [this](const std::vector<std::string>& args) -> std::string {
+                           std::string filter;
+                           for (size_t i = 0; i < args.size(); ++i) {
+                               if (i) filter += ' ';
+                               filter += args[i];
+                           }
+                           return heditorcmd::formatCommandList(commands_, filter);
+                       });
+    }
 }
 
 // ── Play state ─────────────────────────────────────────────────────────────────
