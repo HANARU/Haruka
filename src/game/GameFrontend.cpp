@@ -142,6 +142,6 @@ private:
 
 } // namespace
 
-std::unique_ptr<IEngineFrontend> createEngineFrontend() {
+std::unique_ptr<IEngineFrontend> createEngineFrontend(const EngineFrontendConfig& /*config*/) {
     return std::make_unique<GameFrontend>();
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <vector>
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 
@@ -90,5 +91,12 @@ public:
     virtual void setPointerOverWorldUi(bool /*over*/) {}
 };
 
+// 프로젝트별 경로 등 실행 파일(main.cpp)이 앞단 라이브러리에 넘기는 설정(E1a, 2026-11-23).
+// 라이브러리는 HARUKA_PROJECT_DIR 같은 프로젝트 컴파일 정의를 직접 보지 않습니다.
+struct EngineFrontendConfig {
+    std::string projectDir;
+    std::string engineContentDir;
+};
+
 // 실행 파일마다 하나씩 정의합니다(에디터: editor/EditorFrontend.cpp, 게임: game/GameFrontend.cpp).
-std::unique_ptr<IEngineFrontend> createEngineFrontend();
+std::unique_ptr<IEngineFrontend> createEngineFrontend(const EngineFrontendConfig& config = {});

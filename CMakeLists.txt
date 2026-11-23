@@ -479,20 +479,10 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets/cache)
 # UE 의 Editor · Game 타깃, O3DE 의 Editor · GameLauncher 와 같은 구분입니다. 런타임 코드가 에디터에 기대면 게임
 # 실행 파일의 링크가 실패하므로, 분리가 규칙이 아니라 구조로 지켜집니다. 엔진은 앞단(core/IEngineFrontend.hpp)으로만
 # 에디터 · 게임을 부르고, 어느 앞단인지는 실행 파일마다 링크한 createEngineFrontend 가 정합니다.
-set(RUNTIME_SOURCES
+# ── 시뮬레이션 층 (E1b, 2026-11-23) ──────────────────────────────────────────────
+# 렌더러 · Vulkan · 창 · XR 없이 링크되는 시뮬레이션 모듈(core · scene · geometry · vfx · physics · audio · nav, math 헤더).
+set(SIM_SOURCES
     src/core/AppPaths.cpp
-    src/runtime/Engine.cpp
-    src/runtime/SceneTransition.cpp
-    src/runtime/FrameStats.cpp
-    src/runtime/WorldUiDriver.cpp
-    src/runtime/XrSessionController.cpp
-    src/runtime/XrViewOrigin.cpp
-    src/runtime/EngineOptions.cpp
-    src/runtime/ShaderManifest.cpp
-    src/scene/World.cpp
-    src/scene/TimerManager.cpp
-    src/scene/Actor.cpp
-    src/scene/Component.cpp
     src/core/HLog.cpp
     src/core/HText.cpp
     src/core/AssetRefs.cpp
@@ -504,16 +494,49 @@ set(RUNTIME_SOURCES
     src/core/Accessibility.cpp
     src/core/Subtitles.cpp
     src/core/CrashHandler.cpp
+    src/scene/World.cpp
+    src/scene/TimerManager.cpp
+    src/scene/Actor.cpp
+    src/scene/Component.cpp
+    src/geometry/PrimitiveDesc.cpp
+    src/geometry/PrimitiveBuilder.cpp
+    src/geometry/MeshLod.cpp
+    src/geometry/Ktx2.cpp
+    src/vfx/ParticleSim.cpp
+    src/physics/RigidBodyComponent.cpp
+    src/physics/JointComponent.cpp
+    src/physics/PhysicsSystem.cpp
+    src/audio/AudioComponent.cpp
+    src/audio/ReverbZoneComponent.cpp
+    src/audio/AudioSystem.cpp
+    src/audio/AudioMix.cpp
+    src/audio/AudioAttenuation.cpp
+    src/audio/MiniaudioImpl.cpp
+    src/audio/SteamAudioHrtf.cpp
+    src/nav/NavMeshBuild.cpp
+    src/nav/NavMesh.cpp
+    src/nav/NavGeometry.cpp
+    src/nav/NavSystem.cpp
+    src/nav/NavMeshVolumeComponent.cpp
+    src/nav/NavAgentComponent.cpp
+    src/nav/AIBrainComponent.cpp
+)
+
+set(RUNTIME_SOURCES
+    src/runtime/Engine.cpp
+    src/runtime/SceneTransition.cpp
+    src/runtime/FrameStats.cpp
+    src/runtime/WorldUiDriver.cpp
+    src/runtime/XrSessionController.cpp
+    src/runtime/XrViewOrigin.cpp
+    src/runtime/EngineOptions.cpp
+    src/runtime/ShaderManifest.cpp
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp
     src/components/RenderExtract.cpp
     src/components/StaticMeshComponent.cpp
     src/components/SubtitlePanel.cpp
     src/components/AssetRebind.cpp
-    src/audio/AudioComponent.cpp
-    src/audio/ReverbZoneComponent.cpp
-    src/physics/RigidBodyComponent.cpp
-    src/physics/JointComponent.cpp
     src/components/CoreComponents.cpp
     src/components/XrComponents.cpp
     src/components/SkinnedMeshComponent.cpp
@@ -525,7 +548,6 @@ set(RUNTIME_SOURCES
     src/components/ReflectionCaptureComponent.cpp
     src/components/ParticleSystemComponent.cpp
     src/components/DecalComponent.cpp
-    src/vfx/ParticleSim.cpp
     src/xr/GraspSolver.cpp
     src/renderer/Renderer.cpp
     src/renderer/Renderer_swap.cpp
@@ -544,10 +566,6 @@ set(RUNTIME_SOURCES
     src/renderer/passes/GeometryPass.cpp
     src/renderer/passes/GeometryPass_particles.cpp
     src/renderer/passes/UIPanelPass.cpp
-    src/geometry/PrimitiveDesc.cpp
-    src/geometry/PrimitiveBuilder.cpp
-    src/geometry/MeshLod.cpp
-    src/geometry/Ktx2.cpp
     src/assets/GltfLoader.cpp
     src/assets/AssetManager.cpp
     src/assets/AssetStreamer.cpp
@@ -561,19 +579,6 @@ set(RUNTIME_SOURCES
     src/sceneio/SceneSerializer.cpp
     src/sceneio/PrefabLink.cpp
     src/sceneio/ComponentSerializer.cpp
-    src/audio/AudioSystem.cpp
-    src/audio/AudioMix.cpp
-    src/audio/AudioAttenuation.cpp
-    src/audio/MiniaudioImpl.cpp
-    src/audio/SteamAudioHrtf.cpp
-    src/physics/PhysicsSystem.cpp
-    src/nav/NavMeshBuild.cpp
-    src/nav/NavMesh.cpp
-    src/nav/NavGeometry.cpp
-    src/nav/NavSystem.cpp
-    src/nav/NavMeshVolumeComponent.cpp
-    src/nav/NavAgentComponent.cpp
-    src/nav/AIBrainComponent.cpp
     src/ui/slate/HPaintContext.cpp
     src/ui/slate/HFontAtlas.cpp
     src/ui/slate/HSlateRenderer.cpp
@@ -641,6 +646,26 @@ target_include_directories(HarukaVfs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src PRIV
 target_link_libraries(HarukaVfs PRIVATE haruka_lz4)
 haruka_target_defaults(HarukaVfs)
 
+# ── 시뮬레이션 정적 라이브러리 (E1b, 2026-11-23) ─────────────────────────────────
+# haruka_vulkan · glfw · openxr_loader 를 링크하지 않고 그 include 경로도 받지 않습니다.
+add_library(HarukaSim STATIC ${SIM_SOURCES})
+if(NOT HARUKA_PROFILER)
+    target_compile_definitions(HarukaSim PUBLIC HARUKA_PROFILER=0)
+endif()
+target_compile_definitions(HarukaSim PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
+target_include_directories(HarukaSim PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(HarukaSim SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
+target_link_libraries(HarukaSim PUBLIC glm::glm HarukaVfs meshoptimizer)
+target_link_libraries(HarukaSim PRIVATE Jolt haruka_recast)
+if(WIN32)
+    # 쓰기 루트(%LOCALAPPDATA%)를 구하는 SHGetKnownFolderPath · CoTaskMemFree(core/AppPaths.cpp).
+    target_link_libraries(HarukaSim PUBLIC shell32 ole32)
+elseif(ANDROID)
+    # HLog.cpp 의 __android_log_print.
+    target_link_libraries(HarukaSim PUBLIC log)
+endif()
+haruka_target_defaults(HarukaSim)
+
 if(ANDROID)
     # Quest 단독 실행(2026-10-31, 패키징 3단계): NativeActivity 진입점 · OpenXR 로더(공유) · APK 포장은 이 파일에 있습니다.
     include(cmake/HarukaAndroid.cmake)
@@ -677,16 +702,8 @@ else()
         src/xr/XrSystem.cpp
     )
     add_library(HarukaRuntime STATIC ${RUNTIME_SOURCES})
-    if(NOT HARUKA_PROFILER)
-        target_compile_definitions(HarukaRuntime PUBLIC HARUKA_PROFILER=0)
-    endif()
-    target_link_libraries(HarukaRuntime PUBLIC Vulkan::Vulkan glfw glm::glm tinygltf Jolt openxr_loader HarukaVfs meshoptimizer)
-    target_link_libraries(HarukaRuntime PRIVATE haruka_recast)   # 내비 메시(Docs/Navigation_AI.md D1)
-    target_include_directories(HarukaRuntime PUBLIC ${stb_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
-    if(WIN32)
-        # 쓰기 루트(%LOCALAPPDATA%)를 구하는 SHGetKnownFolderPath · CoTaskMemFree(core/AppPaths.cpp).
-        target_link_libraries(HarukaRuntime PUBLIC shell32 ole32)
-    endif()
+    target_link_libraries(HarukaRuntime PUBLIC haruka_vulkan glfw glm::glm tinygltf openxr_loader HarukaSim meshoptimizer)
+    target_include_directories(HarukaRuntime SYSTEM PUBLIC ${stb_SOURCE_DIR})
 
     # ── Windows 실행 파일·창 아이콘 ────────────────────────────────────────────
     # res/Haruka.rc 가 다중 크기 .ico 하나를 실행 파일 안에 넣습니다. GLFW 는 창
@@ -706,21 +723,28 @@ endif()
 # ── GLM 설정 ──────────────────────────────────────────────────────────────────
 # 투영 행렬의 깊이 범위를 Vulkan 규약 [0,1] 로 둡니다. 예전에는 헤더마다 #define 했는데, 매크로 없이
 # GLM 을 먼저 포함한 헤더(Reflect.hpp)가 있으면 그 번역 단위는 OpenGL 규약 [-1,1] 로 굳었습니다.
-# 그래서 카메라 투영만 [-1,1] 이 되어 실제 근평면이 두 배(0.2m)였습니다(DEF-95). 소스의 개별 정의는
-# 두지 않습니다. 이 디렉터리의 대상(엔진·테스트)에는 위치와 상관없이 붙고, 이 줄보다 먼저 추가한
-# 외부 라이브러리 하위 디렉터리(GLFW 등)에는 붙지 않도록 외부 라이브러리를 다 불러온 뒤에 둡니다.
-add_compile_definitions(GLM_FORCE_DEPTH_ZERO_TO_ONE)
+# 그래서 카메라 투영만 [-1,1] 이 되어 실제 근평면이 두 배(0.2m)였습니다(DEF-95).
+# HarukaRuntime 의 PUBLIC 정의로 두어, 엔진 · 에디터 · 게임 앞단 · 프로젝트 코드 모두 같은 규약으로 컴파일됩니다(E1a).
+target_compile_definitions(HarukaRuntime PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 target_include_directories(HarukaRuntime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # 셰이더 목록(haruka_shader_manifest.inc, DEF-149)은 Shaders 대상이 만듭니다.
 target_include_directories(HarukaRuntime PRIVATE ${HARUKA_GENERATED_DIR})
 add_dependencies(HarukaRuntime Shaders)
-# Android 는 NDK sysroot 의 Vulkan 헤더를 기본 경로로 씁니다. sysroot 를 -I 로 다시 넣으면 libc++ 의 #include_next 순서가
-# 깨질 수 있어 데스크톱(SDK 헤더)만 넣습니다.
-if(NOT ANDROID)
-    target_include_directories(HarukaRuntime PUBLIC ${Vulkan_INCLUDE_DIRS})
-endif()
+# Vulkan 헤더와 volk 는 haruka_vulkan 대상이 PUBLIC 으로 제공합니다.
 haruka_target_defaults(HarukaRuntime)
+
+# ── 에디터 · 게임 앞단 정적 라이브러리 (E1a, 2026-11-23) ──────────────────────
+# 프로젝트 실행 파일이 에디터 · 게임 앞단을 다시 컴파일하지 않고 링크만 하도록 뗍니다.
+add_library(HarukaGameFrontend STATIC ${GAME_SOURCES})
+target_link_libraries(HarukaGameFrontend PUBLIC HarukaRuntime)
+haruka_target_defaults(HarukaGameFrontend)
+
+if(NOT ANDROID)
+    add_library(HarukaEditor STATIC ${EDITOR_SOURCES})
+    target_link_libraries(HarukaEditor PUBLIC HarukaRuntime PRIVATE haruka_nanosvg HarukaProjectOps)
+    haruka_target_defaults(HarukaEditor)
+endif()
 
 if(NOT ANDROID)
     option(HARUKA_CONSOLE "Open a console window alongside the engine" OFF)
@@ -1142,6 +1166,15 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
             target_compile_options(HarukaVkImportTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
             set_target_properties(HarukaVkImportTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
         endif()
+    endif()
+
+    # -- 시뮬레이션 층 단독 링크 테스트 (E1b, 2026-11-23) ----------------------
+    # HarukaSim 만 링크해 렌더러 · Vulkan · 창 · XR 없이 시뮬레이션과 컴포넌트 등록이 동작하는지 검산합니다.
+    add_executable(HarukaSimLinkTest tests/SimLinkTest.cpp)
+    target_link_libraries(HarukaSimLinkTest PRIVATE HarukaSim)
+    if(MSVC)
+        target_compile_options(HarukaSimLinkTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaSimLinkTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
     # -- VR 입력 테스트 -------------------------------------------------------
@@ -1654,6 +1687,15 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaHandTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    # -- SPIR-V 판 시험 (E1a, E0b 후속) ---------------------------------------
+    # 빌드된 모든 .spv 머리말이 SPIR-V 1.0(0x00010000)인지 검산합니다.
+    add_executable(HarukaSpirvTest tests/SpirvVersionTest.cpp)
+    add_dependencies(HarukaSpirvTest Shaders)
+    if(MSVC)
+        target_compile_options(HarukaSpirvTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
+        set_target_properties(HarukaSpirvTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # 모든 시험 실행 파일이 엔진 · 도구와 같은 코드 페이지(UTF-8)에서 돕니다(DEF-121, 2026-10-31 검토). 예를 들어 소리 시험은
     # 임시 폴더의 경로를 std::string 으로 넘기는데, 매니페스트가 없으면 CP949 바이트가 되어 가상 파일 시스템이 찾지 못합니다.
     set(HARUKA_TESTS HarukaPakTest HarukaGltfTest HarukaGeometryTest HarukaActorTest HarukaCommandTest HarukaActorUndoTest
@@ -1700,6 +1742,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
     add_test(NAME stereo_views         COMMAND HarukaStereoTest)
     add_test(NAME math_common          COMMAND HarukaMathTest)
     add_test(NAME architecture_deps    COMMAND HarukaArchTest)
+    add_test(NAME sim_link             COMMAND HarukaSimLinkTest)
     add_test(NAME xr_input             COMMAND HarukaInputTest)
     add_test(NAME window_platform      COMMAND HarukaWindowTest)
     add_test(NAME draw_batching        COMMAND HarukaBatchTest)
@@ -1718,6 +1761,9 @@ add_test(NAME dock_tree            COMMAND HarukaDockTest)
 add_test(NAME hand_skinning        COMMAND HarukaHandTest)
     if(WIN32)
         add_test(NAME vulkan_imports   COMMAND HarukaVkImportTest $<TARGET_FILE:HarukaEngine> $<TARGET_FILE:HarukaGame>
-                                               ${Vulkan_INCLUDE_DIRS}/vulkan/vulkan_core.h)
+                                               $<TARGET_FILE:HarukaSimLinkTest>
+                                               $<TARGET_FILE:HarukaRuntime> $<TARGET_FILE:HarukaSim>
+                                               $<TARGET_FILE:HarukaEditor> $<TARGET_FILE:HarukaGameFrontend>
+                                               ${vulkan_headers_SOURCE_DIR}/include/vulkan/vulkan_core.h)
     endif()
 endif()

@@ -99,11 +99,10 @@ function(haruka_add_project)
     if(ANDROID)
         add_library(${HP_GAME_TARGET} SHARED
             ${HARUKA_ENGINE_ROOT}/src/AndroidMain.cpp
-            ${HARUKA_GAME_SOURCES}
             ${HP_SOURCES}
             $<TARGET_OBJECTS:haruka_app_glue>
         )
-        target_link_libraries(${HP_GAME_TARGET} PRIVATE HarukaRuntime)
+        target_link_libraries(${HP_GAME_TARGET} PRIVATE ${_haruka_game_lib})
         target_compile_definitions(${HP_GAME_TARGET} PRIVATE
             HARUKA_PROJECT_NAME="${HP_DESC_name}"
             HARUKA_PROJECT_COMPANY="${HP_DESC_company}"
@@ -128,11 +127,10 @@ function(haruka_add_project)
     else()
         add_executable(${HP_EDITOR_TARGET}
             ${HARUKA_ENGINE_ROOT}/src/main.cpp
-            ${HARUKA_EDITOR_SOURCES}
             ${HP_SOURCES}
             ${HARUKA_EXE_RESOURCES}
         )
-        target_link_libraries(${HP_EDITOR_TARGET} PRIVATE HarukaRuntime haruka_nanosvg)
+        target_link_libraries(${HP_EDITOR_TARGET} PRIVATE ${_haruka_editor_lib})
         target_compile_definitions(${HP_EDITOR_TARGET} PRIVATE
             HARUKA_EDITOR
             HARUKA_PROJECT_DIR="${HP_PROJECT_DIR}"
@@ -144,11 +142,10 @@ function(haruka_add_project)
 
         add_executable(${HP_GAME_TARGET}
             ${HARUKA_ENGINE_ROOT}/src/main.cpp
-            ${HARUKA_GAME_SOURCES}
             ${HP_SOURCES}
             ${HARUKA_EXE_RESOURCES}
         )
-        target_link_libraries(${HP_GAME_TARGET} PRIVATE HarukaRuntime)
+        target_link_libraries(${HP_GAME_TARGET} PRIVATE ${_haruka_game_lib})
         target_compile_definitions(${HP_GAME_TARGET} PRIVATE
             HARUKA_PROJECT_NAME="${HP_DESC_name}"
             HARUKA_PROJECT_COMPANY="${HP_DESC_company}"

@@ -1,8 +1,10 @@
 #include "RigidBodyComponent.hpp"
+#include "JointComponent.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include "PhysicsSystem.hpp"
 #include "PhysicsLayers.hpp"
 #include "../scene/Actor.hpp"
+#include "../scene/ComponentRegistry.hpp"
 #include "../scene/World.hpp"
 #include "../scene/Reflect.hpp"
 #include "../scene/ComponentFields.hpp"
@@ -272,5 +274,17 @@ bool RigidBodyComponent::readField(const std::string& key, const std::string& va
     else return false;
     if (!ok) reportBadField(key, value);
     return true;
+}
+
+void registerPhysicsComponents() {
+    auto& r = ComponentRegistry::get();
+    if (!r.find("RigidBodyComponent")) {
+        r.registerType<RigidBodyComponent>("RigidBodyComponent", "RigidBody");
+        r.setCategory("RigidBodyComponent", "Physics");
+    }
+    if (!r.find("JointComponent")) {
+        r.registerType<JointComponent>("JointComponent", "Joint");
+        r.setCategory("JointComponent", "Physics");
+    }
 }
 

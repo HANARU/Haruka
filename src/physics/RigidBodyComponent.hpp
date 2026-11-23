@@ -119,3 +119,6 @@ private:
     bool bodyParamsChanged() const;   // 만들 때 쓴 셰이프·모션·크기·질량과 지금 값이 다른가
     void releaseBody();               // 바디만 지움(createFailed_ 는 건드리지 않음)
 };
+
+// physics 모듈의 컴포넌트(RigidBodyComponent · JointComponent)를 ComponentRegistry 에 등록합니다.
+void registerPhysicsComponents();

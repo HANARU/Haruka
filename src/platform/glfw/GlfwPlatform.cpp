@@ -1,6 +1,18 @@
 #include "GlfwPlatform.hpp"
 #include "GlfwWindow.hpp"
+#include "../PlatformAlert.hpp"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
+#include <volk.h>
 #include <algorithm>
 #include <exception>
 #include <vector>
@@ -15,7 +27,11 @@ GlfwState g_glfw;
 } // namespace
 
 bool GlfwPlatform::acquire() {
-    if (g_glfw.refs == 0 && glfwInit() != GLFW_TRUE) return false;
+    if (g_glfw.refs == 0) {
+        if (!vkGetInstanceProcAddr) volkInitialize();
+        if (vkGetInstanceProcAddr) glfwInitVulkanLoader(vkGetInstanceProcAddr);
+        if (glfwInit() != GLFW_TRUE) return false;
+    }
     ++g_glfw.refs;
     return true;
 }
@@ -74,3 +90,27 @@ std::unique_ptr<IWindow> createAuxWindow(int width, int height, const std::strin
     }
     return win;
 }
+
+namespace hplat {
+
+void showFatalError(const char* title, const char* message) {
+#ifdef _WIN32
+    auto toWide = [](const char* s) -> std::wstring {
+        if (!s || !*s) return {};
+        const int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
+        if (n <= 0) return {};
+        std::wstring out((size_t)n, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, s, -1, out.data(), n);
+        if (!out.empty() && out.back() == L'\0') out.pop_back();
+        return out;
+    };
+    const std::wstring wTitle = toWide(title ? title : "Haruka Engine");
+    const std::wstring wMsg   = toWide(message ? message : "");
+    MessageBoxW(nullptr, wMsg.c_str(), wTitle.c_str(), MB_OK | MB_ICONERROR);
+#else
+    (void)title;
+    (void)message;
+#endif
+}
+
+} // namespace hplat

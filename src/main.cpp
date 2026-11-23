@@ -90,7 +90,14 @@ static bool redirectStdioIfHeadless() {
 int main(int argc, char** argv) {
     // 앞단(에디터 또는 게임)을 먼저 정합니다. 쓰기 루트(설정 · 로그 · 캐시를 둘 폴더)가 앞단 정책에 달려 있어,
     // 로그를 열기 전에 알아야 합니다(2026-10-19).
-    std::unique_ptr<IEngineFrontend> frontend = createEngineFrontend();
+    EngineFrontendConfig frontendConfig;
+#ifdef HARUKA_PROJECT_DIR
+    frontendConfig.projectDir = HARUKA_PROJECT_DIR;
+#endif
+#ifdef HARUKA_ENGINE_CONTENT_DIR
+    frontendConfig.engineContentDir = HARUKA_ENGINE_CONTENT_DIR;
+#endif
+    std::unique_ptr<IEngineFrontend> frontend = createEngineFrontend(frontendConfig);
     std::vector<std::string> unknownArgs;
     const EngineOptions options = hopt::parse(std::vector<std::string>(argv + (argc > 0 ? 1 : 0), argv + argc), unknownArgs);
     bool writeRootOk = false;

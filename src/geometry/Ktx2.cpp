@@ -1,12 +1,27 @@
 #include "Ktx2.hpp"
 
-#include <vulkan/vulkan.h>
-
 #include <algorithm>
 #include <cstring>
 
 namespace hktx2 {
 namespace {
+
+// KTX2 파일 머리(vkFormat)가 저장하는 Vulkan VkFormat 규격 번호.
+// HarukaSim 이 Vulkan 헤더 없이 빌드되도록 번호만 직접 둡니다(Vulkan 규격 고정 값).
+constexpr uint32_t kVkFormatR8G8B8A8Unorm    = 37;
+constexpr uint32_t kVkFormatR8G8B8A8Srgb     = 43;
+constexpr uint32_t kVkFormatBc5UnormBlock    = 141;
+constexpr uint32_t kVkFormatBc7UnormBlock    = 145;
+constexpr uint32_t kVkFormatBc7SrgbBlock     = 146;
+constexpr uint32_t kVkFormatAstc4x4Unorm     = 157;
+constexpr uint32_t kVkFormatAstc4x4Srgb      = 158;
+constexpr uint32_t kVkFormatAstc5x5Unorm     = 161;
+constexpr uint32_t kVkFormatAstc5x5Srgb      = 162;
+constexpr uint32_t kVkFormatAstc6x6Unorm     = 165;
+constexpr uint32_t kVkFormatAstc6x6Srgb      = 166;
+constexpr uint32_t kVkFormatAstc8x8Unorm     = 171;
+constexpr uint32_t kVkFormatAstc8x8Srgb      = 172;
+constexpr uint32_t kVkFormatAstc12x12Srgb    = 184;
 
 constexpr uint8_t kIdentifier[12] = { 0xAB, 'K', 'T', 'X', ' ', '2', '0', 0xBB, '\r', '\n', 0x1A, '\n' };
 constexpr size_t  kHeaderBytes    = 80;   // 식별자 12 + 머리 36 + 색인 32
@@ -31,18 +46,18 @@ constexpr uint32_t kModelASTC = 162;
 
 BlockInfo blockInfo(uint32_t f) {
     switch (f) {
-    case VK_FORMAT_BC5_UNORM_BLOCK:       return { 4, 4, 16, false };
-    case VK_FORMAT_BC7_UNORM_BLOCK:       return { 4, 4, 16, false };
-    case VK_FORMAT_BC7_SRGB_BLOCK:        return { 4, 4, 16, true };
-    case VK_FORMAT_ASTC_4x4_UNORM_BLOCK:  return { 4, 4, 16, false };
-    case VK_FORMAT_ASTC_4x4_SRGB_BLOCK:   return { 4, 4, 16, true };
-    case VK_FORMAT_ASTC_5x5_UNORM_BLOCK:  return { 5, 5, 16, false };
-    case VK_FORMAT_ASTC_5x5_SRGB_BLOCK:   return { 5, 5, 16, true };
-    case VK_FORMAT_ASTC_6x6_UNORM_BLOCK:  return { 6, 6, 16, false };
-    case VK_FORMAT_ASTC_6x6_SRGB_BLOCK:   return { 6, 6, 16, true };
-    case VK_FORMAT_ASTC_8x8_UNORM_BLOCK:  return { 8, 8, 16, false };
-    case VK_FORMAT_ASTC_8x8_SRGB_BLOCK:   return { 8, 8, 16, true };
-    default:                              return {};
+    case kVkFormatBc5UnormBlock:  return { 4, 4, 16, false };
+    case kVkFormatBc7UnormBlock:  return { 4, 4, 16, false };
+    case kVkFormatBc7SrgbBlock:   return { 4, 4, 16, true };
+    case kVkFormatAstc4x4Unorm:   return { 4, 4, 16, false };
+    case kVkFormatAstc4x4Srgb:    return { 4, 4, 16, true };
+    case kVkFormatAstc5x5Unorm:   return { 5, 5, 16, false };
+    case kVkFormatAstc5x5Srgb:    return { 5, 5, 16, true };
+    case kVkFormatAstc6x6Unorm:   return { 6, 6, 16, false };
+    case kVkFormatAstc6x6Srgb:    return { 6, 6, 16, true };
+    case kVkFormatAstc8x8Unorm:   return { 8, 8, 16, false };
+    case kVkFormatAstc8x8Srgb:    return { 8, 8, 16, true };
+    default:                      return {};
     }
 }
 
@@ -54,20 +69,20 @@ uint64_t levelBytes(uint32_t f, uint32_t w, uint32_t h) {
 
 std::string formatName(uint32_t f) {
     switch (f) {
-    case VK_FORMAT_BC5_UNORM_BLOCK:      return "BC5_UNORM";
-    case VK_FORMAT_BC7_UNORM_BLOCK:      return "BC7_UNORM";
-    case VK_FORMAT_BC7_SRGB_BLOCK:       return "BC7_SRGB";
-    case VK_FORMAT_ASTC_4x4_UNORM_BLOCK: return "ASTC_4x4_UNORM";
-    case VK_FORMAT_ASTC_4x4_SRGB_BLOCK:  return "ASTC_4x4_SRGB";
-    case VK_FORMAT_ASTC_5x5_UNORM_BLOCK: return "ASTC_5x5_UNORM";
-    case VK_FORMAT_ASTC_5x5_SRGB_BLOCK:  return "ASTC_5x5_SRGB";
-    case VK_FORMAT_ASTC_6x6_UNORM_BLOCK: return "ASTC_6x6_UNORM";
-    case VK_FORMAT_ASTC_6x6_SRGB_BLOCK:  return "ASTC_6x6_SRGB";
-    case VK_FORMAT_ASTC_8x8_UNORM_BLOCK: return "ASTC_8x8_UNORM";
-    case VK_FORMAT_ASTC_8x8_SRGB_BLOCK:  return "ASTC_8x8_SRGB";
-    case VK_FORMAT_R8G8B8A8_UNORM:       return "RGBA8_UNORM";
-    case VK_FORMAT_R8G8B8A8_SRGB:        return "RGBA8_SRGB";
-    default:                             return "format " + std::to_string(f);
+    case kVkFormatBc5UnormBlock:  return "BC5_UNORM";
+    case kVkFormatBc7UnormBlock:  return "BC7_UNORM";
+    case kVkFormatBc7SrgbBlock:   return "BC7_SRGB";
+    case kVkFormatAstc4x4Unorm:   return "ASTC_4x4_UNORM";
+    case kVkFormatAstc4x4Srgb:    return "ASTC_4x4_SRGB";
+    case kVkFormatAstc5x5Unorm:   return "ASTC_5x5_UNORM";
+    case kVkFormatAstc5x5Srgb:    return "ASTC_5x5_SRGB";
+    case kVkFormatAstc6x6Unorm:   return "ASTC_6x6_UNORM";
+    case kVkFormatAstc6x6Srgb:    return "ASTC_6x6_SRGB";
+    case kVkFormatAstc8x8Unorm:   return "ASTC_8x8_UNORM";
+    case kVkFormatAstc8x8Srgb:    return "ASTC_8x8_SRGB";
+    case kVkFormatR8G8B8A8Unorm:  return "RGBA8_UNORM";
+    case kVkFormatR8G8B8A8Srgb:   return "RGBA8_SRGB";
+    default:                      return "format " + std::to_string(f);
     }
 }
 
@@ -136,8 +151,8 @@ std::vector<uint8_t> write(uint32_t vkFormat, uint32_t w, uint32_t h, const std:
     const uint32_t levelCount = (uint32_t)levels.size();
 
     // DFD: 전체 크기(4) + 기본 블록(24 + 표본 16 x n).
-    const bool     bc5     = vkFormat == VK_FORMAT_BC5_UNORM_BLOCK;
-    const bool     astc    = vkFormat >= VK_FORMAT_ASTC_4x4_UNORM_BLOCK && vkFormat <= VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
+    const bool     bc5     = vkFormat == kVkFormatBc5UnormBlock;
+    const bool     astc    = vkFormat >= kVkFormatAstc4x4Unorm && vkFormat <= kVkFormatAstc12x12Srgb;
     const uint32_t samples = bc5 ? 2u : 1u;
     const uint32_t blockSz = 24 + 16 * samples;
     const uint32_t dfdLen  = 4 + blockSz;

@@ -1,4 +1,5 @@
 #include "AndroidWindow.hpp"
+#include "../PlatformAlert.hpp"
 
 #ifdef __ANDROID__
 #include <android/looper.h>
@@ -72,3 +73,11 @@ VkSurfaceKHR AndroidWindow::createSurface(VkInstance) {
 std::vector<const char*> AndroidWindow::getRequiredInstanceExtensions() const {
     return {};
 }
+
+namespace hplat {
+
+void showFatalError(const char* /*title*/, const char* /*message*/) {
+    // Android 에서는 창 대화상자가 없으므로 로그로만 남깁니다.
+}
+
+} // namespace hplat

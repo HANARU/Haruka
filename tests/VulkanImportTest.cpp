@@ -40,6 +40,14 @@ bool readFile(const std::string& path, std::vector<uint8_t>& out) {
     return true;
 }
 
+bool hasExtensionLower(const std::string& path, const char* ext) {
+    const size_t elen = std::strlen(ext);
+    if (path.size() < elen) return false;
+    std::string tail = path.substr(path.size() - elen);
+    std::transform(tail.begin(), tail.end(), tail.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+    return tail == ext;
+}
+
 // vulkan_core.h 에서 허용할 함수 이름을 뽑습니다. 블록은 "#define VK_VERSION_1_0 1" · "#define VK_KHR_surface 1" 같은 줄로
 // 바뀌고, 그 안의 "VKAPI_CALL vkXxx(" 원형을 모읍니다.
 std::set<std::string> allowedFromHeader(const std::string& text) {
@@ -112,6 +120,119 @@ bool importsFrom(const std::vector<uint8_t>& pe, const std::string& dllName, std
     return true;
 }
 
+// COFF 아카이브(.lib) 안의 오브젝트(.obj, volk 제외)에서 미해결 외부 기호 중 vk[A-Z]... 이름을 모읍니다.
+bool undefinedVkSymbolsFromLib(const std::vector<uint8_t>& ar, std::set<std::string>& outSyms,
+                               size_t& outObjCount, std::string& err) {
+    if (ar.size() < 8 || std::memcmp(ar.data(), "!<arch>\n", 8) != 0) {
+        err = "not a COFF archive";
+        return false;
+    }
+    auto u16 = [&](size_t o) -> uint16_t {
+        return o + 2 <= ar.size() ? (uint16_t)(ar[o] | (ar[o + 1] << 8)) : 0;
+    };
+    auto u32 = [&](size_t o) -> uint32_t {
+        return o + 4 <= ar.size()
+            ? (uint32_t)ar[o] | ((uint32_t)ar[o + 1] << 8) | ((uint32_t)ar[o + 2] << 16) | ((uint32_t)ar[o + 3] << 24)
+            : 0;
+    };
+
+    std::string longNames;
+    size_t pos = 8;
+    outObjCount = 0;
+    while (pos + 60 <= ar.size()) {
+        if (pos & 1) ++pos;
+        if (pos + 60 > ar.size()) break;
+
+        const char* hdr = reinterpret_cast<const char*>(&ar[pos]);
+        std::string rawName(hdr, 16);
+        while (!rawName.empty() && (rawName.back() == ' ' || rawName.back() == '\0')) rawName.pop_back();
+
+        std::string sizeStr(hdr + 48, 10);
+        size_t memberSize = 0;
+        try {
+            memberSize = (size_t)std::stoull(sizeStr);
+        } catch (...) {
+            err = "bad archive member size";
+            return false;
+        }
+        const size_t dataOff = pos + 60;
+        if (dataOff + memberSize > ar.size()) {
+            err = "truncated archive member";
+            return false;
+        }
+        pos = dataOff + memberSize;
+
+        if (rawName == "//") {
+            longNames.assign(reinterpret_cast<const char*>(&ar[dataOff]), memberSize);
+            continue;
+        }
+        if (rawName == "/" || rawName == "/SYM64/") continue;
+
+        std::string memberName = rawName;
+        if (memberName.size() >= 2 && memberName[0] == '/' && std::isdigit((unsigned char)memberName[1])) {
+            const size_t off = (size_t)std::stoull(memberName.substr(1));
+            if (off < longNames.size()) {
+                size_t end = longNames.find('\0', off);
+                if (end == std::string::npos) end = longNames.size();
+                const size_t nl = longNames.find('\n', off);
+                if (nl != std::string::npos && nl < end) end = nl;
+                memberName = longNames.substr(off, end - off);
+            }
+        }
+        std::string lowerName = memberName;
+        std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                       [](unsigned char c) { return (char)std::tolower(c); });
+        if (lowerName.find("volk") != std::string::npos) continue;
+
+        if (memberSize < 20) continue;
+        // Anonymous / LTCG / Import object 는 건너뜁니다.
+        const uint16_t machine = u16(dataOff);
+        if (machine == 0x0000) continue;
+
+        const uint32_t symOff  = u32(dataOff + 8);
+        const uint32_t symCnt  = u32(dataOff + 12);
+        if (!symOff || !symCnt) continue;
+
+        const size_t absSym = dataOff + symOff;
+        const size_t absStr = absSym + (size_t)symCnt * 18;
+        if (absStr + 4 > dataOff + memberSize) continue;
+        const uint32_t strSize = u32(absStr);
+        if (absStr + strSize > dataOff + memberSize) continue;
+
+        ++outObjCount;
+        for (uint32_t i = 0; i < symCnt; ++i) {
+            const size_t s = absSym + (size_t)i * 18;
+            const int16_t  sec   = (int16_t)u16(s + 12);
+            const uint8_t  cls   = ar[s + 16];
+            const uint8_t  nAux  = ar[s + 17];
+            if (sec == 0 && cls == 2) {   // IMAGE_SYM_UNDEFINED && IMAGE_SYM_CLASS_EXTERNAL
+                std::string sym;
+                if (u32(s) == 0) {
+                    const uint32_t strOff = u32(s + 4);
+                    if (strOff < strSize) {
+                        const char* p = reinterpret_cast<const char*>(&ar[absStr + strOff]);
+                        const size_t maxLen = strSize - strOff;
+                        size_t len = 0;
+                        while (len < maxLen && p[len] != '\0') ++len;
+                        sym.assign(p, len);
+                    }
+                } else {
+                    const char* p = reinterpret_cast<const char*>(&ar[s]);
+                    size_t len = 0;
+                    while (len < 8 && p[len] != '\0') ++len;
+                    sym.assign(p, len);
+                }
+                if (sym.rfind("__imp_", 0) == 0) sym.erase(0, 6);
+                if (sym.size() > 2 && sym[0] == 'v' && sym[1] == 'k' && std::isupper((unsigned char)sym[2])) {
+                    outSyms.insert(sym);
+                }
+            }
+            i += nAux;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -135,8 +256,16 @@ int main(int argc, char** argv) {
           !allowed.count("vkCmdPushDescriptorSetKHR") && !allowed.count("vkCmdPipelineBarrier2KHR"),
           "1.2 이상 코어 · 확장 함수는 들어 있지 않음");
 
+    std::vector<std::string> exes, libs;
     for (int i = 1; i < argc - 1; ++i) {
-        const std::string exe = argv[i];
+        const std::string p = argv[i];
+        if (hasExtensionLower(p, ".lib")) libs.push_back(p);
+        else                              exes.push_back(p);
+    }
+    check(!exes.empty(), "검사할 실행 파일(.exe)이 있음");
+    check(!libs.empty(), "검사할 정적 라이브러리(.lib)가 있음");
+
+    for (const std::string& exe : exes) {
         const std::string name = exe.substr(exe.find_last_of("/\\") + 1);
         std::printf("\n== (가) %s PE 가져오기 표 ==\n", name.c_str());
         std::vector<uint8_t> pe;

@@ -66,3 +66,6 @@ public:
 private:
     void releaseSound();
 };
+
+// audio 모듈의 컴포넌트(AudioComponent · ReverbZoneComponent)를 ComponentRegistry 에 등록합니다.
+void registerAudioComponents();

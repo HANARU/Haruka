@@ -1,8 +1,10 @@
 #include "AudioComponent.hpp"
+#include "ReverbZoneComponent.hpp"
 #include "../vfs/LogicalPath.hpp"
 #include "../scene/Actor.hpp"
 #include "AudioSystem.hpp"
 #include "../scene/ComponentFields.hpp"
+#include "../scene/ComponentRegistry.hpp"
 #include "../scene/World.hpp"
 #include "../core/HText.hpp"
 #include "../core/Subtitles.hpp"
@@ -241,5 +243,17 @@ bool AudioComponent::readField(const std::string& key, const std::string& value)
     else return false;
     if (!ok) reportBadField(key, value);
     return true;
+}
+
+void registerAudioComponents() {
+    auto& r = ComponentRegistry::get();
+    if (!r.find("AudioComponent")) {
+        r.registerType<AudioComponent>("AudioComponent", "Audio");
+        r.setCategory("AudioComponent", "Audio");
+    }
+    if (!r.find("ReverbZoneComponent")) {
+        r.registerType<ReverbZoneComponent>("ReverbZoneComponent", "Reverb Zone");
+        r.setCategory("ReverbZoneComponent", "Audio");
+    }
 }
 

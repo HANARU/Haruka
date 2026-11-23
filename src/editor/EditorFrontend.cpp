@@ -17,6 +17,8 @@ IEngineFrontend::Policy EditorApp::policy() const {
     return p;
 }
 
-std::unique_ptr<IEngineFrontend> createEngineFrontend() {
-    return std::make_unique<EditorApp>();
+std::unique_ptr<IEngineFrontend> createEngineFrontend(const EngineFrontendConfig& config) {
+    auto app = std::make_unique<EditorApp>();
+    app->setFrontendConfig(config);
+    return app;
 }

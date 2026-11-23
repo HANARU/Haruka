@@ -1,4 +1,6 @@
 #include "NavAgentComponent.hpp"
+#include "NavMeshVolumeComponent.hpp"
+#include "AIBrainComponent.hpp"
 #include "NavEvents.hpp"
 #include "NavLog.hpp"
 
@@ -6,6 +8,7 @@
 #include "../physics/PhysicsSystem.hpp"
 #include "../scene/Actor.hpp"
 #include "../scene/ComponentFields.hpp"
+#include "../scene/ComponentRegistry.hpp"
 #include "../scene/Reflect.hpp"
 #include "../scene/World.hpp"
 
@@ -307,4 +310,20 @@ std::string NavAgentComponent::readOnlyInfo() const {
     if (!path_.points.empty())
         s += "\nPath: " + std::to_string(path_.points.size()) + " points, " + navPathResultName(path_.result);
     return s;
+}
+
+void registerNavComponents() {
+    auto& r = ComponentRegistry::get();
+    if (!r.find("NavMeshVolumeComponent")) {
+        r.registerType<NavMeshVolumeComponent>("NavMeshVolumeComponent", "Nav Mesh Volume");
+        r.setCategory("NavMeshVolumeComponent", "Navigation & AI");
+    }
+    if (!r.find("NavAgentComponent")) {
+        r.registerType<NavAgentComponent>("NavAgentComponent", "Nav Agent");
+        r.setCategory("NavAgentComponent", "Navigation & AI");
+    }
+    if (!r.find("AIBrainComponent")) {
+        r.registerType<AIBrainComponent>("AIBrainComponent", "AI Brain");
+        r.setCategory("AIBrainComponent", "Navigation & AI");
+    }
 }

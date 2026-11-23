@@ -169,7 +169,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // <프로젝트>/Config 를 /Config/ 으로 마운트합니다.
     bool projectFolder = false;
     const bool explicitProject = !options.projectDir.empty();
-    const std::string& rawProjectDir = explicitProject ? options.projectDir : policy_.projectDir;
+    const std::string& rawProjectDir = !policy_.projectDir.empty() ? policy_.projectDir : options.projectDir;
     if (!rawProjectDir.empty()) {
         std::error_code ec;
         const std::filesystem::path project = rawProjectDir;

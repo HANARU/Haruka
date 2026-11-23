@@ -12,13 +12,17 @@
 //
 // 실행: build/Release/HarukaWindowTest.exe
 
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 #include "../src/platform/glfw/GlfwPlatform.hpp"
 #include "../src/platform/glfw/GlfwWindow.hpp"
 #include "../src/platform/WindowPlacement.hpp"
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
 #endif

@@ -45,3 +45,7 @@ module main:      core, math, vfs, memory, platform, input, ui, scene, geometry,
 
 # ── 허용 목록: 아직 고치지 않은 위반 ──
 # (S5d 완료로 허용 목록 0개)
+
+# ── 시뮬레이션 층 그래픽 · 창 · XR 외부 헤더 금지 (E1b, 2026-11-23) ──
+# 이 모듈들은 <volk.h> · <vulkan/...> · <GLFW/...> · <openxr/...> 를 include 할 수 없습니다.
+sim_no_gfx: math, vfs, core, scene, geometry, vfx, physics, audio, nav

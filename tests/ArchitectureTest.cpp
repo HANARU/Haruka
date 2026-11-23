@@ -67,6 +67,7 @@ std::string moduleOf(const std::string& rel) {
 struct Rules {
     std::map<std::string, std::set<std::string>> deps;   // 모듈 → 허용하는 대상 모듈
     std::set<std::pair<std::string, std::string>> allow;  // (포함하는 파일, 포함되는 파일), src 기준
+    std::set<std::string> simNoGfx;                       // <volk.h>·<vulkan/...>·<GLFW/...>·<openxr/...> 금지 모듈(E1b)
     std::vector<std::string> errors;
 };
 
@@ -93,6 +94,8 @@ Rules loadRules(const fs::path& file) {
             if (arrow == std::string::npos) { r.errors.push_back("line " + std::to_string(lineNo) + ": allow without '->'"); continue; }
             const std::string from = trim(line.substr(6, arrow - 6)), to = trim(line.substr(arrow + 2));
             if (!r.allow.insert({ from, to }).second) r.errors.push_back("line " + std::to_string(lineNo) + ": duplicate allow");
+        } else if (line.rfind("sim_no_gfx:", 0) == 0) {
+            for (const std::string& w : words(line.substr(11))) r.simNoGfx.insert(w);
         } else {
             r.errors.push_back("line " + std::to_string(lineNo) + ": unknown line '" + line + "'");
         }
@@ -235,6 +238,34 @@ int main(int argc, char** argv) {
     for (const auto& p : rules.allow) if (!used.count(p)) stale.push_back(p.first + " -> " + p.second);
     for (const std::string& s : stale) std::printf("    필요 없어진 항목(지우십시오): %s\n", s.c_str());
     check(stale.empty(), "허용 목록의 항목이 모두 아직 남은 위반(고친 것은 목록에서 뺌)");
+
+    // ── 시뮬레이션 층 그래픽 · 창 · XR 외부 헤더 금지 (E1b) ──
+    std::vector<std::string> simGfxBad;
+    for (const std::string& rel : files) {
+        if (!rules.simNoGfx.count(moduleOf(rel))) continue;
+        std::ifstream in(src / rel);
+        int n = 0;
+        for (std::string line; std::getline(in, line);) {
+            ++n;
+            const std::string t = trim(line);
+            if (t.rfind("#", 0) != 0) continue;
+            const std::string d = trim(t.substr(1));
+            if (d.rfind("include", 0) != 0) continue;
+            const size_t a0 = d.find('<');
+            if (a0 == std::string::npos) continue;
+            const size_t a1 = d.find('>', a0 + 1);
+            if (a1 == std::string::npos) continue;
+            const std::string hdr = d.substr(a0 + 1, a1 - a0 - 1);
+            if (hdr == "volk.h" || hdr.rfind("vulkan/", 0) == 0 ||
+                hdr.rfind("GLFW/", 0) == 0 || hdr.rfind("openxr/", 0) == 0) {
+                simGfxBad.push_back(rel + ":" + std::to_string(n) + "  <" + hdr + ">");
+            }
+        }
+    }
+    std::printf("\n[시뮬레이션 외부 헤더] 대상 모듈 %zu 개, 금지 include %zu 개\n", rules.simNoGfx.size(), simGfxBad.size());
+    for (const std::string& v : simGfxBad) std::printf("    금지 include: %s\n", v.c_str());
+    check(!rules.simNoGfx.empty() && simGfxBad.empty(),
+          "시뮬레이션 모듈이 <volk.h> · <vulkan/...> · <GLFW/...> · <openxr/...> 를 include하지 않음");
 
     // ── 정적 시스템 포인터 · 전역 싱글턴 (S3) ──
     // 줄 단위로 봅니다(// 뒤 주석은 뺌). 함수 안의 지역 정적(로그 레지스트리의 늦은 생성 등)은 대상이 아닙니다.

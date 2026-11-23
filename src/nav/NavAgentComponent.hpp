@@ -65,3 +65,6 @@ private:
     float     fallSpeed_ = 0.f;
     float     stuckTime_ = 0.f;
 };
+
+// nav 모듈의 컴포넌트(NavMeshVolumeComponent · NavAgentComponent · AIBrainComponent)를 ComponentRegistry 에 등록합니다.
+void registerNavComponents();
