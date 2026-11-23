@@ -1,0 +1,1 @@
+# Haruka embedded Python packages (currently none; reserved for future Editor automation / MCP)

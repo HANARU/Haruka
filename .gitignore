@@ -1,5 +1,7 @@
 # ── Build output (CMake / MSVC) — 1.2GB, never track ──
 /build/
+# 묶음별 검증 구성(예: build_e0b_nosdk, 2026-11-23 엔진 설치 작업)
+/build_*/
 
 # ── Logs (build logs, run output) ──
 /Logs/
@@ -42,6 +44,15 @@ Projects/*/Saved/
 
 # ── Machine-specific launcher shortcut (absolute path; kept on disk, not tracked) ──
 /HarukaEngine.lnk
+
+# ── Embedded Python (downloaded by Setup.bat, E3) ──
+/ThirdParty/Python/
+
+# ── Python bytecode cache (Tools/Setup 등을 동봉 Python으로 돌릴 때 생김) ──
+__pycache__/
+
+# ── Per-machine engine path override for projects (E3) ──
+Haruka.user.ini
 
 # ── Claude local (machine-specific) settings ──
 .claude/settings.local.json

@@ -13,11 +13,13 @@
 //   company        회사/제작사 이름 (쓰기 루트 · 패키징용)
 //   packageId      Android 패키지 ID (예: com.haruka.game)
 //   engineVersion  최소 엔진 버전 (예: 0.1.0)
+//   engine         (선택) 엔진 연결 및 버전 조건 (예: haruka>=0.1)
 struct ProjectDescriptor {
     std::string name;
     std::string company;
     std::string packageId;
     std::string engineVersion;
+    std::string engine;
 };
 
 namespace project_descriptor {
@@ -52,6 +54,7 @@ inline ProjectDescriptor parse(const std::string& text,
         else if (key == "company")       d.company       = val;
         else if (key == "packageId")     d.packageId     = val;
         else if (key == "engineVersion") d.engineVersion = val;
+        else if (key == "engine")        d.engine        = val;
         else warnings.push_back("unknown key '" + key + "'");
     }
     if (d.name.empty())          errors.push_back("missing required key 'name'");

@@ -159,10 +159,11 @@ int main() {
         {
             std::vector<std::string> w, e;
             ProjectDescriptor pd = project_descriptor::parse(
-                "# comment\nname = Samples\ncompany = Haruka\npackageId = com.haruka.game\nengineVersion = 0.1.0\nextra = 1\n", w, e);
+                "# comment\nname = Samples\ncompany = Haruka\npackageId = com.haruka.game\nengineVersion = 0.1.0\nengine = haruka>=0.1\nextra = 1\n", w, e);
             check(e.empty() && w.size() == 1 && pd.name == "Samples" && pd.company == "Haruka" &&
-                  pd.packageId == "com.haruka.game" && pd.engineVersion == "0.1.0",
-                  ".hproject 정상 파싱 + 모르는 키 경고");
+                  pd.packageId == "com.haruka.game" && pd.engineVersion == "0.1.0" &&
+                  pd.engine == "haruka>=0.1",
+                  ".hproject 정상 파싱 + engine 키 + 모르는 키 경고");
             w.clear(); e.clear();
             project_descriptor::parse("name = OnlyName\n", w, e);
             check(e.size() == 3, "필수 키 누락 시 오류");

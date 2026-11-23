@@ -43,31 +43,14 @@ set ERR_LOG=%ROOT%Logs\build_error.txt
 :: Clear previous error log
 if exist "%ERR_LOG%" del /f /q "%ERR_LOG%"
 
-:: --- 1. Ensure VULKAN_SDK environment is loaded in current session ----------
-if "%VULKAN_SDK%"=="" (
-    for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v VULKAN_SDK 2^>nul') do set "VULKAN_SDK=%%b"
-)
-if "%VULKAN_SDK%"=="" (
-    for /f "tokens=2*" %%a in ('reg query "HKCU\Environment" /v VULKAN_SDK 2^>nul') do set "VULKAN_SDK=%%b"
-)
-if "%VULKAN_SDK%"=="" (
-    for /d %%d in (C:\VulkanSDK\*) do if exist "%%d\Bin\glslc.exe" set "VULKAN_SDK=%%d"
-)
-if not "%VULKAN_SDK%"=="" (
-    set "PATH=%VULKAN_SDK%\Bin;%PATH%"
-    echo [build] Using Vulkan SDK: %VULKAN_SDK%
-) else (
-    echo [build] WARNING: VULKAN_SDK not found. CMake may fail to find Vulkan.
-)
-
-:: --- 2. Clean cache if requested --------------------------------------------
+:: --- 1. Clean cache if requested --------------------------------------------
 if "%DO_CLEAN%"=="1" (
     echo [build] Cleaning existing CMake cache...
     if exist "%BUILD_DIR%\CMakeCache.txt" del /f /q "%BUILD_DIR%\CMakeCache.txt"
     if exist "%BUILD_DIR%\CMakeFiles" rmdir /s /q "%BUILD_DIR%\CMakeFiles"
 )
 
-:: --- 3. Detect Visual Studio Generator --------------------------------------
+:: --- 2. Detect Visual Studio Generator --------------------------------------
 set VS_GEN=Visual Studio 18 2026
 if not exist "C:\Program Files\Microsoft Visual Studio\18" (
     if exist "C:\Program Files\Microsoft Visual Studio\2022" (
@@ -76,14 +59,14 @@ if not exist "C:\Program Files\Microsoft Visual Studio\18" (
 )
 echo [build] Target Generator: %VS_GEN%
 
-:: --- 4. Configure CMake -----------------------------------------------------
+:: --- 3. Configure CMake -----------------------------------------------------
 if not exist "%BUILD_DIR%\CMakeCache.txt" (
     echo [build] Configuring CMake...
     cmake -S "%ROOT%." -B "%BUILD_DIR%" -G "%VS_GEN%" -A x64
     if errorlevel 1 goto fail
 )
 
-:: --- 5. Build ---------------------------------------------------------------
+:: --- 4. Build ---------------------------------------------------------------
 echo [build] Building %CONFIG%... (log: %LOG%)
 cmake --build "%BUILD_DIR%" --config %CONFIG% --parallel %NUMBER_OF_PROCESSORS% -- /p:PreferredUILang=en-US > "%LOG%" 2>&1
 if errorlevel 1 goto fail

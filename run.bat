@@ -27,20 +27,9 @@ set LOG=%LOGS_DIR%\latest.txt
 
 if not exist "%EXE%" (
     echo [run] Executable not found: %EXE%
-    echo [run] Run build.bat first.
+    echo [run] Run Setup.bat or build.bat first.
     if not defined HARUKA_NO_PAUSE pause
     endlocal & exit /b 1
-)
-
-:: --- 1. Ensure VULKAN_SDK environment is loaded -----------------------------
-if "%VULKAN_SDK%"=="" (
-    for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v VULKAN_SDK 2^>nul') do set "VULKAN_SDK=%%b"
-)
-if "%VULKAN_SDK%"=="" (
-    for /d %%d in (C:\VulkanSDK\*) do if exist "%%d\Bin\glslc.exe" set "VULKAN_SDK=%%d"
-)
-if not "%VULKAN_SDK%"=="" (
-    set "PATH=%VULKAN_SDK%\Bin;%PATH%"
 )
 
 if not exist "%LOGS_DIR%" mkdir "%LOGS_DIR%"

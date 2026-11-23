@@ -3,3 +3,4 @@ name = Samples
 company = Haruka
 packageId = com.haruka.game
 engineVersion = 0.1.0
+engine = haruka>=0.1
