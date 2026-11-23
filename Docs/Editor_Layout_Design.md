@@ -201,7 +201,8 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
   View(Viewport: Frame Selected · Gizmo Size), Window(Panels: 등록된 패널 + 열림 체크 | Layout: Reset Layout).
   예전 자리에서 옮긴 것: Frame Selected · Gizmo Size(Edit → View), Reset Layout(View → Window), Language(View → Edit 하위 메뉴).
 - 키보드: 열린 메뉴에서 ↑ ↓(소제목 · 구분선 · 꺼진 항목 건너뜀) · Enter · → (하위 메뉴 · 다음 메뉴) · ← (하위 닫기 · 이전 메뉴) ·
-  Esc(한 단계). 메뉴가 열려 있는 동안 그 창의 키는 단축키 · 글 칸 · Q W E R 로 가지 않습니다. Alt · F10 · 가속 글자는 없습니다.
+  Esc(한 단계). 메뉴가 열려 있는 동안 그 창의 키는 단축키 · 글 칸 · Q W E R 로 가지 않습니다.
+- 아이콘 · Alt 메뉴 키보드(C1, 2026-11-23): 상단 · 오른쪽 메뉴 · 툴바 명령에 모두 Lucide 아이콘을 붙입니다(언어 · 열거 콤보는 체크 전용, `Window > Panels`는 열림=체크 · 닫힘=패널 아이콘). 메인 창이 키보드 창일 때 Alt 탭으로 메뉴 바 모드에 들어가 ← → · ↓/Enter/Space · 가속 글자로 열 수 있고, Alt+가속 글자로 바로 엽니다(F10 미지원). 가속 글자는 Alt를 누르거나 메뉴 바 모드일 때만 보이며(영어 밑줄, 비영어 `(F)`), 열린 드롭다운에서는 글자 키로 시작 항목을 고르거나(하나뿐이면 실행) 이동합니다.
 - 같은 창 안 팝업은 한 번에 하나(새 팝업이 뜨면 다른 팝업이 닫힘), 팝업이 덮은 자리에서는 그 밑 위젯의 툴팁이 뜨지 않습니다.
 - 콘솔 명령(B1): 에디터 콘솔(`CVarRegistry`)에서 `cmd <id>` 로 레지스트리 명령을 메뉴와 같은 경로(`execute`)로 실행하고(콘솔 칸 포커스 상태이므로 `needsNoTextFocus` 등 단축키 전용 조건은 적용하지 않음, 없는 id 면 경고 로그와 비슷한 id 최대 5개 안내), `cmd.list [filter]` 로 등록된 명령을 id 순(id · 지금 문화권 라벨 · 단축키 글 · 실행 가능 여부)으로 보입니다. 게임 실행 파일 · Android 에는 등록하지 않습니다.
 
