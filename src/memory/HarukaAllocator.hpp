@@ -1,5 +1,6 @@
 #pragma once
-#include <vulkan/vulkan.h>
+#include "MemoryTypeSelect.hpp"
+#include <volk.h>
 #include <cstdint>
 #include <vector>
 
@@ -10,7 +11,7 @@
 constexpr VkDeviceSize kZoneASize   =   64ULL * 1024 * 1024;  //  64MB : 엔진 구조체
 constexpr VkDeviceSize kZoneBSize   =  896ULL * 1024 * 1024;  // 896MB : 에셋 뱅크 (4K 크기 의존 타깃 + permanent ~216MB)
 constexpr VkDeviceSize kZoneCSize   =   64ULL * 1024 * 1024;  //  64MB : 동적 버퍼 (실사용 ~0.5MB, 128x 여유)
-constexpr VkDeviceSize kHeapTarget  = 1024ULL * 1024 * 1024;  //   1GB : 정확히 이 크기로 한 번 잡음
+constexpr VkDeviceSize kHeapTarget  = 1024ULL * 1024 * 1024;  //   1GB : 가상 힙 예산 (청크 단위로 필요 시 커밋)
 
 constexpr VkDeviceSize kZoneAOffset = 0;
 constexpr VkDeviceSize kZoneBOffset = kZoneAOffset + kZoneASize;
@@ -29,12 +30,14 @@ enum class AllocZone : uint8_t { A, B, C, Dedicated };
 enum class ImageMemory : uint8_t { ZoneB, LazyPreferred };
 
 struct HarukaAllocation {
-    VkDeviceSize   offset    = 0;
-    VkDeviceSize   size      = 0;
-    void*          mappedPtr = nullptr;
-    AllocZone      zone      = AllocZone::A;
-    // Zone B 이미지의 독립 GPU 대체 메모리(ReBAR 없는 PC 등), 또는 Dedicated 할당의 메모리 자체
-    VkDeviceMemory auxMem    = VK_NULL_HANDLE;
+    VkDeviceSize   offset     = 0;
+    VkDeviceSize   size       = 0;
+    void*          mappedPtr  = nullptr;
+    AllocZone      zone       = AllocZone::A;
+    bool           isLarge    = false;   // 128 MB 청크를 넘는 Zone B 큰 요청(전용 할당 후 freeB 에서 해제)
+    bool           auxCoreMem = false;   // auxMem 이 핵심 힙 memType 에서 잡혔는지(heapSize 추적용)
+    // Zone B 이미지의 독립 GPU 대체 메모리(ReBAR 없는 PC 등), 또는 Dedicated / LargeB 할당의 메모리 자체
+    VkDeviceMemory auxMem     = VK_NULL_HANDLE;
 
     bool isValid() const { return size > 0; }
 };
@@ -82,17 +85,20 @@ public:
     VkResult bind(VkBuffer buf, const HarukaAllocation& alloc);
     VkResult bind(VkImage  img, HarukaAllocation& alloc);  // may set auxMem on discrete GPU
 
+    // 프레임 밖 안전한 시점(구동 끝 · 장면 불러오기 · Play/XR 시작)에 여유 청크를 미리 커밋해 프레임 안 멈춤을 막습니다.
+    void precommit(VkDeviceSize minZoneBFreeBytes = 64ULL * 1024 * 1024);
+    void setInFrame(bool on) { inFrame_ = on; }
+
     // 조회
-    VkDeviceMemory heap()          const { return hHeap;      }
-    void*          mappedBase()    const { return heapMapped;  }
     uint32_t       memTypeIndex()  const { return memType;     }
     VkDeviceSize   allocatedSize() const { return heapSize;    }
 
-    // Zone B 에서 지금 잡혀 있는 바이트(빈 목록 합의 나머지, 정렬 틈 포함). 텍스처 메모리 로그(Docs/Texture_Compression.md D12)가 씁니다.
+    // Zone B 에서 지금 잡혀 있는 바이트(빈 목록 합의 나머지 + 큰 요청 전용 할당). 텍스처 메모리 로그(Docs/Texture_Compression.md D12)가 씁니다.
     VkDeviceSize zoneBUsed() const {
         VkDeviceSize freeBytes = 0;
-        for (const FreeBlock& b : freeListB) freeBytes += b.size;
-        return freeBytes <= kZoneBSize ? kZoneBSize - freeBytes : 0;
+        for (const hmem::FreeBlock& b : freeListB) freeBytes += b.size;
+        const VkDeviceSize listUsed = freeBytes <= kZoneBSize ? kZoneBSize - freeBytes : 0;
+        return listUsed + largeBBytes_;
     }
 
     AllocStats getStats() const {
@@ -105,20 +111,36 @@ public:
     }
 
 private:
+    static constexpr VkDeviceSize kZoneBChunkSize  = 128ULL * 1024 * 1024;
+    static constexpr size_t       kZoneBChunkCount = 7;
+    static constexpr size_t       kTotalChunks     = 1 + kZoneBChunkCount + 1; // A(1) + B(7) + C(1)
+    static_assert(kZoneBChunkCount * kZoneBChunkSize == kZoneBSize, "Zone B must be an exact multiple of chunk size");
+
+    struct Chunk {
+        VkDeviceMemory mem    = VK_NULL_HANDLE;
+        void*          mapped = nullptr;
+        VkDeviceSize   base   = 0;
+        VkDeviceSize   size   = 0;
+    };
+
+    static size_t chunkForOffset(VkDeviceSize offset);
+    bool          ensureChunk(size_t idx);
+
     VkDevice         device     = VK_NULL_HANDLE;
     VkPhysicalDevice physDevice = VK_NULL_HANDLE;
-    VkDeviceMemory hHeap      = VK_NULL_HANDLE;
-    void*          heapMapped = nullptr;
-    uint32_t       memType    = UINT32_MAX;
-    VkDeviceSize   heapSize   = 0;
+    Chunk            chunks_[kTotalChunks]{};
+    uint32_t         memType    = UINT32_MAX;
+    VkDeviceSize     heapSize   = 0;
+    hmem::CoreHeapPlan plan_{};
+    VkDeviceSize       maxAllocationSize_ = 0;
 
     // Zone A
     VkDeviceSize   cursorA    = kZoneAOffset;
 
     // Zone B
-    struct FreeBlock { VkDeviceSize offset, size; };
-    std::vector<FreeBlock> freeListB;
-    VkDeviceSize           bigGranularity = 1;
+    std::vector<hmem::FreeBlock> freeListB;
+    VkDeviceSize                 bigGranularity = 1;
+    VkDeviceSize                 largeBBytes_   = 0;
 
     // Zone C
     VkDeviceSize           ringHeadC = kZoneCOffset;
@@ -128,6 +150,7 @@ private:
     uint32_t     dedicatedCount_ = 0;
     VkDeviceSize dedicatedBytes_ = 0;
     bool         forceDedicated_ = false;
+    bool         inFrame_        = false;
     bool         loggedLazy_     = false;   // 지연 할당을 처음 썼을 때 한 번 알림(그 뒤는 Verbose)
     bool         loggedNoLazy_   = false;   // 지연 할당 타입이 없음을 한 번 알림
     bool         loggedAux_      = false;   // Zone B 이미지의 대체 메모리를 처음 썼을 때 한 번 알림

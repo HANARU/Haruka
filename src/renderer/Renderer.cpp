@@ -77,96 +77,169 @@ void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
     deviceHooks_ = deviceHooks;
     // 창이 표면을 주지 않으면(--headless · Quest) 표면 · 스왑체인 없이 XR 이미지에만 그립니다(2026-10-31).
     headless_    = !window->providesSurface();
+    auto elapsedMs = [](std::chrono::steady_clock::time_point t0) {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    };
+
+    const auto tDev0 = std::chrono::steady_clock::now();
     createInstance();
     setupDebugMessenger();
     createSurface();
     pickPhysicalDevice();
     createLogicalDevice();
-    allocator.setForceDedicated(forceDedicatedMsaa_);
-    allocator.init(device, physDevice, deviceCaps_.maxMemoryAllocationSize);
+    startupTimings_.deviceMs = elapsedMs(tDev0);
 
-    if (headless_) {
-        // 이미지 0장 · 넓이 없음. 명목 포맷은 톤매핑 렌더 패스와 XR 선호 포맷, 명목 크기는 크기 의존 타깃에 씁니다.
-        swapchain_ = std::make_unique<NullSwapchain>(VK_FORMAT_R8G8B8A8_SRGB, VkExtent2D{ 64, 64 });
-        HLOG(LogRenderer, Log) << "Renderer: no surface (headless); drawing only to XR or synthetic eye images";
-    } else {
-        auto swap = std::make_unique<GlfwSwapchain>(
-            window, surface, physDevice, device,
-            queueFamilies_.graphics.value(), queueFamilies_.present.value());
-        // XR 중에는 헤드셋이 루프 속도를 정합니다. 데스크톱 표시가 모니터 주사율로 기다리면 헤드셋
-        // 프레임을 놓치므로 기다리지 않는 표시 방식을 고릅니다.
-        swap->setPreferNonBlocking(xrCompatible_);
-        swapchain_ = std::move(swap);
+    {
+        HPROF_SCOPE("Renderer.Init.Swapchain");
+        const auto t0 = std::chrono::steady_clock::now();
+        if (headless_) {
+            // 이미지 0장 · 넓이 없음. 명목 포맷은 톤매핑 렌더 패스와 XR 선호 포맷, 명목 크기는 크기 의존 타깃에 씁니다.
+            swapchain_ = std::make_unique<NullSwapchain>(VK_FORMAT_R8G8B8A8_SRGB, VkExtent2D{ 64, 64 });
+            HLOG(LogRenderer, Log) << "Renderer: no surface (headless); drawing only to XR or synthetic eye images";
+        } else {
+            auto swap = std::make_unique<GlfwSwapchain>(
+                window, surface, physDevice, device,
+                queueFamilies_.graphics.value(), queueFamilies_.present.value());
+            // XR 중에는 헤드셋이 루프 속도를 정합니다. 데스크톱 표시가 모니터 주사율로 기다리면 헤드셋
+            // 프레임을 놓치므로 기다리지 않는 표시 방식을 고릅니다.
+            swap->setPreferNonBlocking(xrCompatible_);
+            swapchain_ = std::move(swap);
+        }
+        swapchain_->create();
+        startupTimings_.swapchainMs = elapsedMs(t0);
     }
-    swapchain_->create();
 
-    depthFormat = findDepthFormat();
-    createCommandPool();
-    createSamplers();
-    createPipelineCache();
+    {
+        HPROF_SCOPE("Renderer.Init.Alloc");
+        const auto t0 = std::chrono::steady_clock::now();
+        allocator.setForceDedicated(forceDedicatedMsaa_);
+        allocator.init(device, physDevice, deviceCaps_.maxMemoryAllocationSize);
+        startupTimings_.allocMs = elapsedMs(t0);
+    }
 
-    // RenderContext 채우기 — 이후 모든 헬퍼/패스가 이 번들 경유
-    rc_.device        = device;
-    rc_.physDev       = physDevice;
-    rc_.gfxQueue      = graphicsQueue;
-    rc_.cmdPool       = cmdPool;
-    rc_.allocator     = &allocator;
-    rc_.pipelineCache = pipelineCache_;
-    rc_.msaaSamples   = msaaSamples_;
-    rc_.swapFormat    = swapchain_->format();
-    rc_.depthFormat   = depthFormat;
-    rc_.extent        = swapchain_->extent();
-    // 뷰포트 미지정 시 씬은 창 전체로 렌더(오프셋 0, 단안이면 renderExtent == extent).
-    rc_.viewportOffset = { 0, 0 };
-    rc_.viewportExtent = rc_.extent;
-    rc_.renderExtent   = desiredRenderExtent();
-    syncSceneLayers();
-    panels_.init(&rc_);
+    {
+        HPROF_SCOPE("Renderer.Init.PoolCache");
+        const auto t0 = std::chrono::steady_clock::now();
+        depthFormat = findDepthFormat();
+        createCommandPool();
+        createSamplers();
+        createPipelineCache();
+
+        // RenderContext 채우기 — 이후 모든 헬퍼/패스가 이 번들 경유
+        rc_.device        = device;
+        rc_.physDev       = physDevice;
+        rc_.gfxQueue      = graphicsQueue;
+        rc_.cmdPool       = cmdPool;
+        rc_.allocator     = &allocator;
+        rc_.pipelineCache = pipelineCache_;
+        rc_.msaaSamples   = msaaSamples_;
+        rc_.swapFormat    = swapchain_->format();
+        rc_.depthFormat   = depthFormat;
+        rc_.extent        = swapchain_->extent();
+        // 뷰포트 미지정 시 씬은 창 전체로 렌더(오프셋 0, 단안이면 renderExtent == extent).
+        rc_.viewportOffset = { 0, 0 };
+        rc_.viewportExtent = rc_.extent;
+        rc_.renderExtent   = desiredRenderExtent();
+        syncSceneLayers();
+        panels_.init(&rc_);
+        startupTimings_.poolCacheMs = elapsedMs(t0);
+    }
 
     // 기본 패스의 수명주기 목록(DEF-17). 프레임 순서대로이고, 확장은 등록할 때 뒤에 붙습니다.
     passRegistry_.setBuiltins({ &shadow_, &geometry_, &ao_, &bloom_, &post_ });
 
     // 셰이더 계약 (set 0~3 + PBR 파이프라인 레이아웃) — 패스 생성보다 선행
-    frames_.createLayouts(rc_);
+    {
+        HPROF_SCOPE("Renderer.Init.Layouts");
+        const auto t0 = std::chrono::steady_clock::now();
+        frames_.createLayouts(rc_);
+        startupTimings_.layoutsMs = elapsedMs(t0);
+    }
 
     // Permanent Zone B resources first: shadow map, mega buffers, IBL/BRDF.
     // Allocating these before swapchain images ensures that on every resize,
     // all freed swapchain images coalesce into one large contiguous block
     // rather than being split around the permanent allocations.
-    shadow_.create(rc_, frames_.pbrLayout());  // 해상도 · 형식에 따라 다름(PC 4096² D32 64 MB, Quest 2048² D32 16 MB · D16 8 MB), no swapchain dependency
-    scene_.create(rc_);                        // 192 MB mega buffers (128 vert + 64 idx)
-    ao_.create(rc_);               // 노이즈 텍스처/커널 UBO 등 영구 자원만
-    generateBRDFLUT();             // ~1 MB — needs cmdPool + pipelineCache only
-    generateIBLCubemaps();         // ~7 MB
+    {
+        HPROF_SCOPE("Renderer.Init.Shadow");
+        const auto t0 = std::chrono::steady_clock::now();
+        shadow_.create(rc_, frames_.pbrLayout());  // 해상도 · 형식에 따라 다름(PC 4096² D32 64 MB, Quest 2048² D32 16 MB · D16 8 MB), no swapchain dependency
+        startupTimings_.shadowMs = elapsedMs(t0);
+    }
+    {
+        HPROF_SCOPE("Renderer.Init.SceneMega");
+        const auto t0 = std::chrono::steady_clock::now();
+        scene_.create(rc_);                        // 192 MB mega buffers (128 vert + 64 idx)
+        startupTimings_.sceneMs = elapsedMs(t0);
+    }
+    {
+        HPROF_SCOPE("Renderer.Init.AO");
+        const auto t0 = std::chrono::steady_clock::now();
+        ao_.create(rc_);               // 노이즈 텍스처/커널 UBO 등 영구 자원만
+        startupTimings_.aoMs = elapsedMs(t0);
+    }
+    {
+        HPROF_SCOPE("Renderer.Init.IBL");
+        const auto tIbl0 = std::chrono::steady_clock::now();
+        generateBRDFLUT();             // ~1 MB — needs cmdPool + pipelineCache only
+        generateIBLCubemaps();         // ~7 MB
+        startupTimings_.iblMs = elapsedMs(tIbl0);
+    }
     // 오류 머티리얼(DEF-28): 머티리얼이 없는 메시를 자홍색으로 그립니다. 알베도와 이미시브를
     // 모두 자홍색으로 두어 조명과 상관없이 눈에 띕니다. 영구 자원이라 크기 의존 할당보다 먼저.
     {
+        HPROF_SCOPE("Renderer.Init.ErrorMaterial");
+        const auto t0 = std::chrono::steady_clock::now();
         TexSourceData magenta;
         magenta.data    = { 255, 0, 255, 255 };
         magenta.w       = magenta.h = 1;
         magenta.hasData = true;
         errorMaterial_ = scene_.uploadMaterial(magenta, {}, {}, {}, magenta);
+        startupTimings_.errMatMs = elapsedMs(t0);
     }
-    geometry_.create(rc_, frames_.pbrLayout(), frames_.frameLayout());  // main pass + 라인 버퍼
-
-    // Swapchain-size resources (allocated above the permanent block)
-    geometry_.acquireSizeDependent();   // depth + MSAA + HDR + 메인 프레임버퍼
-    ao_.acquireSizeDependent();
-    bloom_.create(rc_);
-
-    post_.create(rc_);
-    post_.acquire(swapchain_->imageViews());
-    createAllPipelines();
+    {
+        HPROF_SCOPE("Renderer.Init.Geom");
+        const auto t0 = std::chrono::steady_clock::now();
+        geometry_.create(rc_, frames_.pbrLayout(), frames_.frameLayout());  // main pass + 라인 버퍼
+        // Swapchain-size resources (allocated above the permanent block)
+        geometry_.acquireSizeDependent();   // depth + MSAA + HDR + 메인 프레임버퍼
+        startupTimings_.geomMs = elapsedMs(t0);
+    }
+    {
+        HPROF_SCOPE("Renderer.Init.AO");
+        const auto t0 = std::chrono::steady_clock::now();
+        ao_.acquireSizeDependent();
+        startupTimings_.aoMs += elapsedMs(t0);
+    }
+    {
+        HPROF_SCOPE("Renderer.Init.Post");
+        const auto t0 = std::chrono::steady_clock::now();
+        bloom_.create(rc_);
+        post_.create(rc_);
+        post_.acquire(swapchain_->imageViews());
+        startupTimings_.postMs = elapsedMs(t0);
+    }
+    {
+        HPROF_SCOPE("Renderer.Init.Pipelines");
+        const auto tPipe0 = std::chrono::steady_clock::now();
+        createAllPipelines();
+        startupTimings_.pipelinesMs = elapsedMs(tPipe0);
+    }
 
     // 프레임별 버퍼/디스크립터/커맨드/동기화 (Zone C)
-    frames_.setCapacities(maxDrawRows_, maxLights_);   // DEF-10
-    frames_.createPerFrame(rc_, (uint32_t)swapchain_->imageCount());
-    createTimestampPool();
+    {
+        HPROF_SCOPE("Renderer.Init.Frames");
+        const auto t0 = std::chrono::steady_clock::now();
+        frames_.setCapacities(maxDrawRows_, maxLights_);   // DEF-10
+        frames_.createPerFrame(rc_, (uint32_t)swapchain_->imageCount());
+        createTimestampPool();
 
-    // 씬 세트 와이어링 — 섀도/IBL 뷰가 모두 준비된 뒤
-    frames_.writeSceneSets(shadow_.sampler(), shadow_.shadowView(),
-                           iblSampler_, iblIrradianceView_, iblPrefilterView_,
-                           brdfSampler_, brdfLutView_);
+        // 씬 세트 와이어링 — 섀도/IBL 뷰가 모두 준비된 뒤
+        frames_.writeSceneSets(shadow_.sampler(), shadow_.shadowView(),
+                               iblSampler_, iblIrradianceView_, iblPrefilterView_,
+                               brdfSampler_, brdfLutView_);
+        startupTimings_.framesMs = elapsedMs(t0);
+    }
     deviceHooks_ = nullptr;   // 장치를 만든 뒤에는 쓰지 않습니다
 }
 

@@ -716,6 +716,12 @@ Renderer::RenderView Renderer::extractRenderView(const RenderSceneInput& scene, 
 // ── drawFrame ─────────────────────────────────────────────────────────────────
 
 bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr) {
+    struct FrameCommitGuard {
+        HarukaAllocator& alloc;
+        explicit FrameCommitGuard(HarukaAllocator& a) : alloc(a) { alloc.setInFrame(true); }
+        ~FrameCommitGuard() { alloc.setInFrame(false); }
+    } frameCommitGuard(allocator);
+
     const bool xrFrame = (xr != nullptr) && xrActive_;
     // 데스크톱 창이 최소화되면(표면 크기 0) 스왑체인 이미지를 받을 수 없습니다. 데스크톱 화면은 건너뛰고,
     // XR 프레임이면 두 눈만 그려 헤드셋은 계속 보이게 합니다(DEF-106). UE · Godot 도 최소화한 창은 그리지

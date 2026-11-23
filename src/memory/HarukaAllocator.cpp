@@ -23,74 +23,116 @@ static const char* zoneName(AllocZone z) {
 // Zone 오프셋은 1GB 기준 상수라 줄어든 힙에서는 Zone B · C 가 할당 범위 밖을 가리켰습니다. 이제 못 잡으면 이유(필요한
 // 크기 · 고른 타입 · 힙 크기 · VkResult · 최대 단일 할당)를 적은 예외로 멈춥니다. Quest 는 maxMemoryAllocationSize 가
 // 정확히 1GiB 이고 힙이 12GB 넘게 있어 이 경로를 타지 않습니다. 타입 고르기 규칙은 hmem::planCoreHeap 입니다.
-void HarukaAllocator::init(VkDevice dev, VkPhysicalDevice physDev, VkDeviceSize maxAllocationSize) {
-    device     = dev;
-    physDevice = physDev;
-    vkGetPhysicalDeviceMemoryProperties(physDev, &memProps_);
+size_t HarukaAllocator::chunkForOffset(VkDeviceSize offset) {
+    return hmem::chunkForZoneOffset(offset, kZoneBOffset, kZoneBChunkSize, kTotalChunks, kZoneCOffset);
+}
 
-    const hmem::CoreHeapPlan plan = hmem::planCoreHeap(memProps_, kHeapTarget);
-    if (plan.fail != hmem::CoreHeapFail::None)
-        throw std::runtime_error(hmem::describeCoreHeapFailure(plan, VK_SUCCESS, maxAllocationSize, kHeapTarget));
-    memType = plan.memType;
-    if (plan.tight) {
-        HLOG(LogMemory, Warning) << "Core heap takes more than 75% of heap " << plan.heapIndex << " ("
-                                 << plan.heapBytes / (1024 * 1024) << " MB); the driver and OS have little left";
-    }
-    if (maxAllocationSize && kHeapTarget > maxAllocationSize) {
-        HLOG(LogMemory, Warning) << "Core heap (1024 MB) is larger than the device's max single allocation ("
-                                 << maxAllocationSize / (1024 * 1024) << " MB); trying anyway";
+bool HarukaAllocator::ensureChunk(size_t idx) {
+    if (idx >= kTotalChunks) return false;
+    Chunk& c = chunks_[idx];
+    if (c.mem != VK_NULL_HANDLE) return true;
+
+    if (inFrame_) {
+        HLOG(LogMemory, Warning) << "Frame commit: core heap chunk " << idx << " (" << c.size / (1024 * 1024)
+                                 << " MB) allocated during frame";
     }
 
     VkMemoryAllocateInfo ai{};
     ai.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    ai.allocationSize  = kHeapTarget;
+    ai.allocationSize  = c.size;
     ai.memoryTypeIndex = memType;
-    const VkResult ar = vkAllocateMemory(device, &ai, nullptr, &hHeap);
+    const VkResult ar = vkAllocateMemory(device, &ai, nullptr, &c.mem);
     if (ar != VK_SUCCESS) {
-        hHeap = VK_NULL_HANDLE;
-        throw std::runtime_error(hmem::describeCoreHeapFailure(plan, ar, maxAllocationSize, kHeapTarget));
+        c.mem = VK_NULL_HANDLE;
+        HLOG(LogMemory, Error) << "Core heap chunk " << idx << " (" << c.size / (1024 * 1024)
+                               << " MB) vkAllocateMemory failed (VkResult " << (int)ar << ")";
+        return false;
+    }
+    const VkResult mr = vkMapMemory(device, c.mem, 0, VK_WHOLE_SIZE, 0, &c.mapped);
+    if (mr != VK_SUCCESS) {
+        vkFreeMemory(device, c.mem, nullptr);
+        c.mem    = VK_NULL_HANDLE;
+        c.mapped = nullptr;
+        HLOG(LogMemory, Error) << "Core heap chunk " << idx << " vkMapMemory failed (VkResult " << (int)mr << ")";
+        return false;
+    }
+    heapSize += c.size;
+    return true;
+}
+
+void HarukaAllocator::precommit(VkDeviceSize minZoneBFreeBytes) {
+    if (device == VK_NULL_HANDLE) return;
+    // Zone C (프레임별 동적 버퍼) 를 먼저 확보해 첫 프레임 안 커밋을 막습니다.
+    ensureChunk(kTotalChunks - 1);
+
+    auto committedFreeB = [&]() -> VkDeviceSize {
+        VkDeviceSize sum = 0;
+        for (const hmem::FreeBlock& b : freeListB) {
+            const size_t c = chunkForOffset(b.offset);
+            if (chunks_[c].mem != VK_NULL_HANDLE) sum += b.size;
+        }
+        return sum;
+    };
+
+    while (committedFreeB() < minZoneBFreeBytes) {
+        size_t nextChunk = kTotalChunks;
+        for (const hmem::FreeBlock& b : freeListB) {
+            const size_t c = chunkForOffset(b.offset);
+            if (chunks_[c].mem == VK_NULL_HANDLE && b.size > 0) {
+                nextChunk = c;
+                break;
+            }
+        }
+        if (nextChunk >= kTotalChunks || !ensureChunk(nextChunk)) break;
+    }
+}
+
+void HarukaAllocator::init(VkDevice dev, VkPhysicalDevice physDev, VkDeviceSize maxAllocationSize) {
+    device     = dev;
+    physDevice = physDev;
+    maxAllocationSize_ = maxAllocationSize;
+    vkGetPhysicalDeviceMemoryProperties(physDev, &memProps_);
+
+    plan_ = hmem::planCoreHeap(memProps_, kHeapTarget);
+    if (plan_.fail != hmem::CoreHeapFail::None)
+        throw std::runtime_error(hmem::describeCoreHeapFailure(plan_, VK_SUCCESS, maxAllocationSize, kHeapTarget));
+    memType = plan_.memType;
+    if (plan_.tight) {
+        HLOG(LogMemory, Warning) << "Core heap takes more than 75% of heap " << plan_.heapIndex << " ("
+                                 << plan_.heapBytes / (1024 * 1024) << " MB); the driver and OS have little left";
+    }
+    if (maxAllocationSize && kZoneBChunkSize > maxAllocationSize) {
+        HLOG(LogMemory, Warning) << "Core heap chunk (128 MB) is larger than the device's max single allocation ("
+                                 << maxAllocationSize / (1024 * 1024) << " MB); trying anyway";
     }
 
-    // 전체 범위 지속 매핑 (HOST_COHERENT → flush 불필요)
-    const VkResult mr = vkMapMemory(device, hHeap, 0, VK_WHOLE_SIZE, 0, &heapMapped);
-    if (mr != VK_SUCCESS) {
-        vkFreeMemory(device, hHeap, nullptr);
-        hHeap = VK_NULL_HANDLE;
-        heapMapped = nullptr;
-        throw std::runtime_error("Core heap: vkMapMemory failed (VkResult " + std::to_string((int)mr) + ")");
-    }
-    heapSize = kHeapTarget;
+    chunks_[0] = { VK_NULL_HANDLE, nullptr, kZoneAOffset, kZoneASize };
+    for (size_t i = 0; i < kZoneBChunkCount; ++i)
+        chunks_[1 + i] = { VK_NULL_HANDLE, nullptr, kZoneBOffset + i * kZoneBChunkSize, kZoneBChunkSize };
+    chunks_[kTotalChunks - 1] = { VK_NULL_HANDLE, nullptr, kZoneCOffset, kZoneCSize };
+    heapSize = 0;
 
     HLOG(LogMemory, Log) << "Core Heap ready: "
-                         << heapSize / (1024 * 1024) << "MB"
+                         << kHeapTarget / (1024 * 1024) << "MB virtual (on-demand 128MB chunks)"
                          << " | memType[" << memType << "]"
                          // 이 조합은 UMA(Quest 등)뿐 아니라 ReBAR 를 켠 독립 GPU 에도 있어 UMA 라고 단정하지 않습니다.
-                         << (plan.deviceLocal ? " | DEVICE_LOCAL+HOST_VISIBLE (UMA or ReBAR)"
-                                              : " | HOST_VISIBLE only (discrete GPU)");
+                         << (plan_.deviceLocal ? " | DEVICE_LOCAL+HOST_VISIBLE (UMA or ReBAR)"
+                                               : " | HOST_VISIBLE only (discrete GPU)");
     if (forceDedicated_) {
         HLOG(LogMemory, Log) << "--vk-dedicated-msaa: MSAA color goes to a separate device-local allocation";
     }
 
-    // Zone B free list init
+    // Zone B free list init (청크 경계를 넘지 않도록 청크마다 별도 블록으로 초기화)
     VkPhysicalDeviceProperties devProps;
     vkGetPhysicalDeviceProperties(physDev, &devProps);
     bigGranularity = devProps.limits.bufferImageGranularity;
-    HCHECK_MSG(heapSize == kHeapTarget, "zone offsets assume a 1 GB heap");   // Zone 오프셋은 1GB 기준 상수입니다
-    freeListB.push_back({ kZoneBOffset, kZoneBSize });
+    hmem::initZoneBFreeList(freeListB, kZoneBOffset, kZoneBChunkSize, kZoneBChunkCount);
     HLOG(LogMemory, Log) << "Zone B ready: "
-                         << kZoneBSize / (1024 * 1024) << "MB FreeList"
+                         << kZoneBSize / (1024 * 1024) << "MB FreeList (" << kZoneBChunkCount << "x128MB)"
                          << " | BIG=" << bigGranularity;
 
     HLOG(LogMemory, Log) << "Zone C ready: "
                          << kZoneCSize / (1024 * 1024) << "MB Ring";
-
-    // Zone A smoke test
-    auto probe = allocA(256, 4);
-    if (!probe.isValid())
-        throw std::runtime_error("[Haruka] Zone A smoke test failed!");
-    HLOG(LogMemory, Log) << "Zone A ready: offset=" << probe.offset
-                         << " ptr=" << probe.mappedPtr;
-    resetZoneA();
 }
 
 // ── Zone A: Bump Allocator ────────────────────────────────────────────────────
@@ -105,11 +147,12 @@ HarukaAllocation HarukaAllocator::allocA(VkDeviceSize size, VkDeviceSize alignme
                                << " bytes, cursor=" << cursorA;
         return {};
     }
+    if (!ensureChunk(0)) return {};
 
     HarukaAllocation a;
     a.offset    = aligned;
     a.size      = size;
-    a.mappedPtr = static_cast<uint8_t*>(heapMapped) + aligned;
+    a.mappedPtr = static_cast<uint8_t*>(chunks_[0].mapped) + (aligned - chunks_[0].base);
     a.zone      = AllocZone::A;
 
     cursorA = aligned + size;
@@ -128,27 +171,46 @@ HarukaAllocation HarukaAllocator::allocB(const VkMemoryRequirements& reqs, Resou
         ? std::max(reqs.alignment, bigGranularity)
         : reqs.alignment;
 
-    for (size_t i = 0; i < freeListB.size(); ++i) {
-        const VkDeviceSize blockStart = freeListB[i].offset;
-        const VkDeviceSize blockEnd   = blockStart + freeListB[i].size;
-        const VkDeviceSize aligned    = (blockStart + alignment - 1) & ~(alignment - 1);
-
-        if (aligned + size > blockEnd) continue;
-
+    VkDeviceSize aligned = 0;
+    if (hmem::allocFromFreeList(freeListB, size, alignment, aligned)) {
+        const size_t c = chunkForOffset(aligned);
+        void* mappedPtr = nullptr;
+        if (type == ResourceType::Buffer) {
+            if (!ensureChunk(c)) return {};
+            mappedPtr = static_cast<uint8_t*>(chunks_[c].mapped) + (aligned - chunks_[c].base);
+        }
         HarukaAllocation a;
         a.offset    = aligned;
         a.size      = size;
-        a.mappedPtr = static_cast<uint8_t*>(heapMapped) + aligned;
+        a.mappedPtr = mappedPtr;
         a.zone      = AllocZone::B;
+        return a;
+    }
 
-        const VkDeviceSize beforeSize = aligned - blockStart;
-        const VkDeviceSize afterStart = aligned + size;
-        const VkDeviceSize afterSize  = blockEnd - afterStart;
-
-        freeListB.erase(freeListB.begin() + i);
-        if (afterSize  > 0) freeListB.insert(freeListB.begin() + i, { afterStart, afterSize  });
-        if (beforeSize > 0) freeListB.insert(freeListB.begin() + i, { blockStart, beforeSize });
-
+    // 128 MB 청크에 들어가지 않는 큰 요청(예: 4K/Quest Pro MSAA 색 타깃)은 Zone B 예산 안에서 전용 할당으로 잡습니다.
+    if (zoneBUsed() + size <= kZoneBSize) {
+        HarukaAllocation a;
+        a.offset  = kZoneBOffset;
+        a.size    = size;
+        a.zone    = AllocZone::B;
+        a.isLarge = true;
+        if (type == ResourceType::Buffer) {
+            VkMemoryAllocateInfo ai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+            ai.allocationSize  = size;
+            ai.memoryTypeIndex = memType;
+            if (vkAllocateMemory(device, &ai, nullptr, &a.auxMem) != VK_SUCCESS) {
+                HLOG(LogMemory, Error) << "Zone B large buffer alloc failed: requested " << size << " bytes";
+                return {};
+            }
+            if (vkMapMemory(device, a.auxMem, 0, VK_WHOLE_SIZE, 0, &a.mappedPtr) != VK_SUCCESS) {
+                vkFreeMemory(device, a.auxMem, nullptr);
+                a.auxMem = VK_NULL_HANDLE;
+                return {};
+            }
+            a.auxCoreMem = true;
+            heapSize += size;
+        }
+        largeBBytes_ += size;
         return a;
     }
 
@@ -170,11 +232,13 @@ HarukaAllocation HarukaAllocator::allocC(VkDeviceSize size, VkDeviceSize alignme
         HLOG(LogMemory, Error) << "Zone C OOM: requested " << size << " bytes";
         return {};
     }
+    const size_t c = kTotalChunks - 1;
+    if (!ensureChunk(c)) return {};
 
     HarukaAllocation a;
     a.offset    = aligned;
     a.size      = size;
-    a.mappedPtr = static_cast<uint8_t*>(heapMapped) + aligned;
+    a.mappedPtr = static_cast<uint8_t*>(chunks_[c].mapped) + (aligned - chunks_[c].base);
     a.zone      = AllocZone::C;
 
     ringHeadC = aligned + size;
@@ -199,31 +263,29 @@ void HarukaAllocator::freeB(const HarukaAllocation& alloc) {
                                  << " (offset " << alloc.offset << ", size " << alloc.size << ")";
         return;
     }
+    if (alloc.isLarge) {
+        if (alloc.mappedPtr && alloc.auxMem != VK_NULL_HANDLE)
+            vkUnmapMemory(device, alloc.auxMem);
+        if (alloc.auxMem != VK_NULL_HANDLE)
+            vkFreeMemory(device, alloc.auxMem, nullptr);
+        if (alloc.auxCoreMem)
+            heapSize -= std::min(heapSize, alloc.size);
+        largeBBytes_ -= std::min(largeBBytes_, alloc.size);
+        return;
+    }
     if (alloc.auxMem != VK_NULL_HANDLE) {
         vkFreeMemory(device, alloc.auxMem, nullptr);
     }
-    size_t i = 0;
-    while (i < freeListB.size() && freeListB[i].offset < alloc.offset) ++i;
-
-    freeListB.insert(freeListB.begin() + i, { alloc.offset, alloc.size });
-
-    // Coalesce with next
-    if (i + 1 < freeListB.size() &&
-        freeListB[i].offset + freeListB[i].size == freeListB[i + 1].offset) {
-        freeListB[i].size += freeListB[i + 1].size;
-        freeListB.erase(freeListB.begin() + i + 1);
-    }
-    // Coalesce with prev
-    if (i > 0 &&
-        freeListB[i - 1].offset + freeListB[i - 1].size == freeListB[i].offset) {
-        freeListB[i - 1].size += freeListB[i].size;
-        freeListB.erase(freeListB.begin() + i);
-    }
+    hmem::freeToFreeList(freeListB, alloc.offset, alloc.size, kZoneBOffset, kZoneBChunkSize, kTotalChunks, kZoneCOffset);
 }
 
 // ── bind ──────────────────────────────────────────────────────────────────────
 VkResult HarukaAllocator::bind(VkBuffer buf, const HarukaAllocation& alloc) {
-    return vkBindBufferMemory(device, buf, hHeap, alloc.offset);
+    if (alloc.isLarge)
+        return vkBindBufferMemory(device, buf, alloc.auxMem, 0);
+    const size_t c = chunkForOffset(alloc.offset);
+    if (!ensureChunk(c)) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+    return vkBindBufferMemory(device, buf, chunks_[c].mem, alloc.offset - chunks_[c].base);
 }
 
 VkResult HarukaAllocator::bind(VkImage img, HarukaAllocation& alloc) {
@@ -232,7 +294,19 @@ VkResult HarukaAllocator::bind(VkImage img, HarukaAllocation& alloc) {
     vkGetImageMemoryRequirements(device, img, &reqs);
 
     if ((reqs.memoryTypeBits >> memType) & 1) {
-        return vkBindImageMemory(device, img, hHeap, alloc.offset);
+        if (alloc.isLarge) {
+            VkMemoryAllocateInfo ai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+            ai.allocationSize  = reqs.size;
+            ai.memoryTypeIndex = memType;
+            const VkResult r = vkAllocateMemory(device, &ai, nullptr, &alloc.auxMem);
+            if (r != VK_SUCCESS) return r;
+            alloc.auxCoreMem = true;
+            heapSize += reqs.size;
+            return vkBindImageMemory(device, img, alloc.auxMem, 0);
+        }
+        const size_t c = chunkForOffset(alloc.offset);
+        if (!ensureChunk(c)) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+        return vkBindImageMemory(device, img, chunks_[c].mem, alloc.offset - chunks_[c].base);
     }
 
     // Heap memory type not compatible (discrete GPU). Allocate standalone DEVICE_LOCAL memory.
@@ -316,16 +390,22 @@ void HarukaAllocator::destroy() {
     dedicatedBytes_ = 0;
     loggedLazy_ = loggedNoLazy_ = loggedAux_ = false;
     memProps_ = {};
-    if (heapMapped) {
-        vkUnmapMemory(device, hHeap);
-        heapMapped = nullptr;
+    for (size_t i = 0; i < kTotalChunks; ++i) {
+        if (chunks_[i].mapped) {
+            vkUnmapMemory(device, chunks_[i].mem);
+            chunks_[i].mapped = nullptr;
+        }
+        if (chunks_[i].mem != VK_NULL_HANDLE) {
+            vkFreeMemory(device, chunks_[i].mem, nullptr);
+            chunks_[i].mem = VK_NULL_HANDLE;
+        }
+        chunks_[i].base = 0;
+        chunks_[i].size = 0;
     }
-    if (hHeap != VK_NULL_HANDLE) {
-        vkFreeMemory(device, hHeap, nullptr);
-        hHeap = VK_NULL_HANDLE;
-    }
-    heapSize  = 0;
-    memType   = UINT32_MAX;
+    heapSize     = 0;
+    largeBBytes_ = 0;
+    inFrame_     = false;
+    memType      = UINT32_MAX;
     freeListB.clear();
     ringHeadC = kZoneCOffset;
 }

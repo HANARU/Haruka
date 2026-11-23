@@ -125,7 +125,26 @@ public:
     void setAoEnabled(bool on) { aoOn_ = on; }
     bool aoEnabled() const     { return aoOn_; }
     bool bloomEnabled() const  { return bloomOn_; }
+    struct StartupTimings {
+        double deviceMs    = 0.0;
+        double allocMs     = 0.0;
+        double swapchainMs = 0.0;
+        double poolCacheMs = 0.0;
+        double layoutsMs   = 0.0;
+        double shadowMs    = 0.0;
+        double sceneMs     = 0.0;
+        double aoMs        = 0.0;
+        double iblMs       = 0.0;
+        double errMatMs    = 0.0;
+        double geomMs      = 0.0;
+        double postMs      = 0.0;
+        double pipelinesMs = 0.0;
+        double framesMs    = 0.0;
+    };
+    const StartupTimings& startupTimings() const { return startupTimings_; }
+
     void init(IWindow* window, IVulkanDeviceHooks* deviceHooks = nullptr);
+    void precommitHeap() { allocator.precommit(); }
     void cleanup();
     // xr 이 있으면 두 눈을 XR 스왑체인의 두 층에 그리고, 에디터 뷰포트에는 왼쪽 눈을 비춥니다.
     // 그 프레임에 XR 이미지에 실제로 그렸으면 true(엔진이 투영 레이어를 제출할지 정함).
@@ -673,4 +692,5 @@ private:
         VkDebugUtilsMessageSeverityFlagBitsEXT,
         VkDebugUtilsMessageTypeFlagsEXT,
         const VkDebugUtilsMessengerCallbackDataEXT*, void*);
+    StartupTimings startupTimings_{};
 };

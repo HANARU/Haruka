@@ -160,6 +160,49 @@ int main() {
         check(kHeapTarget == 1 * GiB, "D3 핵심 힙 목표는 1GiB(Quest 의 maxMemoryAllocationSize 와 같음)");
     }
 
+    std::printf("\n== E. Zone B 청크 · 큰 요청 · 해제 후 재사용 ==\n");
+    {
+        constexpr VkDeviceSize kChunk = 128 * MiB;
+        constexpr size_t       kBChunks = 7;
+        constexpr size_t       kTotal = 1 + kBChunks + 1;
+        check(hmem::chunkForZoneOffset(0, kZoneBOffset, kChunk, kTotal, kZoneCOffset) == 0,
+              "E1 Zone A 오프셋은 청크 0");
+        check(hmem::chunkForZoneOffset(kZoneBOffset, kZoneBOffset, kChunk, kTotal, kZoneCOffset) == 1,
+              "E1 Zone B 시작은 청크 1");
+        check(hmem::chunkForZoneOffset(kZoneBOffset + 2 * kChunk + 4096, kZoneBOffset, kChunk, kTotal, kZoneCOffset) == 3,
+              "E1 Zone B 256MB+ 오프셋은 청크 3");
+        check(hmem::chunkForZoneOffset(kZoneCOffset, kZoneBOffset, kChunk, kTotal, kZoneCOffset) == kTotal - 1,
+              "E1 Zone C 오프셋은 마지막 청크");
+
+        std::vector<hmem::FreeBlock> fl;
+        hmem::initZoneBFreeList(fl, kZoneBOffset, kChunk, kBChunks);
+        check(fl.size() == kBChunks, "E2 초기 Zone B 빈 목록은 청크 수(7개)와 같음");
+
+        // 128 MB 정점 버퍼 + 64 MB 인덱스 버퍼 + 64 MB + 225 MB 큰 요청
+        VkDeviceSize oVert = 0, oIdx = 0, oBig = 0;
+        check(hmem::allocFromFreeList(fl, 128 * MiB, 256, oVert) && oVert == kZoneBOffset,
+              "E3 128MB 할당은 청크 1 전체 사용");
+        check(hmem::allocFromFreeList(fl, 64 * MiB, 256, oIdx) && oIdx == kZoneBOffset + kChunk,
+              "E3 다음 64MB 할당은 청크 2 시작");
+        check(!hmem::allocFromFreeList(fl, 225 * MiB, 256, oBig),
+              "E4 128MB 청크를 넘는 225MB 요청은 freeListB 에서 거절(전용 큰 할당 경로로 넘김)");
+
+        // 해제 후 같은 청크 안에서만 병합 · 재사용
+        VkDeviceSize oHalf1 = 0, oMerged = 0;
+        check(hmem::allocFromFreeList(fl, 64 * MiB, 256, oHalf1), "E5 청크 2 나머지 64MB 할당");
+        hmem::freeToFreeList(fl, oIdx, 64 * MiB, kZoneBOffset, kChunk, kTotal, kZoneCOffset);
+        hmem::freeToFreeList(fl, oHalf1, 64 * MiB, kZoneBOffset, kChunk, kTotal, kZoneCOffset);
+        check(hmem::allocFromFreeList(fl, 128 * MiB, 256, oMerged) && oMerged == oIdx,
+              "E5 청크 2 의 두 64MB 해제 후 128MB 로 병합 재사용");
+
+        // 인접한 청크 끝과 다음 청크 시작은 병합되지 않아야 함
+        hmem::freeToFreeList(fl, oVert, 128 * MiB, kZoneBOffset, kChunk, kTotal, kZoneCOffset);
+        hmem::freeToFreeList(fl, oMerged, 128 * MiB, kZoneBOffset, kChunk, kTotal, kZoneCOffset);
+        VkDeviceSize oCross = 0;
+        check(!hmem::allocFromFreeList(fl, 192 * MiB, 256, oCross),
+              "E6 청크 1 과 청크 2 가 모두 비어도 청크 경계를 넘어 병합되지 않음");
+    }
+
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
     return g_failed ? 1 : 0;
 }

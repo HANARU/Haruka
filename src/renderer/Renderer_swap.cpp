@@ -174,6 +174,7 @@ void Renderer::attachXrSwapchain(const std::vector<VkImage>& images, VkFormat fo
         rc_.renderExtent = newExt;
         recreateRenderTargets();
     }
+    allocator.precommit();
 }
 
 // 창이 없으면 뗀 뒤의 크기 의존 타깃은 명목 크기(64x64)로 작게 다시 만들어집니다. 재연결은 드물어 따로 두지 않습니다.

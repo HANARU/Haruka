@@ -387,9 +387,12 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     if (options.headless && policy_.allowHeadless) window_ = std::make_unique<HeadlessWindow>();
     else                                           window_ = std::make_unique<GlfwWindow>(options.windowW, options.windowH, "Haruka Engine", options.hiddenWindow);
 #endif
+    double windowMs = 0.0;
     {
         HPROF_SCOPE("Startup.Window");
+        const double t0 = stats_.msSinceBoot();
         window_->init();
+        windowMs = stats_.msSinceBoot() - t0;
     }
     headless_ = !window_->providesSurface();
 
@@ -399,10 +402,13 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     xrWanted_ = options.xr.has_value() ? *options.xr : (policy_.startXrFromProject && project_.xrStartInVr);
     if (xrWanted_ && !options.xr.has_value())
         HLOG(LogEngine, Log) << "XR requested by the project setting xr.startInVr (" << ProjectSettings::kPath << ")";
+    double xrMs = 0.0;
     if (xrWanted_) {
         HPROF_SCOPE("Startup.Xr");
+        const double t0 = stats_.msSinceBoot();
         xr_ = std::make_unique<XrSystem>();
         if (!xr_->init(options.platform)) xr_.reset();
+        xrMs = stats_.msSinceBoot() - t0;
     }
     if (options.xrRequired && !xr_)
         throw std::runtime_error("XR is required on this platform, but the OpenXR runtime or headset is not available "
@@ -478,9 +484,12 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
                                      ? std::string(" + ") + UserSettings::kPath : std::string())
                              << ")";
     }
+    double rendererMs = 0.0;
     {
         HPROF_SCOPE("Startup.Renderer");   // Vulkan 장치 · 파이프라인 · IBL 굽기
+        const double t0 = stats_.msSinceBoot();
         renderer_->init(window_.get(), xr_.get());
+        rendererMs = stats_.msSinceBoot() - t0;
     }
     if (xr_) {
         // 세션은 Play 때 만듭니다(syncXrWithPlay). 인스턴스는 쓸 수 없어도 남겨 둡니다. 렌더러의 Vulkan
@@ -535,6 +544,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // 동적 모듈: 표준 세트(Audio, Physics). 각자 월드를 참조합니다. noAudio(Quest 첫 실행)면 소리 장치를 열지 않습니다.
     if (options.noAudio) { HLOG(LogEngine, Log) << "Audio output is off for this run"; }
     HPROF_SCOPE("Startup.Modules");   // 소리 · 물리 · 게임 모듈 · 앞단 · 첫 씬(아래 Startup.FirstScene)
+    const double modulesT0 = stats_.msSinceBoot();
     auto* audio   = modules_.registerModule(std::make_unique<AudioSystem>(options.noAudio));
     audio->setWorld(&world_);
     audio->setListenerSelector(CameraComponent::activeOwnerIn);   // 청취자 = 화면 카메라의 액터(2026-11-18 S7)
@@ -599,16 +609,44 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // 처음 열 씬은 앞단이 정합니다. 에디터는 마지막으로 연 씬(없으면 프로젝트 시작 씬), 게임 실행 파일은 프로젝트 시작
     // 씬입니다. 예전에는 게임 모듈이 코드에 박힌 시작 씬을 읽어, 에디터가 지금 열린 파일을 몰랐습니다.
     // --scene 이 있으면 그 씬이 시작 씬입니다(시험 장면 캡처, 2026-11-16).
+    double firstSceneMs = 0.0;
     {
         HPROF_SCOPE("Startup.FirstScene");
+        const double t0 = stats_.msSinceBoot();
         frontend_->openInitialScene(options_.scenePath.empty() ? project_.startScene : options_.scenePath);
+        firstSceneMs = stats_.msSinceBoot() - t0;
     }
+    const double modulesMs = std::max(0.0, (stats_.msSinceBoot() - modulesT0) - firstSceneMs);
     // 게임 모듈까지 등록을 마쳤으니, 명령줄 · ini 로 들어왔는데 끝내 등록되지 않은 CVar 이름을 알리고 첫 변경 콜백을 부릅니다.
     for (const std::string& n : cvars_.pendingNames())
         HLOG(LogEngine, Warning) << "CVar '" << n << "' was set (command line or cvars.ini) but nothing registered it";
     cvars_.dispatchChanges();
     HLOG(LogEngine, Log) << "Startup: engine ready in " << stats_.msSinceBoot()
                          << " ms (window, renderer, IBL, modules, first scene)";
+    {
+        const auto& rt = renderer_->startupTimings();
+        auto msRound = [](double v) { return static_cast<long long>(std::llround(v)); };
+        HLOG(LogEngine, Log) << "Startup breakdown: window " << msRound(windowMs)
+                             << " ms, xr " << msRound(xrMs)
+                             << " ms, renderer " << msRound(rendererMs)
+                             << " ms (device " << msRound(rt.deviceMs)
+                             << ", alloc " << msRound(rt.allocMs)
+                             << ", swapchain " << msRound(rt.swapchainMs)
+                             << ", poolCache " << msRound(rt.poolCacheMs)
+                             << ", layouts " << msRound(rt.layoutsMs)
+                             << ", shadow " << msRound(rt.shadowMs)
+                             << ", scene " << msRound(rt.sceneMs)
+                             << ", ao " << msRound(rt.aoMs)
+                             << ", ibl " << msRound(rt.iblMs)
+                             << ", errMat " << msRound(rt.errMatMs)
+                             << ", geom " << msRound(rt.geomMs)
+                             << ", post " << msRound(rt.postMs)
+                             << ", pipelines " << msRound(rt.pipelinesMs)
+                             << ", frames " << msRound(rt.framesMs)
+                             << "), modules " << msRound(modulesMs)
+                             << " ms, first scene " << msRound(firstSceneMs) << " ms";
+    }
+    renderer_->precommitHeap();
 }
 
 Engine::~Engine() {

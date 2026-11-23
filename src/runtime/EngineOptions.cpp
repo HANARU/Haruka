@@ -243,7 +243,7 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (!v.empty()) o.uiHover = v;
             else unknown.push_back(a);
         }
-        else if (valueOf(a, "--synthetic-eyes", v)) {
+        else if (valueOf(a, "--synthetic-eyes", v) || valueOf(a, "--synthetic-eye-size", v)) {
             if (parseSize(v, o.syntheticEyeW, o.syntheticEyeH)) o.syntheticEyes = true;
             else unknown.push_back(a);
         }

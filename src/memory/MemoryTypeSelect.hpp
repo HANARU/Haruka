@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace hmem {
 
@@ -127,6 +128,74 @@ inline std::string describeCoreHeapFailure(const CoreHeapPlan& plan, VkResult r,
     }
     if (maxAlloc) s += ", max single allocation " + mb(maxAlloc);
     return s;
+}
+
+// ── Zone B 청크 · FreeList 순수 모델 (GPU 없이 HarukaMemoryTest 에서 검산) ───────
+struct FreeBlock {
+    VkDeviceSize offset = 0;
+    VkDeviceSize size   = 0;
+};
+
+inline size_t chunkForZoneOffset(VkDeviceSize offset, VkDeviceSize zoneBOffset, VkDeviceSize zoneBChunkSize,
+                                 size_t totalChunks, VkDeviceSize zoneCOffset) {
+    if (offset < zoneBOffset) return 0;
+    if (offset >= zoneCOffset) return totalChunks - 1;
+    return 1 + static_cast<size_t>((offset - zoneBOffset) / zoneBChunkSize);
+}
+
+inline void initZoneBFreeList(std::vector<FreeBlock>& freeList, VkDeviceSize zoneBOffset,
+                              VkDeviceSize chunkSize, size_t chunkCount) {
+    freeList.clear();
+    freeList.reserve(chunkCount);
+    for (size_t i = 0; i < chunkCount; ++i)
+        freeList.push_back({ zoneBOffset + i * chunkSize, chunkSize });
+}
+
+inline bool allocFromFreeList(std::vector<FreeBlock>& freeList, VkDeviceSize size, VkDeviceSize alignment,
+                              VkDeviceSize& outOffset) {
+    if (alignment == 0) alignment = 1;
+    for (size_t i = 0; i < freeList.size(); ++i) {
+        const VkDeviceSize blockStart = freeList[i].offset;
+        const VkDeviceSize blockEnd   = blockStart + freeList[i].size;
+        const VkDeviceSize aligned    = (blockStart + alignment - 1) & ~(alignment - 1);
+        if (aligned + size > blockEnd) continue;
+
+        const VkDeviceSize beforeSize = aligned - blockStart;
+        const VkDeviceSize afterStart = aligned + size;
+        const VkDeviceSize afterSize  = blockEnd - afterStart;
+
+        freeList.erase(freeList.begin() + i);
+        if (afterSize  > 0) freeList.insert(freeList.begin() + i, { afterStart, afterSize  });
+        if (beforeSize > 0) freeList.insert(freeList.begin() + i, { blockStart, beforeSize });
+        outOffset = aligned;
+        return true;
+    }
+    return false;
+}
+
+inline void freeToFreeList(std::vector<FreeBlock>& freeList, VkDeviceSize offset, VkDeviceSize size,
+                           VkDeviceSize zoneBOffset, VkDeviceSize chunkSize, size_t totalChunks,
+                           VkDeviceSize zoneCOffset) {
+    size_t i = 0;
+    while (i < freeList.size() && freeList[i].offset < offset) ++i;
+    freeList.insert(freeList.begin() + i, { offset, size });
+
+    auto sameChunk = [&](VkDeviceSize a, VkDeviceSize b) {
+        return chunkForZoneOffset(a, zoneBOffset, chunkSize, totalChunks, zoneCOffset) ==
+               chunkForZoneOffset(b, zoneBOffset, chunkSize, totalChunks, zoneCOffset);
+    };
+    if (i + 1 < freeList.size() &&
+        sameChunk(freeList[i].offset, freeList[i + 1].offset) &&
+        freeList[i].offset + freeList[i].size == freeList[i + 1].offset) {
+        freeList[i].size += freeList[i + 1].size;
+        freeList.erase(freeList.begin() + i + 1);
+    }
+    if (i > 0 &&
+        sameChunk(freeList[i - 1].offset, freeList[i].offset) &&
+        freeList[i - 1].offset + freeList[i - 1].size == freeList[i].offset) {
+        freeList[i - 1].size += freeList[i].size;
+        freeList.erase(freeList.begin() + i);
+    }
 }
 
 } // namespace hmem
