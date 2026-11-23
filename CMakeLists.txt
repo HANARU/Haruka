@@ -778,6 +778,8 @@ if(NOT ANDROID)
 
     add_executable(HarukaLauncher
         src/launcher/HarukaLauncherMain.cpp
+        src/launcher/LauncherHost.cpp
+        src/launcher/LauncherApp.cpp
         src/core/HLog.cpp
         src/core/HText.cpp
         src/core/UserSettings.cpp

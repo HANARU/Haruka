@@ -48,42 +48,42 @@ msgctxt "Editor.Command,Console.Focus"
 msgid "Console"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:244
+#: src/editor/EditorCommandRegistry.hpp:247
 msgctxt "Editor.Command,Content.Refresh"
 msgid "Refresh Content"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:247
+#: src/editor/EditorCommandRegistry.hpp:250
 msgctxt "Editor.Command,Details.CopyValue"
 msgid "Copy"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:248
+#: src/editor/EditorCommandRegistry.hpp:251
 msgctxt "Editor.Command,Details.PasteValue"
 msgid "Paste"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:246
+#: src/editor/EditorCommandRegistry.hpp:249
 msgctxt "Editor.Command,Details.ResetToDefault"
 msgid "Reset to Default"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:220
+#: src/editor/EditorCommandRegistry.hpp:223
 msgctxt "Editor.Command,Outliner.FocusSearch"
 msgid "Search Outliner"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:242
+#: src/editor/EditorCommandRegistry.hpp:245
 msgctxt "Editor.Command,Play.Pause"
 msgid "Pause"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:241
+#: src/editor/EditorCommandRegistry.hpp:244
 msgctxt "Editor.Command,Play.Play"
 msgid "Play"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:243
+#: src/editor/EditorCommandRegistry.hpp:246
 msgctxt "Editor.Command,Play.Stop"
 msgid "Stop"
 msgstr ""
@@ -198,7 +198,7 @@ msgctxt "Editor.Details,ActorRef.None"
 msgid "None"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:984
+#: src/editor/DetailsPanel.cpp:993
 msgctxt "Editor.Details,AddComponent"
 msgid "Add Component"
 msgstr ""
@@ -243,42 +243,42 @@ msgctxt "Editor.Details,ComponentTitle"
 msgid "Component"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1135
+#: src/editor/DetailsPanel.cpp:1144
 msgctxt "Editor.Details,Prefab.Apply"
 msgid "Apply"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1056
+#: src/editor/DetailsPanel.cpp:1065
 msgctxt "Editor.Details,Prefab.Missing"
 msgid "Missing: {0}"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1060
+#: src/editor/DetailsPanel.cpp:1069
 msgctxt "Editor.Details,Prefab.MissingKept"
 msgid "Overrides are kept as written"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1065
+#: src/editor/DetailsPanel.cpp:1074
 msgctxt "Editor.Details,Prefab.Overrides"
 msgid "{0} overridden value(s)"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1133
+#: src/editor/DetailsPanel.cpp:1142
 msgctxt "Editor.Details,Prefab.Revert"
 msgid "Revert"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1064
+#: src/editor/DetailsPanel.cpp:1073
 msgctxt "Editor.Details,Prefab.RootOverrides"
 msgid "Root, {0} overridden value(s)"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1057
+#: src/editor/DetailsPanel.cpp:1066
 msgctxt "Editor.Details,Prefab.Source"
 msgid "Instance of {0}"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1137
+#: src/editor/DetailsPanel.cpp:1146
 msgctxt "Editor.Details,Prefab.Unlink"
 msgid "Unlink"
 msgstr ""
@@ -288,7 +288,7 @@ msgctxt "Editor.Details,SearchHint"
 msgid "Search Details"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:582
+#: src/editor/DetailsPanel.cpp:585
 msgctxt "Editor.Details,SearchNoMatch"
 msgid "No properties match '{0}'"
 msgstr ""
@@ -313,12 +313,12 @@ msgctxt "Editor.Details,Tip.ColorPicker"
 msgid "Open the color picker"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:736
+#: src/editor/DetailsPanel.cpp:739
 msgctxt "Editor.Details,Tip.Enable"
 msgid "Enable/Disable Component"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:740
+#: src/editor/DetailsPanel.cpp:743
 msgctxt "Editor.Details,Tip.Remove"
 msgid "Remove Component"
 msgstr ""
@@ -328,17 +328,17 @@ msgctxt "Editor.Details,Tip.ResetToDefault"
 msgid "Reset to Default"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:694
+#: src/editor/DetailsPanel.cpp:697
 msgctxt "Editor.Details,Transform.Location"
 msgid "Location"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:696
+#: src/editor/DetailsPanel.cpp:699
 msgctxt "Editor.Details,Transform.Rotation"
 msgid "Rotation"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:698
+#: src/editor/DetailsPanel.cpp:701
 msgctxt "Editor.Details,Transform.Scale"
 msgid "Scale"
 msgstr ""
@@ -493,7 +493,7 @@ msgctxt "Editor.Dialog,Verb.NewScene"
 msgid "creating a new scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:330
+#: src/editor/EditorApp.cpp:338
 msgctxt "Editor.Dialog,Verb.OpenAnother"
 msgid "opening another scene"
 msgstr ""
@@ -503,167 +503,167 @@ msgctxt "Editor.Dock,Tip.CloseTab"
 msgid "Close Tab"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:798
+#: src/editor/EditorApp.cpp:816
 msgctxt "Editor.Menu,Actor"
 msgid "Actor"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:236
+#: src/editor/EditorCommandRegistry.hpp:239
 msgctxt "Editor.Menu,Actor.AddEmpty"
 msgid "Add Empty"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:237
+#: src/editor/EditorCommandRegistry.hpp:240
 msgctxt "Editor.Menu,Actor.AttachToPrev"
 msgid "Attach To Prev Selected"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:238
+#: src/editor/EditorCommandRegistry.hpp:241
 msgctxt "Editor.Menu,Actor.Detach"
 msgid "Detach Selected"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:785
+#: src/editor/EditorApp.cpp:803
 msgctxt "Editor.Menu,Edit"
 msgid "Edit"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:235
+#: src/editor/EditorCommandRegistry.hpp:238
 msgctxt "Editor.Menu,Edit.AudioOutput"
 msgid "Audio Output..."
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:227
+#: src/editor/EditorCommandRegistry.hpp:230
 msgctxt "Editor.Menu,Edit.Copy"
 msgid "Copy"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:231
+#: src/editor/EditorCommandRegistry.hpp:234
 msgctxt "Editor.Menu,Edit.Delete"
 msgid "Delete"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:210
+#: src/editor/EditorCommandRegistry.hpp:213
 msgctxt "Editor.Menu,Edit.Duplicate"
 msgid "Duplicate"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:208
+#: src/editor/EditorCommandRegistry.hpp:211
 msgctxt "Editor.Menu,Edit.FrameSelected"
 msgid "Frame Selected"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:234
+#: src/editor/EditorCommandRegistry.hpp:237
 msgctxt "Editor.Menu,Edit.GizmoSize"
 msgid "Gizmo Size (S/M/L)"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:229
+#: src/editor/EditorCommandRegistry.hpp:232
 msgctxt "Editor.Menu,Edit.Paste"
 msgid "Paste"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:224
+#: src/editor/EditorCommandRegistry.hpp:227
 msgctxt "Editor.Menu,Edit.Redo"
 msgid "Redo"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:222
+#: src/editor/EditorCommandRegistry.hpp:225
 msgctxt "Editor.Menu,Edit.Undo"
 msgid "Undo"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:777
+#: src/editor/EditorApp.cpp:795
 msgctxt "Editor.Menu,File"
 msgid "File"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:218
+#: src/editor/EditorCommandRegistry.hpp:221
 msgctxt "Editor.Menu,File.NewScene"
 msgid "New Scene"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:216
+#: src/editor/EditorCommandRegistry.hpp:219
 msgctxt "Editor.Menu,File.OpenScene"
 msgid "Open Scene..."
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:212
+#: src/editor/EditorCommandRegistry.hpp:215
 msgctxt "Editor.Menu,File.SaveScene"
 msgid "Save Scene"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:214
+#: src/editor/EditorCommandRegistry.hpp:217
 msgctxt "Editor.Menu,File.SaveSceneAs"
 msgid "Save Scene As..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:794
+#: src/editor/EditorApp.cpp:812
 msgctxt "Editor.Menu,Section.Configuration"
 msgid "Configuration"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:799
+#: src/editor/EditorApp.cpp:817
 msgctxt "Editor.Menu,Section.Create"
 msgid "Create"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:789
+#: src/editor/EditorApp.cpp:807
 msgctxt "Editor.Menu,Section.Edit"
 msgid "Edit"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:801
+#: src/editor/EditorApp.cpp:819
 msgctxt "Editor.Menu,Section.Hierarchy"
 msgid "Hierarchy"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:786
+#: src/editor/EditorApp.cpp:804
 msgctxt "Editor.Menu,Section.History"
 msgid "History"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:813
+#: src/editor/EditorApp.cpp:832
 msgctxt "Editor.Menu,Section.Layout"
 msgid "Layout"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:811
+#: src/editor/EditorApp.cpp:829
 msgctxt "Editor.Menu,Section.Panels"
 msgid "Panels"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:781
+#: src/editor/EditorApp.cpp:799
 msgctxt "Editor.Menu,Section.Save"
 msgid "Save"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:778
+#: src/editor/EditorApp.cpp:796
 msgctxt "Editor.Menu,Section.Scene"
 msgid "Scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:806
+#: src/editor/EditorApp.cpp:824
 msgctxt "Editor.Menu,Section.Viewport"
 msgid "Viewport"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:805
+#: src/editor/EditorApp.cpp:823
 msgctxt "Editor.Menu,View"
 msgid "View"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:795
+#: src/editor/EditorApp.cpp:813
 msgctxt "Editor.Menu,View.Language"
 msgid "Language"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:239
+#: src/editor/EditorCommandRegistry.hpp:242
 msgctxt "Editor.Menu,View.ResetLayout"
 msgid "Reset Layout"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:815
+#: src/editor/EditorApp.cpp:834
 msgctxt "Editor.Menu,Window"
 msgid "Window"
 msgstr ""
@@ -698,97 +698,97 @@ msgctxt "Editor.Outliner,Tip.Visibility"
 msgid "Toggle Visibility"
 msgstr ""
 
-#: src/editor/OutputLogPanel.cpp:268
+#: src/editor/OutputLogPanel.cpp:543
 msgctxt "Editor.OutputLog,ConsoleHint"
 msgid "Enter console command (help)"
 msgstr ""
 
-#: src/editor/OutputLogPanel.cpp:155
-msgctxt "Editor.OutputLog,SearchHint"
-msgid "Search log..."
-msgstr ""
-
-#: src/editor/OutputLogPanel.cpp
-msgctxt "Editor.OutputLog,Tip.DisplayOptions"
-msgid "Display Options"
-msgstr ""
-
-#: src/editor/OutputLogPanel.cpp
-msgctxt "Editor.OutputLog,Opt.HeadingDisplay"
-msgid "Display"
-msgstr ""
-
-#: src/editor/OutputLogPanel.cpp
-msgctxt "Editor.OutputLog,Opt.Timestamp"
-msgid "Timestamp"
-msgstr ""
-
-#: src/editor/EditorCommandRegistry.hpp
-msgctxt "Editor.OutputLog,Opt.TimeNone"
-msgid "None"
-msgstr ""
-
-#: src/editor/EditorCommandRegistry.hpp
-msgctxt "Editor.OutputLog,Opt.TimeUptime"
-msgid "Seconds Since Launch"
-msgstr ""
-
-#: src/editor/EditorCommandRegistry.hpp
-msgctxt "Editor.OutputLog,Opt.TimeClock"
-msgid "Local Time"
-msgstr ""
-
-#: src/editor/EditorCommandRegistry.hpp
-msgctxt "Editor.OutputLog,Opt.Collapse"
-msgid "Collapse"
-msgstr ""
-
-#: src/editor/EditorCommandRegistry.hpp
-msgctxt "Editor.OutputLog,Opt.WordWrap"
-msgid "Word Wrap"
-msgstr ""
-
-#: src/editor/OutputLogPanel.cpp
-msgctxt "Editor.OutputLog,Opt.HeadingPlay"
-msgid "Play"
-msgstr ""
-
-#: src/editor/EditorCommandRegistry.hpp
+#: src/editor/EditorCommandRegistry.hpp:258
 msgctxt "Editor.OutputLog,Opt.ClearOnPlay"
 msgid "Clear on Play"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:668
+#: src/editor/EditorCommandRegistry.hpp:256
+msgctxt "Editor.OutputLog,Opt.Collapse"
+msgid "Collapse"
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp:610
+msgctxt "Editor.OutputLog,Opt.HeadingDisplay"
+msgid "Display"
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp:615
+msgctxt "Editor.OutputLog,Opt.HeadingPlay"
+msgid "Play"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp:255
+msgctxt "Editor.OutputLog,Opt.TimeClock"
+msgid "Local Time"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp:253
+msgctxt "Editor.OutputLog,Opt.TimeNone"
+msgid "None"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp:254
+msgctxt "Editor.OutputLog,Opt.TimeUptime"
+msgid "Seconds Since Launch"
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp:611
+msgctxt "Editor.OutputLog,Opt.Timestamp"
+msgid "Timestamp"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp:257
+msgctxt "Editor.OutputLog,Opt.WordWrap"
+msgid "Word Wrap"
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp:420
+msgctxt "Editor.OutputLog,SearchHint"
+msgid "Search log..."
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp:499
+msgctxt "Editor.OutputLog,Tip.DisplayOptions"
+msgid "Display Options"
+msgstr ""
+
+#: src/editor/EditorApp.cpp:682
 msgctxt "Editor.Panels,ContentBrowser"
 msgid "Content Browser"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:685
+#: src/editor/EditorApp.cpp:699
 msgctxt "Editor.Panels,ContentDrawer"
 msgid "Content Drawer"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:684
+#: src/editor/EditorApp.cpp:698
 msgctxt "Editor.Panels,Details"
 msgid "Details"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:670
+#: src/editor/EditorApp.cpp:684
 msgctxt "Editor.Panels,GpuStats"
 msgid "GPU Stats"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:682
+#: src/editor/EditorApp.cpp:696
 msgctxt "Editor.Panels,Outliner"
 msgid "Outliner"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:669
+#: src/editor/EditorApp.cpp:683
 msgctxt "Editor.Panels,OutputLog"
 msgid "Output Log"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:683
+#: src/editor/EditorApp.cpp:697
 msgctxt "Editor.Panels,Viewport"
 msgid "Viewport"
 msgstr ""
@@ -951,5 +951,170 @@ msgstr ""
 #: src/editor/ViewportToolbar.cpp:201
 msgctxt "Editor.Viewport,World"
 msgid "World"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:791
+msgctxt "Launcher,New.Browse"
+msgid "Browse..."
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:841
+msgctxt "Launcher,New.BuildAfter"
+msgid "Build Release after generating solution"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:816
+msgctxt "Launcher,New.Company"
+msgid "Company"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:852
+msgctxt "Launcher,New.Create"
+msgid "Create Project"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:153
+msgctxt "Launcher,New.ErrorExists"
+msgid "Target folder already exists and is not empty."
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:147
+msgctxt "Launcher,New.ErrorLocation"
+msgid "Enter a valid destination folder."
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:141
+msgctxt "Launcher,New.ErrorName"
+msgid "Project name must start with an ASCII letter and use only letters, digits, or '_'."
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:806
+msgctxt "Launcher,New.Location"
+msgid "Location"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:811
+msgctxt "Launcher,New.Name"
+msgid "Project Name"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:737
+msgctxt "Launcher,New.NoTemplates"
+msgid "No templates found under Templates/."
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:821
+msgctxt "Launcher,New.PackageId"
+msgid "Package ID"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:783
+msgctxt "Launcher,New.Settings"
+msgid "Project Settings"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:726
+msgctxt "Launcher,New.Templates"
+msgid "Templates"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:972
+msgctxt "Launcher,Progress.Back"
+msgid "Back to Recent"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:987
+msgctxt "Launcher,Progress.BuildOpen"
+msgid "Build & Open Editor"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:436
+msgctxt "Launcher,Progress.Complete"
+msgid "Project is ready."
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:981
+msgctxt "Launcher,Progress.OpenVS"
+msgid "Open in Visual Studio"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:891
+msgctxt "Launcher,Progress.SkippedSuffix"
+msgid " (Skipped)"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:939
+msgctxt "Launcher,Progress.StepBuild"
+msgid "3. Build"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:931
+msgctxt "Launcher,Progress.StepCopy"
+msgid "1. Copy Template"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:935
+msgctxt "Launcher,Progress.StepGen"
+msgid "2. Generate Solution"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:547
+msgctxt "Launcher,Recent.Empty"
+msgid "No recent projects yet. Create a new project to get started."
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:627
+msgctxt "Launcher,Recent.Heading"
+msgid "Recent Projects"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:562
+msgctxt "Launcher,Recent.Missing"
+msgid "Missing"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:639
+msgctxt "Launcher,Recent.NewProject"
+msgid "New Project"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:584
+msgctxt "Launcher,Recent.Open"
+msgid "Open"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:589
+msgctxt "Launcher,Recent.OpenFolder"
+msgid "Open Folder"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:634
+msgctxt "Launcher,Recent.Refresh"
+msgid "Refresh"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:594
+msgctxt "Launcher,Recent.Remove"
+msgid "Remove"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:522
+msgctxt "Launcher,Tab.New"
+msgid "New Project"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:527
+msgctxt "Launcher,Tab.Progress"
+msgid "Progress"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:518
+msgctxt "Launcher,Tab.Recent"
+msgid "Recent Projects"
+msgstr ""
+
+#: src/launcher/LauncherApp.cpp:511
+msgctxt "Launcher,Title"
+msgid "Haruka Launcher"
 msgstr ""
 

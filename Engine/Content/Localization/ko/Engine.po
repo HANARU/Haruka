@@ -949,3 +949,135 @@ msgstr "확인"
 msgctxt "Editor.ColorPicker,Cancel"
 msgid "Cancel"
 msgstr "취소"
+
+msgctxt "Launcher,Title"
+msgid "Haruka Launcher"
+msgstr "Haruka 런처"
+
+msgctxt "Launcher,Tab.Recent"
+msgid "Recent Projects"
+msgstr "최근 프로젝트"
+
+msgctxt "Launcher,Tab.New"
+msgid "New Project"
+msgstr "새 프로젝트"
+
+msgctxt "Launcher,Tab.Progress"
+msgid "Progress"
+msgstr "진행"
+
+msgctxt "Launcher,Recent.Heading"
+msgid "Recent Projects"
+msgstr "최근 프로젝트"
+
+msgctxt "Launcher,Recent.Refresh"
+msgid "Refresh"
+msgstr "새로고침"
+
+msgctxt "Launcher,Recent.NewProject"
+msgid "New Project"
+msgstr "새 프로젝트"
+
+msgctxt "Launcher,Recent.Empty"
+msgid "No recent projects yet. Create a new project to get started."
+msgstr "최근 프로젝트가 없습니다. 새 프로젝트를 만들어 시작하세요."
+
+msgctxt "Launcher,Recent.Missing"
+msgid "Missing"
+msgstr "경로 없음"
+
+msgctxt "Launcher,Recent.Open"
+msgid "Open"
+msgstr "열기"
+
+msgctxt "Launcher,Recent.OpenFolder"
+msgid "Open Folder"
+msgstr "폴더 열기"
+
+msgctxt "Launcher,Recent.Remove"
+msgid "Remove"
+msgstr "목록에서 빼기"
+
+msgctxt "Launcher,New.Templates"
+msgid "Templates"
+msgstr "템플릿"
+
+msgctxt "Launcher,New.NoTemplates"
+msgid "No templates found under Templates/."
+msgstr "Templates/ 아래에 템플릿이 없습니다."
+
+msgctxt "Launcher,New.Settings"
+msgid "Project Settings"
+msgstr "프로젝트 설정"
+
+msgctxt "Launcher,New.Browse"
+msgid "Browse..."
+msgstr "찾아보기..."
+
+msgctxt "Launcher,New.Location"
+msgid "Location"
+msgstr "위치"
+
+msgctxt "Launcher,New.Name"
+msgid "Project Name"
+msgstr "프로젝트 이름"
+
+msgctxt "Launcher,New.Company"
+msgid "Company"
+msgstr "회사"
+
+msgctxt "Launcher,New.PackageId"
+msgid "Package ID"
+msgstr "패키지 ID"
+
+msgctxt "Launcher,New.BuildAfter"
+msgid "Build Release after generating solution"
+msgstr "솔루션 생성 후 Release 빌드"
+
+msgctxt "Launcher,New.Create"
+msgid "Create Project"
+msgstr "만들기"
+
+msgctxt "Launcher,New.ErrorName"
+msgid "Project name must start with an ASCII letter and use only letters, digits, or '_'."
+msgstr "프로젝트 이름은 영문자로 시작하고 영문자·숫자·'_'만 쓸 수 있습니다."
+
+msgctxt "Launcher,New.ErrorLocation"
+msgid "Enter a valid destination folder."
+msgstr "올바른 대상 폴더를 입력하세요."
+
+msgctxt "Launcher,New.ErrorExists"
+msgid "Target folder already exists and is not empty."
+msgstr "대상 폴더가 이미 있고 비어 있지 않습니다."
+
+msgctxt "Launcher,Progress.StepCopy"
+msgid "1. Copy Template"
+msgstr "1. 템플릿 복사"
+
+msgctxt "Launcher,Progress.StepGen"
+msgid "2. Generate Solution"
+msgstr "2. 솔루션 생성"
+
+msgctxt "Launcher,Progress.StepBuild"
+msgid "3. Build"
+msgstr "3. 빌드"
+
+msgctxt "Launcher,Progress.Back"
+msgid "Back to Recent"
+msgstr "최근 목록으로"
+
+msgctxt "Launcher,Progress.OpenVS"
+msgid "Open in Visual Studio"
+msgstr "Visual Studio에서 열기"
+
+msgctxt "Launcher,Progress.BuildOpen"
+msgid "Build & Open Editor"
+msgstr "빌드 후 에디터 열기"
+
+msgctxt "Launcher,Progress.Complete"
+msgid "Project is ready."
+msgstr "프로젝트 준비가 끝났습니다."
+
+msgctxt "Launcher,Progress.SkippedSuffix"
+msgid " (Skipped)"
+msgstr " (건너뜀)"
