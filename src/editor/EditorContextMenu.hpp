@@ -52,6 +52,7 @@ public:
     // 포인터 hover(그 창 문맥 좌표) · 메뉴 키.
     void hover(const HSlateContext* ctx, glm::vec2 p) { view_.hover(ctx, p); }
     void handleKey(hmenu::Key k);
+    bool handleMnemonic(char asciiKey) { return view_.activateByMnemonic(asciiKey); }
     const EditorMenuView& view() const { return view_; }
 
 private:

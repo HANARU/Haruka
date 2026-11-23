@@ -20,6 +20,7 @@ public:
         std::string                  name;
         std::vector<EditorMenuEntry> entries;
         float                        x = 0.f;
+        std::string                  englishName;   // 가속 글자 계산용 영어 원문(비면 name 사용)
     };
 
     void init(const EditorUiKit* ui, float menuBarH, HSlateContext* ctx, EditorCommandRegistry* reg);
@@ -32,6 +33,8 @@ public:
     void flushRebuilds();
 
     bool isOpen() const { return openMenu_ >= 0; }
+    bool isBarActive() const { return barState_.barActive; }
+    bool showMnemonics() const { return barState_.showMnemonics(); }
     int  openIndex() const { return openMenu_; }
     // 드롭다운이 팝업 층에 들어가 있는가(열었지만 아직 소진 전이면 거짓).
     bool popupShown() const { return view_.shown(); }
@@ -43,6 +46,10 @@ public:
     void hoverRows(glm::vec2 mousePos) { view_.hover(ctx_, mousePos); }
     // 메뉴 키(드롭다운이 열려 있을 때). ← → 로 이웃 메뉴, Esc 로 한 단계 닫기.
     void handleKey(hmenu::Key k);
+    // Alt 메뉴 바 상태 기계(C1).
+    hmenu::BarAct handleBarEvent(const hmenu::BarEvent& ev);
+    // 열린 드롭다운 글자 키(C1).
+    bool handleDropdownMnemonic(char asciiKey) { return view_.activateByMnemonic(asciiKey); }
 
     const EditorMenuView& view() const { return view_; }
 
@@ -56,6 +63,8 @@ private:
     float                  menuBarH_ = 26.f;
 
     std::vector<Def>                   defs_;
+    std::vector<char>                  barAccels_;
+    hmenu::BarState                    barState_;
     int                                openMenu_   = -1;
     bool                               barDirty_   = false;
     bool                               popupDirty_ = false;

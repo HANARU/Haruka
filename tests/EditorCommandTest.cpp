@@ -7,7 +7,11 @@
 // 실행: build/Release/HarukaEditCmdTest.exe
 #include "../src/editor/EditorCommands.hpp"
 #include "../src/editor/EditorCommandRegistry.hpp"
+#include "../src/editor/EditorIcons.hpp"
 #include "../src/editor/EditorMenuModel.hpp"
+#include "../src/editor/OutputLogModel.hpp"
+#include "../src/editor/ConsoleHistoryModel.hpp"
+#include "../src/vfs/Vfs.hpp"
 #include "../src/editor/EditorTheme.hpp"
 #include "../src/editor/EditTools.hpp"
 #include "../src/editor/AssetPickerModel.hpp"
@@ -1206,6 +1210,302 @@ int main() {
         const std::string emptyList = heditorcmd::formatCommandList(reg, "no_such_filter_xyz");
         check(emptyList == "no editor commands matching 'no_such_filter_xyz'",
               "cmd.list: 거른 결과 없음 안내");
+    }
+
+    // ── C1: 메뉴 아이콘 일관성 · 가속 글자 · 드롭다운 글자 키 · Alt 메뉴 바 상태 기계 ──
+    {
+        std::printf("\n[C1] 메뉴 아이콘 일관성\n");
+        const auto& iconNames = EditorIcons::names();
+        auto hasIconName = [&](const std::string& name) {
+            for (const char* n : iconNames)
+                if (name == n) return true;
+            return false;
+        };
+        const auto specs = heditorcmd::defaultSpecs();
+        bool allHaveIcon = true, allInList = true;
+        std::string missingInfo;
+        for (const EditorCommand& c : specs) {
+            if (c.icon.empty()) { allHaveIcon = false; missingInfo += c.id + "(empty) "; }
+            else if (!hasIconName(c.icon)) { allInList = false; missingInfo += c.id + "(" + c.icon + ") "; }
+        }
+        check(allHaveIcon, "defaultSpecs 모든 명령에 아이콘 지정됨 " + missingInfo);
+        check(allInList, "defaultSpecs 모든 아이콘이 EditorIcons::names() 에 있음 " + missingInfo);
+
+        hvfs::reset();
+        hvfs::mountDirectoryAs(HARUKA_ENGINE_CONTENT_DIR, "/Engine/", 10);
+        EditorIcons icons;
+        check(icons.load() && icons.count() == iconNames.size(),
+              "EditorIcons 모든 SVG 파일이 존재하고 nanosvg 로 읽힘");
+        bool allLoaded = true;
+        for (const EditorCommand& c : specs)
+            if (!icons.has(c.icon)) allLoaded = false;
+        check(allLoaded, "모든 명령 아이콘이 실제로 로드됨");
+    }
+
+    {
+        std::printf("\n[C1] 메뉴 바 가속 글자 · 드롭다운 글자 키\n");
+        const auto acc = hmenu::assignBarAccelerators({ "File", "Edit", "Actor", "View", "Window" });
+        check(acc.size() == 5 && acc[0] == 'F' && acc[1] == 'E' && acc[2] == 'A' && acc[3] == 'V' && acc[4] == 'W',
+              "메뉴 바 기본 가속 글자 = F E A V W");
+        const auto col = hmenu::assignBarAccelerators({ "File", "Format", "Filter" });
+        check(col.size() == 3 && col[0] == 'F' && col[1] == 'O' && col[2] == 'I',
+              "겹치는 메뉴 이름 가속 글자 = 다음 글자(F O I)");
+        check(hmenu::findAcceleratorIndex("File", 'F') == 0 &&
+              hmenu::findAcceleratorIndex("Format", 'O') == 1 &&
+              hmenu::findAcceleratorIndex("Edit", 'X') == -1,
+              "findAcceleratorIndex: 밑줄 위치 계산");
+
+        std::vector<EditorMenuRow> rows;
+        rows.push_back({ hmenu::Kind::Heading, "Section", "Section", "", "", false, false, false, 0 });
+        rows.push_back({ hmenu::Kind::Command, "Save", "Save", "", "", true, false, false, 1 });
+        rows.push_back({ hmenu::Kind::Command, "Save As...", "Save As...", "", "", true, false, false, 2 });
+        rows.push_back({ hmenu::Kind::Command, "Select Disabled", "Select Disabled", "", "", false, false, false, 3 });
+        rows.push_back({ hmenu::Kind::Command, "실행 취소", "Undo", "", "", true, false, false, 4 });
+
+        bool uniq = false;
+        const int r1 = hmenu::findMnemonicRow(rows, -1, 'S', uniq);
+        check(r1 == 1 && !uniq, "드롭다운 글자 키 S: 첫 켜진 S 항목(Save), 여럿이라 즉시 실행 안 함");
+        const int r2 = hmenu::findMnemonicRow(rows, r1, 'S', uniq);
+        check(r2 == 2 && !uniq, "드롭다운 글자 키 S 두 번째: 다음 S 항목(Save As...), 꺼진 항목 건너뜀");
+        const int r3 = hmenu::findMnemonicRow(rows, r2, 'S', uniq);
+        check(r3 == 1 && !uniq, "드롭다운 글자 키 S 세 번째: 처음으로 돎");
+        const int ru = hmenu::findMnemonicRow(rows, -1, 'U', uniq);
+        check(ru == 4 && uniq, "한국어 라벨도 영어 원문 첫 글자(Undo)로 맞춤 · 하나뿐이면 uniqueMatch");
+        check(hmenu::findMnemonicRow(rows, -1, 'Z', uniq) == -1 && !uniq, "없는 글자 키는 -1");
+    }
+
+    {
+        std::printf("\n[C1] Alt 메뉴 바 상태 기계\n");
+        const std::vector<char> acc = { 'F', 'E', 'A', 'V', 'W' };
+        hmenu::BarState st;
+
+        // 1. Alt 탭 -> 메뉴 바 모드
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::AltPress }, acc) == hmenu::BarAct::BarChanged && st.showMnemonics(),
+              "Alt 누름: 가속 글자 표시 켜짐");
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::AltRelease }, acc) == hmenu::BarAct::BarChanged &&
+              st.barActive && st.focusedMenu == 0 && st.openMenu == -1,
+              "Alt 뗌(탭): 메뉴 바 모드 진입 · File 강조 · 드롭다운 미열림");
+
+        // 2. 모드에서 Esc -> 해제
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::NavEscape }, acc) == hmenu::BarAct::BarChanged &&
+              !st.barActive && st.focusedMenu == -1 && !st.showMnemonics(),
+              "모드에서 Esc: 해제");
+
+        // 3. Alt+F4 -> 모드 아님
+        hmenu::stepBar(st, { hmenu::BarEventKind::AltPress }, acc);
+        hmenu::stepBar(st, { hmenu::BarEventKind::OtherKey }, acc);
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::AltRelease }, acc) == hmenu::BarAct::BarChanged &&
+              !st.barActive && !st.showMnemonics(),
+              "Alt+F4(OtherKey): 떼어도 메뉴 모드 아님");
+
+        // 4. Alt+끌기(MouseOrWheel) -> 모드 아님
+        hmenu::stepBar(st, { hmenu::BarEventKind::AltPress }, acc);
+        hmenu::stepBar(st, { hmenu::BarEventKind::MouseOrWheel }, acc);
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::AltRelease }, acc) == hmenu::BarAct::BarChanged &&
+              !st.barActive,
+              "Alt+끌기(MouseOrWheel): 떼어도 메뉴 모드 아님");
+
+        // 5. 모드에서 -> -> Enter
+        hmenu::stepBar(st, { hmenu::BarEventKind::AltPress }, acc);
+        hmenu::stepBar(st, { hmenu::BarEventKind::AltRelease }, acc);
+        hmenu::stepBar(st, { hmenu::BarEventKind::NavRight }, acc);
+        check(st.focusedMenu == 1, "모드에서 ->: Edit(1) 강조");
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::NavEnter }, acc) == hmenu::BarAct::OpenMenu &&
+              st.openMenu == 1 && !st.barActive,
+              "모드에서 Enter: Edit 드롭다운 열림");
+
+        // 6. Alt+E -> Edit 바로 열기
+        st = hmenu::BarState{};
+        hmenu::stepBar(st, { hmenu::BarEventKind::AltPress }, acc);
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::AccelKey, 'E' }, acc) == hmenu::BarAct::OpenMenu &&
+              st.openMenu == 1 && !st.barActive,
+              "Alt+E: Edit 드롭다운 바로 열림");
+        hmenu::stepBar(st, { hmenu::BarEventKind::AltRelease }, acc);
+        check(st.openMenu == 1 && !st.barActive && !st.showMnemonics(),
+              "Alt+E 뒤 Alt 뗌: 드롭다운 유지 · 가속 글자 숨김");
+
+        // 7. 모달 · 떠 있는 창 키보드 중(Blocked) 무시
+        st = hmenu::BarState{};
+        hmenu::stepBar(st, { hmenu::BarEventKind::AltPress }, acc);
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::Blocked }, acc) == hmenu::BarAct::BarChanged &&
+              !st.altDown && !st.barActive,
+              "Blocked(모달 · 떠 있는 창): Alt 상태 초기화");
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::AltRelease }, acc) == hmenu::BarAct::None && !st.barActive,
+              "Blocked 뒤 AltRelease: 메뉴 모드 진입 안 함");
+
+        // 8. 오른쪽 Alt 탭 -> 메뉴 바 모드 진입 안 함 (한/영 키 오작동 방지)
+        st = hmenu::BarState{};
+        hmenu::stepBar(st, { hmenu::BarEventKind::AltPress, '\0', false }, acc);
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::AltRelease }, acc) == hmenu::BarAct::BarChanged &&
+              !st.barActive && !st.showMnemonics(),
+              "오른쪽 Alt 탭: 메뉴 바 모드 아님");
+
+        // 9. Alt+화살표/편집키(OtherKey) 뒤 Alt 떼기 -> 메뉴 바 모드 아님
+        st = hmenu::BarState{};
+        hmenu::stepBar(st, { hmenu::BarEventKind::AltPress, '\0', true }, acc);
+        hmenu::stepBar(st, { hmenu::BarEventKind::OtherKey }, acc);
+        check(hmenu::stepBar(st, { hmenu::BarEventKind::AltRelease }, acc) == hmenu::BarAct::BarChanged &&
+              !st.barActive && !st.showMnemonics(),
+              "Alt+화살표 등(OtherKey) 뒤 Alt 뗌: 메뉴 바 모드 아님");
+    }
+
+    // ── C2: Output Log 표시 옵션(시각 · 묶기 · 줄 바꿈 · 설정 파일) ──
+    {
+        std::printf("\n[C2] Output Log 시각 포맷\n");
+        check(hlogview::formatLogTime(ELogTimeMode::None, 12.34f, 0, false).empty(),
+              "시각 없음: 빈 문자열");
+        check(hlogview::formatLogTime(ELogTimeMode::Uptime, 12.345f, 0, false) == "12.35",
+              "시각 시작 뒤 초: 소수 둘째 자리");
+        check(hlogview::formatLogTime(ELogTimeMode::Uptime, 12.345f, 0, true) == "#.##",
+              "시각 덤프 모드(uptime): #.## 고정");
+        check(hlogview::formatLogTime(ELogTimeMode::Clock, 12.345f, 0, true) == "##:##:##.###",
+              "시각 덤프 모드(clock): ##:##:##.### 고정");
+        const std::string clk = hlogview::formatLogTime(ELogTimeMode::Clock, 1.25f, 1700000000000LL, false);
+        check(clk.size() == 12 && clk[2] == ':' && clk[5] == ':' && clk[8] == '.' && clk.substr(9) == "250",
+              "시각 지역 시각: HH:MM:SS.mmm 형식");
+    }
+
+    {
+        std::printf("\n[C2] Output Log 같은 메시지 묶기(Collapse)\n");
+        hlogview::CollapsedLogList cl;
+        cl.push({ 1, 1.0f, 0, ELogVerbosity::Log, "hello" });
+        cl.push({ 2, 2.0f, 0, ELogVerbosity::Log, "world" });
+        cl.push({ 3, 3.0f, 0, ELogVerbosity::Log, "hello" });
+        cl.push({ 4, 4.0f, 1, ELogVerbosity::Log, "hello" });       // 다른 분류
+        cl.push({ 5, 5.0f, 0, ELogVerbosity::Warning, "hello" });   // 다른 심각도
+        check(cl.size() == 4, "묶기: 같은 것만 묶이고 다른 분류 · 심각도는 분리");
+        check(cl.entries()[0].count == 2 && cl.entries()[0].firstSeq == 1 && cl.entries()[0].lastSeq == 3 &&
+              std::abs(cl.entries()[0].lastTime - 3.0f) < 1e-5f,
+              "묶기: 처음 나온 자리에 두고 count=2 · 시각은 마지막 것");
+        check(cl.firstAfter(1) == 1 && cl.firstAfter(4) == 3,
+              "묶기: firstAfter(firstSeq) 이분 탐색");
+        cl.evict({ 1, 1.0f, 0, ELogVerbosity::Log, "hello" });
+        check(cl.size() == 4 && cl.entries()[0].count == 1, "묶기 evict: count 2 -> 1");
+        cl.evict({ 2, 2.0f, 0, ELogVerbosity::Log, "world" });
+        check(cl.size() == 3 && cl.entries()[1].category == 1, "묶기 evict: count 1 -> 제거");
+    }
+
+    {
+        std::printf("\n[C2] Output Log 줄 나눔(wrapLogText)\n");
+        auto monoWidth = [](std::string_view sv) -> float {
+            float w = 0.f;
+            for (size_t i = 0; i < sv.size();) {
+                const uint32_t cp = utf8::next(sv, i);
+                w += (cp >= 0x80) ? 12.f : 6.f;
+            }
+            return w;
+        };
+        const auto wEmpty = hlogview::wrapLogText("", 100.f, monoWidth);
+        check(wEmpty.size() == 1 && wEmpty[0].empty(), "줄 나눔: 빈 글은 빈 1줄");
+
+        const auto wZero = hlogview::wrapLogText("abc\ndef", 0.f, monoWidth);
+        check(wZero.size() == 2 && wZero[0] == "abc" && wZero[1] == "def",
+              "줄 나눔: 폭 0은 개행만 나눔");
+
+        const auto wLong = hlogview::wrapLogText("ABCDEFGHIJ", 24.f, monoWidth);
+        check(wLong.size() == 3 && wLong[0] == "ABCD" && wLong[1] == "EFGH" && wLong[2] == "IJ",
+              "줄 나눔: 공백 없는 긴 낱말 24px(4자)씩 나눔");
+
+        const auto wKo = hlogview::wrapLogText("가나다라마바사", 36.f, monoWidth);
+        check(wKo.size() == 3 && wKo[0] == "가나다" && wKo[1] == "라마바" && wKo[2] == "사",
+              "줄 나눔: 한국어 UTF-8 경계 깨지지 않고 3자씩 나눔");
+
+        const auto wNl = hlogview::wrapLogText("first line\r\nsecond\nthird", 200.f, monoWidth);
+        check(wNl.size() == 3 && wNl[0] == "first line" && wNl[1] == "second" && wNl[2] == "third",
+              "줄 나눔: \\r\\n · \\n 문단 나눔");
+
+        bool hadNl = false;
+        const std::string one = hlogview::firstLineForSingleRow("first\nsecond", hadNl);
+        check(hadNl && one == "first..", "줄 바꿈 끔: 개행이 있으면 첫 줄 + '..'");
+
+        // 줄 바꿈 캐시 상한 정리(C2 보완)
+        std::unordered_map<uint64_t, std::vector<std::string>> cache;
+        const size_t cap = HLog::kCapacity;
+        for (uint64_t s = 1; s <= cap * 3; ++s) {
+            cache.emplace(s, std::vector<std::string>{ "line" });
+            if (s > cap) {
+                const uint64_t minKeep = s - cap + 1;
+                hlogview::pruneWrapCache(cache, minKeep, cap * 2, [](uint64_t k) { return k == 42; });
+            }
+        }
+        check(cache.size() <= cap * 2 && cache.count(42) == 1 && cache.count(1) == 0 && cache.count(cap * 3) == 1,
+              "줄 바꿈 캐시 정리: 링 크기 초과 입력 뒤 상한 안 · 대표 seq 보존 · 오래된 seq 제거");
+    }
+
+    {
+        std::printf("\n[C2] Output Log 설정 파일 읽기 · 쓰기\n");
+        OutputLogOptions o;
+        bool sv[5] = { false, true, true, true, true };
+        std::set<std::string> hidden;
+        std::istringstream v1in(
+            "# Haruka Output Log display filter v1. Search text is not saved.\n"
+            "severity Warning off\n"
+            "hide Input\n"
+            "unknown_future_key foo bar\n");
+        hlogview::parseLogOptions(v1in, o, sv, hidden);
+        check(!sv[(int)ELogVerbosity::Warning] && sv[(int)ELogVerbosity::Error] &&
+              hidden.count("Input") == 1 && o.timeMode == ELogTimeMode::Uptime && !o.collapse,
+              "설정 v1 하위 호환 읽기 + 모르는 줄 무시");
+
+        o.timeMode = ELogTimeMode::Clock;
+        o.collapse = true;
+        o.wordWrap = true;
+        o.clearOnPlay = true;
+        std::ostringstream v2out;
+        hlogview::formatLogOptions(v2out, o, sv, hidden);
+
+        OutputLogOptions o2;
+        bool sv2[5] = { false, true, true, true, true };
+        std::set<std::string> hidden2;
+        std::istringstream v2in(v2out.str());
+        hlogview::parseLogOptions(v2in, o2, sv2, hidden2);
+        check(o2.timeMode == ELogTimeMode::Clock && o2.collapse && o2.wordWrap && o2.clearOnPlay &&
+              !sv2[(int)ELogVerbosity::Warning] && hidden2.count("Input") == 1,
+              "설정 v2 왕복 저장 · 복원");
+    }
+
+    {
+        std::printf("\n[C3] 콘솔 기록 파일 읽기 · 쓰기 · Console.Focus 명령\n");
+        {
+            std::istringstream emptyIn("");
+            check(hconsole::parseHistory(emptyIn).empty(), "빈 기록 파일");
+        }
+        {
+            std::istringstream crlfIn("# Haruka Console History v1\r\n\r\n  \r\nhelp\r\nhelp\r\nlist time.\r\n\r\nhelp\r\n");
+            auto h = hconsole::parseHistory(crlfIn);
+            check(h == std::vector<std::string>{ "help", "list time.", "help" },
+                  "CRLF · 빈 줄 · 연속 중복 제거 · 비연속 유지");
+        }
+        {
+            std::vector<std::string> h;
+            for (int i = 1; i <= 80; ++i) hconsole::pushHistory(h, "cmd " + std::to_string(i));
+            check(h.size() == hconsole::kMaxHistory && h.front() == "cmd 17" && h.back() == "cmd 80",
+                  "64줄 상한(최근 64줄 유지)");
+            std::ostringstream out;
+            hconsole::formatHistory(out, h);
+            check(out.str().rfind(hconsole::kHistoryHeader, 0) == 0, "머리말 주석 한 줄");
+            std::istringstream in(out.str());
+            auto h2 = hconsole::parseHistory(in);
+            check(h2 == h, "기록 파일 왕복 저장 · 복원");
+        }
+        {
+            EditorCommandRegistry reg;
+            heditorcmd::addDefaultSpecs(reg);
+            const EditorCommand* cf = reg.find("Console.Focus");
+            check(cf && cf->icon == "terminal" && reg.shortcutText("Console.Focus") == "`",
+                  "Console.Focus 명령(아이콘 terminal, 단축키 `)");
+        }
+        {
+            auto l1 = hconsole::computeCompletionLayout({ 80.f, 120.f }, { 30.f, 0.f }, 620.f, 12.f);
+            check(l1.nameW == 120.f && l1.valW == 30.f && l1.gap == 12.f && l1.helpW == 620.f - 120.f - 30.f - 24.f,
+                  "후보 열 폭: 가장 긴 이름 · 값에 맞추고 간격 12px 적용");
+            auto l2 = hconsole::computeCompletionLayout({ 400.f }, { 200.f }, 500.f, 12.f);
+            check(l2.nameW == 500.f * 0.45f && l2.valW == 500.f * 0.20f && l2.helpW == 500.f - l2.nameW - l2.valW - 24.f,
+                  "후보 열 폭: 이름 45% · 값 20% 상한 및 도움말 남은 폭");
+            auto l3 = hconsole::computeCompletionLayout({ 100.f }, { 0.f }, 500.f, 12.f);
+            check(l3.valW == 0.f && l3.helpW == 500.f - 100.f - 12.f,
+                  "후보 열 폭: 값이 없으면 값 열 생략 · 간격 1회");
+        }
     }
 
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);

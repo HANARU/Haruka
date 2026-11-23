@@ -127,6 +127,7 @@ void EditorApp::init(Renderer& renderer, World& world, AssetManager& assets, IWi
 
     contentPanel_.scanAll();
     logPanel_.loadFilter();   // 첫 syncCategories 보다 먼저. 숨긴 카테고리는 등록되는 순간 적용됩니다
+    logPanel_.loadHistory();
     buildWidgetTree();
     outlinerPanel_.rebuild();
     detailsPanel_.rebuild();
@@ -153,7 +154,7 @@ void EditorApp::initPanels() {
                 (!bottomVis   && (f == EFocusTarget::LogSearch || f == EFocusTarget::Console || f == EFocusTarget::ContentSearch)) ||
                 (!detailsVis  && (f == EFocusTarget::NumberField || f == EFocusTarget::TextField)))
                 setTextFocus(EFocusTarget::None);
-            if (!bottomVis) logPanel_.closePopup();
+            if (!bottomVis) { logPanel_.closePopup(); logPanel_.closeCompletion(); }
             if (!detailsVis) { componentPicker_.close(); assetPicker_.close(); colorPicker_.confirm(); }
             // 오른쪽 메뉴 · 콤보는 연 패널이 닫히면 닫습니다(H3a: 디테일 행 메뉴 · 열거 콤보도 이 메뉴).
             if ((!bottomVis && contextMenu_.panel() == "Bottom") || (!detailsVis && contextMenu_.panel() == "Details"))
@@ -265,6 +266,13 @@ void EditorApp::initPanels() {
     textDeps.windowById     = [this](int id) { return windowById(id); };
     textDeps.windowIds      = [this] { return windowIds(); };
     textDeps.isKeyboardCaptured = [this] { return menuKeyCapture_; };   // 열린 메뉴가 키를 받음(H2b)
+    textDeps.onToggleConsole = [this] {
+        const int kb = keyboardWindowId();
+        const int bw = dock_.floatOfPanel("Bottom");
+        if (kb != 0 && kb != bw) return;
+        if (playState_ == EPlayState::Playing && kb == 0) return;   // Play 중 메인 창 게임 입력 잡힘(D7)
+        commands_.execute("Console.Focus");
+    };
     textInput_.init(std::move(textDeps));
     DetailsPanel::Deps detailsDeps{ &ui_, &ctx_, &cmdStack_, &cachedEuler_, &undoSnapshot_,
                          &LogEditor,
@@ -350,6 +358,7 @@ void EditorApp::initPanels() {
     });
     // Categories 팝업은 로그 패널이 있는 창의 팝업 층에 뜹니다(H2a).
     logPanel_.setPopupContext([this] { return panelPopupContext("Bottom"); });
+    logPanel_.setContextMenu(&contextMenu_);
     // 콘솔 줄(Docs/Gameplay_Tools.md D9): 엔진의 CVar 레지스트리(월드 서비스)로 실행하고 결과는 Console 분류 로그로 남깁니다.
     logPanel_.setConsole(
         [this](const std::string& line) -> std::string {
@@ -361,6 +370,10 @@ void EditorApp::initPanels() {
             return cv->executeLogged(line);
         },
         [this] { setTextFocus(EFocusTarget::Console); });
+    logPanel_.setConsoleComplete([this](std::string_view input, size_t max) {
+        CVarRegistry* cv = ctx_.world ? ctx_.world->service<CVarRegistry>() : nullptr;
+        return cv ? cv->complete(input, max) : std::vector<CVarRegistry::Completion>{};
+    });
 }
 
 void EditorApp::cleanup() {
@@ -481,6 +494,7 @@ void EditorApp::tick(float dt) {
     // 휠은 프로세스 전체에서 이 한 줄로만 읽습니다(getScrollDelta 는 consume-on-read라
     // 두 곳에서 읽으면 한쪽이 항상 0 을 받습니다).
     float scroll = ctx_.window ? ctx_.window->getScrollDelta() : 0.f;
+    if (scroll != 0.f) menus_.handleBarEvent({ hmenu::BarEventKind::MouseOrWheel });
     // RMB 비행 중 휠은 돌리가 아니라 이동 속도 조절입니다. 카메라 모드를 놓으면
     // 종전처럼 돌리로 돌아갑니다.
     if (scroll != 0.f && ctx_.window && ctx_.window->isCameraModeActive()) {
@@ -767,6 +781,10 @@ void EditorApp::buildMenus() {
         EditorCommand cmd;
         cmd.id        = "Window.Panel." + id;
         cmd.label     = HText::fromString(def->title);
+        if (id == "Outliner")      cmd.icon = "list-tree";
+        else if (id == "Viewport") cmd.icon = "monitor";
+        else if (id == "Details")  cmd.icon = "sliders-horizontal";
+        else if (id == "Bottom")   cmd.icon = "folder";
         cmd.execute   = [this, id] { dock_.showPanel(id); };
         cmd.isChecked = [this, id] { return dock_.contains(id); };
         commands_.add(std::move(cmd));
@@ -781,7 +799,7 @@ void EditorApp::buildMenus() {
         E::heading(HTEXT("Editor.Menu", "Section.Save", "Save").toString()),
         E::cmd("File.SaveScene"),
         E::cmd("File.SaveSceneAs"),
-    }, 0.f });
+    }, 0.f, "File" });
     defs.push_back({ HTEXT("Editor.Menu", "Edit", "Edit").toString(), {
         E::heading(HTEXT("Editor.Menu", "Section.History", "History").toString()),
         E::cmd("Edit.Undo"),
@@ -792,27 +810,28 @@ void EditorApp::buildMenus() {
         E::cmd("Edit.Duplicate"),
         E::cmd("Edit.Delete"),
         E::heading(HTEXT("Editor.Menu", "Section.Configuration", "Configuration").toString()),
-        E::submenu(HTEXT("Editor.Menu", "View.Language", "Language").toString(), std::move(languages), "globe"),
+        E::submenu(HTEXT("Editor.Menu", "View.Language", "Language").toString(), std::move(languages), "globe", "Language"),
         E::cmd("Edit.AudioOutput"),
-    }, 0.f });
+    }, 0.f, "Edit" });
     defs.push_back({ HTEXT("Editor.Menu", "Actor", "Actor").toString(), {
         E::heading(HTEXT("Editor.Menu", "Section.Create", "Create").toString()),
         E::cmd("Actor.AddEmpty"),
         E::heading(HTEXT("Editor.Menu", "Section.Hierarchy", "Hierarchy").toString()),
         E::cmd("Actor.AttachToPrev"),
         E::cmd("Actor.Detach"),
-    }, 0.f });
+    }, 0.f, "Actor" });
     defs.push_back({ HTEXT("Editor.Menu", "View", "View").toString(), {
         E::heading(HTEXT("Editor.Menu", "Section.Viewport", "Viewport").toString()),
         E::cmd("View.FrameSelected"),
         E::cmd("View.GizmoSize"),
-    }, 0.f });
+    }, 0.f, "View" });
     std::vector<E> window;
     window.push_back(E::heading(HTEXT("Editor.Menu", "Section.Panels", "Panels").toString()));
     for (E& e : panels) window.push_back(std::move(e));
+    window.push_back(E::cmd("Console.Focus"));
     window.push_back(E::heading(HTEXT("Editor.Menu", "Section.Layout", "Layout").toString()));
     window.push_back(E::cmd("Window.ResetLayout"));
-    defs.push_back({ HTEXT("Editor.Menu", "Window", "Window").toString(), std::move(window), 0.f });
+    defs.push_back({ HTEXT("Editor.Menu", "Window", "Window").toString(), std::move(window), 0.f, "Window" });
     menus_.setDefs(std::move(defs));
 }
 
@@ -885,6 +904,33 @@ void EditorApp::registerCommands() {
     commands_.bind("Play.Pause", [this] { pausePlay(); }, [this] { return playState_ != EPlayState::Editor; });
     commands_.bind("Play.Stop",  [this] { stopPlay(); },  [this] { return playState_ != EPlayState::Editor; });
     commands_.bind("Content.Refresh", [this] { contentPanel_.scanAll(); rebuildBottomPanel(); });
+    // Output Log 표시 옵션(C2)
+    commands_.bind("OutputLog.TimeNone",
+                   [this] { logPanel_.setTimeMode(ELogTimeMode::None); }, nullptr,
+                   [this] { return logPanel_.timeMode() == ELogTimeMode::None; });
+    commands_.bind("OutputLog.TimeUptime",
+                   [this] { logPanel_.setTimeMode(ELogTimeMode::Uptime); }, nullptr,
+                   [this] { return logPanel_.timeMode() == ELogTimeMode::Uptime; });
+    commands_.bind("OutputLog.TimeClock",
+                   [this] { logPanel_.setTimeMode(ELogTimeMode::Clock); }, nullptr,
+                   [this] { return logPanel_.timeMode() == ELogTimeMode::Clock; });
+    commands_.bind("OutputLog.Collapse",
+                   [this] { logPanel_.setCollapse(!logPanel_.collapse()); }, nullptr,
+                   [this] { return logPanel_.collapse(); });
+    commands_.bind("OutputLog.WordWrap",
+                   [this] { logPanel_.setWordWrap(!logPanel_.wordWrap()); }, nullptr,
+                   [this] { return logPanel_.wordWrap(); });
+    commands_.bind("OutputLog.ClearOnPlay",
+                   [this] { logPanel_.setClearOnPlay(!logPanel_.clearOnPlay()); }, nullptr,
+                   [this] { return logPanel_.clearOnPlay(); });
+    commands_.bind("Console.Focus", [this] {
+        dock_.showPanel("Bottom");
+        if (bottomTab_ != 1) {
+            bottomTab_ = 1;
+            rebuildBottomPanel();
+        }
+        setTextFocus(EFocusTarget::Console);
+    });
 
     // 콘솔에서 에디터 명령 실행(B1): 에디터 전용. 게임 실행 파일 · Android 에는 EditorApp 이 없어 등록되지 않습니다.
     if (CVarRegistry* cv = ctx_.world ? ctx_.world->service<CVarRegistry>() : nullptr) {
@@ -913,6 +959,7 @@ void EditorApp::registerCommands() {
 void EditorApp::beginPlay() {
     if (playState_ == EPlayState::Playing) return;
     if (playState_ == EPlayState::Editor) {
+        if (logPanel_.clearOnPlay()) logPanel_.clear();
         worldSnapshot_ = serializeWorld();
         doc_.beginPlay(cmdStack_.stateToken());
         viewport_.setViewPreferred(false);   // Play 중에는 씬 카메라(플레이어)가 먼저
@@ -1134,25 +1181,111 @@ void EditorApp::tickMenuKeys() {
                                       HInput::KEY_ENTER, HInput::KEY_ESCAPE };
     static constexpr hmenu::Key kMap[6] = { hmenu::Key::Up, hmenu::Key::Down, hmenu::Key::Left, hmenu::Key::Right,
                                             hmenu::Key::Enter, hmenu::Key::Escape };
+    static constexpr int kExtraKeys[21] = {
+        HInput::KEY_SPACE, 258 /*Tab*/, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301,
+        260 /*Insert*/, HInput::KEY_DELETE, HInput::KEY_BACKSPACE, 266 /*PageUp*/, 267 /*PageDown*/,
+        HInput::KEY_HOME, HInput::KEY_END
+    };
     const int kb = keyboardWindowId();
     IWindow* kw = windowById(kb);
     // 엣지는 늘 잽니다. 키보드 창이 바뀌면 그 창의 지금 상태로 다시 심습니다(다른 창의 눌림이 엣지로 잡히지 않게, 글 칸과 같은 규칙).
     std::vector<hmenu::Key> keys;
+    std::vector<char> alphaEdges;
+    bool spaceEdge = false;
+    bool otherEdge = false;
+    bool navEdge = false;
+    bool altNow = false;
+    bool altLeftNow = false;
+    const bool reseed = kb != menuKeyWin_;
     if (kw) {
-        const bool reseed = kb != menuKeyWin_;
         menuKeyWin_ = kb;
         for (int i = 0; i < 6; ++i) {
             const bool now  = kw->isKeyDown(kKeys[i]);
             const bool edge = now && !prevMenuKeys_[i] && !reseed;
             prevMenuKeys_[i] = now;
+            if (edge) navEdge = true;
             // ↑ ↓ 는 누르고 있으면 OS 자동 반복으로 거듭 움직입니다(편집 키와 같은 규칙, DEF-58).
             int n = edge ? 1 : 0;
             if (!reseed && i < 2) n = std::max(n, kw->keyPressCount(kKeys[i]));
             for (int k = 0; k < n; ++k) keys.push_back(kMap[i]);
         }
+        for (int i = 0; i < 36; ++i) {
+            const int vk = (i < 26) ? ('A' + i) : ('0' + (i - 26));
+            const bool now = kw->isKeyDown(vk);
+            if (now && !prevAltAlpha_[i] && !reseed) alphaEdges.push_back((char)vk);
+            prevAltAlpha_[i] = now;
+        }
+        for (int i = 0; i < 21; ++i) {
+            const bool now = kw->isKeyDown(kExtraKeys[i]);
+            if (now && !prevAltExtra_[i] && !reseed) {
+                if (i == 0) spaceEdge = true;
+                else        otherEdge = true;
+            }
+            prevAltExtra_[i] = now;
+        }
+        altLeftNow = kw->isKeyDown(HInput::KEY_LEFT_ALT);
+        altNow = altLeftNow || kw->isKeyDown(HInput::KEY_RIGHT_ALT);
     }
+
+    // ── C1: Alt 메뉴 바 상태 기계 (메인 창이 키보드 창일 때만) ──
+    const bool barBlocked = (kb != 0) || (modal_ != nullptr) || editDragActive() ||
+                            dock_.isSplitterDragging() || dock_.isTabDragging() ||
+                            outlinerPanel_.isDragging() || contentPanel_.dragging() ||
+                            (playState_ == EPlayState::Playing && ctx_.window && ctx_.window->isCameraModeActive());
+    if (barBlocked) {
+        if (menus_.isBarActive() || menus_.showMnemonics() || prevAltDown_)
+            menus_.handleBarEvent({ hmenu::BarEventKind::Blocked });
+        prevAltDown_ = altNow;
+    } else if (!dumpMode_ && ctx_.window && !ctx_.window->isFocused()) {
+        if (menus_.isBarActive() || menus_.showMnemonics() || prevAltDown_ || menus_.isOpen())
+            menus_.handleBarEvent({ hmenu::BarEventKind::FocusLost });
+        prevAltDown_ = false;
+    } else {
+        if (reseed) {
+            prevAltDown_ = altNow;
+        } else {
+            if (altNow && !prevAltDown_)
+                menus_.handleBarEvent({ hmenu::BarEventKind::AltPress, '\0', altLeftNow });
+            else if (!altNow && prevAltDown_)
+                menus_.handleBarEvent({ hmenu::BarEventKind::AltRelease });
+            prevAltDown_ = altNow;
+        }
+        if (altNow) {
+            if (kw && kw->isCtrlDown()) {
+                menus_.handleBarEvent({ hmenu::BarEventKind::OtherKey });
+            } else if (otherEdge || spaceEdge || navEdge) {
+                menus_.handleBarEvent({ hmenu::BarEventKind::OtherKey });
+            } else {
+                for (char ch : alphaEdges) {
+                    if (ch >= 'A' && ch <= 'Z')
+                        menus_.handleBarEvent({ hmenu::BarEventKind::AccelKey, ch });
+                    else
+                        menus_.handleBarEvent({ hmenu::BarEventKind::OtherKey });
+                }
+            }
+        } else if (menus_.isBarActive() && !menus_.isOpen()) {
+            for (hmenu::Key k : keys) {
+                switch (k) {
+                    case hmenu::Key::Left:   menus_.handleBarEvent({ hmenu::BarEventKind::NavLeft }); break;
+                    case hmenu::Key::Right:  menus_.handleBarEvent({ hmenu::BarEventKind::NavRight }); break;
+                    case hmenu::Key::Down:   menus_.handleBarEvent({ hmenu::BarEventKind::NavDown }); break;
+                    case hmenu::Key::Enter:  menus_.handleBarEvent({ hmenu::BarEventKind::NavEnter }); break;
+                    case hmenu::Key::Escape: menus_.handleBarEvent({ hmenu::BarEventKind::NavEscape }); break;
+                    default: break;
+                }
+            }
+            if (spaceEdge) menus_.handleBarEvent({ hmenu::BarEventKind::NavSpace });
+            for (char ch : alphaEdges) {
+                if (ch >= 'A' && ch <= 'Z')
+                    menus_.handleBarEvent({ hmenu::BarEventKind::AccelKey, ch });
+            }
+            keys.clear();
+            alphaEdges.clear();
+        }
+    }
+
     const int mw = menuWindowId();
-    menuKeyCapture_ = mw >= 0 && mw == kb;
+    menuKeyCapture_ = (mw >= 0 && mw == kb) || (kb == 0 && menus_.isBarActive());
     // 시험 대본 키(그 창이 키보드 창이고 메뉴의 창일 때만) · 덤프 키(--ui-menu-keys, 메뉴가 떠 있을 때 한 프레임에 하나).
     bool scripted = false;
     if (!scriptMenuKeys_.empty()) {
@@ -1168,14 +1301,50 @@ void EditorApp::tickMenuKeys() {
         }
     }
     const bool menuShown = (menus_.isOpen() && menus_.popupShown()) || (contextMenu_.isOpen() && contextMenu_.popupContext());
-    if (dumpMode_ && menuShown && uiMenuKeyNext_ < uiMenuKeys_.size()) {
-        keys.push_back(uiMenuKeys_[uiMenuKeyNext_++]);
-        scripted = true;
+    if (dumpMode_ && uiMenuKeyNext_ < uiMenuKeys_.size()) {
+        const std::string& tok = uiMenuKeys_[uiMenuKeyNext_];
+        hmenu::Key k;
+        if (tok == "alt") {
+            ++uiMenuKeyNext_;
+            menus_.handleBarEvent({ hmenu::BarEventKind::AltPress });
+            menus_.handleBarEvent({ hmenu::BarEventKind::AltRelease });
+        } else if (tok.size() == 5 && tok.rfind("alt+", 0) == 0) {
+            ++uiMenuKeyNext_;
+            menus_.handleBarEvent({ hmenu::BarEventKind::AltPress });
+            menus_.handleBarEvent({ hmenu::BarEventKind::AccelKey, tok[4] });
+            menus_.handleBarEvent({ hmenu::BarEventKind::AltRelease });
+        } else if (menus_.isBarActive() && !menus_.isOpen()) {
+            ++uiMenuKeyNext_;
+            if (tok == "left")       menus_.handleBarEvent({ hmenu::BarEventKind::NavLeft });
+            else if (tok == "right") menus_.handleBarEvent({ hmenu::BarEventKind::NavRight });
+            else if (tok == "down")  menus_.handleBarEvent({ hmenu::BarEventKind::NavDown });
+            else if (tok == "enter") menus_.handleBarEvent({ hmenu::BarEventKind::NavEnter });
+            else if (tok == "space") menus_.handleBarEvent({ hmenu::BarEventKind::NavSpace });
+            else if (tok == "esc")   menus_.handleBarEvent({ hmenu::BarEventKind::NavEscape });
+            else if (tok.size() == 6 && tok.rfind("char:", 0) == 0)
+                menus_.handleBarEvent({ hmenu::BarEventKind::AccelKey, tok[5] });
+        } else if (menuShown) {
+            ++uiMenuKeyNext_;
+            if (hmenu::parseKey(tok, k)) {
+                keys.push_back(k);
+                scripted = true;
+            } else if (tok.size() == 6 && tok.rfind("char:", 0) == 0) {
+                if (menus_.isOpen())            menus_.handleDropdownMnemonic(tok[5]);
+                else if (contextMenu_.isOpen()) contextMenu_.handleMnemonic(tok[5]);
+            }
+        }
     }
+    menuKeyCapture_ = (mw >= 0 && mw == kb) || (kb == 0 && menus_.isBarActive());
     if (!menuKeyCapture_ && !scripted) return;
     for (hmenu::Key k : keys) {
         if (menus_.isOpen())            menus_.handleKey(k);
         else if (contextMenu_.isOpen()) contextMenu_.handleKey(k);
+    }
+    if (menuKeyCapture_ && !altNow && (!kw || !kw->isCtrlDown())) {
+        for (char ch : alphaEdges) {
+            if (menus_.isOpen())            menus_.handleDropdownMnemonic(ch);
+            else if (contextMenu_.isOpen()) contextMenu_.handleMnemonic(ch);
+        }
     }
 }
 
@@ -1252,6 +1421,7 @@ void EditorApp::handleInputEvents(float mouseX, float mouseY,
     // 배경 누름을 먹고 닫습니다. 다른 창(떠 있는 창)의 팝업은 이 창을 누르면 모두 닫습니다.
     HPopupLayer& mainPopups = slateRenderer_.context().popups();
     if (leftDown && !prevLeftDown_) {
+        menus_.handleBarEvent({ hmenu::BarEventKind::MouseOrWheel });
         mainPopups.dismissOutside(glm::vec2{ mouseX, mouseY }, 0);
         dismissPopupsExcept(0);
     }
@@ -1259,6 +1429,7 @@ void EditorApp::handleInputEvents(float mouseX, float mouseY,
     {
         const bool rightDown = ctx_.window && ctx_.window->isMouseButtonDown(HInput::MOUSE_BUTTON_RIGHT);
         if (rightDown && !prevRightDown_) {
+            menus_.handleBarEvent({ hmenu::BarEventKind::MouseOrWheel });
             const glm::vec2 p{ mouseX, mouseY };
             mainPopups.dismissOutside(p, 1);
             dismissPopupsExcept(0);

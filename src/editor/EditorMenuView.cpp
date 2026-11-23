@@ -91,12 +91,11 @@ std::shared_ptr<HWidget> EditorMenuView::buildPanel(Level& lv, float minWidth) {
                           SVerticalBox::ESizeRule::Fixed, h);
             continue;
         }
-        // 체크 · 아이콘 칸: 체크 명령은 켜졌을 때만 체크 표시, 아니면 명령 아이콘(없으면 빈 칸).
+        // 체크 · 아이콘 칸(C1): 켜진 체크 항목은 체크 표시, 그 외(꺼진 체크 항목 포함)는 아이콘이 있으면 아이콘을 그립니다.
         std::shared_ptr<HWidget> mark = u.spacer();
-        if (r.hasCheck) {
-            if (r.checked)
-                mark = HNew(SBox)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)
-                           ->content(u.icon("check", 14.f, EditorUiKit::kAccent, "v", 12.f));
+        if (r.hasCheck && r.checked) {
+            mark = HNew(SBox)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)
+                       ->content(u.icon("check", 14.f, EditorUiKit::kAccent, "v", 12.f));
         } else if (!r.icon.empty()) {
             mark = HNew(SBox)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)
                        ->content(u.icon(r.icon, 14.f, EditorUiKit::kTextDim));
@@ -338,6 +337,21 @@ hmenu::Act EditorMenuView::key(hmenu::Key k, bool inBar) {
         default: break;
     }
     return a;
+}
+
+bool EditorMenuView::activateByMnemonic(char asciiKey) {
+    if (!shown() || levels_.empty()) return false;
+    const int l = (int)levels_.size() - 1;
+    Level& lv = levels_[(size_t)l];
+    bool uniqueMatch = false;
+    const int row = hmenu::findMnemonicRow(lv.rows, lv.highlight, asciiKey, uniqueMatch);
+    if (row < 0) return false;
+    if (uniqueMatch) {
+        activate(l, row);
+    } else {
+        setHighlight(l, row);
+    }
+    return true;
 }
 
 bool EditorMenuView::openSubmenuByLabel(const std::string& label) {

@@ -25,16 +25,27 @@ void EditorApp::setOptions(const EngineOptions& options) {
         const size_t comma = options.uiMenuKeys.find(',', pos);
         const std::string name = options.uiMenuKeys.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
         hmenu::Key k;
-        if (hmenu::parseKey(name, k)) uiMenuKeys_.push_back(k);
+        const bool isAltTok = (name == "alt" || name == "space") ||
+                              (name.size() == 5 && name.rfind("alt+", 0) == 0 && hmenu::isAsciiAlpha(name[4])) ||
+                              (name.size() == 6 && name.rfind("char:", 0) == 0 && hmenu::isAsciiAlnum(name[5]));
+        if (hmenu::parseKey(name, k) || isAltTok) uiMenuKeys_.push_back(name);
         else HLOG(LogEditorDump, Warning) << "--ui-menu-keys: unknown key '" << name << "'";
         if (comma == std::string::npos) break;
         pos = comma + 1;
     }
     uiBottomTab_        = options.uiBottomTab;
     uiLogCategories_    = options.uiLogCategories;
+    uiLogTime_          = options.uiLogTime;
+    uiLogCollapse_      = options.uiLogCollapse;
+    uiLogWrap_          = options.uiLogWrap;
+    uiLogOptions_       = options.uiLogOptions;
+    uiLogSample_        = options.uiLogSample;
     uiOutlinerSearch_   = options.uiOutlinerSearch;
     uiConsole_          = options.uiConsole;
     uiConsoleRecall_    = options.uiConsoleRecall;
+    uiConsoleType_      = options.uiConsoleType;
+    uiConsolePick_      = options.uiConsolePick;
+    uiConsoleTab_       = options.uiConsoleTab;
     uiRename_           = options.uiRename;
     uiAssetActions_     = options.uiAssetActions;
     uiActorPicker_      = options.uiActorPicker;
@@ -219,6 +230,42 @@ void EditorApp::applyDumpState() {
         }
         logPanel_.openPopup();
     }
+    if (!uiLogTime_.empty() || uiLogCollapse_ || uiLogWrap_ || uiLogOptions_ || uiLogSample_) {
+        if (bottomTab_ != 1) {
+            bottomTab_ = 1;
+            rebuildBottomPanel();
+        }
+        if (uiLogSample_) {
+            if (uiLogWrap_) {
+                const auto t0 = std::chrono::steady_clock::now();
+                size_t totalLines = 0;
+                const std::string sampleEn = "Long English message for Output Log word wrap verification: the quick brown fox jumps over the lazy dog 0123456789.";
+                const std::string sampleKo = "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4 \xEA\xB8\xB4 \xEC\xA4\x84 \xEC\xA4\x84 \xEB\xB0\x94\xEA\xBF\x88 \xED\x99\x95\xEC\x9D\xB8: \xEC\xB6\x9C\xEB\xA0\xA5 \xEB\xA1\x9C\xEA\xB7\xB8 \xED\x8C\xA8\xEB\x84\x90 \xED\x8F\xAD\xEC\x97\x90 \xEB\xA7\x9E\xEC\xB6\xB0 \xEC\x97\xAC\xEB\x9F\xAC \xEC\xA4\x84\xEB\xA1\x9C \xEB\x82\x98\xEB\x89\x98\xEB\x8A\x94\xEC\xA7\x80 \xEC\xB8\xA1\xEC\xA0\x95\xED\x95\xA9\xEB\x8B\x88\xEB\x8B\xA4.";
+                auto measureFn = [](std::string_view sv) { return EditorUiKit::textWidth(std::string(sv), 12.f); };
+                for (int i = 0; i < 2048; ++i) {
+                    const std::string& s = (i & 1) ? sampleKo : sampleEn;
+                    totalLines += hlogview::wrapLogText(s, 420.f, measureFn).size();
+                }
+                const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                HLOG(LogEditorDump, Log) << "WordWrap 2048-row bench: " << ms << " ms (lines=" << totalLines << ")";
+            }
+            logPanel_.clear();
+            logPanel_.setSampleMode(true);
+            for (int i = 0; i < 3; ++i) HLOG(LogEditorDump, Log) << "Sample repeated log line";
+            for (int i = 0; i < 2; ++i) HLOG(LogEditorDump, Warning) << "Sample repeated warning";
+            HLOG(LogEditorDump, Error) << "Sample error line";
+            HLOG(LogEditorDump, Log) << "Long English message for Output Log word wrap verification: the quick brown fox jumps over the lazy dog 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ and even more words to wrap across multiple lines cleanly.";
+            HLOG(LogEditorDump, Log) << "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4 \xEA\xB8\xB4 \xEC\xA4\x84 \xEC\xA4\x84 \xEB\xB0\x94\xEA\xBF\x88 \xED\x99\x95\xEC\x9D\xB8: \xEC\xB6\x9C\xEB\xA0\xA5 \xEB\xA1\x9C\xEA\xB7\xB8 \xED\x8C\xA8\xEB\x84\x90\xEC\x9D\x98 \xEA\xB8\x80 \xEC\x97\xB4 \xED\x8F\xAD\xEC\x97\x90 \xEB\xA7\x9E\xEC\xB6\xB0 \xEC\x97\xAC\xEB\x9F\xAC \xEC\xA4\x84\xEB\xA1\x9C \xEB\x82\x98\xEB\x89\x98\xEA\xB3\xA0 \xED\x96\x89 \xEB\x86\x92\xEC\x9D\xB4\xEA\xB0\x80 \xED\x95\xA8\xEA\xBB\x98 \xEB\x8A\x98\xEC\x96\xB4\xEB\x82\x98\xEB\x8A\x94\xEC\xA7\x80 \xEA\xB8\xB4 \xEB\xAC\xB8\xEC\x9E\xA5\xEC\x9C\xBC\xEB\xA1\x9C \xEC\x9E\xAC\xED\x99\x95\xEC\x9D\xB8\xED\x95\xA9\xEB\x8B\x88\xEB\x8B\xA4.";
+            HLOG(LogEditorDump, Log) << "Line one with newline\nLine two after newline";
+        }
+        if (!uiLogTime_.empty()) {
+            ELogTimeMode tm = ELogTimeMode::Uptime;
+            if (hlogview::parseTimeMode(uiLogTime_, tm)) logPanel_.setTimeMode(tm);
+        }
+        if (uiLogCollapse_) logPanel_.setCollapse(true);
+        if (uiLogWrap_)     logPanel_.setWordWrap(true);
+        if (uiLogOptions_)  logPanel_.openOptionsMenu();
+    }
     if (!uiOutlinerSearch_.empty()) outlinerPanel_.setSearchText(uiOutlinerSearch_);
     // 콘솔 줄 흉내(D9): Output Log 탭을 열고 명령을 차례로 Enter 한 것과 같이 실행한 뒤, 칸에 포커스를 둡니다. recall 은 위 화살표 횟수.
     if (!uiConsole_.empty() || uiConsoleRecall_ > 0) {
@@ -232,6 +279,16 @@ void EditorApp::applyDumpState() {
             logPanel_.submitConsole();
         }
         for (int i = 0; i < uiConsoleRecall_; ++i) logPanel_.stepHistory(-1);
+    }
+    if (!uiConsoleType_.empty()) {
+        if (bottomTab_ != 1) {
+            bottomTab_ = 1;
+            rebuildBottomPanel();
+        }
+        setTextFocus(EFocusTarget::Console);
+        logPanel_.setConsoleTextForDump(uiConsoleType_);
+        if (uiConsolePick_ >= 0) logPanel_.pickCompletionForDump(uiConsolePick_);
+        if (uiConsoleTab_)       logPanel_.tabCompletionForDump();
     }
     if (!uiOutlinerCollapse_.empty() && ctx_.world) {
         for (const auto& ap : ctx_.world->getActors()) {

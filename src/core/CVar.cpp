@@ -265,6 +265,82 @@ std::vector<const CVarRegistry::CVar*> CVarRegistry::all() const {
     return out;
 }
 
+std::vector<CVarRegistry::Completion> CVarRegistry::complete(std::string_view input, size_t max) const {
+    std::vector<Completion> out;
+    if (max == 0) return out;
+    while (!input.empty() && (input.front() == ' ' || input.front() == '\t')) input.remove_prefix(1);
+    if (input.empty()) return out;
+
+    struct BuiltinDef { const char* name; const char* help; };
+    static constexpr BuiltinDef kBuiltins[] = {
+        { "help",  "help [name] -- show commands or help for a variable/command" },
+        { "list",  "list [prefix] -- list variables (optionally filtered by prefix)" },
+        { "reset", "reset <variable> -- reset a variable to its default value" },
+    };
+
+    auto varArgInfo = [](const CVar& v) -> std::string {
+        std::string info;
+        switch (v.kind) {
+        case Kind::Bool:   info = "bool"; break;
+        case Kind::Int:    info = "int [" + std::to_string((int)v.lo) + ".." + std::to_string((int)v.hi) + "]"; break;
+        case Kind::Float:  info = "float [" + floatToText(v.lo) + ".." + floatToText(v.hi) + "]"; break;
+        case Kind::String: info = "string"; break;
+        }
+        info += " \xC2\xB7 current " + v.text();
+        return info;
+    };
+
+    const size_t sp = input.find_first_of(" \t");
+    if (sp != std::string_view::npos) {
+        const std::string key = lower(input.substr(0, sp));
+        if (const CVar* v = find(key)) {
+            out.push_back({ v->name, CompletionKind::Variable, varArgInfo(*v), v->help });
+            return out;
+        }
+        if (auto it = commands_.find(key); it != commands_.end()) {
+            out.push_back({ it->second.name, CompletionKind::Command, {}, it->second.help });
+            return out;
+        }
+        for (const auto& b : kBuiltins) {
+            if (key == b.name) {
+                out.push_back({ b.name, CompletionKind::Builtin, {}, b.help });
+                return out;
+            }
+        }
+        return out;
+    }
+
+    const std::string q = lower(input);
+    struct Entry { std::string key; Completion c; };
+    std::vector<Entry> prefix, contains;
+    auto pushIfMatch = [&](const std::string& key, Completion c) {
+        const size_t pos = key.find(q);
+        if (pos == 0) prefix.push_back({ key, std::move(c) });
+        else if (pos != std::string::npos) contains.push_back({ key, std::move(c) });
+    };
+
+    for (const auto& [k, v] : vars_)
+        pushIfMatch(k, { v->name, CompletionKind::Variable, v->text(), v->help });
+    for (const auto& [k, c] : commands_)
+        pushIfMatch(k, { c.name, CompletionKind::Command, {}, c.help });
+    for (const auto& b : kBuiltins)
+        pushIfMatch(b.name, { b.name, CompletionKind::Builtin, {}, b.help });
+
+    auto byKey = [](const Entry& a, const Entry& b) { return a.key < b.key; };
+    std::sort(prefix.begin(), prefix.end(), byKey);
+    std::sort(contains.begin(), contains.end(), byKey);
+
+    for (auto& e : prefix) {
+        if (out.size() >= max) break;
+        out.push_back(std::move(e.c));
+    }
+    for (auto& e : contains) {
+        if (out.size() >= max) break;
+        out.push_back(std::move(e.c));
+    }
+    return out;
+}
+
 std::string CVarRegistry::describe(const CVar& v) const {
     std::string s = v.name + " = " + v.text();
     if (v.text() != v.defaultText) s += "  (default " + v.defaultText + ", set by " + sourceName(v.source) + ")";
@@ -284,6 +360,7 @@ std::string CVarRegistry::execute(std::string_view line) {
             return "unknown command or variable '" + args[0] + "'";
         }
         std::string s = "Commands: help [name], list [prefix], reset <variable>, <variable> [value]";
+        s += "\nEditor console: type to filter suggestions, Up/Down to pick or browse history, Tab to complete, ` to focus (history saved)";
         for (const auto& [k, c] : commands_) s += "\n  " + c.name + "  -- " + c.help;
         s += "\n" + std::to_string(vars_.size()) + " variables (type list)";
         return s;

@@ -30,10 +30,15 @@ namespace HInput {
     constexpr int KEY_DELETE    = 261;  // GLFW_KEY_DELETE
     constexpr int KEY_F2        = 291;  // GLFW_KEY_F2
     constexpr int KEY_BACKSPACE = 259;  // GLFW_KEY_BACKSPACE
+    constexpr int KEY_SPACE     = 32;   // GLFW_KEY_SPACE
+    constexpr int KEY_GRAVE_ACCENT = 96; // GLFW_KEY_GRAVE_ACCENT (`)
     constexpr int KEY_ENTER     = 257;
+    constexpr int KEY_TAB       = 258;  // GLFW_KEY_TAB
     constexpr int KEY_UP        = 265;  // GLFW_KEY_UP
     constexpr int KEY_DOWN      = 264;  // GLFW_KEY_DOWN
     constexpr int KEY_ESCAPE    = 256;  // GLFW_KEY_ESCAPE  // GLFW_KEY_ENTER
+    constexpr int KEY_LEFT_ALT  = 342;  // GLFW_KEY_LEFT_ALT
+    constexpr int KEY_RIGHT_ALT = 346;  // GLFW_KEY_RIGHT_ALT
     constexpr int MOUSE_BUTTON_LEFT  = 0;
     constexpr int MOUSE_BUTTON_RIGHT = 1;
 }

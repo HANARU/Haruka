@@ -283,8 +283,11 @@ private:
     bool menuKeyCapture_ = false;              // 이번 프레임 메뉴가 키보드를 쥠(tickMenuKeys 가 정함)
     int  menuKeyWin_     = -1;                 // 엣지를 잰 키보드 창(바뀌면 다시 심음)
     bool prevMenuKeys_[6] = {};                // ↑ ↓ ← → Enter Esc
+    bool prevAltDown_     = false;             // C1: Alt 메뉴 바 상태 기계
+    bool prevAltAlpha_[36] = {};               // A..Z, 0..9 엣지(드롭다운 글자 키 · Alt+글자)
+    bool prevAltExtra_[21] = {};               // Space · Tab · F1..F12 · Insert · Delete · Backspace · PageUp/Down · Home · End
     std::vector<std::pair<int, hmenu::Key>> scriptMenuKeys_;   // 대본 키(창 번호, 키). 한 프레임에 하나
-    std::vector<hmenu::Key>                 uiMenuKeys_;       // --ui-menu-keys(덤프)
+    std::vector<std::string>                uiMenuKeys_;       // --ui-menu-keys(덤프)
     size_t                                  uiMenuKeyNext_ = 0;
 
     // ── Widget helpers (EditorUiKit 으로 위임) ──────────────────────────────────
@@ -449,9 +452,17 @@ private:
     std::string uiOpenMenu_;
     std::string uiBottomTab_;
     bool        uiLogCategories_ = false;
+    std::string uiLogTime_;
+    bool        uiLogCollapse_   = false;
+    bool        uiLogWrap_       = false;
+    bool        uiLogOptions_    = false;
+    bool        uiLogSample_     = false;
     std::string uiOutlinerSearch_;
     std::vector<std::string> uiConsole_;   // --ui-console(여러 번)
     int         uiConsoleRecall_ = 0;      // --ui-console-recall=N
+    std::string uiConsoleType_;            // --ui-console-type=<글>
+    int         uiConsolePick_   = -1;     // --ui-console-pick=<n>
+    bool        uiConsoleTab_    = false;  // --ui-console-tab
     std::string uiRename_;
     std::string uiAssetActions_;          // --ui-asset-actions(참조 체계 A-5)
     bool        uiAddComponent_ = false;         // --ui-add-component*(2026-11-21)

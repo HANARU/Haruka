@@ -1,6 +1,9 @@
 #pragma once
+#include "ConsoleHistoryModel.hpp"
 #include "EditorUiKit.hpp"
+#include "OutputLogModel.hpp"
 #include "TextInputController.hpp"
+#include "../core/CVar.hpp"
 #include "../core/HLog.hpp"
 #include "../ui/slate/widgets/SBorder.hpp"
 #include "../ui/slate/widgets/SSearchBox.hpp"
@@ -10,7 +13,10 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+class EditorContextMenu;
 
 // 출력 로그 패널(S6a). 위젯 트리 · 사본 링 · 표시/기록 필터 · Categories 팝업을 소유합니다.
 // EditorApp* 을 들지 않고 EditorUiKit 과 좁은 콜백만 받습니다.
@@ -21,8 +27,9 @@ public:
     void init(const EditorUiKit* ui, HLogCategory* logCat, float menuBarH, bool dumpMode,
               std::function<void()> onSearchClicked);
 
-    // 부팅 시 첫 syncLogCategories 전에 저장된 표시 필터를 읽습니다.
+    // 부팅 시 첫 syncLogCategories 전에 저장된 표시 필터와 콘솔 기록을 읽습니다.
     void loadFilter();
+    void loadHistory();
 
     // 매 프레임 tick: 새 seq(바뀌었으면 true), 행 영역 높이 변화, 팝업 카테고리 동기화.
     bool tick(bool tabActive);
@@ -37,6 +44,7 @@ public:
     // Categories 팝업(H2a): Categories 단추를 감싼 SMenuAnchor 가 로그 패널이 있는 창 문맥의 팝업 층에 띄웁니다. fn 은 그 문맥을
     // 돌려줍니다(null 이면 열지 않음). 바깥 누름 · 위치는 팝업 층이 맡습니다.
     void setPopupContext(std::function<HSlateContext*()> fn) { popupContextFn_ = std::move(fn); }
+    void setContextMenu(EditorContextMenu* menu) { contextMenu_ = menu; }
     // 위젯 트리를 다시 만들 때(buildWidgetTree): 팝업을 닫습니다(예전 resetPopupHost).
     void resetPopup();
     void openPopup();
@@ -44,6 +52,19 @@ public:
     bool isPopupOpen() const { return popupOpen_; }
     // 지금 팝업이 떠 있는 문맥(층에 들어가 있을 때만).
     HSlateContext* popupContext() const { return catAnchor_ ? catAnchor_->openContext() : nullptr; }
+
+    // 표시 옵션(C2): 시각 방식 · 같은 메시지 묶기 · 긴 줄 줄 바꿈 · Play 시작 때 지우기.
+    void clear();
+    void setTimeMode(ELogTimeMode m);
+    ELogTimeMode timeMode() const { return opts_.timeMode; }
+    void setCollapse(bool on);
+    bool collapse() const { return opts_.collapse; }
+    void setWordWrap(bool on);
+    bool wordWrap() const { return opts_.wordWrap; }
+    void setClearOnPlay(bool on);
+    bool clearOnPlay() const { return opts_.clearOnPlay; }
+    void setSampleMode(bool on) { sampleMode_ = on; viewDirty_ = true; }
+    void openOptionsMenu();
 
     // 텍스트 포커스 중재용 검색 칸 상태.
     SearchField searchField();
@@ -53,12 +74,19 @@ public:
     // 콘솔 줄(2026-11-20, Docs/Gameplay_Tools.md D9). run 은 명령 한 줄을 실행해 결과 글을 돌려주는 쪽(EditorApp 이 CVar 레지스트리로 연결),
     // clicked 는 칸을 눌렀을 때(포커스 요청).
     void        setConsole(std::function<std::string(const std::string&)> run, std::function<void()> clicked);
+    void        setConsoleComplete(std::function<std::vector<CVarRegistry::Completion>(std::string_view, size_t)> fn);
     TextInputField consoleField();
     bool        isConsoleFocused() const { return consoleFocused_; }
     HTextEditState& consoleEdit() { return consoleEdit_; }
     // 칸의 글을 실행하고 기록에 넣은 뒤 비웁니다(Enter, --ui-console).
     void        submitConsole();
     const std::vector<std::string>& consoleHistory() const { return history_; }
+    bool        isCompletionOpen() const { return completionOpen_; }
+    bool        completionContains(glm::vec2 p) const;
+    void        closeCompletion();
+    void        setConsoleTextForDump(const std::string& text);
+    void        pickCompletionForDump(int idx);
+    void        tabCompletionForDump();
     bool        isSearchFocused() const { return searchFocused_; }
     bool        searchContains(glm::vec2 p) const;
 
@@ -67,7 +95,14 @@ private:
     static constexpr float kTimeW = 52.f;
     static constexpr float kCatW  = 84.f;
 
-    struct ViewRow { std::string time, category, text; glm::vec4 color = EditorTheme::textPrimary; };
+    struct ViewRow {
+        std::string time;
+        std::string category;
+        std::string text;
+        std::string badge;
+        glm::vec4   color  = EditorTheme::textPrimary;
+        float       height = kRowH;
+    };
 
     const EditorUiKit*    ui_       = nullptr;
     HLogCategory*         logCat_   = nullptr;
@@ -90,7 +125,17 @@ private:
     int                      historyPos_ = -1;   // -1 = 기록을 고르지 않음
     std::function<std::string(const std::string&)> consoleRun_;
     std::function<void()>    consoleClicked_;
+    std::function<std::vector<CVarRegistry::Completion>(std::string_view, size_t)> consoleComplete_;
     std::shared_ptr<SSearchBox> consoleBox_;
+    std::vector<CVarRegistry::Completion> completions_;
+    bool                     completionOpen_    = false;
+    bool                     completionDirty_   = false;
+    bool                     completionArgHelp_ = false;
+    int                      completionPicked_  = -1;
+    std::string              completionSavedInput_;
+    std::string              completionQuery_;
+    HPopupLayer::Handle      completionHandle_  = 0;
+    std::shared_ptr<SBorder> completionPanel_;
     // 글 칸 포커스 위젯(H1a-2). HSlate 포커스는 위젯을 약한 참조로 잡으므로, 다시 지을 때 새로 만들지 않고 HReuse 로
     // 같은 객체를 처음 상태로 되돌려 씁니다. 처음 짓기 전에도(팝업 · 행이 아직 없음) 포커스를 받도록 만들 때부터 focusable 입니다.
     // consoleBox_ · searchBox_ 는 탭이 보일 때만 이 객체를 가리킵니다(releaseTab 이 놓음, 판정 코드는 그대로).
@@ -119,11 +164,22 @@ private:
     std::shared_ptr<SVerticalBox> rowsBox_;
     std::shared_ptr<SSearchBox>   searchBox_;
     std::shared_ptr<SButton>      catButton_;
+    std::shared_ptr<SButton>      optionsButton_;
     // Categories 단추를 감싸는 앵커(H2a). 탭을 다시 만들어도 같은 객체를 쓰고 자식만 바꿉니다(열린 팝업과의 연결 유지).
     std::shared_ptr<SMenuAnchor>  catAnchor_;
     std::function<HSlateContext*()> popupContextFn_;
+    EditorContextMenu*            contextMenu_ = nullptr;
     bool                          popupOpen_  = false;
     bool                          popupDirty_ = false;
+
+    OutputLogOptions                                           opts_;
+    bool                                                       sampleMode_     = false;
+    hlogview::CollapsedLogList                                 collapsed_;
+    bool                                                       collapsedDirty_ = true;
+    std::unordered_map<uint64_t, std::vector<std::string>>     wrapCache_;
+    float                                                      wrapCacheW_     = -1.f;
+    float                                                      wrapCacheFont_  = -1.f;
+    std::string                                                lastNeedle_;
 
     void pullRecords();
     void syncCategories();
@@ -134,8 +190,15 @@ private:
     void addPopupCategoryRow(SVerticalBox& list, HLogCategoryState* st,
                              float rowH, const glm::vec4& btnN, const glm::vec4& btnH);
     std::shared_ptr<HWidget> buildPopupPanel();
+    const std::vector<std::string>& wrapCached(uint64_t seq, const std::string& displayText, float msgW, float fontPx);
     bool recordVisible(const HLogRecord& r, const std::string& needleLower) const;
     void setCategoryHidden(uint16_t index, bool hidden);
     void saveFilter() const;
     void saveLevels() const;
+    void saveHistory() const;
+    void updateCompletion();
+    bool stepCompletion(int dir);
+    bool acceptCompletion(int idx = -1);
+    void stepConsoleUpDown(int dir);
+    void rebuildCompletionPopup();
 };

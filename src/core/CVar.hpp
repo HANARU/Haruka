@@ -82,6 +82,17 @@ public:
     // execute 하고 "> 명령" 과 결과를 LogConsole 에 남깁니다(에디터 콘솔 줄 · --console-at).
     std::string executeLogged(std::string_view line);
 
+    enum class CompletionKind { Variable, Command, Builtin };
+    struct Completion {
+        std::string    name;
+        CompletionKind kind = CompletionKind::Variable;
+        std::string    valueText;   // 변수만
+        std::string    help;
+    };
+
+    // 첫 낱말 완성 후보(앞부분 일치 우선 · 포함 순, 이름순, 대소문자 무시). 입력에 공백이 있으면 인자 단계로 한 줄 도움말 1개만 돌려줍니다.
+    std::vector<Completion> complete(std::string_view input, size_t max = 10) const;
+
     std::vector<const CVar*> all() const;   // 이름순
     static std::vector<std::string> splitArgs(std::string_view line);
     static bool        validName(std::string_view name);

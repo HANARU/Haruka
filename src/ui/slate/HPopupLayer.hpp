@@ -41,8 +41,8 @@ struct HPopupRect {
 };
 
 struct HPopupPlacement {
-    enum class Side  : uint8_t { Below, Right };      // 앵커 아래 · 앵커 오른쪽(하위 메뉴 · 누른 점)
-    enum class Align : uint8_t { Start, Center };     // Below 의 가로 맞춤: 앵커 왼쪽 · 앵커 가운데
+    enum class Side  : uint8_t { Below, Above, Right }; // 앵커 아래 · 위 · 오른쪽(하위 메뉴 · 누른 점)
+    enum class Align : uint8_t { Start, Center };     // Below/Above 의 가로 맞춤: 앵커 왼쪽 · 앵커 가운데
     enum class Flip  : uint8_t { None, Overflow, Half };
     // Flip: None = 뒤집지 않음, Overflow = 경계를 넘으면 반대쪽, Half = (Below 만) 앵커 가운데가 경계 아래 절반이면 위로.
     Side  side  = Side::Below;
@@ -69,6 +69,10 @@ inline glm::vec2 placePopup(const HPopupPlacement& pl, const HPopupRect& a, glm:
             top = a.pos.y + a.size.y + pl.gap;
             if (pl.flip == P::Flip::Overflow && top + H > bottom) top = a.pos.y - H - pl.gap;
         }
+        left = (pl.align == P::Align::Center) ? a.pos.x + (a.size.x - W) * 0.5f : a.pos.x;
+    } else if (pl.side == P::Side::Above) {
+        top = a.pos.y - H - pl.gap;
+        if (pl.flip == P::Flip::Overflow && top < b.pos.y + pl.insetTop) top = a.pos.y + a.size.y + pl.gap;
         left = (pl.align == P::Align::Center) ? a.pos.x + (a.size.x - W) * 0.5f : a.pos.x;
     } else {
         left = a.pos.x + a.size.x + pl.gap;

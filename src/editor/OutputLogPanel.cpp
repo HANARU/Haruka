@@ -1,4 +1,5 @@
 #include "OutputLogPanel.hpp"
+#include "EditorContextMenu.hpp"
 #include "../core/Utf8.hpp"
 #include "../core/AppPaths.hpp"
 #include "../ui/slate/widgets/SBox.hpp"
@@ -8,6 +9,7 @@
 #include "../ui/slate/widgets/SToggleButton.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -17,7 +19,8 @@
 namespace fs = std::filesystem;
 
 namespace {
-constexpr const char* kLogFilterPath = "Config/editor_log.txt";
+constexpr const char* kLogFilterPath     = "Config/editor_log.txt";
+constexpr const char* kConsoleHistoryPath = "Config/console_history.txt";
 constexpr ELogVerbosity kLogSeverities[] = {
     ELogVerbosity::Error, ELogVerbosity::Warning, ELogVerbosity::Log, ELogVerbosity::Verbose
 };
@@ -56,6 +59,10 @@ bool OutputLogPanel::tick(bool tabActive) {
 
 void OutputLogPanel::flushRebuilds(bool tabActive) {
     if (popupDirty_) { popupDirty_ = false; rebuildPopup(); }
+    if (completionDirty_ && tabActive && completionOpen_ && consoleBox_ && consoleBox_->cachedGeometry().size.x > 0.f) {
+        completionDirty_ = false;
+        rebuildCompletionPopup();
+    }
     if (viewDirty_ && tabActive && rowsBox_) { viewDirty_ = false; refreshView(); }
 }
 
@@ -63,6 +70,7 @@ void OutputLogPanel::resetPopup() {
     popupOpen_  = false;
     popupDirty_ = false;
     if (catAnchor_) catAnchor_->close();
+    closeCompletion();
 }
 
 void OutputLogPanel::openPopup() {
@@ -95,17 +103,35 @@ void OutputLogPanel::setConsole(std::function<std::string(const std::string&)> r
     consoleClicked_ = std::move(clicked);
 }
 
+void OutputLogPanel::setConsoleComplete(std::function<std::vector<CVarRegistry::Completion>(std::string_view, size_t)> fn) {
+    consoleComplete_ = std::move(fn);
+}
+
+bool OutputLogPanel::completionContains(glm::vec2 p) const {
+    return completionOpen_ && completionPanel_ && completionPanel_->cachedGeometry().contains(p);
+}
+
 TextInputField OutputLogPanel::consoleField() {
     TextInputField f{
         consoleEdit_,
         consoleFocused_,
-        [this](glm::vec2 p) { return consoleBox_ && consoleBox_->cachedGeometry().contains(p); },
-        [] {},
+        [this](glm::vec2 p) { return (consoleBox_ && consoleBox_->cachedGeometry().contains(p)) || completionContains(p); },
+        [this] {
+            if (!consoleFocused_) { closeCompletion(); return; }
+            if (consoleEdit_.isComposing()) return;
+            updateCompletion();
+        },
     };
     f.onCommit          = [this] { submitConsole(); };
     f.keepFocusOnCommit = true;
     f.selectAllOnFocus  = false;   // 이어 쓰기(커서를 끝에)
-    f.onHistory         = [this](int dir) { stepHistory(dir); };
+    f.onHistory         = [this](int dir) { stepConsoleUpDown(dir); };
+    f.onTab             = [this]() -> bool { return acceptCompletion(); };
+    f.onPreEscape       = [this]() -> bool {
+        if (!completionOpen_) return false;
+        closeCompletion();
+        return true;
+    };
     return f;
 }
 
@@ -113,14 +139,20 @@ void OutputLogPanel::submitConsole() {
     const std::string line = consoleEdit_.text;
     consoleEdit_.setText("");
     historyPos_ = -1;
+    closeCompletion();
     if (line.find_first_not_of(" \t") == std::string::npos) return;
-    if (history_.empty() || history_.back() != line) history_.push_back(line);
-    if (history_.size() > 64) history_.erase(history_.begin());
+    hconsole::pushHistory(history_, line);
+    saveHistory();
     if (consoleRun_) consoleRun_(line);
     // 결과를 보도록 맨 아래로 갑니다.
     anchorSeq_ = 0;
     scrollReq_ = 0;
     viewDirty_ = true;
+}
+
+void OutputLogPanel::stepConsoleUpDown(int dir) {
+    if (stepCompletion(dir)) return;
+    stepHistory(dir);
 }
 
 void OutputLogPanel::stepHistory(int dir) {
@@ -133,12 +165,245 @@ void OutputLogPanel::stepHistory(int dir) {
     consoleEdit_.end(false);
 }
 
+void OutputLogPanel::updateCompletion() {
+    historyPos_ = -1;
+    if (!consoleComplete_ || !consoleFocused_ || consoleEdit_.text.empty()) {
+        closeCompletion();
+        return;
+    }
+    std::string_view sv(consoleEdit_.text);
+    while (!sv.empty() && (sv.front() == ' ' || sv.front() == '\t')) sv.remove_prefix(1);
+    if (sv.empty()) {
+        closeCompletion();
+        return;
+    }
+    const size_t sp = sv.find_first_of(" \t");
+    completionArgHelp_ = (sp != std::string_view::npos);
+    completionQuery_   = completionArgHelp_ ? std::string() : std::string(sv);
+    completions_       = consoleComplete_(consoleEdit_.text, 10);
+    if (completions_.empty()) {
+        closeCompletion();
+        return;
+    }
+    completionOpen_   = true;
+    completionPicked_ = -1;
+    completionDirty_  = true;
+}
+
+void OutputLogPanel::closeCompletion() {
+    const HPopupLayer::Handle h = completionHandle_;
+    completionHandle_  = 0;
+    completionOpen_    = false;
+    completionDirty_   = false;
+    completionArgHelp_ = false;
+    completionPicked_  = -1;
+    completions_.clear();
+    completionPanel_.reset();
+    if (h != 0)
+        if (HSlateContext* ctx = popupContextFn_ ? popupContextFn_() : nullptr)
+            ctx->popups().dismiss(h);
+}
+
+bool OutputLogPanel::stepCompletion(int dir) {
+    if (!completionOpen_ || completionArgHelp_ || completions_.empty()) return false;
+    const int n = (int)completions_.size();
+    if (completionPicked_ < 0) {
+        completionSavedInput_ = consoleEdit_.text;
+        completionPicked_     = (dir < 0) ? (n - 1) : 0;
+    } else {
+        completionPicked_ += dir;
+        if (completionPicked_ < 0 || completionPicked_ >= n) {
+            completionPicked_ = -1;
+            consoleEdit_.setText(completionSavedInput_);
+            consoleEdit_.end(false);
+            completionDirty_ = true;
+            return true;
+        }
+    }
+    consoleEdit_.setText(completions_[(size_t)completionPicked_].name);
+    consoleEdit_.end(false);
+    completionDirty_ = true;
+    return true;
+}
+
+bool OutputLogPanel::acceptCompletion(int idx) {
+    if (!completionOpen_ || completionArgHelp_ || completions_.empty()) return false;
+    const int i = (idx >= 0 && idx < (int)completions_.size()) ? idx : (completionPicked_ >= 0 ? completionPicked_ : 0);
+    consoleEdit_.setText(completions_[(size_t)i].name + " ");
+    consoleEdit_.end(false);
+    updateCompletion();
+    return true;
+}
+
+void OutputLogPanel::setConsoleTextForDump(const std::string& text) {
+    consoleEdit_.setText(text);
+    consoleEdit_.end(false);
+    updateCompletion();
+}
+
+void OutputLogPanel::pickCompletionForDump(int idx) {
+    if (!completionOpen_ || completionArgHelp_ || idx < 0 || idx >= (int)completions_.size()) return;
+    completionSavedInput_ = consoleEdit_.text;
+    completionPicked_     = idx;
+    consoleEdit_.setText(completions_[(size_t)idx].name);
+    consoleEdit_.end(false);
+    completionDirty_ = true;
+}
+
+void OutputLogPanel::tabCompletionForDump() {
+    acceptCompletion();
+}
+
+void OutputLogPanel::rebuildCompletionPopup() {
+    HSlateContext* ctx = popupContextFn_ ? popupContextFn_() : nullptr;
+    if (!ctx || !ui_ || !consoleBox_ || completions_.empty()) return;
+    const EditorUiKit& u = *ui_;
+    const float boxW = consoleBox_->cachedGeometry().size.x;
+    const float popW = std::clamp(boxW, u.s(360.f), u.s(640.f));
+    const float rowH = u.s(22.f);
+    const float innerW = popW - u.s(8.f) - u.s(12.f);   // SBorder padding(4*2) + SButton padding(6*2)
+    const float gap    = u.s(12.f);
+
+    std::vector<float> nameWidths, valWidths;
+    nameWidths.reserve(completions_.size());
+    valWidths.reserve(completions_.size());
+    for (const auto& c : completions_) {
+        nameWidths.push_back(EditorUiKit::textWidth(c.name, u.s(12.f)));
+        valWidths.push_back(c.valueText.empty() ? 0.f : EditorUiKit::textWidth(c.valueText, u.s(11.f)));
+    }
+    const float valCap = completionArgHelp_ ? 0.42f : 0.20f;
+    const hconsole::CompletionLayout layout =
+        hconsole::computeCompletionLayout(nameWidths, valWidths, innerW, gap, 0.45f, valCap, u.s(60.f));
+
+    auto list = HNew(SVerticalBox);
+    const std::string qLower = [&] {
+        std::string s = completionQuery_;
+        for (char& c : s) if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        return s;
+    }();
+
+    for (size_t i = 0; i < completions_.size(); ++i) {
+        const CVarRegistry::Completion& c = completions_[i];
+        const bool picked = ((int)i == completionPicked_);
+        auto row = HNew(SHorizontalBox);
+
+        // 1. 이름 열 (고정 폭 · 왼쪽 정렬 · 맞은 부분 강조 · 넘치면 말줄임)
+        const std::string shownName = (nameWidths[i] > layout.nameW)
+            ? u.ellipsizeText(c.name, layout.nameW, u.s(12.f))
+            : c.name;
+        size_t matchPos = std::string::npos;
+        if (!completionArgHelp_ && !qLower.empty()) {
+            std::string nameLower = shownName;
+            for (char& ch : nameLower) if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+            matchPos = nameLower.find(qLower);
+        }
+        auto nameBox = HNew(SHorizontalBox);
+        if (matchPos != std::string::npos) {
+            const std::string pre   = shownName.substr(0, matchPos);
+            const std::string match = shownName.substr(matchPos, qLower.size());
+            const std::string post  = shownName.substr(matchPos + qLower.size());
+            if (!pre.empty())
+                nameBox->addSlot(HNew(STextBlock)->text(pre)->fontSize(u.s(12.f))->color(EditorUiKit::kTextBody)->vAlign(EVAlign::Center),
+                                 SHorizontalBox::ESizeRule::Auto);
+            nameBox->addSlot(HNew(STextBlock)->text(match)->fontSize(u.s(12.f))->color(EditorUiKit::kAccent)->bold(true)->vAlign(EVAlign::Center),
+                             SHorizontalBox::ESizeRule::Auto);
+            if (!post.empty())
+                nameBox->addSlot(HNew(STextBlock)->text(post)->fontSize(u.s(12.f))->color(EditorUiKit::kTextBody)->vAlign(EVAlign::Center),
+                                 SHorizontalBox::ESizeRule::Auto);
+        } else {
+            nameBox->addSlot(HNew(STextBlock)->text(shownName)->fontSize(u.s(12.f))->color(EditorUiKit::kAccent)->bold(true)->vAlign(EVAlign::Center),
+                             SHorizontalBox::ESizeRule::Auto);
+        }
+        row->addSlot(HNew(SBox)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)->content(nameBox),
+                     SHorizontalBox::ESizeRule::Fixed, layout.nameW);
+        row->addSlot(u.spacer(), SHorizontalBox::ESizeRule::Fixed, layout.gap);
+
+        // 2. 값 열 (고정 폭 · 왼쪽 정렬 · 변수/인자 정보만 표시, 명령은 빈 자리 유지)
+        if (layout.valW > 0.f) {
+            if (!c.valueText.empty()) {
+                const std::string shownVal = (valWidths[i] > layout.valW)
+                    ? u.ellipsizeText(c.valueText, layout.valW, u.s(11.f))
+                    : c.valueText;
+                row->addSlot(HNew(SBox)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)->content(
+                                 HNew(STextBlock)->text(shownVal)->fontSize(u.s(11.f))
+                                     ->color(EditorTheme::accentHover)->vAlign(EVAlign::Center)),
+                             SHorizontalBox::ESizeRule::Fixed, layout.valW);
+            } else {
+                row->addSlot(u.spacer(), SHorizontalBox::ESizeRule::Fixed, layout.valW);
+            }
+            row->addSlot(u.spacer(), SHorizontalBox::ESizeRule::Fixed, layout.gap);
+        }
+
+        // 3. 도움말 열 (남은 폭에서 말줄임)
+        if (!c.help.empty()) {
+            const std::string helpStr = u.ellipsizeText(c.help, layout.helpW, u.s(11.f));
+            row->addSlot(HNew(STextBlock)->text(helpStr)->fontSize(u.s(11.f))->color(EditorUiKit::kTextDim)
+                             ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                         SHorizontalBox::ESizeRule::Fill);
+        } else {
+            row->addSlot(u.spacer(), SHorizontalBox::ESizeRule::Fill);
+        }
+
+        auto btnStyle = EditorUiKit::buttonStyle(u.s(1.f));
+        btnStyle.normal  = picked ? EditorTheme::selectRow : EditorTheme::transparent;
+        btnStyle.hovered = picked ? EditorTheme::selectRow : EditorTheme::ctlHover;
+        const int rowIdx = (int)i;
+        auto btn = HNew(SButton)
+            ->style(btnStyle)
+            ->padding(HPadding{ u.s(6.f), u.s(2.f) })
+            ->hAlign(EHAlign::Fill)
+            ->vAlign(EVAlign::Center)
+            ->content(row)
+            ->onClick([this, rowIdx] {
+                if (!completionArgHelp_) acceptCompletion(rowIdx);
+            });
+        list->addSlot(btn, SVerticalBox::ESizeRule::Fixed, rowH);
+    }
+
+    const float popH = rowH * (float)completions_.size() + u.s(8.f);
+    completionPanel_ = HNew(SBorder)
+        ->background(EditorTheme::bgPopup)
+        ->borderColor(EditorTheme::lineDivider)
+        ->borderThickness(1.f)
+        ->padding(HPadding{ u.s(4.f), u.s(4.f) })
+        ->content(HNew(SBox)->widthOverride(popW - u.s(8.f))->content(list));
+
+    HPopupLayer::Spec sp;
+    sp.content             = completionPanel_;
+    sp.anchor              = HPopupRect::of(consoleBox_->cachedGeometry());
+    sp.placement           = { HPopupPlacement::Side::Above, HPopupPlacement::Align::Start,
+                               HPopupPlacement::Flip::Overflow, true, u.s(2.f), menuBarH_ };
+    sp.size                = { popW, popH };
+    sp.outside             = HPopupLayer::EOutside::PassThrough;
+    sp.closeOnLeftOutside  = true;
+    sp.closeOnRightOutside = true;
+    sp.closeOnEscape       = false;
+    sp.anchorWidget        = consoleBoxKeep_;
+    sp.onDismissed         = [this] {
+        completionOpen_    = false;
+        completionDirty_   = false;
+        completionArgHelp_ = false;
+        completionPicked_  = -1;
+        completionHandle_  = 0;
+        completionPanel_.reset();
+        completions_.clear();
+    };
+    if (completionHandle_ != 0 && ctx->popups().isOpen(completionHandle_))
+        ctx->popups().update(completionHandle_, std::move(sp));
+    else
+        completionHandle_ = ctx->popups().push(std::move(sp));
+}
+
 void OutputLogPanel::releaseTab(bool tabActive) {
     rowsBox_.reset();
     searchBox_.reset();
     consoleBox_.reset();
     catButton_.reset();
-    if (!tabActive) closePopup();
+    optionsButton_.reset();
+    if (!tabActive) {
+        closePopup();
+        closeCompletion();
+    }
 }
 
 void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
@@ -174,7 +439,8 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
             ->isActive([this, vi] { return showVerb_[vi]; })
             ->onClick([this, vi] {
                 showVerb_[vi] = !showVerb_[vi];
-                viewDirty_    = true;
+                collapsedDirty_ = true;
+                viewDirty_      = true;
                 saveFilter();
             })
             ->normalColor(btnN)->hoveredColor(btnH)->activeColor(EditorTheme::bgHeader)
@@ -191,7 +457,8 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
             ->onClick([this, v] {
                 for (bool& on : showVerb_) on = false;
                 showVerb_[(int)v] = true;
-                viewDirty_ = true;
+                collapsedDirty_ = true;
+                viewDirty_      = true;
                 saveFilter();
             })
             ->content(HNew(STextBlock)
@@ -217,13 +484,21 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
         ->addSlot(counter(false), HR::ESizeRule::Auto, 0.f, vpad)
         ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(6.f))
         ->addSlot(u.textButton("Clear", 11.f, EditorUiKit::kTextBody, HPadding{ 8.f, 3.f }, btnN, btnH,
-                               [this] {
-                                   pullRecords();
-                                   clearedSeq_ = mirrorSeq_;
-                                   anchorSeq_  = 0;
-                                   scrollReq_  = 0;
-                                   viewDirty_  = true;
-                               }),
+                               [this] { clear(); }),
+                  HR::ESizeRule::Auto, 0.f, vpad)
+        ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(4.f))
+        ->addSlot([&] {
+            optionsButton_ = u.iconButton("settings", 13.f, EditorUiKit::kTextBody,
+                                          "", 11.f, EditorUiKit::kTextBody, HPadding{ 5.f, 3.f }, btnN, btnH,
+                                          [this] {
+                                              if (contextMenu_ && contextMenu_->isOpenBelow(optionsButton_.get()))
+                                                  contextMenu_->close();
+                                              else
+                                                  openOptionsMenu();
+                                          }, "...");
+            optionsButton_->setTooltip(HTEXT("Editor.OutputLog", "Tip.DisplayOptions", "Display Options"));
+            return optionsButton_;
+        }(),
                   HR::ESizeRule::Auto, 0.f, vpad)
         ->addSlot(u.spacer(),   HR::ESizeRule::Fixed, u.s(4.f));
 
@@ -282,19 +557,87 @@ void OutputLogPanel::buildTab(SVerticalBox& bottomContent) {
     rebuildRows();
 }
 
+void OutputLogPanel::clear() {
+    pullRecords();
+    clearedSeq_     = mirrorSeq_;
+    anchorSeq_      = 0;
+    scrollReq_      = 0;
+    collapsedDirty_ = true;
+    viewDirty_      = true;
+}
+
+void OutputLogPanel::setTimeMode(ELogTimeMode m) {
+    if (opts_.timeMode == m) return;
+    opts_.timeMode = m;
+    wrapCache_.clear();
+    saveFilter();
+    if (rowsBox_) rebuildRows();
+    else          viewDirty_ = true;
+}
+
+void OutputLogPanel::setCollapse(bool on) {
+    if (opts_.collapse == on) return;
+    opts_.collapse  = on;
+    collapsedDirty_ = true;
+    anchorSeq_      = 0;
+    scrollReq_      = 0;
+    viewDirty_      = true;
+    saveFilter();
+}
+
+void OutputLogPanel::setWordWrap(bool on) {
+    if (opts_.wordWrap == on) return;
+    opts_.wordWrap = on;
+    wrapCache_.clear();
+    viewDirty_ = true;
+    saveFilter();
+}
+
+void OutputLogPanel::setClearOnPlay(bool on) {
+    if (opts_.clearOnPlay == on) return;
+    opts_.clearOnPlay = on;
+    saveFilter();
+}
+
+void OutputLogPanel::openOptionsMenu() {
+    if (!contextMenu_ || !optionsButton_) return;
+    std::vector<EditorMenuEntry> timeChildren = {
+        EditorMenuEntry::cmd("OutputLog.TimeNone"),
+        EditorMenuEntry::cmd("OutputLog.TimeUptime"),
+        EditorMenuEntry::cmd("OutputLog.TimeClock"),
+    };
+    std::vector<EditorMenuEntry> entries = {
+        EditorMenuEntry::heading(HTEXT("Editor.OutputLog", "Opt.HeadingDisplay", "Display").toString()),
+        EditorMenuEntry::submenu(HTEXT("Editor.OutputLog", "Opt.Timestamp", "Timestamp").toString(),
+                                 std::move(timeChildren), "clock", "Timestamp"),
+        EditorMenuEntry::cmd("OutputLog.Collapse"),
+        EditorMenuEntry::cmd("OutputLog.WordWrap"),
+        EditorMenuEntry::heading(HTEXT("Editor.OutputLog", "Opt.HeadingPlay", "Play").toString()),
+        EditorMenuEntry::cmd("OutputLog.ClearOnPlay"),
+    };
+    contextMenu_->openBelow(optionsButton_, std::move(entries), "Bottom");
+}
+
 void OutputLogPanel::pullRecords() {
     std::vector<HLogRecord> fresh;
     HLog::copySince(mirrorSeq_, fresh);
     if (fresh.empty()) return;
 
+    const bool incCollapse = opts_.collapse && !collapsedDirty_;
     for (HLogRecord& r : fresh) {
         if (r.category >= catNames_.size()) syncCategories();
         if (r.category < catCounts_.size()) ++catCounts_[r.category];
+        if (incCollapse && r.seq > clearedSeq_ && recordVisible(r, lastNeedle_))
+            collapsed_.push(r);
         mirror_.push_back(std::move(r));
     }
     while (mirror_.size() > HLog::kCapacity) {
-        const uint16_t c = mirror_.front().category;
+        const HLogRecord& evicted = mirror_.front();
+        const uint16_t c = evicted.category;
         if (c < catCounts_.size()) --catCounts_[c];
+        if (incCollapse && evicted.seq > clearedSeq_ && recordVisible(evicted, lastNeedle_))
+            collapsed_.evict(evicted);
+        wrapCache_.erase(evicted.seq);
         mirror_.pop_front();
     }
     mirrorSeq_ = mirror_.back().seq;
@@ -328,37 +671,41 @@ void OutputLogPanel::setCategoryHidden(uint16_t index, bool hidden) {
         if (hidden) hiddenNames_.insert(st->name);
         else        hiddenNames_.erase(st->name);
     }
-    viewDirty_ = true;
+    collapsedDirty_ = true;
+    viewDirty_      = true;
 }
 
 void OutputLogPanel::loadFilter() {
     std::ifstream f(happ::inWriteRoot(kLogFilterPath));
     if (!f) return;
-    std::string line;
-    while (std::getline(f, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.empty() || line[0] == '#') continue;
-        std::istringstream ls(line);
-        std::string key, a, b;
-        ls >> key >> a >> b;
-        ELogVerbosity v = ELogVerbosity::Off;
-        if (key == "severity" && parseLogVerbosity(a, v) && v != ELogVerbosity::Off &&
-            (b == "on" || b == "off"))
-            showVerb_[(int)v] = (b == "on");
-        else if (key == "hide" && !a.empty())
-            hiddenNames_.insert(a);
-    }
+    hlogview::parseLogOptions(f, opts_, showVerb_, hiddenNames_);
+    collapsedDirty_ = true;
+}
+
+void OutputLogPanel::loadHistory() {
+    if (dumpMode_) return;
+    std::ifstream f(happ::inWriteRoot(kConsoleHistoryPath));
+    if (!f) return;
+    history_    = hconsole::parseHistory(f);
+    historyPos_ = -1;
+}
+
+void OutputLogPanel::saveHistory() const {
+    if (dumpMode_) return;
+    std::error_code ec;
+    fs::create_directories(happ::inWriteRoot("Config"), ec);
+    std::ofstream f(happ::inWriteRoot(kConsoleHistoryPath), std::ios::trunc);
+    if (!f) { if (logCat_) HLOG(*logCat_, Warning) << "Console history save failed (" << kConsoleHistoryPath << ")"; return; }
+    hconsole::formatHistory(f, history_);
 }
 
 void OutputLogPanel::saveFilter() const {
+    if (dumpMode_) return;
     std::error_code ec;
     fs::create_directories(happ::inWriteRoot("Config"), ec);
     std::ofstream f(happ::inWriteRoot(kLogFilterPath), std::ios::trunc);
     if (!f) { if (logCat_) HLOG(*logCat_, Warning) << "Output Log filter save failed (" << kLogFilterPath << ")"; return; }
-    f << "# Haruka Output Log display filter v1. Search text is not saved.\n";
-    for (ELogVerbosity v : kLogSeverities)
-        f << "severity " << logVerbosityName(v) << (showVerb_[(int)v] ? " on\n" : " off\n");
-    for (const std::string& name : hiddenNames_) f << "hide " << name << '\n';
+    hlogview::formatLogOptions(f, opts_, showVerb_, hiddenNames_);
 }
 
 void OutputLogPanel::saveLevels() const {
@@ -384,8 +731,10 @@ void OutputLogPanel::rebuildRows() {
     const HGeometry& g = rowsBox_->cachedGeometry();
     rowsSig_ = { (int)(g.size.x / 4.f), (int)(g.size.y / 4.f) };
 
-    const float rowH = u.s(kRowH);
-    const int   cap  = std::max(4, g.size.y > rowH ? (int)(g.size.y / rowH) : 10);
+    const float rowH  = u.s(kRowH);
+    const int   cap   = std::max(4, g.size.y > rowH ? (int)(g.size.y / rowH) : 10);
+    const float timeW = u.s(hlogview::timeColumnWidth(opts_.timeMode));
+    const float gapW  = opts_.timeMode == ELogTimeMode::None ? 0.f : u.s(8.f);
     rowCap_ = cap;
 
     rowsBox_->clearSlots();
@@ -402,8 +751,8 @@ void OutputLogPanel::rebuildRows() {
                               }))
                               ->fontSize(u.s(11.f))->color(EditorTheme::textDisabled)
                               ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
-                          HR::ESizeRule::Fixed, u.s(kTimeW))
-                ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(8.f))
+                          HR::ESizeRule::Fixed, timeW)
+                ->addSlot(u.spacer(), HR::ESizeRule::Fixed, gapW)
                 ->addSlot(HNew(STextBlock)
                               ->text(AttrStr([this, i]() -> std::string {
                                   return i < (int)viewRows_.size() ? viewRows_[i].category : std::string();
@@ -420,91 +769,241 @@ void OutputLogPanel::rebuildRows() {
                                   return i < (int)viewRows_.size() ? viewRows_[i].color : EditorTheme::textPrimary;
                               }))
                               ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
-                          HR::ESizeRule::Fill),
+                          HR::ESizeRule::Fill)
+                ->addSlot(HNew(STextBlock)
+                              ->text(AttrStr([this, i]() -> std::string {
+                                  return i < (int)viewRows_.size() ? viewRows_[i].badge : std::string();
+                              }))
+                              ->fontSize(u.s(11.f))->color(EditorTheme::textDisabled)
+                              ->hAlign(EHAlign::Right)->vAlign(EVAlign::Center),
+                          HR::ESizeRule::Auto),
             VR::ESizeRule::Fixed, rowH);
     }
     viewDirty_ = false;
     refreshView();
 }
 
+const std::vector<std::string>& OutputLogPanel::wrapCached(uint64_t seq, const std::string& displayText,
+                                                           float msgW, float fontPx) {
+    if (std::abs(msgW - wrapCacheW_) > 0.5f || std::abs(fontPx - wrapCacheFont_) > 0.1f) {
+        wrapCache_.clear();
+        wrapCacheW_    = msgW;
+        wrapCacheFont_ = fontPx;
+    }
+    if (auto it = wrapCache_.find(seq); it != wrapCache_.end()) return it->second;
+    const uint64_t minKeep = mirror_.empty() ? 0 : mirror_.front().seq;
+    hlogview::pruneWrapCache(wrapCache_, minKeep, HLog::kCapacity * 2, [this](uint64_t s) {
+        if (!opts_.collapse) return false;
+        for (const auto& e : collapsed_.entries())
+            if (e.firstSeq == s) return true;
+        return false;
+    });
+    auto lines = hlogview::wrapLogText(displayText, msgW, [fontPx](std::string_view sv) {
+        return EditorUiKit::textWidth(std::string(sv), fontPx);
+    });
+    return wrapCache_.emplace(seq, std::move(lines)).first->second;
+}
+
 void OutputLogPanel::refreshView() {
     pullRecords();
 
     const std::string needle = utf8::asciiLower(searchEdit_.text);
-    auto shown      = [&](size_t i) { return recordVisible(mirror_[i], needle); };
-    auto firstAfter = [&](uint64_t seq) {
-        return (size_t)(std::upper_bound(mirror_.begin(), mirror_.end(), seq,
-                                         [](uint64_t v, const HLogRecord& r) { return v < r.seq; })
-                        - mirror_.begin());
-    };
-
-    const size_t n   = mirror_.size();
-    const size_t lo  = firstAfter(clearedSeq_);
-    const int    cap = std::max(1, rowCap_);
-    size_t end = anchorSeq_ ? std::max(lo, firstAfter(anchorSeq_)) : n;
-
-    for (int k = scrollReq_; k > 0 && end > lo; ) { --end; if (shown(end)) --k; }
-    for (int k = -scrollReq_; k > 0 && end < n; ++end) if (shown(end)) --k;
-    scrollReq_ = 0;
-
-    std::vector<size_t> picked;
-    picked.reserve((size_t)cap);
-    for (size_t i = end; i > lo && (int)picked.size() < cap; ) { --i; if (shown(i)) picked.push_back(i); }
-    std::reverse(picked.begin(), picked.end());
-    for (; end < n && (int)picked.size() < cap; ++end) if (shown(end)) picked.push_back(end);
-
-    if (!anchorSeq_) pinSeq_ = mirrorSeq_;
-    size_t below = 0, fresh = 0;
-    for (size_t i = n; i > end; ) {
-        --i;
-        if (!shown(i)) continue;
-        ++below;
-        if (mirror_[i].seq > pinSeq_) ++fresh;
-    }
-    if (below == 0 || picked.empty()) {
-        anchorSeq_ = 0;
-        pinSeq_    = 0;
-        jumpText_.clear();
-    } else {
-        anchorSeq_ = mirror_[picked.back()].seq;
-        jumpText_  = fresh == 0 ? std::string("v Latest")
-                   : fresh == 1 ? std::string("v 1 new line")
-                                : "v " + std::to_string(fresh) + " new lines";
+    if (needle != lastNeedle_) {
+        lastNeedle_     = needle;
+        collapsedDirty_ = true;
     }
 
-    const EditorUiKit& u = *ui_;
-    const HGeometry& g   = rowsBox_ ? rowsBox_->cachedGeometry() : HGeometry{};
-    const float      msgW = g.size.x - u.s(kTimeW) - u.s(8.f) - u.s(kCatW) - u.s(4.f);
+    const EditorUiKit& u      = *ui_;
+    const HGeometry&   g      = rowsBox_ ? rowsBox_->cachedGeometry() : HGeometry{};
+    const float        rowH   = u.s(kRowH);
+    const float        timeW  = u.s(hlogview::timeColumnWidth(opts_.timeMode));
+    const float        gapW   = opts_.timeMode == ELogTimeMode::None ? 0.f : u.s(8.f);
+    const float        badgeReserve = opts_.collapse ? u.s(38.f) : 0.f;
+    const float        msgW   = g.size.x - timeW - gapW - u.s(kCatW) - u.s(4.f) - badgeReserve;
+    const float        fontPx = u.s(12.f);
+    const float        availH = g.size.y > rowH ? g.size.y : (float)std::max(1, rowCap_) * rowH;
+    const int          cap    = std::max(1, rowCap_);
+    const int64_t      wallMs = HLog::startWallMs();
 
-    viewRows_.resize(picked.size());
-    for (size_t i = 0; i < picked.size(); ++i) {
-        const HLogRecord& r   = mirror_[picked[i]];
-        ViewRow&          row = viewRows_[i];
-
-        if (dumpMode_) {
-            row.time = "#.##";
-        } else {
-            char tb[32];
-            std::snprintf(tb, sizeof tb, "%.2f", (double)r.time);
-            row.time = tb;
-        }
-
-        const std::string& cat = r.category < catNames_.size() ? catNames_[r.category]
-                                                               : std::string("?");
-        row.category = u.ellipsizeText(cat, u.s(kCatW) - u.s(4.f), u.s(11.f));
-
+    auto buildDisplayText = [&](ELogVerbosity verb, const std::string& rawText) {
         std::string text;
-        text.reserve(r.text.size() + 10);
-        if (r.verbosity == ELogVerbosity::Error)   text += "Error: ";
-        if (r.verbosity == ELogVerbosity::Warning) text += "Warning: ";
-        if (dumpMode_) {
+        text.reserve(rawText.size() + 10);
+        if (verb == ELogVerbosity::Error)   text += "Error: ";
+        if (verb == ELogVerbosity::Warning) text += "Warning: ";
+        if (dumpMode_ && !sampleMode_) {
             text += "#";
         } else {
-            text += r.text;
-            text = EditorUiKit::toDisplayAscii(std::move(text));
+            text += rawText;
+            text = hlogview::sanitizeLogTextPreserveNewlines(std::move(text));
         }
-        row.text  = (msgW > u.s(24.f)) ? u.ellipsizeText(text, msgW, u.s(12.f)) : std::string();
-        row.color = EditorUiKit::logColor(r.verbosity);
+        return text;
+    };
+
+    auto computeRow = [&](uint64_t seq, float time, uint16_t catIdx, ELogVerbosity verb,
+                          const std::string& rawText, uint32_t count) -> ViewRow {
+        ViewRow row;
+        row.time = hlogview::formatLogTime(opts_.timeMode, time, wallMs, dumpMode_);
+        const std::string& cat = catIdx < catNames_.size() ? catNames_[catIdx] : std::string("?");
+        row.category = u.ellipsizeText(cat, u.s(kCatW) - u.s(4.f), u.s(11.f));
+        row.color    = EditorUiKit::logColor(verb);
+        if (opts_.collapse && count > 1)
+            row.badge = " \xC3\x97" + std::to_string(count);
+
+        const std::string text = buildDisplayText(verb, rawText);
+        if (msgW <= u.s(24.f)) {
+            row.height = rowH;
+            return row;
+        }
+        if (!opts_.wordWrap) {
+            bool hadNl = false;
+            std::string one = hlogview::firstLineForSingleRow(text, hadNl);
+            row.text   = u.ellipsizeText(one, msgW, fontPx);
+            row.height = rowH;
+        } else {
+            const auto& lines = wrapCached(seq, text, msgW, fontPx);
+            const size_t lc   = std::max<size_t>(1, lines.size());
+            for (size_t li = 0; li < lines.size(); ++li) {
+                if (li > 0) row.text += '\n';
+                row.text += lines[li];
+            }
+            row.height = lc == 1 ? rowH : std::ceil((float)lc * u.s(14.4f)) + u.s(2.f);
+        }
+        return row;
+    };
+
+    if (opts_.collapse) {
+        if (collapsedDirty_) {
+            collapsed_.clear();
+            const size_t lo = (size_t)(std::upper_bound(mirror_.begin(), mirror_.end(), clearedSeq_,
+                                                        [](uint64_t v, const HLogRecord& r) { return v < r.seq; })
+                                       - mirror_.begin());
+            for (size_t i = lo; i < mirror_.size(); ++i)
+                if (recordVisible(mirror_[i], needle)) collapsed_.push(mirror_[i]);
+            collapsedDirty_ = false;
+        }
+
+        const auto& entries = collapsed_.entries();
+        const size_t n      = entries.size();
+        size_t end          = anchorSeq_ ? collapsed_.firstAfter(anchorSeq_) : n;
+
+        for (int k = scrollReq_; k > 0 && end > 0; --end) --k;
+        for (int k = -scrollReq_; k > 0 && end < n; ++end) --k;
+        scrollReq_ = 0;
+
+        std::vector<ViewRow> picked;
+        std::vector<uint64_t> pickedSeqs;
+        picked.reserve((size_t)cap);
+        pickedSeqs.reserve((size_t)cap);
+        float usedH = 0.f;
+        for (size_t i = end; i > 0 && (int)picked.size() < cap; ) {
+            --i;
+            const auto& e = entries[i];
+            ViewRow vr = computeRow(e.firstSeq, e.lastTime, e.category, e.verbosity, e.text, e.count);
+            if (!picked.empty() && opts_.wordWrap && usedH + vr.height > availH + 0.5f) break;
+            usedH += vr.height;
+            picked.push_back(std::move(vr));
+            pickedSeqs.push_back(e.firstSeq);
+        }
+        std::reverse(picked.begin(), picked.end());
+        std::reverse(pickedSeqs.begin(), pickedSeqs.end());
+        for (; end < n && (int)picked.size() < cap; ++end) {
+            const auto& e = entries[end];
+            ViewRow vr = computeRow(e.firstSeq, e.lastTime, e.category, e.verbosity, e.text, e.count);
+            if (!picked.empty() && opts_.wordWrap && usedH + vr.height > availH + 0.5f) break;
+            usedH += vr.height;
+            picked.push_back(std::move(vr));
+            pickedSeqs.push_back(e.firstSeq);
+        }
+
+        if (!anchorSeq_) pinSeq_ = mirrorSeq_;
+        size_t below = 0, fresh = 0;
+        for (size_t i = end; i < n; ++i) {
+            ++below;
+            if (entries[i].lastSeq > pinSeq_) ++fresh;
+        }
+        if (below == 0 || picked.empty()) {
+            anchorSeq_ = 0;
+            pinSeq_    = 0;
+            jumpText_.clear();
+        } else {
+            anchorSeq_ = pickedSeqs.back();
+            jumpText_  = fresh == 0 ? std::string("v Latest")
+                       : fresh == 1 ? std::string("v 1 new line")
+                                    : "v " + std::to_string(fresh) + " new lines";
+        }
+
+        viewRows_ = std::move(picked);
+    } else {
+        auto shown      = [&](size_t i) { return recordVisible(mirror_[i], needle); };
+        auto firstAfter = [&](uint64_t seq) {
+            return (size_t)(std::upper_bound(mirror_.begin(), mirror_.end(), seq,
+                                             [](uint64_t v, const HLogRecord& r) { return v < r.seq; })
+                            - mirror_.begin());
+        };
+
+        const size_t n   = mirror_.size();
+        const size_t lo  = firstAfter(clearedSeq_);
+        size_t       end = anchorSeq_ ? std::max(lo, firstAfter(anchorSeq_)) : n;
+
+        for (int k = scrollReq_; k > 0 && end > lo; ) { --end; if (shown(end)) --k; }
+        for (int k = -scrollReq_; k > 0 && end < n; ++end) if (shown(end)) --k;
+        scrollReq_ = 0;
+
+        std::vector<ViewRow>  picked;
+        std::vector<uint64_t> pickedSeqs;
+        picked.reserve((size_t)cap);
+        pickedSeqs.reserve((size_t)cap);
+        float usedH = 0.f;
+        for (size_t i = end; i > lo && (int)picked.size() < cap; ) {
+            --i;
+            if (!shown(i)) continue;
+            const HLogRecord& r = mirror_[i];
+            ViewRow vr = computeRow(r.seq, r.time, r.category, r.verbosity, r.text, 1);
+            if (!picked.empty() && opts_.wordWrap && usedH + vr.height > availH + 0.5f) break;
+            usedH += vr.height;
+            picked.push_back(std::move(vr));
+            pickedSeqs.push_back(r.seq);
+        }
+        std::reverse(picked.begin(), picked.end());
+        std::reverse(pickedSeqs.begin(), pickedSeqs.end());
+        for (; end < n && (int)picked.size() < cap; ++end) {
+            if (!shown(end)) continue;
+            const HLogRecord& r = mirror_[end];
+            ViewRow vr = computeRow(r.seq, r.time, r.category, r.verbosity, r.text, 1);
+            if (!picked.empty() && opts_.wordWrap && usedH + vr.height > availH + 0.5f) break;
+            usedH += vr.height;
+            picked.push_back(std::move(vr));
+            pickedSeqs.push_back(r.seq);
+        }
+
+        if (!anchorSeq_) pinSeq_ = mirrorSeq_;
+        size_t below = 0, fresh = 0;
+        for (size_t i = n; i > end; ) {
+            --i;
+            if (!shown(i)) continue;
+            ++below;
+            if (mirror_[i].seq > pinSeq_) ++fresh;
+        }
+        if (below == 0 || picked.empty()) {
+            anchorSeq_ = 0;
+            pinSeq_    = 0;
+            jumpText_.clear();
+        } else {
+            anchorSeq_ = pickedSeqs.back();
+            jumpText_  = fresh == 0 ? std::string("v Latest")
+                       : fresh == 1 ? std::string("v 1 new line")
+                                    : "v " + std::to_string(fresh) + " new lines";
+        }
+
+        viewRows_ = std::move(picked);
+    }
+
+    if (rowsBox_) {
+        for (int i = 0; i < rowCap_; ++i) {
+            const float h = i < (int)viewRows_.size() ? viewRows_[(size_t)i].height
+                                                      : (opts_.wordWrap ? 0.f : rowH);
+            rowsBox_->setSlotValue((size_t)i, h);
+        }
     }
 }
 
@@ -587,7 +1086,8 @@ std::shared_ptr<SVerticalBox> OutputLogPanel::buildPopupList(const std::vector<H
         ->addSlot(u.textButton("All", 11.f, EditorUiKit::kTextBody, HPadding{ 8.f, 2.f }, btnN, btnH, [this] {
                       std::fill(catHidden_.begin(), catHidden_.end(), (char)0);
                       hiddenNames_.clear();
-                      viewDirty_ = true;
+                      collapsedDirty_ = true;
+                      viewDirty_      = true;
                       saveFilter();
                   }), HR::ESizeRule::Auto, 0.f, HPadding{ 0.f, u.s(4.f) })
         ->addSlot(u.spacer(), HR::ESizeRule::Fixed, u.s(4.f))

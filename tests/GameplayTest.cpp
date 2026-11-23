@@ -321,13 +321,56 @@ void testCVars() {
     check(out.find("game.count") != std::string::npos && out.find("game.label") != std::string::npos && out.find("time.scale") == std::string::npos,
           "list 앞부분");
     out = r.execute("help");
-    check(out.find("give") != std::string::npos && out.find("4 variables") != std::string::npos, "help 목록");
+    check(out.find("give") != std::string::npos && out.find("4 variables") != std::string::npos
+          && out.find("Tab") != std::string::npos && out.find("`") != std::string::npos, "help 목록 및 콘솔 안내");
     check(r.execute("help give").find("give <item>") != std::string::npos && r.execute("help time.scale").find("World time scale") != std::string::npos,
           "help <이름>");
     out = r.execute("frobnicate");
     check(out.find("unknown") != std::string::npos, "모르는 명령: " + out);
     check(r.execute("   ").empty(), "빈 줄은 빈 결과");
     check(CVarRegistry::splitArgs("  a  \"b c\" \"\" d") == std::vector<std::string>{ "a", "b c", "", "d" }, "splitArgs(빈 따옴표 포함)");
+
+    // C3: 콘솔 후보 계산(complete)
+    std::printf("\n== C3 console complete ==\n");
+    check(r.complete("").empty() && r.complete("   \t ").empty(), "빈 입력 · 공백만은 빈 목록");
+    check(r.complete("time", 0).empty(), "max 0 은 빈 목록");
+    r.addCommand("game.give", "gives item", [](const auto&) { return std::string(); });
+    {
+        auto c = r.complete("game", 10);
+        check(c.size() == 3 && c[0].name == "game.count" && c[1].name == "game.give" && c[2].name == "game.label",
+              "앞부분 일치 이름순(변수+명령)");
+        check(c[0].kind == CVarRegistry::CompletionKind::Variable && c[0].valueText == "0"
+              && c[1].kind == CVarRegistry::CompletionKind::Command && c[1].valueText.empty(),
+              "종류 · 변수 값");
+    }
+    {
+        // "sc": time.scale 은 포함 일치, scene 은 없으면 time.scale 만. 앞부분 일치를 먼저 두고 포함 일치를 뒤에 둠.
+        r.addCommand("sc.test", "prefix command", [](const auto&) { return std::string(); });
+        auto c = r.complete("SC", 10);
+        check(c.size() == 2 && c[0].name == "sc.test" && c[1].name == "time.scale",
+              "대소문자 무시 + 앞부분 일치 우선, 포함 일치 뒤");
+    }
+    {
+        auto c = r.complete("e", 10);
+        // builtins: help, list, reset; vars: debug.lines, game.count, game.label, time.scale; cmds: game.give, give, sc.test
+        check(c.size() >= 3 && r.complete("e", 2).size() == 2, "max 상한 준수");
+    }
+    {
+        auto c = r.complete("time.scale ", 10);
+        check(c.size() == 1 && c[0].name == "time.scale" && c[0].kind == CVarRegistry::CompletionKind::Variable
+              && c[0].valueText.find("float") != std::string::npos && c[0].valueText.find("0..100") != std::string::npos
+              && c[0].valueText.find("current 1") != std::string::npos && c[0].help.find("World time scale") != std::string::npos,
+              "인자 단계 변수: 형 · 범위 · 지금 값 · 도움말 1줄");
+        auto cCmd = r.complete("give iron", 10);
+        check(cCmd.size() == 1 && cCmd[0].name == "give" && cCmd[0].kind == CVarRegistry::CompletionKind::Command
+              && cCmd[0].valueText.empty() && cCmd[0].help.find("give <item>") != std::string::npos,
+              "인자 단계 명령: 도움말 1줄");
+        auto cBuilt = r.complete("reset ", 10);
+        check(cBuilt.size() == 1 && cBuilt[0].name == "reset" && cBuilt[0].kind == CVarRegistry::CompletionKind::Builtin,
+              "인자 단계 기본 명령");
+        check(r.complete("nobody ", 10).empty(), "인자 단계 없는 이름");
+    }
+    check(r.complete("zzz_not_found", 10).empty(), "없는 이름");
 }
 
 } // namespace

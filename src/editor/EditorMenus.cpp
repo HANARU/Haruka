@@ -1,4 +1,5 @@
 #include "EditorMenus.hpp"
+#include "../core/HText.hpp"
 #include <algorithm>
 
 void EditorMenus::init(const EditorUiKit* ui, float menuBarH, HSlateContext* ctx, EditorCommandRegistry* reg) {
@@ -9,7 +10,12 @@ void EditorMenus::init(const EditorUiKit* ui, float menuBarH, HSlateContext* ctx
     // 행을 고르면 메뉴를 닫은 뒤 실행합니다. 층이 드롭다운을 닫으면(배경 누름 · 다른 팝업이 열림) 열림 상태를 맞춥니다.
     view_.init(ui, reg, [this] { setOpen(-1); },
                [this] {
-                   if (openMenu_ >= 0) { openMenu_ = -1; barDirty_ = true; popupDirty_ = true; }
+                   if (openMenu_ >= 0) {
+                       openMenu_ = -1;
+                       barState_.openMenu = -1;
+                       barDirty_ = true;
+                       popupDirty_ = true;
+                   }
                });
 }
 
@@ -20,6 +26,13 @@ std::shared_ptr<SHorizontalBox> EditorMenus::buildBar() {
 
 void EditorMenus::setOpen(int mi) {
     openMenu_   = mi;
+    barState_.openMenu = mi;
+    if (mi >= 0) {
+        barState_.barActive = false;
+        barState_.focusedMenu = mi;
+    } else {
+        barState_.focusedMenu = barState_.barActive ? barState_.focusedMenu : -1;
+    }
     barDirty_   = true;
     popupDirty_ = true;
     highlightFirst_ = false;
@@ -29,6 +42,9 @@ void EditorMenus::setOpen(int mi) {
 
 void EditorMenus::switchTo(int mi, bool highlightFirst) {
     openMenu_       = mi;
+    barState_.openMenu = mi;
+    barState_.barActive = false;
+    barState_.focusedMenu = mi;
     barDirty_       = true;
     popupDirty_     = true;
     highlightFirst_ = highlightFirst;
@@ -37,6 +53,11 @@ void EditorMenus::switchTo(int mi, bool highlightFirst) {
 
 void EditorMenus::setDefs(std::vector<Def> defs) {
     defs_ = std::move(defs);
+    std::vector<std::string> english;
+    english.reserve(defs_.size());
+    for (const Def& d : defs_)
+        english.push_back(d.englishName.empty() ? d.name : d.englishName);
+    barAccels_ = hmenu::assignBarAccelerators(english);
 }
 
 void EditorMenus::close() {
@@ -83,6 +104,25 @@ void EditorMenus::handleKey(hmenu::Key k) {
     }
 }
 
+hmenu::BarAct EditorMenus::handleBarEvent(const hmenu::BarEvent& ev) {
+    barState_.openMenu = openMenu_;
+    const hmenu::BarAct act = hmenu::stepBar(barState_, ev, barAccels_);
+    switch (act) {
+        case hmenu::BarAct::BarChanged:
+            barDirty_ = true;
+            break;
+        case hmenu::BarAct::OpenMenu:
+            switchTo(barState_.openMenu, true);
+            break;
+        case hmenu::BarAct::CloseMenu:
+            setOpen(-1);
+            break;
+        case hmenu::BarAct::None:
+            break;
+    }
+    return act;
+}
+
 void EditorMenus::flushRebuilds() {
     if (barDirty_)   { barDirty_   = false; rebuildBar();   }
     if (popupDirty_) { popupDirty_ = false; rebuildPopup(); }
@@ -94,9 +134,22 @@ void EditorMenus::rebuildBar() {
     buttons_.assign(defs_.size(), nullptr);   // hover 전환 히트테스트용(defs_ 와 1:1)
     barBox_->addSlot(ui_->spacer(), SHorizontalBox::ESizeRule::Fixed, s(6.f));
     float x = s(6.f);
+    const bool showAcc = barState_.showMnemonics();
+    const bool isEn    = htext::culture() == "en";
     for (int mi = 0; mi < (int)defs_.size(); ++mi) {
         defs_[mi].x = x;                      // 팝업 위치용 x(스케일 픽셀)
-        const bool open = (openMenu_ == mi);
+        const bool open = (openMenu_ == mi) || (barState_.barActive && barState_.focusedMenu == mi);
+        std::string label = defs_[mi].name;
+        int underlineIdx = -1;
+        if (showAcc && mi < (int)barAccels_.size() && barAccels_[mi] != '\0') {
+            if (isEn) {
+                underlineIdx = hmenu::findAcceleratorIndex(label, barAccels_[mi]);
+            } else {
+                label += " (";
+                label += barAccels_[mi];
+                label += ")";
+            }
+        }
         auto btn = HNew(SButton)
                 ->style(EditorUiKit::buttonStyle(s(1.f)))
                 ->normalColor (open ? EditorTheme::selectRow      : EditorTheme::transparent)
@@ -104,7 +157,7 @@ void EditorMenus::rebuildBar() {
                 ->pressedColor(EditorTheme::ctlHover)
                 ->padding(HPadding{s(10.f), s(4.f)})
                 ->onClick([this, mi]{ setOpen((openMenu_ == mi) ? -1 : mi); })
-                ->content(HNew(STextBlock)->text(defs_[mi].name)->fontSize(s(13.f))
+                ->content(HNew(STextBlock)->text(label)->fontSize(s(13.f))->underline(underlineIdx)
                     ->color(EditorUiKit::kTextBody)->hAlign(EHAlign::Center)->vAlign(EVAlign::Center));
         buttons_[mi] = btn;
         // 폭은 글자 실측에 맞추되 짧은 이름도 같은 최소 폭을 씁니다. 고정 폭이면 "Window" 처럼

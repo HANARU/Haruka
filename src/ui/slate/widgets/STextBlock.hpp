@@ -38,6 +38,10 @@ public:
     std::shared_ptr<STextBlock> vAlign(EVAlign a) {
         vAlign_ = a; return self();
     }
+    // UTF-8 시작 바이트 위치의 한 글자 아래에 밑줄을 그립니다(C1 메뉴 가속 글자, -1 = 없음).
+    std::shared_ptr<STextBlock> underline(int byteIndex) {
+        underlineByte_ = byteIndex; return self();
+    }
 
     glm::vec2 computeDesiredSize() override {
         // Attr 은 매 프레임 여러 번 평가되므로 게터는 한 번만 부릅니다.
@@ -69,6 +73,22 @@ public:
         textGeo.size     = { tw, th };
         textGeo.scale    = geo.scale;
         ctx.drawText(textGeo, t, fontSize_, color_.get(), face_);
+        if (underlineByte_ >= 0 && underlineByte_ < (int)t.size()) {
+            const HFontAtlas* font = HFontAtlas::metrics();
+            size_t next = (size_t)underlineByte_;
+            HFontAtlas::nextCodepoint(t, next);
+            const float x0 = font ? font->measureText(t.substr(0, (size_t)underlineByte_), fontSize_, face_)
+                                  : (float)underlineByte_ * fontSize_ * 0.6f;
+            const float x1 = font ? font->measureText(t.substr(0, next), fontSize_, face_)
+                                  : (float)next * fontSize_ * 0.6f;
+            const float uw = std::max(1.f, x1 - x0);
+            const float uh = std::max(1.f, std::round(fontSize_ * 0.08f));
+            HGeometry ug;
+            ug.position = { tx + x0, ty + fontSize_ + std::max(1.f, fontSize_ * 0.10f) };
+            ug.size     = { uw, uh };
+            ug.scale    = geo.scale;
+            ctx.drawRect(ug, color_.get());
+        }
     }
 
 private:
@@ -104,6 +124,7 @@ private:
     float              measuredSize_ = -1.f;
     int                face_         = 0;
     int                measuredFace_ = -1;
+    int                underlineByte_ = -1;
     const HFontAtlas*  measuredFont_ = nullptr;
     glm::vec2          measured_ { 0.f, 0.f };
 

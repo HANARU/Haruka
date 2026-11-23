@@ -57,6 +57,8 @@ public:
     void hover(const HSlateContext* ctx, glm::vec2 p);
     // 키 하나. NextMenu · PrevMenu · Close 는 소유자가 처리합니다(나머지는 여기서 처리하고 None 이 아닌 값을 돌려줌).
     hmenu::Act key(hmenu::Key k, bool inBar);
+    // 드롭다운 글자 키(C1): 가장 깊은 단계에서 asciiKey 로 시작하는 다음 켜진 항목으로 강조를 옮기거나(여럿), 하나뿐이면 바로 실행합니다.
+    bool activateByMnemonic(char asciiKey);
 
     // ── 덤프 · 시험 ──
     int  highlight(int level) const { return level < (int)levels_.size() ? levels_[(size_t)level].highlight : -1; }

@@ -108,6 +108,8 @@ struct Sink {
     bool                    console = true;
     std::FILE*              file    = nullptr;   // 파일 출력처(mtx 보호)
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    int64_t                 startWallMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
 };
 
 Sink& sink() {
@@ -270,6 +272,10 @@ void HLog::submit(const HLogCategory& cat, ELogVerbosity v, std::string_view tex
 // ── 소비 ──────────────────────────────────────────────────────────────────────
 uint64_t HLog::latestSeq() {
     return sink().latest.load(std::memory_order_relaxed);
+}
+
+int64_t HLog::startWallMs() {
+    return sink().startWallMs;
 }
 
 bool HLog::tryRecentLines(size_t maxCount, std::vector<std::string>& out) {

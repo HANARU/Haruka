@@ -32,6 +32,8 @@ struct TextInputField {
     // Esc 로 빠져나오기 직전(포커스를 풀기 전, H3b). 포커스를 잃으면 확정하는 칸(디테일 글 칸 · 색 16진수 칸)이 이번 나감은 취소임을
     // 알아 둡니다. 포커스를 푼 뒤에는 onCancel 이 불립니다.
     std::function<void()>          onEscape = {};
+    std::function<bool()>          onTab = {};         // Tab 완성 등(참이면 키 소비, C3)
+    std::function<bool()>          onPreEscape = {};   // Esc 먼저 처리(후보 목록 닫기 등, 참이면 포커스 유지, C3)
     bool                           selectAllOnFocus = true;   // 거짓이면 커서를 끝에 둠(콘솔: 이어 쓰기)
 };
 
@@ -82,6 +84,8 @@ public:
         std::function<std::vector<int>()> windowIds;        // IME 를 맞출 창 목록(메인 포함)
         // 열린 메뉴가 키보드를 쥐고 있는가(H2b). 참이면 키 엣지만 갱신하고 글자는 버립니다(Delete · Ctrl+C · Ctrl+V · F2 · Esc 가 새지 않게).
         std::function<bool()>             isKeyboardCaptured;
+        // ` 키로 콘솔 포커스 토글(C3). 포커스 없음일 때 부름.
+        std::function<void()>             onToggleConsole;
     };
 
     // 글 입력 칸 대상인지(숫자 칸 · 대화상자 제외).
@@ -135,6 +139,8 @@ public:
         bool delEdge    = false;
         bool enterEdge  = false;
         bool escEdge    = false;
+        bool tabEdge    = false;
+        bool graveEdge  = false;
         int  bsCount    = 0;
         int  delCount   = 0;
         int  leftCount  = 0;
@@ -190,6 +196,8 @@ private:
     bool         prevADown_        = false;
     bool         prevXDown_        = false;
     bool         prevEscapeDown_   = false;
+    bool         prevTabDown_      = false;
+    bool         prevGraveDown_    = false;
     bool         prevUpDown_       = false;
     bool         prevDownDown_     = false;
     int          lastKeyboardWin_  = 0;

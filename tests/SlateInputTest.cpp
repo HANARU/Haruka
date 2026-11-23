@@ -4636,6 +4636,22 @@ void testColorPickerWidgets() {
     }
 }
 
+static void testTextUnderline() {
+    std::printf("\n[testTextUnderline]\n");
+    HPaintContext pc(nullptr);
+    auto tb = HNew(STextBlock)->text("File")->fontSize(13.f)->underline(0);
+    HGeometry geo;
+    geo.position = { 10.f, 4.f };
+    geo.size     = { 40.f, 20.f };
+    tb->paint(pc, geo);
+    int texts = 0, rects = 0;
+    for (const HDrawElement& e : pc.elements) {
+        if (e.type == HDrawElement::Type::Text) ++texts;
+        if (e.type == HDrawElement::Type::Rect) ++rects;
+    }
+    check(texts == 1 && rects == 1, "STextBlock::underline(0) 이 Text 와 밑줄 Rect 를 함께 그림");
+}
+
 int main() {
     std::printf("== HSlate input ==\n");
     testStrayReleaseDoesNotEdit();
@@ -4708,6 +4724,7 @@ int main() {
     testVectorField();
     testComboMenu();
     testColorPickerWidgets();
+    testTextUnderline();
 
     if (g_failed) {
         std::printf("\n%d check(s) FAILED\n", g_failed);

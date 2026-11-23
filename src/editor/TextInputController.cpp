@@ -172,6 +172,8 @@ void TextInputController::transition(EFocusTarget prev, int pi, EFocusTarget t, 
         prevCDown_      = w.isKeyDown(HInput::KEY_C);
         prevADown_      = w.isKeyDown(HInput::KEY_A);
         prevXDown_      = w.isKeyDown(HInput::KEY_X);
+        prevTabDown_    = w.isKeyDown(HInput::KEY_TAB);
+        prevGraveDown_  = w.isKeyDown(HInput::KEY_GRAVE_ACCENT);
     }
     // 글 입력 칸에서만 IME 를 켭니다(T2). 숫자 칸 · 포커스 없음은 끔. 여러 창이면 그 칸이 있는 창만 켭니다(M3b).
     {
@@ -250,9 +252,11 @@ TextInputController::KeyEdges TextInputController::sampleEdges(IWindow& win) {
         if ((blockedKeys_ & bit) && !win.isKeyDown(kRepeatKeys[i])) blockedKeys_ &= ~bit;
         counts[i] = (blockedKeys_ & bit) ? 0 : win.keyPressCount(kRepeatKeys[i]);
     }
-    const bool escNow = win.isKeyDown(HInput::KEY_ESCAPE);
-    const bool upNow   = win.isKeyDown(HInput::KEY_UP);
-    const bool downNow = win.isKeyDown(HInput::KEY_DOWN);
+    const bool escNow   = win.isKeyDown(HInput::KEY_ESCAPE);
+    const bool tabNow   = win.isKeyDown(HInput::KEY_TAB);
+    const bool graveNow = win.isKeyDown(HInput::KEY_GRAVE_ACCENT);
+    const bool upNow    = win.isKeyDown(HInput::KEY_UP);
+    const bool downNow  = win.isKeyDown(HInput::KEY_DOWN);
 
     KeyEdges k;
     k.ctrlHeld   = ctrlHeld;
@@ -265,6 +269,8 @@ TextInputController::KeyEdges TextInputController::sampleEdges(IWindow& win) {
     k.delEdge    = delNow && !prevDeleteDown_;
     k.enterEdge  = enNow  && !prevEnterDown_;
     k.escEdge    = escNow && !prevEscapeDown_;
+    k.tabEdge    = tabNow && !prevTabDown_;
+    k.graveEdge  = graveNow && !prevGraveDown_;
     k.bsCount    = counts[0];
     k.delCount   = counts[1];
     k.leftCount  = counts[2];
@@ -284,6 +290,8 @@ TextInputController::KeyEdges TextInputController::sampleEdges(IWindow& win) {
     prevDeleteDown_ = delNow;
     prevEnterDown_  = enNow;
     prevEscapeDown_ = escNow;
+    prevTabDown_    = tabNow;
+    prevGraveDown_  = graveNow;
     return k;
 }
 
@@ -350,6 +358,8 @@ void TextInputController::reseedEdges(IWindow& win) {
     prevADown_      = win.isKeyDown(HInput::KEY_A);
     prevXDown_      = win.isKeyDown(HInput::KEY_X);
     prevEscapeDown_ = win.isKeyDown(HInput::KEY_ESCAPE);
+    prevTabDown_    = win.isKeyDown(HInput::KEY_TAB);
+    prevGraveDown_  = win.isKeyDown(HInput::KEY_GRAVE_ACCENT);
     prevUpDown_     = win.isKeyDown(HInput::KEY_UP);
     prevDownDown_   = win.isKeyDown(HInput::KEY_DOWN);
     blockedKeys_    = 0;
@@ -398,6 +408,7 @@ void TextInputController::handleTextFieldInput(IWindow& win, EFocusTarget focus,
         if (!f.keepFocusOnCommit) setFocus(EFocusTarget::None);
         return;
     }
+    if (k.tabEdge && !f.edit.isComposing() && f.onTab && f.onTab()) return;
     if (f.onHistory && !f.edit.isComposing()) {
         if (k.upEdge)   f.onHistory(-1);
         if (k.downEdge) f.onHistory(+1);
@@ -450,10 +461,27 @@ void TextInputController::tickInput() {
     std::string compNow;
     size_t      compCaretNow = 0;
     const bool  imeComposing = win.getComposition(compNow, compCaretNow);
+    // ` 키로 콘솔 포커스 토글(C3): 콘솔 포커스 중이면 글자를 넣지 않고 해제, 포커스 없음이면 콘솔 포커스 요청.
+    // 다른 글 칸 포커스 중에는 그대로 글자로 들어갑니다.
+    if (k.graveEdge && !imeComposing) {
+        if (focus == EFocusTarget::Console) {
+            std::vector<unsigned int> junk;
+            win.drainCharQueue(junk);
+            setFocus(EFocusTarget::None);
+            return;
+        }
+        if (focus == EFocusTarget::None && deps_.onToggleConsole) {
+            std::vector<unsigned int> junk;
+            win.drainCharQueue(junk);
+            deps_.onToggleConsole();
+            return;
+        }
+    }
     if (k.escEdge && focus != EFocusTarget::None && !imeComposing) {
         std::function<void()> cancel;
         if (const int i = focusedBinding(); i >= 0 && isTextField(focus)) {
             const TextInputField f = fieldAt(i);
+            if (f.onPreEscape && f.onPreEscape()) return;
             cancel = f.onCancel;
             if (f.onEscape) f.onEscape();   // 포커스를 잃으면 확정하는 칸: 이번 나감은 취소(H3b)
         }

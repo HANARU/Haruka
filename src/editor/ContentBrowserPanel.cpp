@@ -531,41 +531,41 @@ std::vector<EditorMenuEntry> ContentBrowserPanel::contextItems(const std::string
     std::vector<E> items;
     if (path.empty()) {
         const std::string f = folder_;
-        items.push_back(E::act(HTEXT("Editor.Content", "Menu.ShowFolder", "Show in Explorer").toString(), [this, f] { showInExplorer(f); }));
-        items.push_back(E::act(HTEXT("Editor.Content", "Menu.Refresh", "Refresh").toString(), [this] { scanAll(); }));
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.ShowFolder", "Show in Explorer").toString(), [this, f] { showInExplorer(f); }, true, "external-link", "Show in Explorer"));
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.Refresh", "Refresh").toString(), [this] { scanAll(); }, true, "refresh-cw", "Refresh"));
         return items;
     }
     if (index_.hasFolder(path)) {
-        items.push_back(E::act(HTEXT("Editor.Content", "Menu.OpenFolder", "Open").toString(), [this, path] { navigate(path); }));
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.OpenFolder", "Open").toString(), [this, path] { navigate(path); }, true, "folder-open", "Open"));
         items.push_back(E::separator());
-        items.push_back(E::act(HTEXT("Editor.Content", "Menu.ShowInExplorer", "Show in Explorer").toString(), [this, path] { showInExplorer(path); }));
-        items.push_back(E::act(HTEXT("Editor.Content", "Menu.CopyPath", "Copy Path").toString(), [this, path] { copyPath(path); }));
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.ShowInExplorer", "Show in Explorer").toString(), [this, path] { showInExplorer(path); }, true, "external-link", "Show in Explorer"));
+        items.push_back(E::act(HTEXT("Editor.Content", "Menu.CopyPath", "Copy Path").toString(), [this, path] { copyPath(path); }, true, "clipboard-copy", "Copy Path"));
         return items;
     }
     const hcb::Item* it = index_.find(path);
     if (!it) return items;
     switch (it->kind) {
         case AssetKind::Scene:
-            items.push_back(E::act(HTEXT("Editor.Content", "Menu.OpenScene", "Open Scene").toString(), [this, path] { activate(path); }));
+            items.push_back(E::act(HTEXT("Editor.Content", "Menu.OpenScene", "Open Scene").toString(), [this, path] { activate(path); }, true, "map", "Open Scene"));
             break;
         case AssetKind::Model:
         case AssetKind::Prefab:
-            items.push_back(E::act(HTEXT("Editor.Content", "Menu.Place", "Place in Scene").toString(), [this, path] { activate(path); }));
+            items.push_back(E::act(HTEXT("Editor.Content", "Menu.Place", "Place in Scene").toString(), [this, path] { activate(path); }, true, "map-pin", "Place in Scene"));
             break;
         case AssetKind::Audio:
         case AssetKind::Cue: {
-            items.push_back(E::act(HTEXT("Editor.Content", "Menu.Play", "Play").toString(), [this, path] { activate(path); }));
+            items.push_back(E::act(HTEXT("Editor.Content", "Menu.Play", "Play").toString(), [this, path] { activate(path); }, true, "play", "Play"));
             const bool canAssign = deps_.ctx && deps_.ctx->selected && !(deps_.isEditorCam && deps_.isEditorCam(deps_.ctx->selected));
-            items.push_back(E::act(HTEXT("Editor.Content", "Menu.Assign", "Assign to Selected Actor").toString(), [this, path] { assignSound(path); }, canAssign));
+            items.push_back(E::act(HTEXT("Editor.Content", "Menu.Assign", "Assign to Selected Actor").toString(), [this, path] { assignSound(path); }, canAssign, "link-2", "Assign to Selected Actor"));
             break;
         }
         default: break;
     }
     if (!items.empty()) items.push_back(E::separator());
     items.push_back(E::act(HTEXT("Editor.Content", "Menu.AssetActions", "References, Rename, Move...").toString(),
-                           [this, path] { if (deps_.onAssetActions) deps_.onAssetActions(path); }));
-    items.push_back(E::act(HTEXT("Editor.Content", "Menu.ShowInExplorer", "Show in Explorer").toString(), [this, path] { showInExplorer(path); }));
-    items.push_back(E::act(HTEXT("Editor.Content", "Menu.CopyPath", "Copy Path").toString(), [this, path] { copyPath(path); }));
+                           [this, path] { if (deps_.onAssetActions) deps_.onAssetActions(path); }, true, "folder-input", "References, Rename, Move..."));
+    items.push_back(E::act(HTEXT("Editor.Content", "Menu.ShowInExplorer", "Show in Explorer").toString(), [this, path] { showInExplorer(path); }, true, "external-link", "Show in Explorer"));
+    items.push_back(E::act(HTEXT("Editor.Content", "Menu.CopyPath", "Copy Path").toString(), [this, path] { copyPath(path); }, true, "clipboard-copy", "Copy Path"));
     return items;
 }
 

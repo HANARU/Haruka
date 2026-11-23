@@ -64,9 +64,17 @@ struct EngineOptions {
     std::string uiMenuKeys;              // --ui-menu-keys=<키,키...> : 메뉴가 뜬 뒤 한 프레임에 하나씩 메뉴 키(up · down · left · right · enter · esc, H2b)
     std::string uiBottomTab;             // --ui-bottom-tab=<name> : 첫 프레임 뒤 하단 탭 전환(에디터 전용)
     bool        uiLogCategories = false; // --ui-log-categories : 첫 프레임 뒤 로그 Categories 팝업 열기(에디터 전용)
+    std::string uiLogTime;               // --ui-log-time=none|uptime|clock : Output Log 시각 표시 방식(C2)
+    bool        uiLogCollapse   = false; // --ui-log-collapse : Output Log 같은 메시지 묶기(C2)
+    bool        uiLogWrap       = false; // --ui-log-wrap : Output Log 긴 줄 줄 바꿈(C2)
+    bool        uiLogOptions    = false; // --ui-log-options : Output Log Display Options 메뉴 열기(C2)
+    bool        uiLogSample     = false; // --ui-log-sample : 덤프용 샘플 로그 남기기(C2)
     std::string uiOutlinerSearch;        // --ui-outliner-search=<text> : 아웃라이너 검색어(에디터 전용)
     std::vector<std::string> uiConsole;  // --ui-console=<명령> (여러 번) : Output Log 콘솔 줄에서 실행(에디터 전용, Gameplay_Tools D9)
     int         uiConsoleRecall = 0;     // --ui-console-recall=N : 그 뒤 위 화살표 N 번(콘솔 기록, 에디터 전용)
+    std::string uiConsoleType;           // --ui-console-type=<글> : 콘솔 칸에 글을 넣어 후보 목록 띄우기(C3)
+    int         uiConsolePick   = -1;    // --ui-console-pick=<n> : n 번째 후보 고르기(C3)
+    bool        uiConsoleTab    = false; // --ui-console-tab : Tab 완성 적용(C3)
     std::string uiRename;                // --ui-rename=<actor> : 액터 이름 바꾸기 시작(에디터 전용)
     // --debug-crash=segv|stack|purecall|abort|terminate|throw|check|ensure : 몇 프레임 뒤 일부러 크래시(크래시 보고 D5,
     // Docs/Crash_Reporting.md). 크래시 보고서 확인용입니다.

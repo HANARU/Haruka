@@ -88,6 +88,7 @@ public:
     void setPressHeldIfContains(glm::vec2 p);
     void tickDrag(float mx, float my, bool leftDown, bool prevLeftDown, bool modalOpen, bool visible);
     void cancelDrag();
+    bool isDragging() const { return dragActive_; }
 
     const std::vector<Row>& rows() const { return rows_; }
     std::string nextActorName() { return "Actor_" + std::to_string(actorCounter_++); }

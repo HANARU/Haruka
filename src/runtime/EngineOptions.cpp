@@ -71,6 +71,14 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (a == "--no-auto-lod")    o.autoLod       = false;
         else if (a == "--hidden-window")  o.hiddenWindow  = true;
         else if (a == "--ui-log-categories") o.uiLogCategories = true;
+        else if (a == "--ui-log-collapse")   o.uiLogCollapse   = true;
+        else if (a == "--ui-log-wrap")       o.uiLogWrap       = true;
+        else if (a == "--ui-log-options")    o.uiLogOptions    = true;
+        else if (a == "--ui-log-sample")     o.uiLogSample     = true;
+        else if (valueOf(a, "--ui-log-time", v)) {
+            if (v == "none" || v == "uptime" || v == "clock") o.uiLogTime = v;
+            else unknown.push_back(a);
+        }
         else if (a == "--ui-play")           o.uiPlay          = true;
         else if (a == "--ui-local-space")    o.uiLocalSpace    = true;
         else if (a == "--ui-float-cycle")    o.uiFloatCycle    = true;
@@ -120,6 +128,16 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (!v.empty()) o.uiConsole.push_back(v);
             else unknown.push_back(a);
         }
+        else if (valueOf(a, "--ui-console-type", v)) {
+            if (!v.empty()) o.uiConsoleType = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--ui-console-pick", v)) {
+            uint32_t n = 0;
+            if (parseUint(v, n) && n < 10) o.uiConsolePick = (int)n;
+            else unknown.push_back(a);
+        }
+        else if (a == "--ui-console-tab") o.uiConsoleTab = true;
         else if (valueOf(a, "--ui-outliner-search", v)) {
             if (!v.empty()) o.uiOutlinerSearch = v;
             else unknown.push_back(a);

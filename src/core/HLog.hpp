@@ -98,6 +98,8 @@ void submit(const HLogCategory& cat, ELogVerbosity v, std::string_view text);
 
 // ── 소비 API ──────────────────────────────────────────────────────────────────
 uint64_t latestSeq();
+// 로그 체계가 시작한 벽시계 시각(Unix epoch 이후 밀리초). 지역 시각 표시용입니다.
+int64_t  startWallMs();
 // afterSeq 보다 뒤의 레코드를 out 에 덧붙입니다. 반환값은 이미 링에서 밀려나 주지 못한 개수입니다.
 size_t   copySince(uint64_t afterSeq, std::vector<HLogRecord>& out);
 // 크래시 보고서용(Docs/Crash_Reporting.md D3): 가장 최근 maxCount 개를 "경과초 [카테고리] 수준: 본문" 줄로 out 에 덧붙입니다. 잠금을 기다리지

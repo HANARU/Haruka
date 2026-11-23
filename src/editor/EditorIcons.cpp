@@ -42,6 +42,14 @@ const std::vector<const char*>& EditorIcons::names() {
         "folder", "chevron-left", "music", "film", "layout-grid", "list", "package", "map", "image",
         // 디테일 기본값 되돌리기(H3a)
         "rotate-ccw",
+        // 메뉴 · 툴바 아이콘 전체 적용(C1)
+        "undo-2", "redo-2", "copy", "clipboard-paste", "copy-plus", "file-pen", "focus",
+        "link", "unlink", "external-link", "clipboard-copy", "map-pin", "link-2", "folder-input",
+        "list-tree", "sliders-horizontal", "monitor",
+        // Output Log 표시 옵션(C2 보완)
+        "clock", "timer", "list-collapse", "wrap-text", "eraser",
+        // 콘솔 포커스 명령(C3)
+        "terminal",
     };
     return k;
 }

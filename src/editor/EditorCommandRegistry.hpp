@@ -56,6 +56,8 @@ inline std::string chordText(const EditorChord& c) {
     else if (k == HInput::KEY_DELETE)      s += "Del";
     else if (k == HInput::KEY_F2)          s += "F2";
     else if (k == HInput::KEY_ENTER)       s += "Enter";
+    else if (k == HInput::KEY_TAB)         s += "Tab";
+    else if (k == HInput::KEY_GRAVE_ACCENT) s += "`";
     else if (k == HInput::KEY_ESCAPE)      s += "Esc";
     else if (k == HInput::KEY_BACKSPACE)   s += "Backspace";
     else                                   s += "?";
@@ -206,13 +208,13 @@ inline std::vector<EditorCommand> defaultSpecs() {
     };
     std::vector<EditorCommand> v;
     // ── 단축키가 있는 명령(우선순위 순) ──
-    v.push_back(cmd("View.FrameSelected", HTEXT("Editor.Menu", "Edit.FrameSelected", "Frame Selected"), "",
+    v.push_back(cmd("View.FrameSelected", HTEXT("Editor.Menu", "Edit.FrameSelected", "Frame Selected"), "focus",
                     { chord(HInput::KEY_F, false, S::Any) }, true));
-    v.push_back(cmd("Edit.Duplicate", HTEXT("Editor.Menu", "Edit.Duplicate", "Duplicate"), "",
+    v.push_back(cmd("Edit.Duplicate", HTEXT("Editor.Menu", "Edit.Duplicate", "Duplicate"), "copy-plus",
                     { chord(HInput::KEY_D, true, S::Any) }, true, true));
     v.push_back(cmd("File.SaveScene", HTEXT("Editor.Menu", "File.SaveScene", "Save Scene"), "save",
                     { chord(HInput::KEY_S, true, S::Off) }, false, true));
-    v.push_back(cmd("File.SaveSceneAs", HTEXT("Editor.Menu", "File.SaveSceneAs", "Save Scene As..."), "",
+    v.push_back(cmd("File.SaveSceneAs", HTEXT("Editor.Menu", "File.SaveSceneAs", "Save Scene As..."), "file-pen",
                     { chord(HInput::KEY_S, true, S::On) }, false, true));
     v.push_back(cmd("File.OpenScene", HTEXT("Editor.Menu", "File.OpenScene", "Open Scene..."), "folder-open",
                     { chord(HInput::KEY_O, true, S::Any) }, false, true));
@@ -220,14 +222,14 @@ inline std::vector<EditorCommand> defaultSpecs() {
                     { chord(HInput::KEY_N, true, S::Any) }, false, true));
     v.push_back(cmd("Outliner.FocusSearch", HTEXT("Editor.Command", "Outliner.FocusSearch", "Search Outliner"), "search",
                     { chord(HInput::KEY_F, true, S::Any) }));
-    v.push_back(cmd("Edit.Undo", HTEXT("Editor.Menu", "Edit.Undo", "Undo"), "",
+    v.push_back(cmd("Edit.Undo", HTEXT("Editor.Menu", "Edit.Undo", "Undo"), "undo-2",
                     { chord(HInput::KEY_Z, true, S::Off) }, true));
-    v.push_back(cmd("Edit.Redo", HTEXT("Editor.Menu", "Edit.Redo", "Redo"), "",
+    v.push_back(cmd("Edit.Redo", HTEXT("Editor.Menu", "Edit.Redo", "Redo"), "redo-2",
                     { chord(HInput::KEY_Y, true, S::Any), chord(HInput::KEY_Z, true, S::On) }, true));
     // ── 단축키 표시만(처리는 TextInputController 의 포커스 없음 분기, 같은 명령 id) ──
-    v.push_back(cmd("Edit.Copy", HTEXT("Editor.Menu", "Edit.Copy", "Copy"), "",
+    v.push_back(cmd("Edit.Copy", HTEXT("Editor.Menu", "Edit.Copy", "Copy"), "copy",
                     { chord(HInput::KEY_C, true, S::Any, false) }));
-    v.push_back(cmd("Edit.Paste", HTEXT("Editor.Menu", "Edit.Paste", "Paste"), "",
+    v.push_back(cmd("Edit.Paste", HTEXT("Editor.Menu", "Edit.Paste", "Paste"), "clipboard-paste",
                     { chord(HInput::KEY_V, true, S::Any, false) }));
     v.push_back(cmd("Edit.Delete", HTEXT("Editor.Menu", "Edit.Delete", "Delete"), "trash-2",
                     { chord(HInput::KEY_DELETE, false, S::Any, false) }));
@@ -235,8 +237,8 @@ inline std::vector<EditorCommand> defaultSpecs() {
     v.push_back(cmd("View.GizmoSize", HTEXT("Editor.Menu", "Edit.GizmoSize", "Gizmo Size (S/M/L)"), "scaling", {}));
     v.push_back(cmd("Edit.AudioOutput", HTEXT("Editor.Menu", "Edit.AudioOutput", "Audio Output..."), "volume-2", {}));
     v.push_back(cmd("Actor.AddEmpty", HTEXT("Editor.Menu", "Actor.AddEmpty", "Add Empty"), "plus", {}));
-    v.push_back(cmd("Actor.AttachToPrev", HTEXT("Editor.Menu", "Actor.AttachToPrev", "Attach To Prev Selected"), "", {}));
-    v.push_back(cmd("Actor.Detach", HTEXT("Editor.Menu", "Actor.Detach", "Detach Selected"), "", {}));
+    v.push_back(cmd("Actor.AttachToPrev", HTEXT("Editor.Menu", "Actor.AttachToPrev", "Attach To Prev Selected"), "link", {}));
+    v.push_back(cmd("Actor.Detach", HTEXT("Editor.Menu", "Actor.Detach", "Detach Selected"), "unlink", {}));
     v.push_back(cmd("Window.ResetLayout", HTEXT("Editor.Menu", "View.ResetLayout", "Reset Layout"), "layout-grid", {}));
     // 툴바(모양은 그대로, 같은 명령 id 로 부름)
     v.push_back(cmd("Play.Play", HTEXT("Editor.Command", "Play.Play", "Play"), "play", {}));
@@ -245,8 +247,18 @@ inline std::vector<EditorCommand> defaultSpecs() {
     v.push_back(cmd("Content.Refresh", HTEXT("Editor.Command", "Content.Refresh", "Refresh Content"), "refresh-cw", {}));
     // 디테일 속성 행 오른쪽 메뉴(H3a): 메뉴를 연 행에 대해 동작
     v.push_back(cmd("Details.ResetToDefault", HTEXT("Editor.Command", "Details.ResetToDefault", "Reset to Default"), "rotate-ccw", {}));
-    v.push_back(cmd("Details.CopyValue", HTEXT("Editor.Command", "Details.CopyValue", "Copy"), "", {}));
-    v.push_back(cmd("Details.PasteValue", HTEXT("Editor.Command", "Details.PasteValue", "Paste"), "", {}));
+    v.push_back(cmd("Details.CopyValue", HTEXT("Editor.Command", "Details.CopyValue", "Copy"), "copy", {}));
+    v.push_back(cmd("Details.PasteValue", HTEXT("Editor.Command", "Details.PasteValue", "Paste"), "clipboard-paste", {}));
+    // Output Log 표시 옵션(C2)
+    v.push_back(cmd("OutputLog.TimeNone",    HTEXT("Editor.OutputLog", "Opt.TimeNone",    "None"),                "eye-off",       {}));
+    v.push_back(cmd("OutputLog.TimeUptime",  HTEXT("Editor.OutputLog", "Opt.TimeUptime",  "Seconds Since Launch"), "timer",         {}));
+    v.push_back(cmd("OutputLog.TimeClock",   HTEXT("Editor.OutputLog", "Opt.TimeClock",   "Local Time"),          "clock",         {}));
+    v.push_back(cmd("OutputLog.Collapse",    HTEXT("Editor.OutputLog", "Opt.Collapse",    "Collapse"),            "list-collapse", {}));
+    v.push_back(cmd("OutputLog.WordWrap",    HTEXT("Editor.OutputLog", "Opt.WordWrap",    "Word Wrap"),           "wrap-text",     {}));
+    v.push_back(cmd("OutputLog.ClearOnPlay", HTEXT("Editor.OutputLog", "Opt.ClearOnPlay", "Clear on Play"),       "eraser",        {}));
+    // 콘솔 포커스(C3): 표시 전용 chord (` 키 처리는 TextInputController 가 콘솔 포커스/비포커스 분기로 맡음)
+    v.push_back(cmd("Console.Focus", HTEXT("Editor.Command", "Console.Focus", "Console"), "terminal",
+                    { chord(HInput::KEY_GRAVE_ACCENT, false, S::Any, false) }));
     return v;
 }
 

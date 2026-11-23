@@ -375,6 +375,56 @@ msgctxt "Editor.OutputLog,ConsoleHint"
 msgid "Enter console command (help)"
 msgstr "콘솔 명령 입력(help)"
 
+#: src/editor/OutputLogPanel.cpp
+msgctxt "Editor.OutputLog,Tip.DisplayOptions"
+msgid "Display Options"
+msgstr "표시 옵션"
+
+#: src/editor/OutputLogPanel.cpp
+msgctxt "Editor.OutputLog,Opt.HeadingDisplay"
+msgid "Display"
+msgstr "표시"
+
+#: src/editor/OutputLogPanel.cpp
+msgctxt "Editor.OutputLog,Opt.Timestamp"
+msgid "Timestamp"
+msgstr "시각 표시"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.TimeNone"
+msgid "None"
+msgstr "없음"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.TimeUptime"
+msgid "Seconds Since Launch"
+msgstr "시작 뒤 초"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.TimeClock"
+msgid "Local Time"
+msgstr "지역 시각"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.Collapse"
+msgid "Collapse"
+msgstr "같은 메시지 묶기"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.WordWrap"
+msgid "Word Wrap"
+msgstr "긴 줄 줄 바꿈"
+
+#: src/editor/OutputLogPanel.cpp
+msgctxt "Editor.OutputLog,Opt.HeadingPlay"
+msgid "Play"
+msgstr "Play"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.ClearOnPlay"
+msgid "Clear on Play"
+msgstr "Play 시작 때 지우기"
+
 #: src/editor/EditorApp.cpp:500
 msgctxt "Editor.Panels,ContentBrowser"
 msgid "Content Browser"
@@ -749,6 +799,11 @@ msgstr "패널"
 msgctxt "Editor.Menu,Section.Layout"
 msgid "Layout"
 msgstr "배치"
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.Command,Console.Focus"
+msgid "Console"
+msgstr "콘솔"
 
 #: src/editor/EditorCommandRegistry.hpp
 msgctxt "Editor.Command,Outliner.FocusSearch"

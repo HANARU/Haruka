@@ -43,6 +43,11 @@ msgctxt "Editor.ColorPicker,Title"
 msgid "Color Picker: {0}"
 msgstr ""
 
+#: src/editor/EditorCommandRegistry.hpp:260
+msgctxt "Editor.Command,Console.Focus"
+msgid "Console"
+msgstr ""
+
 #: src/editor/EditorCommandRegistry.hpp:244
 msgctxt "Editor.Command,Content.Refresh"
 msgid "Refresh Content"
@@ -701,6 +706,56 @@ msgstr ""
 #: src/editor/OutputLogPanel.cpp:155
 msgctxt "Editor.OutputLog,SearchHint"
 msgid "Search log..."
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp
+msgctxt "Editor.OutputLog,Tip.DisplayOptions"
+msgid "Display Options"
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp
+msgctxt "Editor.OutputLog,Opt.HeadingDisplay"
+msgid "Display"
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp
+msgctxt "Editor.OutputLog,Opt.Timestamp"
+msgid "Timestamp"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.TimeNone"
+msgid "None"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.TimeUptime"
+msgid "Seconds Since Launch"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.TimeClock"
+msgid "Local Time"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.Collapse"
+msgid "Collapse"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.WordWrap"
+msgid "Word Wrap"
+msgstr ""
+
+#: src/editor/OutputLogPanel.cpp
+msgctxt "Editor.OutputLog,Opt.HeadingPlay"
+msgid "Play"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp
+msgctxt "Editor.OutputLog,Opt.ClearOnPlay"
+msgid "Clear on Play"
 msgstr ""
 
 #: src/editor/EditorApp.cpp:668

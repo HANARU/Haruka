@@ -1095,8 +1095,10 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         src/scene/Actor.cpp
         src/scene/Component.cpp
         src/core/HLog.cpp
+        src/editor/EditorIcons.cpp
     )
-    target_link_libraries(HarukaEditCmdTest PRIVATE glm::glm HarukaVfs)   # HText(H2b 명령 표의 글)이 번역 표 파일을 vfs 로 읽음
+    target_link_libraries(HarukaEditCmdTest PRIVATE glm::glm HarukaVfs haruka_nanosvg)   # HText(H2b 명령 표의 글)이 번역 표 파일을 vfs 로 읽음
+    target_compile_definitions(HarukaEditCmdTest PRIVATE HARUKA_ENGINE_CONTENT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Engine/Content")
     target_include_directories(HarukaEditCmdTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(MSVC)
         target_compile_options(HarukaEditCmdTest PRIVATE /W4 /utf-8 /wd4865 /Wv:18)
