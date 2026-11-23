@@ -1,0 +1,127 @@
+@PACKAGE_INIT@
+
+# ── 엔진 빌드 메타데이터 (어긋남 막기, Docs/Engine_Install_Design.md 5.2) ─────
+set(HARUKA_CXX_COMPILER_ID           "@CMAKE_CXX_COMPILER_ID@")
+set(HARUKA_CXX_COMPILER_VERSION      "@CMAKE_CXX_COMPILER_VERSION@")
+set(HARUKA_MSVC_TOOLSET_VERSION      "@MSVC_TOOLSET_VERSION@")
+set(HARUKA_SUPPORTED_CONFIGS         "@HARUKA_SUPPORTED_CONFIGS@")
+set(HARUKA_MSVC_RUNTIME_LIBRARY      "@HARUKA_EXPORT_MSVC_RUNTIME_LIBRARY@")
+set(HARUKA_ITERATOR_DEBUG_LEVEL_DEBUG   "2")
+set(HARUKA_ITERATOR_DEBUG_LEVEL_RELEASE "0")
+
+function(_haruka_check_abi_compatibility)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL HARUKA_CXX_COMPILER_ID)
+        message(FATAL_ERROR
+            "Haruka: C++ compiler mismatch. Engine was built with '${HARUKA_CXX_COMPILER_ID}', "
+            "but this project uses '${CMAKE_CXX_COMPILER_ID}'. "
+            "Configure the project with the same compiler or rebuild the Haruka engine.")
+    endif()
+
+    if(MSVC)
+        if(NOT "${MSVC_TOOLSET_VERSION}" STREQUAL "${HARUKA_MSVC_TOOLSET_VERSION}")
+            message(FATAL_ERROR
+                "Haruka: MSVC toolset mismatch. Engine was built with toolset v${HARUKA_MSVC_TOOLSET_VERSION} "
+                "(${HARUKA_CXX_COMPILER_ID} ${HARUKA_CXX_COMPILER_VERSION}), but this project uses "
+                "v${MSVC_TOOLSET_VERSION} (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}). "
+                "Pass -T v${HARUKA_MSVC_TOOLSET_VERSION} when configuring the project, or rebuild the engine.")
+        endif()
+
+        if(DEFINED CMAKE_MSVC_RUNTIME_LIBRARY AND NOT "${CMAKE_MSVC_RUNTIME_LIBRARY}" STREQUAL "")
+            if(NOT CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "DLL")
+                message(FATAL_ERROR
+                    "Haruka: MSVC_RUNTIME_LIBRARY mismatch. Engine uses dynamic CRT (/MD in Release, /MDd in Debug: "
+                    "'${HARUKA_MSVC_RUNTIME_LIBRARY}'), but project set CMAKE_MSVC_RUNTIME_LIBRARY='${CMAKE_MSVC_RUNTIME_LIBRARY}'. "
+                    "Remove the /MT override or use '${HARUKA_MSVC_RUNTIME_LIBRARY}'.")
+            endif()
+        endif()
+
+        foreach(_flag_var IN ITEMS
+                CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+                CMAKE_CXX_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_MINSIZEREL)
+            if(DEFINED ${_flag_var} AND NOT "${${_flag_var}}" STREQUAL "")
+                if("${${_flag_var}}" MATCHES "(^| )[/-]MTd?( |$)")
+                    message(FATAL_ERROR
+                        "Haruka: Static MSVC runtime (/MT or /MTd) detected in ${_flag_var} ('${${_flag_var}}'). "
+                        "Engine libraries are built with dynamic CRT (/MD, /MDd). Remove /MT / /MTd from ${_flag_var}.")
+                endif()
+                if("${${_flag_var}}" MATCHES "_ITERATOR_DEBUG_LEVEL=([0-9]+)")
+                    set(_idl "${CMAKE_MATCH_1}")
+                    if(_flag_var MATCHES "DEBUG" AND NOT _idl EQUAL ${HARUKA_ITERATOR_DEBUG_LEVEL_DEBUG})
+                        message(FATAL_ERROR
+                            "Haruka: _ITERATOR_DEBUG_LEVEL=${_idl} in ${_flag_var} conflicts with engine Debug "
+                            "(_ITERATOR_DEBUG_LEVEL=${HARUKA_ITERATOR_DEBUG_LEVEL_DEBUG}). Remove the override.")
+                    elseif(NOT _flag_var MATCHES "DEBUG" AND NOT _idl EQUAL ${HARUKA_ITERATOR_DEBUG_LEVEL_RELEASE})
+                        message(FATAL_ERROR
+                            "Haruka: _ITERATOR_DEBUG_LEVEL=${_idl} in ${_flag_var} conflicts with engine Release "
+                            "(_ITERATOR_DEBUG_LEVEL=${HARUKA_ITERATOR_DEBUG_LEVEL_RELEASE}). Remove the override.")
+                    endif()
+                endif()
+            endif()
+        endforeach()
+
+        get_directory_property(_dir_defs COMPILE_DEFINITIONS)
+        foreach(_def IN LISTS _dir_defs)
+            if(_def MATCHES "^_ITERATOR_DEBUG_LEVEL=([0-9]+)$")
+                message(FATAL_ERROR
+                    "Haruka: Directory compile definition '${_def}' overrides _ITERATOR_DEBUG_LEVEL. "
+                    "Engine requires Debug=${HARUKA_ITERATOR_DEBUG_LEVEL_DEBUG}, Release=${HARUKA_ITERATOR_DEBUG_LEVEL_RELEASE}. "
+                    "Remove the _ITERATOR_DEBUG_LEVEL definition.")
+            endif()
+        endforeach()
+    endif()
+
+    if(NOT CMAKE_CONFIGURATION_TYPES)
+        if(NOT CMAKE_BUILD_TYPE)
+            message(FATAL_ERROR
+                "Haruka: Single-config generator requires CMAKE_BUILD_TYPE to be set "
+                "(supported: ${HARUKA_SUPPORTED_CONFIGS}, or RelWithDebInfo/MinSizeRel mapped to Release).")
+        endif()
+        set(_allowed_configs ${HARUKA_SUPPORTED_CONFIGS} RelWithDebInfo MinSizeRel)
+        if(NOT CMAKE_BUILD_TYPE IN_LIST _allowed_configs)
+            message(FATAL_ERROR
+                "Haruka: Unsupported CMAKE_BUILD_TYPE '${CMAKE_BUILD_TYPE}'. "
+                "Engine supports: ${HARUKA_SUPPORTED_CONFIGS} (RelWithDebInfo/MinSizeRel map to Release).")
+        endif()
+    endif()
+endfunction()
+
+_haruka_check_abi_compatibility()
+
+# ── 내보낸 대상 불러오기 ──────────────────────────────────────────────────────
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+if(NOT TARGET OpenXR::headers)
+    add_library(OpenXR::headers INTERFACE IMPORTED)
+    set_target_properties(OpenXR::headers PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "@openxr_SOURCE_DIR@/include"
+    )
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/HarukaTargets.cmake")
+
+# RelWithDebInfo · MinSizeRel은 Release와 MSVC CRT(/MD) 및 _ITERATOR_DEBUG_LEVEL(0)이 같으므로 RELEASE로 대응시킵니다.
+set(_haruka_exported_targets "@HARUKA_EXPORT_TARGETS@")
+foreach(_tgt IN LISTS _haruka_exported_targets)
+    if(TARGET "Haruka::${_tgt}")
+        set_target_properties("Haruka::${_tgt}" PROPERTIES
+            MAP_IMPORTED_CONFIG_RELWITHDEBINFO RELEASE
+            MAP_IMPORTED_CONFIG_MINSIZEREL     RELEASE
+        )
+    endif()
+endforeach()
+
+# ── haruka_add_project 용 변수 (CMakeLists.txt "프로젝트 등록" 절과 같음) ───────
+set(HARUKA_ENGINE_ROOT         "@HARUKA_ENGINE_ROOT@")
+set(HARUKA_EXE_RESOURCES       "@HARUKA_EXE_RESOURCES@")
+set(HARUKA_SHADER_BIN_DIR      "@HARUKA_SHADER_BIN_DIR@")
+set(HARUKA_PAK_TOOL            "Haruka::HarukaPak")
+set(HARUKA_PAK_DEPENDS         "Haruka::HarukaPak")
+set(HARUKA_STEAM_AUDIO_FOUND   "@HARUKA_STEAM_AUDIO_FOUND@")
+set(HARUKA_STEAM_AUDIO_LIBRARY "@HARUKA_STEAM_AUDIO_LIBRARY@")
+set(HARUKA_PACKAGE_MODE        TRUE)
+
+file(GLOB HARUKA_SPIRV_OUTPUTS "${HARUKA_SHADER_BIN_DIR}/*.spv")
+
+include("${HARUKA_ENGINE_ROOT}/cmake/HarukaProject.cmake")
+
+check_required_components(Haruka)

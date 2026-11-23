@@ -624,15 +624,8 @@ set(GAME_SOURCES
     src/game/GameFrontend.cpp
 )
 
-# 엔진 대상(라이브러리 · 실행 파일)이 함께 쓰는 컴파일 설정. 위의 add_compile_options(/wd4100 …)는 이 폴더 범위라, 엔진을
-# 하위 프로젝트로 쓰는 바깥 프로젝트의 실행 파일(haruka_add_project)에는 닿지 않으므로 여기에도 적습니다(D3, 2026-11-19).
-function(haruka_target_defaults tgt)
-    if(MSVC)
-        target_compile_options(${tgt} PRIVATE /W4 /utf-8 /wd4865 /wd4100 /Wv:18)
-    else()
-        target_compile_options(${tgt} PRIVATE -Wall -Wextra)
-    endif()
-endfunction()
+# 엔진 대상(라이브러리 · 실행 파일)이 함께 쓰는 컴파일 설정과 프로젝트 등록 함수를 불러옵니다.
+include(cmake/HarukaProject.cmake)
 
 # ── 묶음 파일 · 가상 파일 시스템 (2026-10-24, src/vfs) ──────────────────────────
 # 엔진(HarukaRuntime) · 묶음 도구(HarukaPak) · 시험이 함께 씁니다. Vulkan · 창 없이 빌드됩니다.
@@ -793,9 +786,55 @@ set(HARUKA_PAK_TOOL            "${HARUKA_PAK_TOOL}"             CACHE INTERNAL "
 set(HARUKA_PAK_DEPENDS         "${HARUKA_PAK_DEPENDS}"          CACHE INTERNAL "")
 set(HARUKA_STEAM_AUDIO_FOUND   "${HARUKA_STEAM_AUDIO_FOUND}"    CACHE INTERNAL "")
 set(HARUKA_STEAM_AUDIO_LIBRARY "${HARUKA_STEAM_AUDIO_LIBRARY}"  CACHE INTERNAL "")
-include(cmake/HarukaProject.cmake)
 if(HARUKA_BUILD_SAMPLES)
     add_subdirectory(Projects/Samples)
+endif()
+
+# ── 엔진 CMake 패키지 내보내기 (E2, Docs/Engine_Install_Design.md 5.3) ─────────
+if(NOT ANDROID)
+    include(CMakePackageConfigHelpers)
+    set(HARUKA_EXPORT_TARGETS
+        HarukaVfs
+        HarukaSim
+        HarukaRuntime
+        HarukaGameFrontend
+        HarukaEditor
+        HarukaProjectOps
+        HarukaPak
+        haruka_vulkan
+        haruka_lz4
+        haruka_recast
+        haruka_nanosvg
+        glm
+        meshoptimizer
+        Jolt
+        glfw
+        tinygltf
+        openxr_loader
+    )
+    if(TARGET glm-header-only)
+        list(APPEND HARUKA_EXPORT_TARGETS glm-header-only)
+    endif()
+    if(TARGET jsoncpp_lib_static)
+        list(APPEND HARUKA_EXPORT_TARGETS jsoncpp_lib_static)
+    endif()
+    set(HARUKA_SUPPORTED_CONFIGS "Debug;Release")
+    set(HARUKA_EXPORT_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
+    export(TARGETS ${HARUKA_EXPORT_TARGETS}
+        NAMESPACE Haruka::
+        FILE "${CMAKE_CURRENT_BINARY_DIR}/HarukaTargets.cmake"
+    )
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/HarukaConfigVersion.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
+    )
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HarukaConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/HarukaConfig.cmake"
+        INSTALL_DESTINATION "${CMAKE_CURRENT_BINARY_DIR}"
+    )
 endif()
 
 # ── 서드파티 라이선스 고지 (2026-10-24) ─────────────────────────────────────────

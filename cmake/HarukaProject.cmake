@@ -1,3 +1,14 @@
+# ── 엔진 대상 기본 컴파일 설정 (D3, E2) ───────────────────────────────────────
+if(NOT COMMAND haruka_target_defaults)
+    function(haruka_target_defaults tgt)
+        if(MSVC)
+            target_compile_options(${tgt} PRIVATE /W4 /utf-8 /wd4865 /wd4100 /Wv:18)
+        else()
+            target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+        endif()
+    endfunction()
+endif()
+
 # ── 프로젝트 설명 파일 읽기 (*.hproject, P4 2026-11-19) ──────────────────────
 # src/core/ProjectDescriptor.hpp 와 같은 규칙으로 *.hproject 를 읽습니다.
 function(haruka_read_project_descriptor PROJECT_DIR OUT_PREFIX)
@@ -95,6 +106,18 @@ function(haruka_add_project)
         set(SA_TGT   "${HP_NAME}SteamAudioRuntime")
     endif()
 
+    if(TARGET Haruka::HarukaEditor)
+        set(_haruka_editor_lib Haruka::HarukaEditor)
+        set(_haruka_game_lib   Haruka::HarukaGameFrontend)
+    else()
+        set(_haruka_editor_lib HarukaEditor)
+        set(_haruka_game_lib   HarukaGameFrontend)
+    endif()
+
+    if(HARUKA_PACKAGE_MODE AND COMMAND _haruka_check_abi_compatibility)
+        _haruka_check_abi_compatibility()
+    endif()
+
     # ── 게임 실행 파일 · 에디터 실행 파일 ────────────────────────────────────────
     if(ANDROID)
         add_library(${HP_GAME_TARGET} SHARED
@@ -112,7 +135,9 @@ function(haruka_add_project)
         set_target_properties(${HP_GAME_TARGET} PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
         )
-        add_dependencies(${HP_GAME_TARGET} Shaders)
+        if(TARGET Shaders)
+            add_dependencies(${HP_GAME_TARGET} Shaders)
+        endif()
         haruka_target_defaults(${HP_GAME_TARGET})
 
         set(HARUKA_ANDROID_PACKAGE_ID "${HP_DESC_packageId}")
@@ -154,7 +179,9 @@ function(haruka_add_project)
 
         set(PROJECT_EXES ${HP_EDITOR_TARGET} ${HP_GAME_TARGET})
         foreach(EXE ${PROJECT_EXES})
-            add_dependencies(${EXE} Shaders)
+            if(TARGET Shaders)
+                add_dependencies(${EXE} Shaders)
+            endif()
             haruka_target_defaults(${EXE})
             set_target_properties(${EXE} PROPERTIES
                 RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -170,6 +197,7 @@ function(haruka_add_project)
         endforeach()
 
         add_custom_target(${RT_TGT} ALL
+            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${HP_GAME_TARGET}> $<TARGET_FILE_DIR:${HP_GAME_TARGET}>/Config
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${HARUKA_SHADER_BIN_DIR} $<TARGET_FILE_DIR:${HP_GAME_TARGET}>/shaders
             COMMAND ${CMAKE_COMMAND} -E copy_directory ${HP_PROJECT_DIR}/Content $<TARGET_FILE_DIR:${HP_GAME_TARGET}>/Content
             # 엔진 콘텐츠(글꼴 · 아이콘 · 번역, 글자 체계 T4-4): 게임 실행 파일이 실행 폴더의 Engine/Content 를 /Engine/ 으로 씀
@@ -177,14 +205,17 @@ function(haruka_add_project)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HP_PROJECT_DIR}/Config/project.ini $<TARGET_FILE_DIR:${HP_GAME_TARGET}>/Config/project.ini
             COMMENT "Copying SPIR-V shaders and project files to the output dir (${HP_NAME})"
         )
-        add_dependencies(${RT_TGT} Shaders)
+        if(TARGET Shaders)
+            add_dependencies(${RT_TGT} Shaders)
+        endif()
         foreach(EXE ${PROJECT_EXES})
             add_dependencies(${EXE} ${RT_TGT})
         endforeach()
 
         if(HARUKA_STEAM_AUDIO_FOUND)
             add_custom_target(${SA_TGT} ALL
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HARUKA_STEAM_AUDIO_LIBRARY} $<TARGET_FILE_DIR:${HP_GAME_TARGET}>
+                COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${HP_GAME_TARGET}>
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HARUKA_STEAM_AUDIO_LIBRARY} $<TARGET_FILE_DIR:${HP_GAME_TARGET}>/
                 COMMENT "Copying the Steam Audio library to the output dir (${HP_NAME})"
             )
             foreach(EXE ${PROJECT_EXES})
@@ -215,7 +246,9 @@ function(haruka_add_project)
         VERBATIM
     )
     add_custom_target(${PACK_TGT} ALL DEPENDS ${PACK_OUT})
-    add_dependencies(${PACK_TGT} Shaders)
+    if(TARGET Shaders)
+        add_dependencies(${PACK_TGT} Shaders)
+    endif()
     if(ANDROID)
         add_dependencies(${HP_GAME_TARGET} ${PACK_TGT})
     endif()
