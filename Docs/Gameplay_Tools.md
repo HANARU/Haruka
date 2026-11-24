@@ -49,8 +49,10 @@
   줄을 씁니다(태그 없는 씬은 예전과 같은 글). 옛 실행 파일은 모르는 줄을 건너뜁니다.
 - **D4 이벤트 버스 `World::events()`:** 형으로 구독 · 발행합니다(`subscribe<T>(fn)` → 이동만 되는 구독 객체, 지우면 해제, `publish<T>(e)` 는
   바로 부름). 발행 중 구독 · 해제는 안전합니다(해제는 표시만 하고 끝나면 정리). 구독 순서대로 부릅니다.
-- **D5 물리 뒤 틱:** `Component::tickGroup()`(기본 `PrePhysics`)이 `PostPhysics` 이면 모듈 틱 뒤의 `World::tickPostPhysics()` 에서 틱합니다.
-  지금 컴포넌트는 모두 `PrePhysics` 라 순서가 바뀌지 않습니다. 물리 뒤 컴포넌트가 하나도 없으면 두 번째 훑기를 하지 않습니다.
+- **D5 틱 그룹 (`ETickGroup`) · 표시 보간 · 표시 모듈:**
+  - `Component::tickGroup`(기본 `PrePhysics`): `PrePhysics`(시뮬레이션 틱 물리 앞), `PostPhysics`(시뮬레이션 틱 물리 뒤, `World::tickPostPhysics`), `Display`(표시 단계, 프레임마다 1회, `World::tickDisplay` — 애니메이션·파티클·로컬 머리/손 추적). 해당 그룹 컴포넌트가 없으면 훑기를 생략합니다.
+  - **표시 보간(D2b):** `World::snapshotTickPoses()`가 시뮬레이션 틱 시작 전 이전 틱 자세를 보관하고, `RenderExtract`·카메라·오디오가 `Actor::displayWorldMatrix(alpha)`로 시뮬레이션 틱 사이를 보간합니다(정적 액터는 캐시된 `worldMatrix()` 재사용, `Transform` 미수정). 텔레포트·스냅 회전 등 순간 이동은 `Actor::teleportTo` / `teleportPosition` / `resetInterpolation`으로 보간을 건너뜁니다.
+  - **표시 모듈:** `IEngineModule::isDisplayModule()`이 참인 모듈(`AudioSystem`)은 시뮬레이션 틱 루프 밖에서 표시 단계 직후 프레임마다 1회 `ModuleManager::tickDisplayAll(dt)`로 돕니다.
 - **D6 CVar `CVarRegistry`(core):** 이름 · 형(bool · int · float · string) · 범위 · 도움말 · 기본값 · 마지막으로 바꾼 곳(기본 · ini · 명령줄 ·
   콘솔 · 코드). 이름은 `[A-Za-z0-9_.]`, 찾을 때 대소문자를 가리지 않습니다. **엔진 단위**입니다(Engine 이 소유, `EngineContext::cvars`, 월드
   서비스 `world.service<CVarRegistry>()`). S3 규칙대로 새 전역 싱글턴을 만들지 않습니다. 등록 전에 들어온 값(명령줄 · ini)은 보관했다가

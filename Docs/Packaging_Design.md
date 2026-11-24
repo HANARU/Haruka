@@ -52,7 +52,7 @@
 | # | 결정 | 고른 안 | 이유 |
 |---|---|---|---|
 | 1 | 게임 실행 파일을 만드는 방식 | 빌드 타깃 분리(HarukaRuntime 라이브러리 + 에디터 `HarukaEngine.exe` + 게임 `HarukaGame.exe`), 엔진은 앞단 인터페이스로만 에디터 · 게임을 부름 | 게임 실행 파일에 에디터 코드가 들어가지 않고, 런타임이 에디터에 기대면 링크가 실패해 분리가 구조로 지켜짐. Android 는 같은 라이브러리에 진입점만 바꿔 얹음 |
-| 2 | 게임 빌드에서 VR 을 켜는 방법 | `assets/project.ini` 의 `xr.startInVr` + 명령줄 `--xr` · `--no-xr` 덮어쓰기. Android 는 항상 XR | 더블클릭으로 VR 시작, 시험은 명령줄로. UE 의 Start in VR, Unity 의 Initialize XR on Startup 과 같은 자리 |
+| 2 | VR 을 켜는 방법 | `assets/project.ini` 의 `xr.startInVr`("VR auto-detect", 에디터 · 게임 모두) + 명령줄 `--xr` · `--no-xr` 덮어쓰기. Android 는 항상 XR | 더블클릭 · 에디터 실행에서 VR 자동 감지, 시험은 명령줄로. UE 의 Start in VR, Unity 의 Initialize XR on Startup 과 같은 자리 |
 | 3 | 헤드셋이 없거나 런타임이 세션을 끝냈을 때(Windows) | 시작할 때 헤드셋이 없으면 데스크톱으로 계속(제목에 표시), 실행 중 EXITING 이면 종료, LOSS_PENDING 이면 데스크톱으로 계속하며 다시 연결 시도 | 헤드셋 없이 시험하기 쉽고, 대시보드에서 종료하면 사용자 기대(OpenXR 권고)대로 앱이 끝남 |
 | 4 | 헤드셋을 벗었을 때 | 게임 실행 파일만 일시정지(초점을 잃으면 Pause 와 같은 경로, 돌아오면 이어서). 에디터 Play 는 그대로 | Meta 심사 요건 VRC.Quest.Functional.2. 개발 중에는 헤드셋을 벗고 화면을 보는 일이 많음 |
 | 5 | 설정 · 로그 · 캐시를 쓰는 위치 | 게임: Windows `%LOCALAPPDATA%\Haruka\<실행 파일 이름>`, Android 외부 앱 폴더. 에디터: 실행 폴더(지금과 같음). 설정은 두 겹(패키지 기본값 + 사용자 덮어쓰기) | Program Files 에 설치해도 쓸 수 있고 사용자마다 따로. 점검 도구는 에디터의 실행 폴더를 그대로 씀 |
@@ -83,8 +83,8 @@
 
 ### 4-2. XR 실행 규칙 (결정 2 · 3 · 4)
 
-- `EngineOptions::xr` 가 셋 중 하나(지정 안 함 · `--xr` · `--no-xr`)입니다. 지정하지 않으면 게임 실행 파일은 `xr.startInVr`
-  (기본 false), 에디터는 끔입니다. 게임은 시작하자마자 Play 라 세션도 바로 엽니다.
+- `EngineOptions::xr` 가 셋 중 하나(지정 안 함 · `--xr` · `--no-xr`)입니다. 지정하지 않으면 에디터 · 게임 모두 `xr.startInVr`
+  (기본 false)을 따르되, 숨은 · `--headless` · `--synthetic-eyes` 실행은 `--xr` 이 없으면 켜지 않습니다. 게임은 시작하자마자 Play 라 세션도 바로 엽니다.
 - `XrSystem::lossReason()`: 세션을 잃은 이유를 Exiting · Disconnected(LOSS_PENDING) · InstanceLost 로 구별합니다. 게임 실행 파일은
   Exiting 이면 창 닫기를 요청해 끝내고, Disconnected 면 데스크톱으로 계속하며 2초마다 `headsetAvailable()`(로그 없는 xrGetSystem)로
   확인해 돌아오면 세션을 다시 엽니다. 에디터는 예전처럼 데스크톱으로 계속하고 다음 Play 에서 엽니다.

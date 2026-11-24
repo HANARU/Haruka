@@ -135,7 +135,7 @@
 | VR 은 Play 동안만 | 2026-10-15 | `--xr` 은 OpenXR 를 준비만 하고, 세션은 Play 때 만들고 Stop 때 끝냅니다(UE VR Preview · Unity 와 같음) | [Core_Defects_Task_Spec.md](Core_Defects_Task_Spec.md) "헤드셋 확인 결과" |
 | 할당자는 이식 때 조사 | 2026-10-15 | VMA 대 자체 할당자는 Quest 이식 착수 때 정합니다. 2026-10-19 GPU 힙 조사에서 판단 근거(메모리 종류를 여럿 다뤄야 함)가 더해졌습니다 | [Roadmap.md](Roadmap.md), [Packaging_Design.md](Packaging_Design.md) 2절 |
 | 런타임 분리는 빌드 타깃 | 2026-10-19 | 에디터를 뺀 엔진을 `HarukaRuntime` 정적 라이브러리로 묶고 에디터 · 게임 실행 파일이 각각 링크합니다(UE 의 Game · Editor 타깃, O3DE 와 같음). 엔진은 앞단 인터페이스로만 에디터 · 게임을 부릅니다 | [Packaging_Design.md](Packaging_Design.md) 3 · 4-1절 |
-| 게임 실행 규칙 | 2026-10-19 | VR 시작은 `project.ini` 의 `xr.startInVr` + 명령줄 `--xr` · `--no-xr`. 시작 때 헤드셋이 없으면 데스크톱, 실행 중 런타임이 끝내면(EXITING) 종료, 연결이 끊기면 데스크톱으로 계속하며 다시 연결. 헤드셋을 벗으면 게임만 일시정지(에디터 Play 는 그대로) | 같은 문서 3 · 4-2절 |
+| 게임 · 에디터 VR 시작 규칙 | 2026-10-19 (2026-11-24 V1 · PS1b) | VR 자동 감지는 `project.ini` 의 `xr.startInVr`(Project Settings > Platforms > XR) + 명령줄 `--xr` · `--no-xr`(숨은 · `--headless` · `--synthetic-eyes` 실행은 `--xr` 없으면 제외). 에디터 Play 는 헤드셋이 있으면 VR, 없으면 데스크톱(Play on Desktop 으로 데스크톱 강제 가능). 시작 때 헤드셋이 없으면 데스크톱, 게임은 실행 중 EXITING 이면 종료 · 연결 끊기면 재연결 · 헤드셋을 벗으면 일시정지 | 같은 문서 3 · 4-2절 |
 | 쓰기 위치 | 2026-10-19 | 게임의 설정 · 로그 · 캐시는 `%LOCALAPPDATA%\Haruka\<실행 파일 이름>`(Android 는 외부 앱 폴더), 에디터는 실행 폴더. 설정은 패키지 기본값 + 사용자 덮어쓰기 두 겹 | 같은 문서 3 · 4-3절 |
 | 자체 묶음 파일 | 2026-10-19 결정, 2026-10-24 형식 | 게임 배포물의 에셋 · 셰이더는 `.hpak` 하나로 묶습니다(사용자: "실제 게임 개발에 들어가면 커진다, 규약을 하나 만들어 두자"). LZ4 64KiB 블록 · XXH3-64 · 대소문자 무시 찾기 · 16B/4KiB 정렬 · 이름 규칙에 따른 여러 묶음 | 같은 문서 5절 |
 | 프로젝트 설정 파일 | 2026-10-15 | 시작 씬 · 입력 바인딩은 프로젝트 폴더의 `assets/project.ini`(Godot 의 `project.godot` 자리), 마지막에 연 씬은 실행 폴더의 `Config/editor_state.txt` 에 둡니다 | [Engine_Basics_Design.md](Engine_Basics_Design.md) 2-2 |
@@ -201,7 +201,7 @@ Layer 2 는 `EngineContext` 로 월드 · 에셋 · 창 · 모듈 · 렌더 확�
 1. 컴포넌트 등록(기본 5종 + XR 5종) → 에셋 루트(에디터는 프로젝트 폴더, 그 밖에는 실행 폴더) → 가상 파일 시스템 마운트(실행 폴더의 낱개
    파일 위에 에디터는 프로젝트 폴더의 `assets/`, 게임은 실행 폴더의 묶음 파일, `--loose` 면 낱개 파일이 맨 위) → 프로젝트 설정
    `assets/project.ini` → `Config/engine.ini`(실행 폴더의 패키지 기본값 위에 쓰기 루트의 사용자 값, 에디터는 없으면 기본값으로 생성).
-2. GLFW 창(1600x900) → VR 을 원하면 OpenXR 초기화(명령줄 `--xr` · `--no-xr`, 없으면 게임은 `xr.startInVr`. 렌더러보다 먼저, OpenXR 이
+2. GLFW 창(1600x900) → VR 을 원하면 OpenXR 초기화(명령줄 `--xr` · `--no-xr`, 없으면 에디터 · 게임 모두 `xr.startInVr`; 숨은 · `--headless` · `--synthetic-eyes` 실행은 `--xr` 없으면 제외. 렌더러보다 먼저, OpenXR 이
    GPU 를 고름) → 렌더러(에디터는 XR 세션을 Play 때, 게임은 시작하자마자 만듦) → `--emulate-stereo` 처리 → 에셋 관리자.
 3. 동적 모듈(Audio, Physics) 등록 → 앞단 초기화 → 입력 바인딩(프로젝트 설정, 없으면 엔진 기본값) → 게임 모듈 `onStart` → 앞단이 처음 씬을
    엶(에디터: 마지막에 연 씬, 없으면 `startScene`, 그것도 없으면 빈 씬. 게임: `startScene` 을 열고 카메라가 없으면 기본 카메라를 둔 뒤 Play).

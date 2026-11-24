@@ -69,7 +69,7 @@ build\Release\HarukaLauncher.exe associate [--dry-run]   :: .hproject 파일 연
 
 `build.bat`은 `build\CMakeCache.txt`가 없을 때만 CMake를 구성합니다. 생성기나 옵션을 바꾸려면 `clean` 인자가 필요합니다. 전체 빌드 로그는 `Logs\build_log.txt`, error/fatal만 걸러낸 요약은 `Logs\build_error.txt`에 남습니다.
 
-산출물은 `build\<Config>\HarukaEngine.exe`(에디터) · `HarukaGame.exe`(게임) · `HarukaPak.exe`(묶음 도구)와 `build\pack\game.hpak`(목록 `Packaging/game.pack.txt`)이고, SPIR-V와 `assets/`는 POST_BUILD로 실행 파일 옆에 복사됩니다. 게임 실행 파일은 VR 시작을 `assets/project.ini` 의 `xr.startInVr` 로 정하고 `--xr` · `--no-xr` 이 덮어씁니다. 실행 폴더에서 바로 띄우면 묶음 없이 낱개 파일을 읽고, `--loose` 를 주면 묶음이 있어도 낱개 파일을 먼저 찾습니다.
+산출물은 `build\<Config>\HarukaEngine.exe`(에디터) · `HarukaGame.exe`(게임) · `HarukaPak.exe`(묶음 도구)이고, SPIR-V와 `assets/`는 POST_BUILD로 실행 파일 옆에 복사됩니다. 에디터와 게임 모두 `Config/project.ini` 의 `xr.startInVr`(VR 자동 감지)로 OpenXR 초기화를 정하고 `--xr` · `--no-xr` 이 덮어씁니다(숨은 창 · `--headless` · `--synthetic-eyes` 실행은 `--xr` 없으면 제외, 에디터는 Play 단추 오른쪽 메뉴의 Play on Desktop 으로 데스크톱 실행 가능). 실행 폴더에서 바로 띄우면 묶음 없이 낱개 파일을 읽고, `--loose` 를 주면 묶음이 있어도 낱개 파일을 먼저 찾습니다.
 
 그리기 행 · 라이트 · 물리 바디 상한은 실행 폴더의 `Config/engine.ini` 에서 바꿉니다(처음 실행할 때 기본값과 설명으로 만들어지고, 바꾼 뒤에는 다시 실행). 시작 씬과 입력 바인딩은 프로젝트 설정 `assets/project.ini` 에 있고(버전 관리함), 에디터는 마지막에 연 씬을 먼저 엽니다(실행 폴더의 `Config/editor_state.txt`).
 
