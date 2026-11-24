@@ -31,12 +31,15 @@ public:
 
     // 모은 분포를 한 줄로 남기고 비웁니다(XR 세션 끝 · 자동 실행 끝).
     void logPacing(const char* when);
+    // 시뮬레이션 틱 누적기 상한 초과로 시간을 버린 횟수를 셉니다(D2a).
+    void addDroppedSimTick() { ++droppedSimTicks_; }
 
 private:
     hperf::FrameHistory                   cpuFrames_;            // 루프 1 회(ms)
     hperf::FrameHistory                   gpuFrames_;            // GPU 합계(ms, 타임스탬프라 MAX_FRAMES 앞 프레임 것)
-    uint32_t                              overBudget_    = 0;    // 예산을 넘은 프레임 수
-    uint32_t                              hitchesLogged_ = 0;    // 자세히 남긴 끊김 수(상한 kMaxHitchLogs)
+    uint32_t                              overBudget_      = 0;  // 예산을 넘은 프레임 수
+    uint32_t                              hitchesLogged_   = 0;  // 자세히 남긴 끊김 수(상한 kMaxHitchLogs)
+    uint64_t                              droppedSimTicks_ = 0;  // 누적기 상한 초과 횟수(D2a)
     float                                 budgetMs_      = 0.f;  // 마지막으로 모은 프레임의 예산(세션을 지운 뒤에도 씀)
     std::chrono::steady_clock::time_point bootStart_{};          // 엔진 생성 시작
     bool                                  firstFrameLogged_ = false;

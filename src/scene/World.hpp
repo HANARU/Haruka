@@ -22,6 +22,11 @@ public:
     void   tick(float dt);
     // 모듈(물리 · 소리) 틱 뒤에 PostPhysics 컴포넌트를 tick 과 같은 dt 로 틱합니다(D5). 그런 컴포넌트가 없으면 훑지 않습니다.
     void   tickPostPhysics();
+    // 표시 단계(D2a): 프레임마다 1회, 프레임 dt(시간 배율 적용)로 Display 컴포넌트를 틱합니다. 없으면 훑지 않습니다.
+    void   tickDisplay(float dt);
+    // 표시 보간(D2b): 시뮬레이션 틱 시작 전 이전 틱 자세를 기록 / 씬 로드·Play 시작 시 보간 상태 초기화
+    void   snapshotTickPoses();
+    void   resetAllInterpolation();
 
     // ── 게임 시간 (2026-11-20, Docs/Gameplay_Tools.md D1) ─────────────────────────────────────────────
     // 시간 배율(0 ~ 100, 기본 1, UE TimeDilation · Unity timeScale). 0 이면 컴포넌트는 dt 0 으로 틱합니다(일시정지와 달리 틱은 돎).
@@ -120,6 +125,8 @@ private:
     mutable std::unordered_map<std::string, std::vector<Actor*>> tagCache_;
     mutable uint64_t postPhysicsVersion_ = 0;   // 물리 뒤 컴포넌트가 있는지 본 구조 버전
     mutable bool     anyPostPhysics_     = false;
+    mutable uint64_t displayVersion_     = 0;   // 표시 단계 컴포넌트가 있는지 본 구조 버전
+    mutable bool     anyDisplay_         = false;
 
     struct TypeListBase {
         virtual ~TypeListBase() = default;

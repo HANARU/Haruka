@@ -25,7 +25,7 @@ namespace PropColor {
 //   Size   = 늘 양수인 크기(배율·반경·질량 등): 끌기 시작값의 1%/px(최소 step 의 1/10), 다섯째 자리까지
 //   Angle  = 각도(도): 0.5°/px, 둘째 자리까지
 //   Ratio  = 0~1 비율(색 성분·마찰 등): 0.005/px, 넷째 자리까지
-enum class PropUnit { Scalar, Offset, Size, Angle, Ratio };
+enum class PropUnit { Scalar, Offset, Size, Angle, Ratio, Integer };
 
 // ── 디테일 패널 속성 설명(반사) ───────────────────────────────────────────────────────────────────────────────
 // 컴포넌트가 buildProps 로 내놓는 칸 하나입니다. 값은 게터 · 세터로만 읽고 씁니다(씬 파일 직렬화는 writeFields · readField 가

@@ -10,8 +10,8 @@
 // 실행 옵션(명령줄). main() 이 채워 Engine 에 넘깁니다. 해석 규칙은 EngineOptions.cpp 이고, 창 없이 시험합니다
 // (HarukaHeadlessTest, headless_render).
 struct EngineOptions {
-    // --xr · --no-xr : OpenXR 를 준비할지(런타임이 없으면 데스크톱). 둘 다 없으면 앞단 정책을 따릅니다. 에디터는 끔,
-    // 게임 실행 파일은 프로젝트 설정 xr.startInVr(2026-10-19). 에디터는 Play 동안만, 게임은 시작부터 헤드셋에 그립니다.
+    // --xr · --no-xr : OpenXR 를 준비할지(런타임이 없으면 데스크톱). 둘 다 없으면 앞단 정책(에디터 · 게임 모두
+    // 프로젝트 설정 xr.startInVr, V1)을 따릅니다. 에디터는 Play 동안만, 게임은 시작부터 헤드셋에 그립니다.
     std::optional<bool> xr;
     bool emulateStereo = false;   // --emulate-stereo : 헤드셋 없이 두 눈 경로 확인(DEF-09)
     // --loose : 실행 폴더의 낱개 파일을 묶음 파일보다 먼저 찾음(게임, 개발 중 묶음을 다시 만들지 않고 에셋을 바꿔 보기).
@@ -27,6 +27,10 @@ struct EngineOptions {
     float       timeoutSec    = 0.f;     // --timeout=S : S 초가 지나면 실패로 끝냄(0 이면 frames 가 있을 때 60초)
     // --fixed-dt=S : 프레임 시간을 실제 경과 대신 S 초로 고정(애니메이션 D9). 창 없는 확인 PNG 가 실행마다 같게 합니다. 최대 0.05.
     float       fixedDt       = 0.f;
+    // --sim-ticks=N : 고정 시뮬레이션 틱이 N 회 실행된 직후 액터 자세 해시를 로그에 남기고 종료(주사율 독립성 시험, D2a).
+    uint32_t    simTicks      = 0;
+    // --log-render-pos=<이름> : 매 프레임 extractRenderScene 직후 해당 액터(또는 @camera)의 렌더 입력 위치를 로그(D2b).
+    std::string logRenderPos;
     std::string capturePath;             // --capture=path : 끝낼 때 합성 눈 왼쪽 층을 PNG 로 저장
     uint32_t    captureEye    = 0;       // --capture-eye=left|right : 캡처할 눈 층(멀티뷰의 오른눈 확인, 2026-11-18)
     // --scene=assets/scenes/X.hscene : 프로젝트 시작 씬 대신 이 씬으로 시작(시험 장면 캡처용, 2026-11-16). 에디터는 지금처럼
@@ -148,7 +152,11 @@ struct EngineOptions {
     int         uiSelectLeft = 0;        // --ui-select-left=<n> : Shift+왼쪽 n 번(선택)
     std::string uiImeCompose;            // --ui-ime-compose=<UTF-8 글> : IME 조합 중인 글
     std::string uiOutlinerCollapse;      // --ui-outliner-collapse=<actor> : 아웃라이너 접힘(에디터 전용)
-    bool        uiPlay          = false; // --ui-play : 첫 프레임 뒤 Play 시작(에디터 전용)
+    bool        uiPlay             = false; // --ui-play : 첫 프레임 뒤 Play 시작(에디터 전용)
+    bool        uiProjectSettings  = false; // --ui-project-settings : 첫 프레임 뒤 Project Settings 창 열기(에디터 전용)
+    std::string uiPsCategory;               // --ui-ps-category=<분류> : Project Settings 분류 고르기(덤프 전용)
+    std::string uiPsSearch;                 // --ui-ps-search=<검색어> : Project Settings 검색어(덤프 전용)
+    std::vector<std::string> uiPsSet;       // --ui-ps-set=<키>=<값> (여러 번) : Project Settings 쓰기 시험(사본 프로젝트 전용)
     std::string uiLayout;                // --ui-layout=<file> : 도크 배치 파일 읽기 전용 오버라이드(에디터 전용)
     std::string viewportDumpPath;        // --viewport-dump=<file> : 마지막 프레임 에디터 선·삼각형 덤프(에디터 전용)
     std::string uiGizmoMode;             // --ui-gizmo-mode=select|move|rotate|scale : 기즈모 모드(에디터 전용)

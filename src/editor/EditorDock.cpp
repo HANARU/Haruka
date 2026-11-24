@@ -371,6 +371,29 @@ void EditorDock::showPanel(const std::string& id) {
     saveLayout();
 }
 
+void EditorDock::showPanelFloating(const std::string& id, int w, int h, int x, int y) {
+    if (!deps_.panelReg->find(id)) return;
+    if (contains(id)) {
+        showPanel(id);
+        if (DockLocation loc = dockFindLeafAll(root_.get(), floats_, id); loc && loc.floatIndex < 0 && deps_.onRaiseFloat)
+            deps_.onRaiseFloat(0);
+        return;
+    }
+    DockFloat fl;
+    fl.id = ++floatIdFloor_;
+    hdockdrag::ScreenRect r{ x, y, w, h };
+    if (deps_.clampFloatRect) deps_.clampFloatRect(r);
+    fl.x = r.x; fl.y = r.y;
+    fl.w = std::clamp(r.w, kDockFloatMinW, kDockFloatMaxDim);
+    fl.h = std::clamp(r.h, kDockFloatMinH, kDockFloatMaxDim);
+    fl.root = DockNode::makeLeaf({ id });
+    floats_.push_back(std::move(fl));
+    const int floatId = floats_.back().id;
+    rebuildArea();
+    saveLayout();
+    if (deps_.onRaiseFloat) deps_.onRaiseFloat(floatId);
+}
+
 void EditorDock::saveLayout() {
     if (!root_ || !deps_.layoutWritePath) return;
     if (deps_.readFloatRect)

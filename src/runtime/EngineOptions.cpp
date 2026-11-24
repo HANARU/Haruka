@@ -159,6 +159,10 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             else unknown.push_back(a);
         }
         else if (a == "--ui-actor-picker") o.uiActorPicker = true;
+        else if (a == "--ui-project-settings") o.uiProjectSettings = true;
+        else if (valueOf(a, "--ui-ps-category", v)) o.uiPsCategory = v;
+        else if (valueOf(a, "--ui-ps-search", v))   o.uiPsSearch   = v;
+        else if (valueOf(a, "--ui-ps-set", v))      o.uiPsSet.push_back(v);
         else if (a == "--ui-add-component") o.uiAddComponent = true;
         else if (valueOf(a, "--ui-content-folder", v))   o.uiContentFolder = v;
         else if (valueOf(a, "--ui-content-search", v))   o.uiContentSearch = v;
@@ -314,6 +318,13 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         }
         else if (valueOf(a, "--fixed-dt", v)) {
             if (!parsePositiveFloat(v, o.fixedDt) || o.fixedDt > 0.05f) unknown.push_back(a);
+        }
+        else if (valueOf(a, "--sim-ticks", v)) {
+            if (!parseUint(v, o.simTicks) || o.simTicks == 0) unknown.push_back(a);
+        }
+        else if (valueOf(a, "--log-render-pos", v)) {
+            if (!v.empty()) o.logRenderPos = v;
+            else unknown.push_back(a);
         }
         else if (valueOf(a, "--capture", v)) {
             if (!v.empty()) o.capturePath = v;

@@ -1,10 +1,7 @@
 #include "DetailsPanel.hpp"
 #include "EditorCommands.hpp"
 #include "ActorPicker.hpp"
-#include "AssetPickerModel.hpp"
-#include "ContentBrowserPanel.hpp"
 #include "DetailsSearch.hpp"
-#include "../math/Color.hpp"
 #include "../core/HText.hpp"
 #include "../scene/World.hpp"
 #include "../scene/Actor.hpp"
@@ -22,50 +19,8 @@
 
 namespace {
 
-constexpr glm::vec4 kRed   = EditorTheme::axisX;
-constexpr glm::vec4 kGreen = EditorTheme::axisY;
-constexpr glm::vec4 kBlue  = EditorTheme::axisZ;
-
-// 속성 행 크기(1x, H3a).
-constexpr float kRowIndent = 12.f;   // 이름 열 왼쪽 여백(예전 행의 왼쪽 여백과 같음)
-constexpr float kResetW    = 18.f;   // 되돌리기 화살표 자리
-constexpr float kRightPad  = 6.f;    // 되돌리기 자리 오른쪽
-constexpr float kNameFont  = 12.f;
-
-glm::vec4 themePropColor(glm::vec4 c) {
-    if (c == PropColor::Red)     return EditorTheme::axisX;
-    if (c == PropColor::Green)   return EditorTheme::axisY;
-    if (c == PropColor::Blue)    return EditorTheme::axisZ;
-    if (c == PropColor::Neutral) return EditorTheme::textSecondary;
-    return c;
-}
-
 glm::vec3 quatToEulerDeg(const glm::quat& q) {
     return glm::degrees(glm::vec3(glm::pitch(q), glm::yaw(q), glm::roll(q)));
-}
-
-// 속성의 단위 종류(core)를 숫자 칸의 단위 종류(UI)로 옮깁니다(DEF-46). 두 계층이 서로를 모르게 둡니다.
-ENumberUnit toNumberUnit(PropUnit u) {
-    switch (u) {
-        case PropUnit::Offset: return ENumberUnit::Offset;
-        case PropUnit::Size:   return ENumberUnit::Size;
-        case PropUnit::Angle:  return ENumberUnit::Angle;
-        case PropUnit::Ratio:  return ENumberUnit::Ratio;
-        default:               return ENumberUnit::Scalar;
-    }
-}
-
-// sRGB 로 저장한 색 성분을 선형으로(견본은 렌더러에 선형 값을 넘깁니다, EditorTheme 과 같은 규칙). 정본은 math/Color.hpp(H3b).
-float srgbToLinear(float c) { return hcolor::srgbToLinear(c); }
-
-// 성분 띠 색: X · Y · Z(R · G · B) = 축 색, W(A) = 보조 글자 색.
-glm::vec4 componentColor(int i) {
-    switch (i) {
-        case 0:  return kRed;
-        case 1:  return kGreen;
-        case 2:  return kBlue;
-        default: return EditorTheme::textSecondary;
-    }
 }
 
 std::string rowKey(const void* owner, const std::string& label) {
@@ -76,6 +31,33 @@ std::string rowKey(const void* owner, const std::string& label) {
 
 void DetailsPanel::init(Deps deps) {
     deps_ = std::move(deps);
+    PropertyRowKit::Deps kd;
+    kd.ui              = deps_.ui;
+    kd.columns         = cols_;
+    kd.openCombo       = [this](const std::shared_ptr<HWidget>& a, std::vector<EditorMenuEntry> e, int hi) {
+        if (deps_.openCombo) deps_.openCombo(a, std::move(e), hi);
+    };
+    kd.isComboOpen     = [this](const HWidget* w) { return deps_.isComboOpen && deps_.isComboOpen(w); };
+    kd.closeMenu       = [this] { if (deps_.closeMenu) deps_.closeMenu(); };
+    kd.focusText       = [this](const std::shared_ptr<HWidget>& w) { if (deps_.focusText) deps_.focusText(w); };
+    kd.openAssetPicker = [this](const std::shared_ptr<HWidget>& a, const std::string& t, const std::string& c,
+                                std::function<void(const std::string&)> cb) {
+        if (deps_.openAssetPicker) deps_.openAssetPicker(a, t, c, std::move(cb));
+    };
+    kd.browseToAsset   = [this](const std::string& p) { if (deps_.browseToAsset) deps_.browseToAsset(p); };
+    kd.openColorPicker = [this](const std::shared_ptr<HWidget>& a, ColorPickerPopup::Target t) {
+        if (deps_.openColorPicker) deps_.openColorPicker(a, std::move(t));
+    };
+    kd.pickActor       = [this](const std::string& title, uint64_t cur, std::function<void(uint64_t)> cb) {
+        if (deps_.pickActor) deps_.pickActor(title, cur, std::move(cb));
+    };
+    kd.actorLabel      = [this](uint64_t g) {
+        const std::string none    = HTEXT("Editor.Details", "ActorRef.None", "None").toString();
+        const std::string missing = HTEXT("Editor.Details", "ActorRef.Missing", "(missing)").toString();
+        return (deps_.ctx && deps_.ctx->world) ? hpick::labelFor(*deps_.ctx->world, g, none, missing) : none;
+    };
+    kd.onChanged       = [this] { dirty_ = true; };
+    rowKit_.init(std::move(kd));
 }
 
 std::shared_ptr<HWidget> DetailsPanel::build() {
@@ -137,268 +119,9 @@ bool DetailsPanel::scrollContains(const glm::vec2& p) const {
     return !scroll_ || scroll_->cachedGeometry().contains(p);
 }
 
-// ── 속성 행(H3a) ───────────────────────────────────────────────────────────────────────────────────────────────
-// 모든 종류가 같은 틀(SPropertyRow)입니다: 이름 열 | 값 열 | 되돌리기 자리. 예전에는 종류마다 가로 상자 · 여백 · 고정 폭을 손으로
-// 다시 만들었습니다(조사 B10). 이름은 이름 열 폭에 맞춰 ".." 로 줄이고, 줄였으면 툴팁으로 전체 이름을 보입니다.
-std::shared_ptr<SPropertyRow> DetailsPanel::addPropRow(const std::string& name, glm::vec4 nameColor, std::shared_ptr<HWidget> value,
-                                                       std::shared_ptr<RowOps> ops, SVerticalBox* into) {
-    auto text = HNew(STextBlock)->fontSize(s(kNameFont))->color(nameColor)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center);
-    std::weak_ptr<STextBlock> weakText = text;
-    const EditorUiKit* ui = deps_.ui;
-    const float font = s(kNameFont);
-    text->text(Attr<std::string>(std::function<std::string()>([weakText, ui, name, font]() -> std::string {
-        auto t = weakText.lock();
-        const float w = t ? t->cachedGeometry().size.x : 0.f;
-        return (ui && w > 1.f) ? ui->ellipsizeText(name, w, font) : name;
-    })));
-    text->tooltip.bind([weakText, ui, name, font]() -> std::string {
-        auto t = weakText.lock();
-        const float w = t ? t->cachedGeometry().size.x : 0.f;
-        return (ui && w > 1.f && EditorUiKit::textWidth(name, font) > w) ? name : std::string();
-    });
-
-    std::shared_ptr<HWidget> reset;
-    if (ops && ops->reset) {
-        auto resetFn = ops->reset;
-        auto canFn   = ops->canReset;
-        auto b = deps_.ui->resetArrow([canFn] { return canFn && canFn(); }, [this, resetFn] { resetFn(); dirty_ = true; });
-        b->setTooltip(HTEXT("Editor.Details", "Tip.ResetToDefault", "Reset to Default"));
-        reset = b;
-    }
-    auto row = HNew(SPropertyRow)
-        ->columns(cols_)->style(EditorUiKit::propertyRowStyle(s(1.f)))
-        ->indent(s(kRowIndent))->resetWidth(s(kResetW))->rightPad(s(kRightPad))->valueVPad(s(1.f))->height(s(EditorTheme::rowH))
-        ->name(text)->value(std::move(value))->reset(std::move(reset));
-    if (ops) rowHits_.push_back({ row, ops });
-    (into ? into : list_.get())->addSlot(row, SVerticalBox::ESizeRule::Fixed, s(EditorTheme::rowH));
-    return row;
-}
-
-std::shared_ptr<HWidget> DetailsPanel::numberField(std::function<float()> getter, std::function<void(float)> setter, float step,
-                                                   ENumberUnit unit, glm::vec4 barColor, std::function<void()> bFn,
-                                                   std::function<void()> eFn) {
-    auto f = HNew(SNumberField)
-        ->style(EditorUiKit::numberFieldStyle(s(1.f)))->fontSize(s(12.f))
-        ->get(std::move(getter))->set(std::move(setter))->step(step)->unit(unit)
-        ->onDragBegin(std::move(bFn))->onDragEnd(std::move(eFn))->clipText(true);
-    if (barColor.a > 0.f) f->axisBar(barColor, s(3.f));
-    return f;
-}
-
-std::shared_ptr<SVectorField> DetailsPanel::vectorField(const PropDesc& pd, std::function<float(int)> get,
-                                                        std::function<void(int, float)> set, std::function<void()> bFn,
-                                                        std::function<void()> eFn) {
-    const int n = std::clamp(pd.components, 1, 4);
-    std::vector<std::string> labels;
-    std::vector<glm::vec4> colors;
-    for (int i = 0; i < n; ++i) { labels.push_back(""); colors.push_back(componentColor(i)); }
-    auto v = HNew(SVectorField)
-        ->components(n)->style(EditorUiKit::numberFieldStyle(s(1.f)))->fontSize(s(12.f))
-        ->gap(s(EditorTheme::space2))->barWidth(s(3.f))->step(pd.step)->unit(toNumberUnit(pd.unit))
-        ->labels(std::move(labels))->colors(std::move(colors))
-        ->get(std::move(get))->set(std::move(set))
-        ->onDragBegin([bFn](int) { if (bFn) bFn(); })
-        ->onDragEnd([eFn](int) { if (eFn) eFn(); });
-    // 성분 이름은 띠 색으로 보이고(UE5 와 같음), 툴팁으로도 알립니다.
-    for (int i = 0; i < n; ++i)
-        if (auto f = v->field(i)) f->tooltip.set(hprop::componentName(pd, i));
-    return v;
-}
-
-// 색 칸(H3a): [견본][성분 칸 셋(넷)]. 견본을 누르면 색 선택기(H3b)가 견본 아래에 열립니다(다시 누르면 확정하고 닫음).
-std::shared_ptr<HWidget> DetailsPanel::colorField(const PropDesc& pd, std::function<float(int)> get, std::function<void(int, float)> set,
-                                                  std::function<void()> bFn, std::function<void()> eFn,
-                                                  std::function<void(const std::shared_ptr<HWidget>&)> openPicker,
-                                                  const std::shared_ptr<RowOps>& ops) {
-    const bool srgb = pd.srgb;
-    const int n = std::clamp(pd.components, 3, 4);
-    auto swatch = HNew(SColorSwatch)
-        ->color([get, srgb, n]() -> glm::vec4 {
-            glm::vec4 c{ get(0), get(1), get(2), n > 3 ? get(3) : 1.f };
-            if (srgb) { c.r = srgbToLinear(c.r); c.g = srgbToLinear(c.g); c.b = srgbToLinear(c.b); }
-            return c;
-        })
-        ->border(EditorTheme::borderPopup, EditorTheme::borderThin)->backdrop(EditorTheme::bgInput)
-        ->cornerRadius(s(EditorTheme::radiusInput))->size({ s(28.f), s(18.f) });
-    swatch->setTooltip(HTEXT("Editor.Details", "Tip.ColorPicker", "Open the color picker"));
-    std::weak_ptr<SColorSwatch> weak = swatch;   // 견본이 자기 자신을 붙잡지 않게
-    if (openPicker) {
-        swatch->onClick([weak, openPicker] { if (auto w = weak.lock()) openPicker(w); });
-        if (ops) ops->openColor = [weak, openPicker](bool) { if (auto w = weak.lock()) openPicker(w); };
-    }
-    using HR = SHorizontalBox;
-    return HNew(SHorizontalBox)
-        ->addSlot(swatch, HR::ESizeRule::Fixed, s(28.f))
-        ->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(EditorTheme::space4))
-        ->addSlot(vectorField(pd, std::move(get), std::move(set), std::move(bFn), std::move(eFn)), HR::ESizeRule::Fill);
-}
-
-// 열거 콤보(H3a): 누르면 단추 아래에 선택 목록(지금 값에 체크 · 강조)이 열립니다. ↑ ↓ · Enter · Esc · 바깥 누름은 메뉴 규칙
-// (EditorMenuView)이고, 팝업은 디테일이 있는 창의 팝업 층입니다. 다시 누르면 닫습니다. 예전에는 누를 때마다 다음 값으로 돌았습니다.
-std::shared_ptr<HWidget> DetailsPanel::comboField(const PropDesc& pd, std::function<void(int)> choose, const std::shared_ptr<RowOps>& ops) {
-    const int idx = pd.getI ? pd.getI() : -1;
-    const std::vector<const char*> opts = pd.options;
-    const char* cur = (idx >= 0 && idx < (int)opts.size() && opts[(size_t)idx]) ? opts[(size_t)idx] : "?";
-    auto btn = deps_.ui->comboButton(cur, 12.f, {});
-    std::weak_ptr<SButton> weak = btn;   // 단추가 자기 자신을 붙잡지 않게
-    auto getI = pd.getI;
-    auto open = [this, weak, opts, getI, choose] {
-        auto b = weak.lock();
-        if (!b || !deps_.openCombo) return;
-        if (deps_.isComboOpen && deps_.isComboOpen(b.get())) { if (deps_.closeMenu) deps_.closeMenu(); return; }
-        const int now = getI ? getI() : -1;
-        std::vector<EditorMenuEntry> entries;
-        for (int i = 0; i < (int)opts.size(); ++i) {
-            EditorMenuEntry e = EditorMenuEntry::act(opts[(size_t)i] ? opts[(size_t)i] : "", [choose, i] { choose(i); });
-            e.checked = [getI, i] { return getI && getI() == i; };
-            entries.push_back(std::move(e));
-        }
-        deps_.openCombo(b, std::move(entries), now);
-    };
-    btn->onClick(open);
-    if (ops) ops->openCombo = open;
-    return btn;
-}
-
-// 액터 참조 칸(참조 체계 R-7): 대상 이름(비었으면 None, 못 찾으면 (missing))을 보이는 단추. 누르면 액터 목록에서 고릅니다.
-std::shared_ptr<HWidget> DetailsPanel::actorRefField(const PropDesc& pd, std::function<void(uint64_t)> choose) {
-    const std::string none    = HTEXT("Editor.Details", "ActorRef.None", "None").toString();
-    const std::string missing = HTEXT("Editor.Details", "ActorRef.Missing", "(missing)").toString();
-    auto getG = pd.getG;
-    const std::string cur   = (deps_.ctx && deps_.ctx->world && getG) ? hpick::labelFor(*deps_.ctx->world, getG(), none, missing) : none;
-    const std::string title = pd.label ? pd.label : "";
-    auto b = deps_.ui->textButton(cur, 12.f, EditorUiKit::kTextBody, { 6.f, 0.f }, EditorTheme::ctlNormal, EditorTheme::ctlHover,
-                                  [this, title, getG, choose] {
-                                      if (!deps_.pickActor || !getG) return;
-                                      deps_.pickActor(title, getG(), [this, choose](uint64_t g) {
-                                          choose(g);
-                                          dirty_ = true;
-                                      });
-                                  });
-    b->hAlign(EHAlign::Left);
-    return b;
-}
-
-std::shared_ptr<HWidget> DetailsPanel::checkField(std::function<bool()> getB, std::function<void(bool)> setB) {
-    auto box = HNew(SCheckBox)
-        ->style(EditorUiKit::checkBoxStyle(s(1.f)))
-        ->checked(getB)
-        ->onClick([this, getB, setB] { setB(!getB()); dirty_ = true; });
-    return HNew(SBox)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)->content(box);
-}
-
-// 글 칸(H3a). 편집 중이 아닐 때는 글을 보이는 칸이고, 누르면 그 자리에서 편집합니다(키보드 포커스 = H1a-2 글 칸 체계). Enter = 확정
-// (Undo 한 단계), Esc = 취소, 다른 곳 누름 = 취소(아웃라이너 이름 바꾸기 칸과 같은 규칙).
-std::shared_ptr<HWidget> DetailsPanel::stringValue(const std::string& key, std::function<std::string()> get,
-                                                   std::function<void(const std::string&)> commit, const std::shared_ptr<RowOps>& ops) {
-    auto begin = [this, key, get, commit] {
-        str_.prepare(key, get, commit);
-        if (deps_.focusText) deps_.focusText(strText_);
-    };
-    if (ops) ops->beginEdit = begin;
-    if (str_.editing(key)) {
-        strShown_ = true;
-        SEditableText::Style es;
-        es.text        = EditorUiKit::kTextBody;
-        es.composition = EditorUiKit::kTextBody;
-        es.selection   = EditorTheme::accent;
-        es.caret       = EditorUiKit::kTextBody;
-        es.caretWidth  = std::max(1.f, std::floor(s(1.f)));
-        auto edit = HReuse(strText_)->focusable(true)->state(&str_.edit())->focused([this] { return str_.focused(); })
-                        ->fontSize(s(12.f))->textHeight(s(16.f))->style(es);
-        str_.rebind(get, commit);   // 다시 만들 때 새 세터(같은 칸)
-        return HNew(SBorder)->background(EditorTheme::bgInput)->borderColor(EditorTheme::accent)
-            ->borderThickness(EditorTheme::borderThin)->cornerRadius(s(EditorTheme::radiusInput))
-            ->padding(HPadding{ s(5.f), 0.f })->vAlign(EVAlign::Center)->content(edit);
-    }
-    const std::string now = get ? get() : std::string();
-    auto b = HNew(SButton)
-        ->style(EditorUiKit::buttonStyle(s(1.f)))->cornerRadius(s(EditorTheme::radiusInput))
-        ->normalColor(EditorTheme::bgInput)->hoveredColor(EditorTheme::ctlNormal)->pressedColor(EditorTheme::bgInput)
-        ->padding(HPadding{ s(5.f), 0.f })->hAlign(EHAlign::Left)->vAlign(EVAlign::Center)
-        ->content(HNew(STextBlock)->text(now)->fontSize(s(12.f))->color(EditorUiKit::kTextBody))
-        ->onClick(begin);
-    return b;
-}
-
-TextInputField DetailsPanel::stringField() {
-    // 포커스가 바뀌면(들어감 · 나감 · 확정 · 취소) 행을 다시 만듭니다(보기 ↔ 편집 모양). 글자는 칸이 상태를 바로 그리므로 다시 만들지 않습니다.
-    return str_.field([this] { if (str_.focused() != strShown_ || !str_.focused()) dirty_ = true; },
-                      [this](glm::vec2 p) { return strShown_ && strText_ && strText_->cachedGeometry().contains(p); });
-}
-
-// 에셋 경로 칸(H3b, UE 의 에셋 고르기 칸 축소판): [종류 아이콘 · 에셋 이름 · ▾][콘텐츠 브라우저에서 찾기][비우기].
-//   - 이름 단추를 누르면 칸 아래에 고르기 팝업(검색 + 그 종류의 에셋 목록, AssetPicker). 다시 누르면 닫음.
-//   - 찾기 = 콘텐츠 브라우저를 그 에셋의 폴더로 열고 고름. 비우기 = 빈 경로(None). 값이 비면 둘 다 흐림.
-//   - 콘텐츠 브라우저에서 끌어 이 칸에 놓을 수 있습니다(종류가 맞지 않으면 거부, EditorApp 이 dropAsset 을 부름).
-//   - 값을 넣는 일은 모두 setPath(Undo 한 단계, 함께 고른 액터 포함)입니다.
-std::shared_ptr<HWidget> DetailsPanel::assetPathValue(const PropDesc& pd, std::function<void(const std::string&)> setPath,
-                                                      const std::shared_ptr<RowOps>& ops) {
-    const EditorUiKit& u = *deps_.ui;
-    const std::string path = pd.getS ? pd.getS() : std::string();
-    const std::string none = HTEXT("Editor.Details", "ActorRef.None", "None").toString();
-    const hcb::AssetKind kind = path.empty() ? hcb::AssetKind::Other : hcb::kindOfExt(hcb::extOf(hcb::nameOf(path)));
-    const std::string assetType = pd.assetType ? pd.assetType : "";
-    const std::vector<hcb::AssetKind> kinds = hasset::kindsOf(assetType);
-    using HR = SHorizontalBox;
-
-    auto row = HNew(SHorizontalBox);
-    if (!path.empty())
-        row->addSlot(u.icon(hcbui::kindIcon(kind), 13.f, hcbui::kindColor(kind), hcbui::kindFallback(kind), 10.f),
-                     HR::ESizeRule::Fixed, s(17.f), {}, EVAlign::Center);
-    row->addSlot(HNew(STextBlock)->text(path.empty() ? none : hasset::displayName(path))->fontSize(s(12.f))
-                     ->color(path.empty() ? EditorUiKit::kTextDim : EditorUiKit::kTextBody)->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
-                 HR::ESizeRule::Fill);
-    row->addSlot(u.icon("chevron-down", 12.f, EditorUiKit::kTextDim, "v", 11.f), HR::ESizeRule::Auto, 0.f, {}, EVAlign::Center);
-    auto btn = HNew(SButton)
-        ->style(EditorUiKit::buttonStyle(s(1.f)))->content(row)
-        ->padding(HPadding{ s(5.f), 0.f, s(4.f), 0.f })->hAlign(EHAlign::Fill)->vAlign(EVAlign::Fill)
-        ->normalColor(EditorTheme::bgInput)->hoveredColor(EditorTheme::ctlNormal)->cornerRadius(s(EditorTheme::radiusInput));
-    btn->tooltip.set(path.empty() ? HTEXT("Editor.Details", "Tip.AssetPick", "Choose an asset").toString() : path);
-    std::weak_ptr<SButton> weak = btn;
-    auto getS = pd.getS;
-    auto open = [this, weak, assetType, getS, setPath] {
-        auto b = weak.lock();
-        if (!b || !deps_.openAssetPicker) return;
-        deps_.openAssetPicker(b, assetType, getS ? getS() : std::string(), setPath);
-    };
-    btn->onClick(open);
-
-    auto browse = u.iconButton("search", 12.f, EditorUiKit::kTextBody, "", 12.f, EditorUiKit::kTextBody, { 3.f, 0.f },
-                               EditorTheme::ctlNormal, EditorTheme::ctlHover, [this, getS] {
-                                   const std::string p = getS ? getS() : std::string();
-                                   if (!p.empty() && deps_.browseToAsset) deps_.browseToAsset(p);
-                               }, "o");
-    browse->setTooltip(HTEXT("Editor.Details", "Tip.AssetBrowse", "Browse to Asset in Content Browser"));
-    browse->enabled.set(!path.empty());
-    auto clear = u.iconButton("x", 12.f, EditorUiKit::kTextBody, "", 12.f, EditorUiKit::kTextBody, { 3.f, 0.f },
-                              EditorTheme::ctlNormal, EditorTheme::ctlHover, [setPath] { if (setPath) setPath(""); }, "x");
-    clear->setTooltip(HTEXT("Editor.Details", "Tip.AssetClear", "Clear"));
-    clear->enabled.set(!path.empty());
-
-    if (ops) {
-        ops->acceptsAsset = [kinds](const std::string& p) { return hasset::acceptsPath(kinds, p); };
-        ops->setAsset     = setPath;
-        ops->openPicker   = open;
-    }
-    // 끌어 놓기 강조: 이 행 위를 끄는 중이면 테두리(받음 = 강조색, 안 받음 = 빨강).
-    const bool hot = !dropHoverRow_.empty() && ops && dropHoverRow_ == ops->label;
-    auto frame = HNew(SBorder)->background(EditorTheme::transparent)
-        ->borderColor(hot ? (dropHoverOk_ ? EditorTheme::accent : EditorTheme::error) : EditorTheme::transparent)
-        ->borderThickness(hot ? std::max(1.f, s(1.f)) : 0.f)->cornerRadius(s(EditorTheme::radiusInput))
-        ->padding(hot ? HPadding{ std::max(1.f, s(1.f)), std::max(1.f, s(1.f)) } : HPadding{ 0.f, 0.f })   // 테두리가 칸에 가리지 않게
-        ->content(HNew(SHorizontalBox)
-            ->addSlot(btn, HR::ESizeRule::Fill)
-            ->addSlot(u.spacer(), HR::ESizeRule::Fixed, s(2.f))
-            ->addSlot(browse, HR::ESizeRule::Fixed, s(22.f))
-            ->addSlot(u.spacer(), HR::ESizeRule::Fixed, s(2.f))
-            ->addSlot(clear, HR::ESizeRule::Fixed, s(22.f)));
-    return frame;
-}
-
 const DetailsPanel::RowOps* DetailsPanel::assetRowAt(glm::vec2 p) const {
     if (!scroll_ || !scrollContains(p)) return nullptr;
-    for (const auto& [w, ops] : rowHits_) {
+    for (const auto& [w, ops] : rowKit_.rowHits()) {
         auto row = w.lock();
         if (!row || !ops || !ops->setAsset || !row->cachedGeometry().contains(p)) continue;
         return ops.get();
@@ -436,20 +159,15 @@ std::vector<EditorMenuEntry> DetailsPanel::rowMenuEntries() const {
 
 bool DetailsPanel::openRowMenuAt(glm::vec2 p) {
     if (!deps_.openMenu || !scrollContains(p)) return false;
-    for (const auto& [w, ops] : rowHits_) {
-        auto row = w.lock();
-        if (!row || !row->cachedGeometry().contains(p)) continue;
-        menuRow_ = ops;
-        deps_.openMenu(p, rowMenuEntries());
-        return true;
-    }
-    return false;
+    auto ops = rowKit_.hitTestRow(p);
+    if (!ops) return false;
+    menuRow_ = std::move(ops);
+    deps_.openMenu(p, rowMenuEntries());
+    return true;
 }
 
 const DetailsPanel::RowOps* DetailsPanel::findRow(const std::string& label) const {
-    for (const auto& [w, ops] : rowHits_)
-        if (ops && ops->label == label) return ops.get();
-    return nullptr;
+    return rowKit_.findRow(label);
 }
 
 bool DetailsPanel::dumpSetValue(const std::string& label, const std::string& text) {
@@ -468,7 +186,7 @@ bool DetailsPanel::dumpOpenCombo(const std::string& label) {
 }
 
 bool DetailsPanel::dumpOpenRowMenu(const std::string& label) {
-    for (const auto& [w, ops] : rowHits_) {
+    for (const auto& [w, ops] : rowKit_.rowHits()) {
         auto row = w.lock();
         if (!row || !ops || ops->label != label) continue;
         menuRow_ = ops;
@@ -508,7 +226,7 @@ bool DetailsPanel::dumpOpenColorPicker(const std::string& label, bool rgbaDemo) 
 }
 
 bool DetailsPanel::dumpDropAsset(const std::string& label, const std::string& path) {
-    for (const auto& [w, ops] : rowHits_) {
+    for (const auto& [w, ops] : rowKit_.rowHits()) {
         auto row = w.lock();
         if (!row || !ops || ops->label != label) continue;
         const HGeometry& g = row->cachedGeometry();
@@ -535,9 +253,8 @@ void DetailsPanel::rebuild() {
         if (deps_.closeAssetPicker) deps_.closeAssetPicker();
         if (deps_.confirmColorPicker) deps_.confirmColorPicker();
     }
-    rowHits_.clear();
+    rowKit_.beginRebuild(list_);
     menuRow_.reset();
-    strShown_ = false;
     shownSearch_   = searchEdit_.text;
     searchMatches_ = 0;
     list_->clearSlots();
@@ -590,9 +307,9 @@ void DetailsPanel::rebuild() {
         buildSavePrefabRow(sel);
     }
     // 편집하던 글 칸의 행이 없어졌으면(선택이 바뀜 · 컴포넌트를 지움) 부수 효과 없이 포커스를 놓습니다.
-    if (str_.focused() && !strShown_) {
+    if (rowKit_.isStringFocused() && !rowKit_.isStringShown()) {
         if (deps_.releaseTextQuiet) deps_.releaseTextQuiet();
-        str_.forget();
+        rowKit_.forgetString();
     }
 }
 
@@ -685,8 +402,8 @@ void DetailsPanel::buildTransformSection(Actor& sel) {
         ops->english  = name.source();
         if (!rowMatches(ops->label, ops->english)) return;   // 속성 검색(H3b)
         ++txMatches;
-        auto field = vectorField(pd, [get](int i) { return get()[i]; }, setAxis, txBegin, txEnd);
-        addPropRow(ops->label, nameColor, field, ops, txBody.get());
+        auto field = rowKit_.vectorField(pd, [get](int i) { return get()[i]; }, setAxis, txBegin, txEnd);
+        rowKit_.addPropRow(ops->label, nameColor, field, ops, txBody.get());
     };
 
     // 프리팹 인스턴스에서 덮어쓴 값은 이름 색으로 알립니다(D9).
@@ -773,21 +490,24 @@ void DetailsPanel::buildComponentProp(Actor& sel, Component& comp, const PropDes
     // 속성 검색(H3b): 맞지 않는 행은 만들지 않습니다. 컴포넌트 칸 이름은 아직 번역하지 않으므로 보이는 이름 = 영어 원문입니다.
     if (!rowMatches(lbl, lbl)) return;
 
-    // 행 동작: 되돌리기(이 칸 + 함께 고른 액터의 같은 칸, Undo 한 단계) · 복사 · 붙여넣기(Undo 한 단계).
-    auto ops = std::make_shared<RowOps>();
-    ops->label   = lbl;
-    ops->english = lbl;
-    ops->kind    = kind;
+    PropertyRowKit::RowParams p;
+    p.rowKey      = rowKey(compPtr, lbl);
+    p.englishName = lbl;
+    p.nameColor   = EditorUiKit::kTextBody;
+    p.dropHot     = !dropHoverRow_.empty() && dropHoverRow_ == lbl;
+    p.dropOk      = dropHoverOk_;
+    p.onDragBegin = compBegin;
+    p.onDragEnd   = compEnd;
+    p.commit      = commitClick;
+
     if (pd.hasDefault) {
-        ops->canReset = [pd] { return hprop::canReset(pd); };
-        ops->reset    = [this, selPtr, compPtr, peers, lbl, kind] {
+        p.onReset = [this, selPtr, compPtr, peers, lbl, kind] {
             hcmd::resetPropToDefault(*deps_.ctx->world, selPtr, compPtr, peers, lbl, kind, *deps_.cmdStack);
             dirty_ = true;
         };
     }
-    ops->copyText = [pd] { return hprop::valueText(pd); };
-    if (hprop::writable(pd))
-        ops->paste = [pd, commitClick, peers, lbl, kind](const std::string& t) {
+    if (hprop::writable(pd)) {
+        p.onPaste = [pd, commitClick, peers, lbl, kind](const std::string& t) {
             bool ok = false;
             commitClick([&] {
                 ok = hprop::setFromText(pd, t);
@@ -796,126 +516,83 @@ void DetailsPanel::buildComponentProp(Actor& sel, Component& comp, const PropDes
             });
             return ok;
         };
-
-    std::shared_ptr<HWidget> value;
-    glm::vec4 nameColor = EditorUiKit::kTextBody;
-    switch (kind) {
-        case PropDesc::Float: {
-            // 축 색이 붙은 칸(폭 · 높이처럼 X · Y 를 뜻하는 칸)은 숫자 칸 왼쪽에 그 색 띠를 둡니다.
-            const glm::vec4 bar = pd.color == PropColor::Neutral ? glm::vec4(0.f) : themePropColor(pd.color);
-            value = numberField([pd] { return pd.getF(); },
-                                [pd, lbl, toPeers](float v) {
-                                    pd.setF(v);
-                                    hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Float; e.f = v;
-                                    toPeers(e);
-                                },
-                                pd.step, toNumberUnit(pd.unit), bar, compBegin, compEnd);
-            break;
-        }
-        case PropDesc::Toggle:
-            value = checkField(pd.getB, [commitClick, toPeers, lbl, setB = pd.setB](bool v) {
-                commitClick([&] {
-                    setB(v);
-                    hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Toggle; e.b = v;
-                    toPeers(e);
-                });
-            });
-            break;
-        case PropDesc::Enum:
-            value = comboField(pd, [this, commitClick, toPeers, lbl, setI = pd.setI](int v) {
-                commitClick([&] {
-                    setI(v);
-                    hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Enum; e.i = v;
-                    toPeers(e);
-                });
-                dirty_ = true;
-            }, ops);
-            break;
-        case PropDesc::ActorRef:
-            value = actorRefField(pd, [commitClick, toPeers, lbl, setG = pd.setG](uint64_t v) {
-                commitClick([&] {
-                    setG(v);
-                    hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::ActorRef; e.g = v;
-                    toPeers(e);
-                });
-            });
-            break;
-        case PropDesc::String:
-            value = stringValue(rowKey(compPtr, lbl), pd.getS, [commitClick, toPeers, lbl, setS = pd.setS](const std::string& v) {
-                commitClick([&] {
-                    setS(v);
-                    hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::String; e.s = v;
-                    toPeers(e);
-                });
-            }, ops);
-            break;
-        case PropDesc::AssetPath:
-            // 고르기 · 비우기 · 끌어 놓기 · 붙여넣기가 모두 이 한 길(Undo 한 단계, 함께 고른 액터 포함)입니다. 같은 값이면 기록 없음.
-            value = assetPathValue(pd, [this, commitClick, toPeers, lbl, setS = pd.setS, getS = pd.getS,
-                                        world = deps_.ctx->world, actorId = selPtr->id, compPtr](const std::string& v) {
-                if (!setS || !world) return;
-                // 고르기 팝업이 열린 동안 컴포넌트가 사라졌으면(Undo · 씬 바꿈) 넣지 않습니다.
-                Actor* owner = world->findById(actorId);
-                if (!owner || std::none_of(owner->getComponents().begin(), owner->getComponents().end(),
-                                           [compPtr](const auto& c) { return c.get() == compPtr; }))
-                    return;
-                commitClick([&] {
-                    if (!getS || getS() != v) setS(v);
-                    hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::AssetPath; e.s = v;
-                    toPeers(e);
-                });
-                dirty_ = true;
-            }, ops);
-            break;
-        case PropDesc::Vec3:
-        case PropDesc::Color: {
-            // 성분 하나를 바꾸면 주 선택은 그 성분만, 함께 고른 액터도 그 성분만 바꿉니다(트랜스폼과 같은 규칙).
-            auto get = [pd](int i) { return pd.getV()[std::clamp(i, 0, 3)]; };
-            auto set = [pd, peers, lbl, kind](int i, float v) {
-                glm::vec4 cur = pd.getV();
-                cur[std::clamp(i, 0, 3)] = v;
-                pd.setV(cur);
-                for (Component* pc : peers) hcmd::setPropComponent(*pc, lbl, kind, i, v);
-            };
-            if (kind == PropDesc::Color) {
-                // 색 선택기(H3b): 연 동안의 편집은 한 세션(hcmd::PropSession)입니다. 확정 = Undo 한 단계, 취소 = 원래 값(기록 없음).
-                World* world = deps_.ctx->world;
-                HCommandStack* stack = deps_.cmdStack;
-                const uint64_t actorId = selPtr->id;
-                const int n = std::clamp(pd.components, 3, 4);
-                auto openPicker = [this, world, stack, actorId, selPtr, compPtr, peers, pd, set, lbl, n](const std::shared_ptr<HWidget>& anchor) {
-                    if (!deps_.openColorPicker || !world) return;
-                    auto session = std::make_shared<hcmd::PropSession>(hcmd::beginPropSession(*compPtr, peers));
-                    ColorPickerPopup::Target t;
-                    t.title      = lbl;
-                    t.components = n;
-                    t.srgb       = pd.srgb;
-                    t.get        = [pd] { return pd.getV(); };
-                    t.set        = [set, n](const glm::vec4& v) { for (int i = 0; i < n; ++i) set(i, v[i]); };
-                    t.alive      = [world, actorId, compPtr] {
-                        Actor* a = world->findById(actorId);
-                        if (!a) return false;
-                        for (const auto& c : a->getComponents()) if (c.get() == compPtr) return true;
-                        return false;
-                    };
-                    t.commit = [this, world, stack, selPtr, compPtr, peers, session] {
-                        hcmd::endPropSession(*world, selPtr, compPtr, peers, *session, *stack);
-                        dirty_ = true;
-                    };
-                    t.cancel = [this, compPtr, peers, session] {
-                        hcmd::cancelPropSession(compPtr, peers, *session);
-                        dirty_ = true;
-                    };
-                    deps_.openColorPicker(anchor, std::move(t));
-                };
-                value = colorField(pd, get, set, compBegin, compEnd, openPicker, ops);
-            } else {
-                value = vectorField(pd, get, set, compBegin, compEnd);
-            }
-            break;
-        }
     }
-    if (value) addPropRow(lbl, nameColor, value, ops);
+
+    p.onSetFloat = [pd, lbl, toPeers](float v) {
+        pd.setF(v);
+        hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Float; e.f = v;
+        toPeers(e);
+    };
+    p.onSetBool = [lbl, toPeers, setB = pd.setB](bool v) {
+        setB(v);
+        hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Toggle; e.b = v;
+        toPeers(e);
+    };
+    p.onSetEnum = [lbl, toPeers, setI = pd.setI](int v) {
+        setI(v);
+        hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::Enum; e.i = v;
+        toPeers(e);
+    };
+    p.onSetActor = [lbl, toPeers, setG = pd.setG](uint64_t v) {
+        setG(v);
+        hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::ActorRef; e.g = v;
+        toPeers(e);
+    };
+    p.onSetString = [lbl, toPeers, setS = pd.setS](const std::string& v) {
+        setS(v);
+        hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::String; e.s = v;
+        toPeers(e);
+    };
+    p.onSetAsset = [this, commitClick, toPeers, lbl, setS = pd.setS, getS = pd.getS,
+                    world = deps_.ctx->world, actorId = selPtr->id, compPtr](const std::string& v) {
+        if (!setS || !world) return;
+        Actor* owner = world->findById(actorId);
+        if (!owner || std::none_of(owner->getComponents().begin(), owner->getComponents().end(),
+                                   [compPtr](const auto& c) { return c.get() == compPtr; }))
+            return;
+        commitClick([&] {
+            if (!getS || getS() != v) setS(v);
+            hcmd::PropValue e; e.label = lbl; e.kind = PropDesc::AssetPath; e.s = v;
+            toPeers(e);
+        });
+        dirty_ = true;
+    };
+    auto setVecComp = [pd, peers, lbl, kind](int i, float v) {
+        glm::vec4 cur = pd.getV();
+        cur[std::clamp(i, 0, 3)] = v;
+        pd.setV(cur);
+        for (Component* pc : peers) hcmd::setPropComponent(*pc, lbl, kind, i, v);
+    };
+    p.onSetVecComp = setVecComp;
+    p.onOpenColor = [this, world = deps_.ctx->world, stack = deps_.cmdStack, actorId = selPtr->id,
+                     selPtr, compPtr, peers, pd, setVecComp, lbl](const std::shared_ptr<HWidget>& anchor) {
+        if (!deps_.openColorPicker || !world) return;
+        const int n = std::clamp(pd.components, 3, 4);
+        auto session = std::make_shared<hcmd::PropSession>(hcmd::beginPropSession(*compPtr, peers));
+        ColorPickerPopup::Target t;
+        t.title      = lbl;
+        t.components = n;
+        t.srgb       = pd.srgb;
+        t.get        = [pd] { return pd.getV(); };
+        t.set        = [setVecComp, n](const glm::vec4& v) { for (int i = 0; i < n; ++i) setVecComp(i, v[i]); };
+        t.alive      = [world, actorId, compPtr] {
+            Actor* a = world->findById(actorId);
+            if (!a) return false;
+            for (const auto& c : a->getComponents()) if (c.get() == compPtr) return true;
+            return false;
+        };
+        t.commit = [this, world, stack, selPtr, compPtr, peers, session] {
+            hcmd::endPropSession(*world, selPtr, compPtr, peers, *session, *stack);
+            dirty_ = true;
+        };
+        t.cancel = [this, compPtr, peers, session] {
+            hcmd::cancelPropSession(compPtr, peers, *session);
+            dirty_ = true;
+        };
+        deps_.openColorPicker(anchor, std::move(t));
+    };
+
+    rowKit_.buildRow(pd, p);
 }
 
 void DetailsPanel::buildComponentsSection(Actor& sel) {
@@ -965,11 +642,11 @@ void DetailsPanel::buildComponentsSection(Actor& sel) {
             hcmd::commitPropChange(*deps_.ctx->world, selPtr, comp, peers, change, *deps_.cmdStack);
         };
 
-        const size_t rowsBefore = rowHits_.size();
+        const size_t rowsBefore = rowKit_.rowHits().size();
         for (auto& pd : *props)
             buildComponentProp(sel, *comp, pd, compBegin, compEnd, commitClick, peers);
         // 속성 검색(H3b): 맞는 행이 없는 컴포넌트는 머리 줄만 남깁니다(접힘). 읽기 정보 줄은 검색 중에는 숨깁니다.
-        if (searching()) searchMatches_ += (int)(rowHits_.size() - rowsBefore);
+        if (searching()) searchMatches_ += (int)(rowKit_.rowHits().size() - rowsBefore);
         if (!hdsearch::showInfoLine(searching())) continue;
 
         std::string info = comp->readOnlyInfo();

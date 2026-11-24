@@ -9,7 +9,7 @@
 #include <string>
 
 // 숫자 칸의 단위 종류. 끌기 감도와 표시 자릿수를 정합니다(DEF-46). 에디터가 PropUnit 에서 옮겨 줍니다.
-enum class ENumberUnit { Scalar, Offset, Size, Angle, Ratio };
+enum class ENumberUnit { Scalar, Offset, Size, Angle, Ratio, Integer };
 
 // ── SNumberField ──────────────────────────────────────────────────────────────
 // UE5 스타일 숫자 필드:
@@ -48,6 +48,10 @@ public:
     // 둬 "-0.0" 이 나오지 않습니다(DEF-88). float 의 유효 숫자는 7자리 남짓이라 그 이상은 쓰지 않고,
     // 입력 필터가 'e' 를 받지 않으므로 지수 표기도 쓰지 않습니다.
     static std::string formatTrimmed(float v, int maxDecimals) {
+        if (maxDecimals <= 0) {
+            const long long iv = std::llround((double)v);
+            return std::to_string(iv);
+        }
         const float a = std::abs(v);
         const int intDigits = a >= 1.f ? (int)std::floor(std::log10(a)) + 1 : 1;
         const int dec = std::clamp(7 - intDigits, 1, std::max(1, maxDecimals));
@@ -333,12 +337,16 @@ private:
     int displayDecimals() const {
         switch (unit_) {
             case ENumberUnit::Offset:
-            case ENumberUnit::Size:  return 5;
-            case ENumberUnit::Angle: return 2;
-            default:                 return 4;
+            case ENumberUnit::Size:    return 5;
+            case ENumberUnit::Angle:   return 2;
+            case ENumberUnit::Integer: return 0;
+            default:                   return 4;
         }
     }
-    int editDecimals() const { return unit_ == ENumberUnit::Angle ? 3 : 6; }
+    int editDecimals() const {
+        if (unit_ == ENumberUnit::Integer) return 0;
+        return unit_ == ENumberUnit::Angle ? 3 : 6;
+    }
 
     // 값이 실제로 바뀌었는가. 예전 기준은 절대값 1e-6 이라, 아주 작은 값(1µm 아래)의 편집은
     // undo 기록이 남지 않았습니다. 이제 값 크기에 비례한 기준으로 봅니다(float 잡음은 걸러냄).

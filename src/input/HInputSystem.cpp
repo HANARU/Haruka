@@ -240,8 +240,29 @@ void HInputSystem::unsubscribe(Handle h) {
 }
 
 bool HInputSystem::held(const std::string& action) const {
+    if (inSimTick_) {
+        auto it = actionLatches_.find(action);
+        return it != actionLatches_.end() && it->second.tickHeld();
+    }
     auto it = actionHeld_.find(action);
     return it != actionHeld_.end() && it->second;
+}
+
+bool HInputSystem::pressed(const std::string& action) const {
+    auto it = actionLatches_.find(action);
+    if (it == actionLatches_.end()) return false;
+    return inSimTick_ ? it->second.tickPressed() : it->second.framePressed;
+}
+
+bool HInputSystem::released(const std::string& action) const {
+    auto it = actionLatches_.find(action);
+    if (it == actionLatches_.end()) return false;
+    return inSimTick_ ? it->second.tickReleased() : it->second.frameReleased;
+}
+
+void HInputSystem::endSimTick() {
+    inSimTick_ = false;
+    for (auto& [_, latch] : actionLatches_) latch.consumeTick();
 }
 
 // ── 장치 값 ─────────────────────────────────────────────────────────────────────
@@ -498,6 +519,7 @@ void HInputSystem::update(float dt, const std::function<bool(int)>& isKeyDown, b
         const bool pressed  = h && !prev;
         const bool released = !h && prev;
         prev = h;
+        actionLatches_[action].recordFrame(h);
         if (!pressed && !released && !h) continue;
 
         for (auto& [handle, lst] : listeners_) {

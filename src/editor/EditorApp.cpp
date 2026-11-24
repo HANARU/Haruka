@@ -182,6 +182,7 @@ void EditorApp::initPanels() {
         &ui_, &ctx_,
         [this] { return playState_ == EPlayState::Playing; },
         [this] { return playState_ == EPlayState::Paused;  },
+        [this] { return playTooltipText(); },
         // 툴바 단추도 명령 레지스트리의 같은 명령을 부릅니다(H2b, 모양은 그대로).
         [this] { commands_.execute("Play.Play"); },
         [this] { commands_.execute("Play.Pause"); },
@@ -256,6 +257,8 @@ void EditorApp::initPanels() {
             { EFocusTarget::TextField,     [this] { return detailsPanel_.stringWidget(); },   [this] { return detailsPanel_.stringField(); } },
             // H3b: 디테일 속성 검색 칸 · 에셋 고르기 팝업 검색 칸 · 색 선택기 16진수 칸(모두 디테일이 있는 창).
             { EFocusTarget::TextField,     [this] { return detailsPanel_.searchWidget(); },   [this] { return detailsPanel_.searchField(); } },
+            { EFocusTarget::TextField,     [this] { return projectSettingsPanel_.searchWidget(); }, [this] { return projectSettingsPanel_.searchField(); } },
+            { EFocusTarget::TextField,     [this] { return projectSettingsPanel_.stringWidget(); }, [this] { return projectSettingsPanel_.stringField(); } },
             { EFocusTarget::TextField,     [this] { return assetPicker_.searchWidget(); },    [this] { return assetPicker_.field(); } },
             { EFocusTarget::TextField,     [this] { return colorPicker_.hexWidget(); },       [this] { return colorPicker_.hexField(); } },
         }
@@ -313,6 +316,26 @@ void EditorApp::initPanels() {
     detailsDeps.confirmColorPicker = [this] { colorPicker_.confirm(); };
     detailsDeps.releaseSearchQuiet = [this] { textInput_.releaseQuietWidget(detailsPanel_.searchWidget()); };
     detailsPanel_.init(std::move(detailsDeps));
+
+    ProjectSettingsPanel::Deps psDeps;
+    psDeps.ui       = &ui_;
+    psDeps.openMenu = [this](glm::vec2 at, std::vector<EditorMenuEntry> entries) {
+        contextMenu_.open(at, std::move(entries), "ProjectSettings");
+    };
+    psDeps.openCombo = [this](const std::shared_ptr<HWidget>& anchor, std::vector<EditorMenuEntry> entries, int highlight) {
+        contextMenu_.openBelow(anchor, std::move(entries), "ProjectSettings", highlight);
+    };
+    psDeps.isComboOpen = [this](const HWidget* w) { return contextMenu_.isOpenBelow(w); };
+    psDeps.closeMenu   = [this] { if (contextMenu_.isOpen() && contextMenu_.panel() == "ProjectSettings") contextMenu_.close(); };
+    psDeps.focusText   = [this](const std::shared_ptr<HWidget>& w) { textInput_.setFocusWidget(w); };
+    psDeps.openAssetPicker = [this](const std::shared_ptr<HWidget>& anchor, const std::string& type, const std::string& current,
+                                    std::function<void(const std::string&)> pick) {
+        assetPicker_.toggle(anchor, type, current, std::move(pick));
+    };
+    psDeps.browseToAsset         = [this](const std::string& path) { browseToAsset(path); };
+    psDeps.onLiveSettingsChanged = [this] { liveProjectDirty_ = true; };
+    psDeps.xrStatus              = [this]() -> const hxrmode::XrRunStatus& { return xrStatus_; };
+    projectSettingsPanel_.init(std::move(psDeps));
     assetPicker_.init({ &ui_,
                         [this]() -> const hcb::ContentIndex* { return &contentPanel_.index(); },
                         [this](const std::shared_ptr<HWidget>& w) { textInput_.setFocusWidget(w); },
@@ -690,6 +713,7 @@ void EditorApp::buildWidgetTree() {
         ->content(HNew(VR)
             ->addSlot(tabBar,         VR::ESizeRule::Fixed, s(EditorTheme::tabH))
             ->addSlot(bottomHost_,    VR::ESizeRule::Fill));
+    auto projectSettingsPanel = projectSettingsPanel_.build();
 
     // ── Register panels (신규 위젯도 add 한 줄이면 도킹 대상 — 확장성 seam) ──────
     // 제목은 지금 문화권 글(글자 체계 T3). 패널 id 는 레이아웃 파일 · 코드가 쓰는 이름이라 번역하지 않습니다.
@@ -697,6 +721,7 @@ void EditorApp::buildWidgetTree() {
     panelReg_.add("Viewport", HTEXT("Editor.Panels", "Viewport", "Viewport").toString(),      viewportPanel, /*closable=*/false, /*floatable=*/false);
     panelReg_.add("Details",  HTEXT("Editor.Panels", "Details", "Details").toString(),       detailsPanel);
     panelReg_.add("Bottom",   HTEXT("Editor.Panels", "ContentDrawer", "Content Drawer").toString(), bottomPanel);
+    panelReg_.add("ProjectSettings", HTEXT("Editor.Panels", "ProjectSettings", "Project Settings").toString(), projectSettingsPanel);
 
     // 저장된 레이아웃을 복원하고(등록된 패널 기준으로 검증), 없거나 손상되면 기본 배치로 폴백합니다.
     // uiScale 변경 등으로 buildWidgetTree 가 재호출될 때는 dockRoot_ 가 이미 살아 있으므로 재로딩하지
@@ -785,7 +810,11 @@ void EditorApp::buildMenus() {
         else if (id == "Viewport") cmd.icon = "monitor";
         else if (id == "Details")  cmd.icon = "sliders-horizontal";
         else if (id == "Bottom")   cmd.icon = "folder";
-        cmd.execute   = [this, id] { dock_.showPanel(id); };
+        else if (id == "ProjectSettings") cmd.icon = "sliders-horizontal";
+        cmd.execute   = [this, id] {
+            if (id == "ProjectSettings") openProjectSettings();
+            else                         dock_.showPanel(id);
+        };
         cmd.isChecked = [this, id] { return dock_.contains(id); };
         commands_.add(std::move(cmd));
         panels.push_back(E::cmd("Window.Panel." + id));
@@ -812,6 +841,7 @@ void EditorApp::buildMenus() {
         E::heading(HTEXT("Editor.Menu", "Section.Configuration", "Configuration").toString()),
         E::submenu(HTEXT("Editor.Menu", "View.Language", "Language").toString(), std::move(languages), "globe", "Language"),
         E::cmd("Edit.AudioOutput"),
+        E::cmd("Edit.ProjectSettings"),
     }, 0.f, "Edit" });
     defs.push_back({ HTEXT("Editor.Menu", "Actor", "Actor").toString(), {
         E::heading(HTEXT("Editor.Menu", "Section.Create", "Create").toString()),
@@ -854,17 +884,23 @@ void EditorApp::registerCommands() {
     commands_.bind("Edit.Duplicate", [this] { duplicateSelection(); }, hasRoots);
     commands_.bind("Edit.Delete",    [this] { deleteSelection(); },
                    [this, hasRoots] { return ctx_.world && ctx_.assets && hasRoots(); });
-    // 디테일 속성 행 오른쪽 메뉴(H3a). 메뉴를 연 행에 대해 동작하고, 되돌릴 것이 없으면(기본값과 같음 · 기본값 없음) 흐립니다.
-    commands_.bind("Details.ResetToDefault", [this] { detailsPanel_.resetMenuRow(); detailsPanel_.markDirty(); },
-                   [this] { return detailsPanel_.menuRowCanReset(); });
-    commands_.bind("Details.CopyValue", [this] { if (ctx_.window) ctx_.window->setClipboardText(detailsPanel_.menuRowText()); },
-                   [this] { return ctx_.window && detailsPanel_.menuRowCanCopy(); });
-    commands_.bind("Details.PasteValue", [this] {
+    // 디테일 · 프로젝트 설정 속성 행 오른쪽 메뉴(H3a · PS1b).
+    auto psMenu = [this] { return contextMenu_.panel() == "ProjectSettings"; };
+    commands_.bind("Details.ResetToDefault", [this, psMenu] {
+        if (psMenu()) { projectSettingsPanel_.resetMenuRow(); projectSettingsPanel_.markDirty(); }
+        else          { detailsPanel_.resetMenuRow(); detailsPanel_.markDirty(); }
+    }, [this, psMenu] { return psMenu() ? projectSettingsPanel_.menuRowCanReset() : detailsPanel_.menuRowCanReset(); });
+    commands_.bind("Details.CopyValue", [this, psMenu] {
+        if (!ctx_.window) return;
+        ctx_.window->setClipboardText(psMenu() ? projectSettingsPanel_.menuRowText() : detailsPanel_.menuRowText());
+    }, [this, psMenu] { return ctx_.window && (psMenu() ? projectSettingsPanel_.menuRowCanCopy() : detailsPanel_.menuRowCanCopy()); });
+    commands_.bind("Details.PasteValue", [this, psMenu] {
         const std::string text = ctx_.window ? ctx_.window->getClipboardText() : std::string();
-        if (!detailsPanel_.pasteMenuRow(text))
-            HLOG(LogEditor, Warning) << "Paste: the clipboard text does not fit this property";
-        detailsPanel_.markDirty();
-    }, [this] { return ctx_.window && detailsPanel_.menuRowCanPaste(); });
+        const bool ok = psMenu() ? projectSettingsPanel_.pasteMenuRow(text) : detailsPanel_.pasteMenuRow(text);
+        if (!ok) HLOG(LogEditor, Warning) << "Paste: the clipboard text does not fit this property";
+        if (psMenu()) projectSettingsPanel_.markDirty();
+        else          detailsPanel_.markDirty();
+    }, [this, psMenu] { return ctx_.window && (psMenu() ? projectSettingsPanel_.menuRowCanPaste() : detailsPanel_.menuRowCanPaste()); });
     commands_.bind("View.FrameSelected", [this] { frameSelection(); },
                    [this] { return viewport_.cameraActor() && viewport_.camera() && !ctx_.selection.empty(); });
     // 기즈모 크기(카메라 거리 배율)를 작게 0.08 · 보통 0.12 · 크게 0.18 로 돌립니다. 툴바는 폭 사다리 때문에 칩을 더하지 않습니다.
@@ -875,6 +911,7 @@ void EditorApp::registerCommands() {
         HLOG(LogEditor, Log) << "Gizmo size " << (n < 0.10f ? "small" : (n < 0.15f ? "medium" : "large"));
     });
     commands_.bind("Edit.AudioOutput", [this] { openAudioOutputDialog(); });
+    commands_.bind("Edit.ProjectSettings", [this] { openProjectSettings(); });
     commands_.bind("Actor.AddEmpty", [this] {
         selectOnly(ctx_.world->spawnActor(outlinerPanel_.nextActorName()));
         recordActorCreation({ ctx_.selected });
@@ -901,6 +938,7 @@ void EditorApp::registerCommands() {
     });
     // 툴바(모양 그대로, 같은 명령 id).
     commands_.bind("Play.Play",  [this] { beginPlay(); });
+    commands_.bind("Play.PlayDesktop", [this] { beginPlayDesktop(); }, [this] { return playState_ == EPlayState::Editor; });
     commands_.bind("Play.Pause", [this] { pausePlay(); }, [this] { return playState_ != EPlayState::Editor; });
     commands_.bind("Play.Stop",  [this] { stopPlay(); },  [this] { return playState_ != EPlayState::Editor; });
     commands_.bind("Content.Refresh", [this] { contentPanel_.scanAll(); rebuildBottomPanel(); });
@@ -956,6 +994,37 @@ void EditorApp::registerCommands() {
 }
 
 // ── Play state ─────────────────────────────────────────────────────────────────
+void EditorApp::beginPlayDesktop() {
+    if (playState_ != EPlayState::Editor) return;
+    playDesktopRequested_ = true;
+    beginPlay();
+}
+
+std::string EditorApp::playTooltipText() const {
+    if (playState_ == EPlayState::Paused)
+        return HTEXT("Editor.Toolbar", "ResumeTip", "Resume Play").toString();
+    if (playState_ == EPlayState::Playing)
+        return HTEXT("Editor.Toolbar", "Play", "Play").toString();
+    switch (hxrmode::statusKind(xrStatus_)) {
+        case hxrmode::StatusKind::HeadsetFound:
+            return HTEXT("Editor.Toolbar", "PlayTip.HeadsetFound", "Play (VR: headset ready)").toString();
+        case hxrmode::StatusKind::NoHeadset:
+            return HTEXT("Editor.Toolbar", "PlayTip.NoHeadset", "Play (Desktop: no headset found)").toString();
+        case hxrmode::StatusKind::Ready:
+            return HTEXT("Editor.Toolbar", "PlayTip.Ready", "Play (VR: ready)").toString();
+        case hxrmode::StatusKind::Unavailable:
+            return HTEXT("Editor.Toolbar", "PlayTip.Unavailable", "Play (Desktop: VR unavailable)").toString();
+        case hxrmode::StatusKind::DisabledByNoXr:
+            return HTEXT("Editor.Toolbar", "PlayTip.DisabledByNoXr", "Play (Desktop: --no-xr)").toString();
+        case hxrmode::StatusKind::AutomatedRun:
+            return HTEXT("Editor.Toolbar", "PlayTip.AutomatedRun", "Play (Desktop: automated run)").toString();
+        case hxrmode::StatusKind::NotPrepared:
+        default:
+            return HTEXT("Editor.Toolbar", "PlayTip.NotPrepared",
+                         "Play (Desktop: VR not prepared - enable in Project Settings)").toString();
+    }
+}
+
 void EditorApp::beginPlay() {
     if (playState_ == EPlayState::Playing) return;
     if (playState_ == EPlayState::Editor) {
@@ -985,6 +1054,7 @@ void EditorApp::pausePlay() {
 void EditorApp::stopPlay() {
     if (playState_ == EPlayState::Editor) return;
     playState_ = EPlayState::Editor;
+    playDesktopRequested_ = false;
     viewport_.setViewPreferred(true);
     deserializeWorld(worldSnapshot_);
     worldSnapshot_.clear();
@@ -1031,6 +1101,7 @@ void EditorApp::flushChromeRebuilds() {
     menus_.flushRebuilds();
     toolbar_.flushRebuild();
     detailsPanel_.flushRebuild();
+    projectSettingsPanel_.flushRebuild();
     logPanel_.flushRebuilds(bottomTab_ == 1);
     componentPicker_.flushRebuild();
     assetPicker_.flushRebuild();
@@ -1434,9 +1505,17 @@ void EditorApp::handleInputEvents(float mouseX, float mouseY,
             mainPopups.dismissOutside(p, 1);
             dismissPopupsExcept(0);
             if (!modal_ && bottomTab_ == 0 && bottomInMain) contentPanel_.openContextMenuAt(p);
+            if (!modal_ && toolbar_.playButtonContains(p)) {
+                contextMenu_.open(p, {
+                    EditorMenuEntry::cmd("Play.Play"),
+                    EditorMenuEntry::cmd("Play.PlayDesktop"),
+                }, "Toolbar");
+            }
             // 디테일 속성 행(H3a): Reset to Default · Copy · Paste.
             if (!modal_ && dock_.panelActiveInMain("Details") && hwininput::panelGetsPointer(dock_.floatOfPanel("Details"), 0))
                 detailsPanel_.openRowMenuAt(p);
+            if (!modal_ && dock_.panelActiveInMain("ProjectSettings") && hwininput::panelGetsPointer(dock_.floatOfPanel("ProjectSettings"), 0))
+                projectSettingsPanel_.openRowMenuAt(p);
         }
         prevRightDown_ = rightDown;
         // Esc: closeOnEscape 팝업(오른쪽 메뉴)을 닫습니다. Add Component 는 검색 칸의 Esc(onCancel)가 닫습니다.

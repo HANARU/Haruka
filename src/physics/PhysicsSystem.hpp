@@ -27,9 +27,11 @@ public:
     // 2026-11-18 S3). 컴포넌트(리그 이동 · 텔레포트)는 owner->world() 로 찾습니다. 예전 정적 포인터 current() 자리입니다.
     void setWorld(World* w);
 
-    // 물리 스텝 주기(Hz). 기본 60 입니다. XR 세션 동안 엔진이 헤드셋 주사율에 맞춥니다(Godot 의 XR
-    // 문서 권고). 스텝이 화면보다 느리면 어떤 프레임은 스텝이 없어 움직이는 물체가 떨려 보입니다.
+    // 물리 스텝 주기(Hz). 기본 60 입니다. 단독 테스트 경로(directStep_ == false)에서 씁니다.
     void  setStepRate(float hz);
+    // 엔진 고정 시뮬레이션 틱 모드(D2a): 켜면 자체 누적기 없이 tick(dt) 1회당 정확히 1스텝(dt)만 실행합니다.
+    void  setDirectStep(bool on) { directStep_ = on; }
+    bool  directStep() const     { return directStep_; }
 
     // 바디 상한(DEF-10, Config/engine.ini 의 physics.maxBodies). startup 전에 부릅니다(모듈 등록 전).
     void     setMaxBodies(uint32_t n) { maxBodies_ = n; }
@@ -176,9 +178,10 @@ private:
 
     uint32_t maxBodies_ = 4096;   // setMaxBodies(DEF-10)
 
-    // Fixed-step accumulator
+    // Fixed-step accumulator (단독 사용 경로용; 엔진 모드에서는 directStep_ == true)
     float accumulator_ = 0.f;
     float step_        = 1.f / 60.f;
+    bool  directStep_  = false;
 
     // 힘 · 토크(DEF-19). frame 은 이번 틱에 받은 합, budget 은 아직 넣지 못한 충격량(합 × 틱 시간)입니다.
     struct ForceTorque { glm::vec3 force{ 0.f }, torque{ 0.f }; };

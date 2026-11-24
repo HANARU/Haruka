@@ -70,7 +70,7 @@ static bool redirectStdioIfHeadless() {
 // 실행 옵션(core/EngineOptions.cpp). 모르는 인자는 경고만 남기고 무시합니다(로그 체계가 준비된 뒤에 알립니다).
 //   --xr             OpenXR 런타임(Quest Link 등)을 준비합니다. 에디터는 Play 동안, 게임은 시작부터 헤드셋에 그립니다.
 //                    런타임이나 헤드셋이 없으면 데스크톱으로 계속합니다.
-//   --no-xr          VR 없이 실행합니다(게임 실행 파일의 프로젝트 설정 xr.startInVr 을 덮어씀).
+//   --no-xr          VR 없이 실행합니다(프로젝트 설정 xr.startInVr 을 덮어씀).
 //   --emulate-stereo 헤드셋 없이 두 눈 경로를 확인합니다(뷰포트를 좌우로 나눠 두 눈을 그림).
 //   --loose          실행 폴더의 낱개 파일을 묶음 파일(game.hpak)보다 먼저 찾습니다(게임 실행 파일).
 // 창 없는 실행과 자동 확인(2026-10-31, 배포 실행 파일에도 남김):

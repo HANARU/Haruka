@@ -32,6 +32,8 @@
 #include "../src/editor/EditorFloatWindows.hpp"
 #include "../src/editor/EditorWindowInput.hpp"
 #include "../src/editor/EditorContextMenu.hpp"
+#include "../src/editor/PropertyRowKit.hpp"
+#include "../src/editor/SettingsPanel.hpp"
 #include "../src/ui/slate/widgets/SColorPicker.hpp"
 #include "../src/platform/IWindow.hpp"
 #include <fstream>
@@ -4652,6 +4654,112 @@ static void testTextUnderline() {
     check(texts == 1 && rects == 1, "STextBlock::underline(0) 이 Text 와 밑줄 Rect 를 함께 그림");
 }
 
+void testPropertyRowKit() {
+    std::printf("\n-- PS1a: PropertyRowKit(독립 PropDesc · 지역 변수 바인딩) --\n");
+    EditorUiKit ui;
+    auto cols = std::make_shared<HPropertyColumns>();
+    auto list = HNew(SVerticalBox);
+    int changed = 0;
+
+    PropertyRowKit kit;
+    PropertyRowKit::Deps d;
+    d.ui        = &ui;
+    d.columns   = cols;
+    d.onChanged = [&] { ++changed; };
+    kit.init(std::move(d));
+    kit.beginRebuild(list);
+
+    float localF = 20.f;
+    bool  localB = false;
+    int   localE = 1;
+    std::string localS = "/Game/A.hscene";
+
+    PropDesc pf = makePropFloat("Shadow Distance", PropColor::Neutral, 0.5f,
+                                [&] { return localF; }, [&](float v) { localF = v; }).withDefault(20.f);
+    PropDesc pb = makePropToggle("AO", [&] { return localB; }, [&](bool v) { localB = v; }).withDefault(1.0);
+    PropDesc pe = makePropEnum("Height Mode", { "tracked", "fixed" },
+                               [&] { return localE; }, [&](int v) { localE = v; }).withDefault(0.0);
+    PropDesc ps = makePropString("Company", [&] { return localS; }, [&](const std::string& v) { localS = v; }).withDefault("");
+
+    kit.buildRow(pf);
+    kit.buildRow(pb);
+    kit.buildRow(pe);
+    kit.buildRow(ps);
+
+    HSlateContext ctx;
+    ctx.setRootWidget(list);
+    ctx.arrange({ 400.f, 200.f });
+
+    check(kit.rowHits().size() == 4, "PropertyRowKit builds 4 rows without Actor/Component");
+    const auto* rf = kit.findRow("Shadow Distance");
+    const auto* rb = kit.findRow("AO");
+    const auto* re = kit.findRow("Height Mode");
+    const auto* rs = kit.findRow("Company");
+    check(rf && rb && re && rs, "findRow locates all 4 standalone rows");
+    if (rf && rb && re && rs) {
+        check(!rf->canReset(), "Float at default cannot reset");
+        check(rb->canReset(),  "Toggle differing from default can reset");
+        check(re->canReset(),  "Enum differing from default can reset");
+        check(rs->canReset(),  "String differing from default can reset");
+        check(rf->paste("42.5") && std::fabs(localF - 42.5f) < 1e-3f && rf->canReset(),
+              "paste updates local float and enables reset");
+        rf->reset();
+        check(std::fabs(localF - 20.f) < 1e-3f && !rf->canReset(),
+              "reset restores local float to default");
+        rb->reset();
+        check(localB == true && !rb->canReset(), "reset restores local bool to default");
+        re->reset();
+        check(localE == 0 && !re->canReset(), "reset restores local enum to default");
+        check(rs->copyText() == "/Game/A.hscene", "copyText reads local string");
+        rs->reset();
+        check(localS.empty() && !rs->canReset(), "reset restores local string to default");
+        check(changed >= 5, "onChanged callback fired on edits and resets");
+    }
+
+    // PS1b: SettingsPanel 분류 검색 거르기
+    std::vector<SettingsCategoryDef> cats(3);
+    cats[0].id = "Description"; cats[1].id = "Rendering"; cats[2].id = "XR";
+    std::vector<SettingsRowItem> items(3);
+    items[0].categoryId = "Description"; items[0].englishName = "Project Name"; items[0].prop.label = "프로젝트 이름";
+    items[1].categoryId = "Rendering";   items[1].englishName = "Shadow Distance"; items[1].prop.label = "그림자 거리";
+    items[2].categoryId = "XR";          items[2].englishName = "VR Auto-Detect"; items[2].prop.label = "VR 자동 감지";
+    check(hsettings_ui::filterCategories(cats, items, "").size() == 3, "empty search shows all categories");
+    auto eng = hsettings_ui::filterCategories(cats, items, "shadow");
+    check(eng.size() == 1 && eng[0] == "Rendering", "English search filters categories");
+    auto kor = hsettings_ui::filterCategories(cats, items, "그림자");
+    check(kor.size() == 1 && kor[0] == "Rendering", "Korean search filters categories");
+    check(hsettings_ui::filterCategories(cats, items, "zzzzzz").empty(), "no-match search returns empty categories");
+
+    // PS1b 보완: 정수 표시(ENumberUnit::Integer) 및 숫자 칸 끌기 시 onDragEnd 1회 호출
+    check(SNumberField::formatTrimmed(2.f, 0) == "2" && SNumberField::formatTrimmed(0.f, 0) == "0" &&
+          SNumberField::formatTrimmed(32.f, 0) == "32",
+          "ENumberUnit::Integer formats integers without .0");
+    {
+        float val = 20.f;
+        int dragEnds = 0;
+        auto nf = HNew(SNumberField)
+            ->get([&] { return val; })
+            ->set([&](float v) { val = v; })
+            ->step(1.f)->unit(ENumberUnit::Scalar)
+            ->onDragEnd([&] { ++dragEnds; });
+        HSlateContext nctx;
+        nctx.setRootWidget(nf);
+        nctx.arrange({ 120.f, 22.f });
+        HPointerEvent ev;
+        ev.button = 0; ev.down = true; ev.position = { 20.f, 11.f };
+        nctx.handlePointerEvent(ev);
+        ev.button = -1; ev.down = true;
+        for (int dx : { 10, 20, 30 }) {
+            ev.position = { 20.f + (float)dx, 11.f };
+            nctx.handlePointerEvent(ev);
+        }
+        check(dragEnds == 0 && val != 20.f, "dragging SNumberField updates memory with 0 disk writes");
+        ev.button = 0; ev.down = false; ev.position = { 50.f, 11.f };
+        nctx.handlePointerEvent(ev);
+        check(dragEnds == 1, "releasing SNumberField drag triggers onDragEnd exactly once");
+    }
+}
+
 int main() {
     std::printf("== HSlate input ==\n");
     testStrayReleaseDoesNotEdit();
@@ -4725,6 +4833,7 @@ int main() {
     testComboMenu();
     testColorPickerWidgets();
     testTextUnderline();
+    testPropertyRowKit();
 
     if (g_failed) {
         std::printf("\n%d check(s) FAILED\n", g_failed);

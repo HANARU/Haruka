@@ -395,5 +395,6 @@ std::vector<Actor*> SceneSerializer::readScene(const std::string& source, World&
             && spawned[i] && spawned[p] && spawned[p] != spawned[i])
             spawned[i]->attachTo(spawned[p]);
     }
+    for (Actor* a : spawned) if (a) a->resetInterpolation();
     return spawned;
 }

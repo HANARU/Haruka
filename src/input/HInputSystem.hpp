@@ -1,5 +1,6 @@
 #pragma once
 #include "HXrInput.hpp"
+#include "../core/SimTick.hpp"
 #include "../platform/Gamepad.hpp"
 #include <cstdint>
 #include <functional>
@@ -139,8 +140,17 @@ public:
     // ── 구독 (컴포넌트 레이어) ─────────────────────────────────────────────────
     Handle subscribe  (const std::string& action, EInputEvent when, Fn fn);
     void   unsubscribe(Handle h);
-    // 액션이 지금 눌려 있는지(마지막 update 기준). 잡기처럼 누르는 동안 이어지는 동작에 씁니다.
-    bool   held(const std::string& action) const;
+    // 액션이 지금 눌려 있는지(마지막 update 기준; 시뮬레이션 틱 중에는 래치된 틱 눌림 반영).
+    bool   held    (const std::string& action) const;
+    // 눌린 순간 / 뗀 순간(프레임 문맥에서는 이번 프레임 기준, 시뮬레이션 틱 문맥에서는 다음 틱이 1회 소비).
+    bool   pressed (const std::string& action) const;
+    bool   released(const std::string& action) const;
+
+    // ── 시뮬레이션 틱 입력 문맥(D2a) ───────────────────────────────────────────
+    // 엔진 시뮬레이션 틱 루프가 각 틱 앞뒤로 부릅니다. 0틱 프레임의 눌림/뗌이 사라지거나 2틱 프레임에서
+    // 두 번 처리되지 않게 ActionEdgeLatch 를 틱마다 한 번 소비합니다.
+    void   beginSimTick() { inSimTick_ = true; }
+    void   endSimTick();
 
     // ── VR 입력 (XR 모듈이 매 프레임 넣음) ────────────────────────────────────
     void                 setXrInput(const HXrInputState& s) { xr_ = s; }
@@ -230,6 +240,8 @@ private:
     mutable std::vector<Layer>       layers_;
     mutable bool                     layersDirty_ = true;
     std::unordered_map<std::string, bool> actionHeld_;   // 이름별 마지막 update 의 눌림
+    std::unordered_map<std::string, hsim::ActionEdgeLatch> actionLatches_;   // 틱 입력 눌림 · 뗌 보존(D2a)
+    bool                             inSimTick_ = false;
     std::unordered_set<int>          keysDown_;          // 마지막 update 에서 눌린(바인딩된) 키
     std::unordered_map<Handle, Listener> listeners_;
     Lines                            projectLines_;

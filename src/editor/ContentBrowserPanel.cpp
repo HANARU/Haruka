@@ -80,12 +80,7 @@ const char* kindFallback(AssetKind k) {
 
 } // namespace
 
-// 디테일 에셋 칸 · 고르기 팝업(H3b)도 같은 종류 아이콘 · 색을 씁니다.
-namespace hcbui {
-glm::vec4   kindColor(hcb::AssetKind k)    { return ::kindColor(k); }
-const char* kindIcon(hcb::AssetKind k)     { return ::kindIcon(k); }
-const char* kindFallback(hcb::AssetKind k) { return ::kindFallback(k); }
-} // namespace hcbui
+// 디테일 에셋 칸 · 고르기 팝업(H3b)용 hcbui::kind* 는 ContentBrowserPanel.hpp 에 인라인 정의되어 있습니다.
 
 namespace {
 

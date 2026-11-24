@@ -64,8 +64,9 @@ IEngineFrontend::Policy EditorApp::policy() const {
     p.projectResolveError  = projectResolveError_;
     p.engineResolveError   = engineResolveError_;
     p.startupLogs          = startupLogs_;
-    // 나머지는 기본값입니다: VR 은 --xr 로만 준비하고 Play 동안만 헤드셋에 그림(2026-10-15), 헤드셋을 벗어도 Play 는 계속,
-    // 런타임이 세션을 끝내면 데스크톱으로 계속하고 다음 Play 에서 다시 엶, 설정 · 로그는 실행 폴더.
+    p.startXrFromProject   = true;   // xr.startInVr("VR auto-detect") 로 시작 때 OpenXR 준비, Play 동안만 세션(2026-11-24 V1)
+    // 나머지는 기본값입니다: 헤드셋을 벗어도 Play 는 계속, 런타임이 세션을 끝내면 데스크톱으로 계속하고 다음 Play 에서
+    // 다시 엶, 설정 · 로그는 실행 폴더.
     return p;
 }
 

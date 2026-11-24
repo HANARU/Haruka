@@ -9,6 +9,7 @@
 #include "StaticMeshComponent.hpp"
 #include "SubtitlePanel.hpp"
 #include "UIPanelComponent.hpp"
+#include "XrComponents.hpp"
 #include "../scene/Actor.hpp"
 #include "../core/Accessibility.hpp"
 #include "../scene/World.hpp"
@@ -16,11 +17,37 @@
 #include <algorithm>
 #include <cmath>
 
-void extractRenderScene(const World& world, RenderSceneInput& out) {
+namespace {
+// 표시 단계(D2b) 월드 행렬. 쥔 물체(!velocityTracking)는 손 표시 자세 + 쥔 상대 자세로 그립니다.
+glm::mat4 displayWorldMatrixOf(const Actor& a, float alpha) {
+    if (const auto* gr = a.getComponent<GrabbableComponent>(); gr && gr->holder() && !gr->holder()->isVelocityTracking()) {
+        const Actor* hand = nullptr;
+        glm::vec3 offPos; glm::quat offRot;
+        if (gr->holder()->heldDisplayOffset(hand, offPos, offRot) && hand) {
+            const glm::vec3 hp = hand->displayWorldPosition(alpha);
+            const glm::quat hr = hand->displayWorldRotation(alpha);
+            const glm::vec3 pos = hp + hr * offPos;
+            const glm::quat rot = glm::normalize(hr * offRot);
+            return glm::translate(glm::mat4(1.f), pos) * glm::mat4_cast(rot) * glm::scale(glm::mat4(1.f), a.worldScale());
+        }
+    }
+    if (const Actor* p = a.getParent()) {
+        // 조상 중에 쥔 물체가 있으면 그 표시 자세를 따라감
+        for (const Actor* cur = p; cur; cur = cur->getParent()) {
+            if (const auto* gr = cur->getComponent<GrabbableComponent>(); gr && gr->holder() && !gr->holder()->isVelocityTracking()) {
+                return displayWorldMatrixOf(*p, alpha) * a.transform().matrix();
+            }
+        }
+    }
+    return a.displayWorldMatrix(alpha);
+}
+} // namespace
+
+void extractRenderScene(const World& world, RenderSceneInput& out, float displayAlpha) {
     if (const CameraComponent* cam = CameraComponent::activeIn(world)) {
         out.camera.present    = true;
-        out.camera.view       = cam->viewMatrix();
-        out.camera.xrOrigin   = cam->xrOrigin();
+        out.camera.view       = cam->viewMatrix(displayAlpha);
+        out.camera.xrOrigin   = cam->xrOrigin(displayAlpha);
         out.camera.fovY       = cam->fovY;
         out.camera.zNear      = cam->zNear;
         out.camera.zFar       = cam->zFar;
@@ -44,7 +71,7 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
             case LightType::Spot:  rl.kind = RenderLightKind::Spot;        break;
             default:               rl.kind = RenderLightKind::Directional; break;
         }
-        rl.position            = lc->owner ? glm::vec3(lc->owner->worldMatrix()[3]) : glm::vec3(0.f);
+        rl.position            = lc->owner ? glm::vec3(displayWorldMatrixOf(*lc->owner, displayAlpha)[3]) : glm::vec3(0.f);
         rl.emitDirection       = lc->emitDirection();
         rl.color               = lc->effectiveColor() * lc->intensity;
         rl.radius              = std::max(lc->attenuationRadius, LightComponent::kMinAttenuationRadius);
@@ -64,7 +91,7 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         out.fog.maxOpacity    = fog->maxOpacity;
         out.fog.density       = fog->density;
         out.fog.heightFalloff = fog->heightFalloff;
-        out.fog.height        = fog->owner->worldPosition().y;
+        out.fog.height        = displayWorldMatrixOf(*fog->owner, displayAlpha)[3].y;
         out.fog.startDistance = fog->startDistance;
         break;
     }
@@ -85,7 +112,7 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         rm.lodScreenSizeCount = mc->lodScreenSizes.size();
         rm.autoLod            = mc->autoLod;
         rm.material           = mc->material;
-        rm.model              = mc->owner ? mc->owner->worldMatrix() : glm::mat4(1.f);
+        rm.model              = mc->owner ? displayWorldMatrixOf(*mc->owner, displayAlpha) : glm::mat4(1.f);
         rm.transparent        = mc->transparent;
         rm.lightChannels      = mc->lightChannels;
         out.meshes.push_back(rm);
@@ -103,7 +130,7 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         rs.actorId       = a->id;
         rs.debugName     = a->name.c_str();
         rs.material      = sk->material;
-        rs.model         = a->worldMatrix();
+        rs.model         = displayWorldMatrixOf(*a, displayAlpha);
         rs.transparent   = sk->transparent;
         rs.lightChannels = sk->lightChannels;
         out.skinned.push_back(rs);
@@ -115,7 +142,7 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         if (c->isEnabled()) {
             out.capture.present    = true;
             out.capture.actorId    = c->owner->id;
-            out.capture.pos        = c->owner->worldPosition();
+            out.capture.pos        = glm::vec3(displayWorldMatrixOf(*c->owner, displayAlpha)[3]);
             out.capture.radius     = c->radius;
             out.capture.intensity  = c->intensity;
             out.capture.version    = c->version();
@@ -132,7 +159,7 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
         RenderUIPanel rp;
         rp.key         = reinterpret_cast<uint64_t>(pc);
         rp.source      = pc;
-        rp.model       = a->worldMatrix() * glm::scale(glm::mat4(1.f), glm::vec3(pc->width, pc->height, 1.f));
+        rp.model       = displayWorldMatrixOf(*a, displayAlpha) * glm::scale(glm::mat4(1.f), glm::vec3(pc->width, pc->height, 1.f));
         rp.textureSize = pc->textureSize();
         rp.twoSided    = pc->twoSided;
         rp.brightness  = std::clamp(pc->brightness, UIPanelComponent::kMinBrightness, 1.f);
@@ -165,7 +192,7 @@ void extractRenderScene(const World& world, RenderSceneInput& out) {
     for (const DecalComponent* dc : world.componentsOf<DecalComponent>()) {
         const Actor* a = dc->owner;
         if (!a->activeInHierarchy() || !dc->isEnabled() || !(dc->opacity > 0.f)) continue;
-        const glm::mat4 box = a->worldMatrix() * glm::scale(glm::mat4(1.f), dc->size);
+        const glm::mat4 box = displayWorldMatrixOf(*a, displayAlpha) * glm::scale(glm::mat4(1.f), dc->size);
         if (std::fabs(glm::determinant(glm::mat3(box))) < 1e-12f) continue;   // 크기 0 인 축
         RenderDecal d;
         d.worldToBox = glm::inverse(box);

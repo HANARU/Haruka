@@ -1,4 +1,5 @@
 #pragma once
+#include "XrRunMode.hpp"
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,6 +12,7 @@ class AssetManager;
 class IWindow;
 class AudioSystem;
 struct EngineOptions;
+struct ProjectSettings;
 
 // ── 엔진 앞단 (2026-10-19, 런타임 분리 DEF-12) ─────────────────────────────────────
 // 엔진(Engine)은 에디터를 직접 알지 않고 이 인터페이스로만 묻습니다. 실행 파일마다 앞단 하나를 링크합니다.
@@ -33,7 +35,7 @@ public:
         std::string projectResolveError;
         std::string engineResolveError;
         std::vector<std::string> startupLogs;
-        // 명령줄에 --xr · --no-xr 이 없을 때 프로젝트 설정 xr.startInVr 로 VR 시작을 정함(게임). 거짓이면 --xr 로만 켬(에디터).
+        // 명령줄에 --xr · --no-xr 이 없을 때 프로젝트 설정 xr.startInVr 로 VR 자동 감지를 켬(에디터 · 게임).
         bool startXrFromProject = false;
         // 헤드셋이 입력 초점을 잃으면(벗음 · 시스템 메뉴) 게임을 일시정지(Meta VRC.Quest.Functional.2).
         bool pauseOnXrFocusLoss = false;
@@ -87,6 +89,14 @@ public:
     virtual std::string windowTitle() const = 0;   // 창 제목 앞부분(엔진이 FPS 를 덧붙임)
     // XR 세션 동안 소리를 헤드셋 장치로 바꿀지(2026-10-16).
     virtual bool headsetAudioInVr() const = 0;
+    // 이번 Play 에서 XR 세션을 열지(에디터 Play on Desktop 이면 false).
+    virtual bool wantsXrForPlay() const { return true; }
+    // 엔진이 시작할 때 · 헤드셋 연결 상태가 바뀔 때 앞단에 알립니다.
+    virtual void setXrRunStatus(const hxrmode::XrRunStatus& /*status*/) {}
+    // 시작 때 읽은 프로젝트 설정을 앞단에 알립니다(다시 시작 띠 기준값 · 바로 적용 초기값).
+    virtual void setInitialProjectSettings(const ProjectSettings& /*ps*/) {}
+    // 실행 중 바뀐 바로 적용 항목(render.ao · render.bloom · xr.height · xr.eyeHeight)을 엔진에 넘깁니다.
+    virtual bool consumeLiveProjectSettings(ProjectSettings& /*out*/) { return false; }
 
     // ── 월드 UI 패널 포인터 (3D UI 구간 5) ─────────────────────────────────────
     // Play 중 마우스 (mx, my) 를 지나는 게임 화면의 월드 광선. 마우스가 게임 화면 밖이거나 게임 카메라가 보이지 않으면

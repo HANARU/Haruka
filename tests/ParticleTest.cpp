@@ -226,7 +226,7 @@ void testWorldTime() {
         return ps;
     };
     auto run = [](World& w, int frames) {
-        for (int i = 0; i < frames; ++i) { w.tick(kDt); w.tickPostPhysics(); }
+        for (int i = 0; i < frames; ++i) { w.tick(kDt); w.tickPostPhysics(); w.tickDisplay(kDt); }
     };
     World w1;
     ParticleSystemComponent* p1 = make(w1);
@@ -382,7 +382,7 @@ void testDecals() {
     auto* ps = em->addComponent<ParticleSystemComponent>();
     ps->desc.blend = vfx::Blend::Alpha;
     ps->desc.rate = 60.f;
-    for (int i = 0; i < 10; ++i) { w.tick(kDt); w.tickPostPhysics(); }
+    for (int i = 0; i < 10; ++i) { w.tick(kDt); w.tickPostPhysics(); w.tickDisplay(kDt); }
     RenderSceneInput in;
     extractRenderScene(w, in);
     check(in.decals.size() == 1, "켜진 데칼만 추출(불투명도 0 은 뺌)");
@@ -418,7 +418,7 @@ std::vector<vfx::ParticleInstance> probeRun(const std::string& text, size_t& emi
     World w;
     AssetManager assets(nullptr);
     SceneSerializer::readScene(text, w, assets);
-    for (int i = 0; i < 90; ++i) { w.tick(kDt); w.tickPostPhysics(); }
+    for (int i = 0; i < 90; ++i) { w.tick(kDt); w.tickPostPhysics(); w.tickDisplay(kDt); }
     RenderSceneInput in;
     extractRenderScene(w, in);
     emitters = in.particles.size();

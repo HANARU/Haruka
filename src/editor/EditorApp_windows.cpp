@@ -334,6 +334,8 @@ void EditorApp::handleFloatInput(EditorWindow& w) {
     // 디테일 속성 행(H3a): 이 창에 디테일이 있으면 그 행의 오른쪽 메뉴를 이 창 팝업 층에 엽니다.
     if (f.rightPressed && !modal_ && hwininput::panelGetsPointer(dock_.floatOfPanel("Details"), id) && dock_.panelActiveIn(id, "Details"))
         detailsPanel_.openRowMenuAt(m);
+    if (f.rightPressed && !modal_ && hwininput::panelGetsPointer(dock_.floatOfPanel("ProjectSettings"), id) && dock_.panelActiveIn(id, "ProjectSettings"))
+        projectSettingsPanel_.openRowMenuAt(m);
     // Esc: 이 창 키(GLFW 키 상태는 창마다)로 closeOnEscape 팝업을 닫습니다.
     if (!popups.empty() && w.window->isKeyDown(HInput::KEY_ESCAPE)) popups.dismissOnEscape();
     // 콘텐츠 브라우저: 누름 · 끌기 시작(놓기는 메인 처리가 메인 뷰포트 좌표로).

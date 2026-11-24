@@ -123,6 +123,8 @@ glm::vec3 teleportRigPosition(const glm::vec3& rigPos, const glm::vec3& headPos,
 // (트리거를 당기면 노래지고 그립을 쥐면 길어짐. 예전에 에디터가 그리던 표시를 손 액터로 옮김).
 class TrackedPoseComponent : public Component {
 public:
+    TrackedPoseComponent() { tickGroup = ETickGroup::Display; }
+
     ETrackedSource source    = ETrackedSource::Head;
     bool           showDebug = true;
 
@@ -256,6 +258,16 @@ public:
     static constexpr float kMaxTrackSpeed   = 20.f;   // m/s. 막혔다 풀릴 때 튀지 않게
     static constexpr float kMaxTrackAngular = 40.f;   // rad/s
     void release(const glm::vec3& linearVelocity, const glm::vec3& angularVelocity, bool throwIt);
+
+    bool isVelocityTracking() const { return tracking_; }
+    // 표시 단계(D2b): 손 액터와 쥔 상대 자세를 돌려줍니다(인라인, RenderExtract 가 손 표시 자세로 합성).
+    bool heldDisplayOffset(const Actor*& outHand, glm::vec3& outOffPos, glm::quat& outOffRot) const {
+        if (!owner) return false;
+        outHand   = owner;
+        outOffPos = offPos_;
+        outOffRot = offRot_;
+        return true;
+    }
 
     void tick(float dt) override;
     void onDisable() override;

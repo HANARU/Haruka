@@ -84,6 +84,10 @@ void EditorApp::setOptions(const EngineOptions& options) {
     uiImeCompose_       = options.uiImeCompose;
     uiOutlinerCollapse_ = options.uiOutlinerCollapse;
     uiPlay_             = options.uiPlay;
+    uiProjectSettings_  = options.uiProjectSettings;
+    uiPsCategory_       = options.uiPsCategory;
+    uiPsSearch_         = options.uiPsSearch;
+    uiPsSet_            = options.uiPsSet;
     uiLayout_           = options.uiLayout;
     viewportDumpPath_   = options.viewportDumpPath;
     uiGizmoMode_        = options.uiGizmoMode;
@@ -409,6 +413,17 @@ void EditorApp::applyDumpState() {
         }
     }
     if (uiPlay_ && playState_ == EPlayState::Editor) beginPlay();
+    if (uiProjectSettings_) {
+        openProjectSettings();
+        for (const std::string& kv : uiPsSet_) {
+            const size_t eq = kv.find('=');
+            if (eq != std::string::npos)
+                projectSettingsPanel_.applyTestWrite(kv.substr(0, eq), kv.substr(eq + 1));
+        }
+        if (!uiPsCategory_.empty()) projectSettingsPanel_.selectCategory(uiPsCategory_);
+        if (!uiPsSearch_.empty())   projectSettingsPanel_.setSearch(uiPsSearch_);
+        projectSettingsPanel_.rebuild();
+    }
     if (!uiGizmoMode_.empty()) {
         if      (uiGizmoMode_ == "select") gizmoMode_ = 0;
         else if (uiGizmoMode_ == "move")   gizmoMode_ = 1;

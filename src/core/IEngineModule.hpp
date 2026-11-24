@@ -12,5 +12,7 @@ public:
     // 플레이 중 일시정지와 재개입니다. 일시정지 동안 Engine 은 tick 을 부르지 않지만,
     // 자기 스레드에서 도는 일(오디오 믹싱 등)은 모듈이 여기서 직접 멈춰야 합니다.
     virtual void        onPauseChanged(bool /*paused*/) {}
+    // 표시 단계(프레임마다 1회)에 도는 모듈인지. 거짓(기본)이면 시뮬레이션 틱마다 tickAll 에서 돕니다(D2b).
+    virtual bool        isDisplayModule() const { return false; }
     virtual const char* name() const   = 0;
 };

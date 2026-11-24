@@ -8,10 +8,11 @@ class Actor;
 class ComponentFieldWriter;
 struct ComponentLoadContext;
 
-// 틱 단계(2026-11-20, Docs/Gameplay_Tools.md D5). PrePhysics 는 월드 틱(물리 앞), PostPhysics 는 모듈(물리 · 소리) 틱 뒤의
-// World::tickPostPhysics 에서 틱합니다(UE TG_PrePhysics · TG_PostPhysics, Unity Update · LateUpdate 와 같은 자리). 물리 결과를 따라가는
-// 컴포넌트(카메라 · 붙여 따라가기)가 PostPhysics 를 씁니다.
-enum class ETickGroup : uint8_t { PrePhysics, PostPhysics };
+// 틱 단계(2026-11-20, Docs/Gameplay_Tools.md D5; 2026-11-24 D2a).
+//   PrePhysics  : 시뮬레이션 틱(물리 앞)
+//   PostPhysics : 시뮬레이션 틱(물리 뒤, World::tickPostPhysics)
+//   Display     : 표시 단계(프레임마다 1회, 프레임 dt, World::tickDisplay) — 애니메이션 · 파티클 · 손/머리 추적
+enum class ETickGroup : uint8_t { PrePhysics, PostPhysics, Display };
 
 class Component {
 public:

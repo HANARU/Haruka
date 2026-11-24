@@ -170,6 +170,30 @@ public:
     void setWorldPosition(const glm::vec3& p);
     void setWorldRotation(const glm::quat& q);
 
+    // ── 표시 보간 · 명시적 순간 이동 (D2b) ────────────────────────────────────
+    // 순간 이동은 이전 틱 자세와의 보간을 건너뛰고 즉시 새 자리에서 그립니다.
+    // 텔레포트, 스냅 회전, 씬 로드/스폰에서 호출합니다.
+    void resetInterpolation() {
+        prevTickTransform_ = transform_;
+        prevTickLocalVer_  = localVersion_;
+        interpValid_       = false;
+    }
+    void teleportLocal   (const glm::vec3& p, const glm::quat& r) {
+        transform_.setPosition(p);
+        transform_.setRotation(r);
+        ++localVersion_;
+        resetInterpolation();
+    }
+    void teleportTo      (const glm::vec3& worldPos, const glm::quat& worldRot);
+    void teleportPosition(const glm::vec3& worldPos);
+    void teleportRotation(const glm::quat& worldRot);
+
+    // 시뮬레이션 틱 경계에서 이전 틱 자세와의 보간 비율 alpha [0, 1] 로 섞은 표시용 월드 자세입니다.
+    // Transform(시뮬레이션 상태)은 건드리지 않으며, 정적 액터는 캐시된 worldMatrix() 를 그대로 씁니다.
+    glm::mat4 displayWorldMatrix  (float alpha) const;
+    glm::vec3 displayWorldPosition(float alpha) const;
+    glm::quat displayWorldRotation(float alpha) const;
+
     // ── Scene hierarchy ───────────────────────────────────────────────────────
     // attachTo/detach 는 조상 체인을 바꾸므로, 재부착 뒤 이 서브트리의 컴포넌트
     // 실효 활성(onEnable/onDisable)을 다시 맞춥니다.
@@ -216,6 +240,20 @@ private:
     mutable uint32_t    cacheLocalVer_    = 0;
     mutable uint64_t    cacheParentStamp_ = 0;
     mutable const Actor* cacheParent_     = nullptr;
+    // 표시 보간용 직전 시뮬레이션 틱 스냅샷(D2b)
+    Transform           prevTickTransform_;
+    uint32_t            prevTickLocalVer_ = 0;
+    bool                interpValid_      = false;
+    bool                anyInterp() const {
+        return (interpValid_ && localVersion_ != prevTickLocalVer_) || (parent_ && parent_->anyInterp());
+    }
+    void                snapshotTickPose() {
+        if (localVersion_ != prevTickLocalVer_) {
+            prevTickTransform_ = transform_;
+            prevTickLocalVer_  = localVersion_;
+        }
+        interpValid_ = true;
+    }
     Actor*              parent_   = nullptr;
     std::vector<Actor*> children_;
     bool                activeSelf_ = true;

@@ -43,27 +43,27 @@ msgctxt "Editor.ColorPicker,Title"
 msgid "Color Picker: {0}"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:260
+#: src/editor/EditorCommandRegistry.hpp:262
 msgctxt "Editor.Command,Console.Focus"
 msgid "Console"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:247
+#: src/editor/EditorCommandRegistry.hpp:249
 msgctxt "Editor.Command,Content.Refresh"
 msgid "Refresh Content"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:250
+#: src/editor/EditorCommandRegistry.hpp:252
 msgctxt "Editor.Command,Details.CopyValue"
 msgid "Copy"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:251
+#: src/editor/EditorCommandRegistry.hpp:253
 msgctxt "Editor.Command,Details.PasteValue"
 msgid "Paste"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:249
+#: src/editor/EditorCommandRegistry.hpp:251
 msgctxt "Editor.Command,Details.ResetToDefault"
 msgid "Reset to Default"
 msgstr ""
@@ -73,132 +73,137 @@ msgctxt "Editor.Command,Outliner.FocusSearch"
 msgid "Search Outliner"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:245
+#: src/editor/EditorCommandRegistry.hpp:247
 msgctxt "Editor.Command,Play.Pause"
 msgid "Pause"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:244
+#: src/editor/EditorCommandRegistry.hpp:245
 msgctxt "Editor.Command,Play.Play"
 msgid "Play"
 msgstr ""
 
 #: src/editor/EditorCommandRegistry.hpp:246
+msgctxt "Editor.Command,Play.PlayDesktop"
+msgid "Play on Desktop"
+msgstr ""
+
+#: src/editor/EditorCommandRegistry.hpp:248
 msgctxt "Editor.Command,Play.Stop"
 msgid "Stop"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:660
+#: src/editor/ContentBrowserPanel.cpp:655
 msgctxt "Editor.Content,ClearFilters"
 msgid "Clear"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:486
+#: src/editor/ContentBrowserPanel.cpp:481
 msgctxt "Editor.Content,Drag.CannotDrop"
 msgid "cannot drop here"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:795
+#: src/editor/ContentBrowserPanel.cpp:790
 msgctxt "Editor.Content,EmptyFolder"
 msgid "This folder is empty"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:639
+#: src/editor/ContentBrowserPanel.cpp:634
 msgctxt "Editor.Content,Filters"
 msgid "Filters"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:565
+#: src/editor/ContentBrowserPanel.cpp:560
 msgctxt "Editor.Content,Menu.AssetActions"
 msgid "References, Rename, Move..."
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:559
+#: src/editor/ContentBrowserPanel.cpp:554
 msgctxt "Editor.Content,Menu.Assign"
 msgid "Assign to Selected Actor"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:542
+#: src/editor/ContentBrowserPanel.cpp:537
 msgctxt "Editor.Content,Menu.CopyPath"
 msgid "Copy Path"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:539
+#: src/editor/ContentBrowserPanel.cpp:534
 msgctxt "Editor.Content,Menu.OpenFolder"
 msgid "Open"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:549
+#: src/editor/ContentBrowserPanel.cpp:544
 msgctxt "Editor.Content,Menu.OpenScene"
 msgid "Open Scene"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:553
+#: src/editor/ContentBrowserPanel.cpp:548
 msgctxt "Editor.Content,Menu.Place"
 msgid "Place in Scene"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:557
+#: src/editor/ContentBrowserPanel.cpp:552
 msgctxt "Editor.Content,Menu.Play"
 msgid "Play"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:535
+#: src/editor/ContentBrowserPanel.cpp:530
 msgctxt "Editor.Content,Menu.Refresh"
 msgid "Refresh"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:534
+#: src/editor/ContentBrowserPanel.cpp:529
 msgctxt "Editor.Content,Menu.ShowFolder"
 msgid "Show in Explorer"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:541
+#: src/editor/ContentBrowserPanel.cpp:536
 msgctxt "Editor.Content,Menu.ShowInExplorer"
 msgid "Show in Explorer"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:794
+#: src/editor/ContentBrowserPanel.cpp:789
 msgctxt "Editor.Content,NoMatch"
 msgid "No matching assets"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:152
+#: src/editor/ContentBrowserPanel.cpp:147
 msgctxt "Editor.Content,SearchHint"
 msgid "Search assets..."
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:598
+#: src/editor/ContentBrowserPanel.cpp:593
 msgctxt "Editor.Content,Tip.Back"
 msgid "Back"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:599
+#: src/editor/ContentBrowserPanel.cpp:594
 msgctxt "Editor.Content,Tip.Forward"
 msgid "Forward"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:630
+#: src/editor/ContentBrowserPanel.cpp:625
 msgctxt "Editor.Content,Tip.List"
 msgid "List view"
 msgstr ""
 
-#: src/editor/ContentBrowserPanel.cpp:629
+#: src/editor/ContentBrowserPanel.cpp:624
 msgctxt "Editor.Content,Tip.Tiles"
 msgid "Tile view"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:266
+#: src/editor/DetailsPanel.cpp:56
 msgctxt "Editor.Details,ActorRef.Missing"
 msgid "(missing)"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:265
+#: src/editor/DetailsPanel.cpp:55
 msgctxt "Editor.Details,ActorRef.None"
 msgid "None"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:993
+#: src/editor/DetailsPanel.cpp:670
 msgctxt "Editor.Details,AddComponent"
 msgid "Add Component"
 msgstr ""
@@ -243,117 +248,117 @@ msgctxt "Editor.Details,ComponentTitle"
 msgid "Component"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1144
+#: src/editor/DetailsPanel.cpp:821
 msgctxt "Editor.Details,Prefab.Apply"
 msgid "Apply"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1065
+#: src/editor/DetailsPanel.cpp:742
 msgctxt "Editor.Details,Prefab.Missing"
 msgid "Missing: {0}"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1069
+#: src/editor/DetailsPanel.cpp:746
 msgctxt "Editor.Details,Prefab.MissingKept"
 msgid "Overrides are kept as written"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1074
+#: src/editor/DetailsPanel.cpp:751
 msgctxt "Editor.Details,Prefab.Overrides"
 msgid "{0} overridden value(s)"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1142
+#: src/editor/DetailsPanel.cpp:819
 msgctxt "Editor.Details,Prefab.Revert"
 msgid "Revert"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1073
+#: src/editor/DetailsPanel.cpp:750
 msgctxt "Editor.Details,Prefab.RootOverrides"
 msgid "Root, {0} overridden value(s)"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1066
+#: src/editor/DetailsPanel.cpp:743
 msgctxt "Editor.Details,Prefab.Source"
 msgid "Instance of {0}"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:1146
+#: src/editor/DetailsPanel.cpp:823
 msgctxt "Editor.Details,Prefab.Unlink"
 msgid "Unlink"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:91
+#: src/editor/DetailsPanel.cpp:73
 msgctxt "Editor.Details,SearchHint"
 msgid "Search Details"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:585
+#: src/editor/DetailsPanel.cpp:302
 msgctxt "Editor.Details,SearchNoMatch"
 msgid "No properties match '{0}'"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:372
+#: src/editor/PropertyRowKit.cpp:283
 msgctxt "Editor.Details,Tip.AssetBrowse"
 msgid "Browse to Asset in Content Browser"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:376
+#: src/editor/PropertyRowKit.cpp:287
 msgctxt "Editor.Details,Tip.AssetClear"
 msgid "Clear"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:357
+#: src/editor/PropertyRowKit.cpp:268
 msgctxt "Editor.Details,Tip.AssetPick"
 msgid "Choose an asset"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:223
+#: src/editor/PropertyRowKit.cpp:140
 msgctxt "Editor.Details,Tip.ColorPicker"
 msgid "Open the color picker"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:739
+#: src/editor/DetailsPanel.cpp:456
 msgctxt "Editor.Details,Tip.Enable"
 msgid "Enable/Disable Component"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:743
+#: src/editor/DetailsPanel.cpp:460
 msgctxt "Editor.Details,Tip.Remove"
 msgid "Remove Component"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:165
+#: src/editor/PropertyRowKit.cpp:82
 msgctxt "Editor.Details,Tip.ResetToDefault"
 msgid "Reset to Default"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:697
+#: src/editor/DetailsPanel.cpp:414
 msgctxt "Editor.Details,Transform.Location"
 msgid "Location"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:699
+#: src/editor/DetailsPanel.cpp:416
 msgctxt "Editor.Details,Transform.Rotation"
 msgid "Rotation"
 msgstr ""
 
-#: src/editor/DetailsPanel.cpp:701
+#: src/editor/DetailsPanel.cpp:418
 msgctxt "Editor.Details,Transform.Scale"
 msgid "Scale"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:541
+#: src/editor/EditorApp_scene.cpp:560
 msgctxt "Editor.Dialog,Asset.NoRefs"
 msgid "{0}\nNo scene, prefab or setting refers to it."
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:543
+#: src/editor/EditorApp_scene.cpp:562
 msgctxt "Editor.Dialog,Asset.Refs"
 msgid "{0}\nReferenced by {1} file(s). Pick a scene to open it."
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:539
+#: src/editor/EditorApp_scene.cpp:558
 msgctxt "Editor.Dialog,Asset.Title"
 msgid "Asset"
 msgstr ""
@@ -373,7 +378,7 @@ msgctxt "Editor.Dialog,Button.Close"
 msgid "Close"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:311
+#: src/editor/EditorApp_scene.cpp:330
 msgctxt "Editor.Dialog,Button.DontSave"
 msgid "Don't Save"
 msgstr ""
@@ -383,7 +388,7 @@ msgctxt "Editor.Dialog,Button.Keep"
 msgid "Keep Current"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:568
+#: src/editor/EditorApp_scene.cpp:587
 msgctxt "Editor.Dialog,Button.Move"
 msgid "Move"
 msgstr ""
@@ -393,47 +398,47 @@ msgctxt "Editor.Dialog,Button.Reload"
 msgid "Reload"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:552
+#: src/editor/EditorApp_scene.cpp:571
 msgctxt "Editor.Dialog,Button.RenameMove"
 msgid "Rename / Move..."
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:289
+#: src/editor/EditorApp_scene.cpp:308
 msgctxt "Editor.Dialog,Button.Replace"
 msgid "Replace"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:270
+#: src/editor/EditorApp_scene.cpp:289
 msgctxt "Editor.Dialog,Button.Save"
 msgid "Save"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:563
+#: src/editor/EditorApp_scene.cpp:582
 msgctxt "Editor.Dialog,Move.Message"
 msgid "New path under /Game for {0}\n(folders are created; files that refer to it are updated;\nthe Undo history is cleared):"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:562
+#: src/editor/EditorApp_scene.cpp:581
 msgctxt "Editor.Dialog,Move.Title"
 msgid "Rename / Move Asset"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:590
+#: src/editor/EditorApp_scene.cpp:609
 msgctxt "Editor.Dialog,MoveFailed.Title"
 msgid "Cannot Move"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:216
+#: src/editor/EditorApp_scene.cpp:235
 msgctxt "Editor.Dialog,Open.List"
 msgid "Scenes in assets/scenes:"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:214
+#: src/editor/EditorApp_scene.cpp:233
 msgctxt "Editor.Dialog,Open.None"
 msgid "No .hscene files in assets/scenes."
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:211
+#: src/editor/EditorApp_scene.cpp:230
 msgctxt "Editor.Dialog,Open.Title"
 msgid "Open Scene"
 msgstr ""
@@ -441,6 +446,41 @@ msgstr ""
 #: src/editor/EditorApp_edit.cpp:196
 msgctxt "Editor.Dialog,PickActor.Message"
 msgid "Choose the actor this field points to.\nNow: {0}"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:399
+msgctxt "Editor.Dialog,ProjectSettings.Status.AutomatedRun"
+msgid "This run: skipped for automated run"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:396
+msgctxt "Editor.Dialog,ProjectSettings.Status.DisabledByNoXr"
+msgid "This run: disabled by --no-xr"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:384
+msgctxt "Editor.Dialog,ProjectSettings.Status.HeadsetFound"
+msgid "This run: VR ready (headset detected; Play opens VR)"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:387
+msgctxt "Editor.Dialog,ProjectSettings.Status.NoHeadset"
+msgid "This run: VR ready (no headset detected; Play opens desktop)"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:403
+msgctxt "Editor.Dialog,ProjectSettings.Status.NotPrepared"
+msgid "This run: VR not prepared"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:390
+msgctxt "Editor.Dialog,ProjectSettings.Status.Ready"
+msgid "This run: VR ready"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:393
+msgctxt "Editor.Dialog,ProjectSettings.Status.Unavailable"
+msgid "This run: VR unavailable (desktop only)"
 msgstr ""
 
 #: src/editor/EditorApp_reload.cpp:162
@@ -453,37 +493,37 @@ msgctxt "Editor.Dialog,Reload.Title"
 msgid "Scene Changed on Disk"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:288
+#: src/editor/EditorApp_scene.cpp:307
 msgctxt "Editor.Dialog,Replace.Message"
 msgid "{0} already exists.\nReplace it?"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:287
+#: src/editor/EditorApp_scene.cpp:306
 msgctxt "Editor.Dialog,Replace.Title"
 msgid "Replace Scene"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:267
+#: src/editor/EditorApp_scene.cpp:286
 msgctxt "Editor.Dialog,SaveAs.Message"
 msgid "Name under /Game/scenes (letters in any language, digits, space, - _ and / for folders):"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:266
+#: src/editor/EditorApp_scene.cpp:285
 msgctxt "Editor.Dialog,SaveAs.Title"
 msgid "Save Scene As"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:305
+#: src/editor/EditorApp_scene.cpp:324
 msgctxt "Editor.Dialog,Unsaved.Message"
 msgid "Save changes to {0}\nbefore {1}?"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:303
+#: src/editor/EditorApp_scene.cpp:322
 msgctxt "Editor.Dialog,Unsaved.Title"
 msgid "Unsaved Changes"
 msgstr ""
 
-#: src/editor/EditorApp_scene.cpp:335
+#: src/editor/EditorApp_scene.cpp:354
 msgctxt "Editor.Dialog,Verb.Closing"
 msgid "closing"
 msgstr ""
@@ -493,7 +533,7 @@ msgctxt "Editor.Dialog,Verb.NewScene"
 msgid "creating a new scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:338
+#: src/editor/EditorApp.cpp:361
 msgctxt "Editor.Dialog,Verb.OpenAnother"
 msgid "opening another scene"
 msgstr ""
@@ -503,27 +543,27 @@ msgctxt "Editor.Dock,Tip.CloseTab"
 msgid "Close Tab"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:816
+#: src/editor/EditorApp.cpp:846
 msgctxt "Editor.Menu,Actor"
 msgid "Actor"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:239
+#: src/editor/EditorCommandRegistry.hpp:240
 msgctxt "Editor.Menu,Actor.AddEmpty"
 msgid "Add Empty"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:240
+#: src/editor/EditorCommandRegistry.hpp:241
 msgctxt "Editor.Menu,Actor.AttachToPrev"
 msgid "Attach To Prev Selected"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:241
+#: src/editor/EditorCommandRegistry.hpp:242
 msgctxt "Editor.Menu,Actor.Detach"
 msgid "Detach Selected"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:803
+#: src/editor/EditorApp.cpp:832
 msgctxt "Editor.Menu,Edit"
 msgid "Edit"
 msgstr ""
@@ -563,6 +603,11 @@ msgctxt "Editor.Menu,Edit.Paste"
 msgid "Paste"
 msgstr ""
 
+#: src/editor/EditorCommandRegistry.hpp:239
+msgctxt "Editor.Menu,Edit.ProjectSettings"
+msgid "Project Settings..."
+msgstr ""
+
 #: src/editor/EditorCommandRegistry.hpp:227
 msgctxt "Editor.Menu,Edit.Redo"
 msgid "Redo"
@@ -573,7 +618,7 @@ msgctxt "Editor.Menu,Edit.Undo"
 msgid "Undo"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:795
+#: src/editor/EditorApp.cpp:824
 msgctxt "Editor.Menu,File"
 msgid "File"
 msgstr ""
@@ -598,72 +643,72 @@ msgctxt "Editor.Menu,File.SaveSceneAs"
 msgid "Save Scene As..."
 msgstr ""
 
-#: src/editor/EditorApp.cpp:812
+#: src/editor/EditorApp.cpp:841
 msgctxt "Editor.Menu,Section.Configuration"
 msgid "Configuration"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:817
+#: src/editor/EditorApp.cpp:847
 msgctxt "Editor.Menu,Section.Create"
 msgid "Create"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:807
+#: src/editor/EditorApp.cpp:836
 msgctxt "Editor.Menu,Section.Edit"
 msgid "Edit"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:819
+#: src/editor/EditorApp.cpp:849
 msgctxt "Editor.Menu,Section.Hierarchy"
 msgid "Hierarchy"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:804
+#: src/editor/EditorApp.cpp:833
 msgctxt "Editor.Menu,Section.History"
 msgid "History"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:832
+#: src/editor/EditorApp.cpp:862
 msgctxt "Editor.Menu,Section.Layout"
 msgid "Layout"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:829
+#: src/editor/EditorApp.cpp:859
 msgctxt "Editor.Menu,Section.Panels"
 msgid "Panels"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:799
+#: src/editor/EditorApp.cpp:828
 msgctxt "Editor.Menu,Section.Save"
 msgid "Save"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:796
+#: src/editor/EditorApp.cpp:825
 msgctxt "Editor.Menu,Section.Scene"
 msgid "Scene"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:824
+#: src/editor/EditorApp.cpp:854
 msgctxt "Editor.Menu,Section.Viewport"
 msgid "Viewport"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:823
+#: src/editor/EditorApp.cpp:853
 msgctxt "Editor.Menu,View"
 msgid "View"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:813
+#: src/editor/EditorApp.cpp:842
 msgctxt "Editor.Menu,View.Language"
 msgid "Language"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:242
+#: src/editor/EditorCommandRegistry.hpp:243
 msgctxt "Editor.Menu,View.ResetLayout"
 msgid "Reset Layout"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:834
+#: src/editor/EditorApp.cpp:864
 msgctxt "Editor.Menu,Window"
 msgid "Window"
 msgstr ""
@@ -703,12 +748,12 @@ msgctxt "Editor.OutputLog,ConsoleHint"
 msgid "Enter console command (help)"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:258
+#: src/editor/EditorCommandRegistry.hpp:260
 msgctxt "Editor.OutputLog,Opt.ClearOnPlay"
 msgid "Clear on Play"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:256
+#: src/editor/EditorCommandRegistry.hpp:258
 msgctxt "Editor.OutputLog,Opt.Collapse"
 msgid "Collapse"
 msgstr ""
@@ -723,17 +768,17 @@ msgctxt "Editor.OutputLog,Opt.HeadingPlay"
 msgid "Play"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:255
+#: src/editor/EditorCommandRegistry.hpp:257
 msgctxt "Editor.OutputLog,Opt.TimeClock"
 msgid "Local Time"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:253
+#: src/editor/EditorCommandRegistry.hpp:255
 msgctxt "Editor.OutputLog,Opt.TimeNone"
 msgid "None"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:254
+#: src/editor/EditorCommandRegistry.hpp:256
 msgctxt "Editor.OutputLog,Opt.TimeUptime"
 msgid "Seconds Since Launch"
 msgstr ""
@@ -743,7 +788,7 @@ msgctxt "Editor.OutputLog,Opt.Timestamp"
 msgid "Timestamp"
 msgstr ""
 
-#: src/editor/EditorCommandRegistry.hpp:257
+#: src/editor/EditorCommandRegistry.hpp:259
 msgctxt "Editor.OutputLog,Opt.WordWrap"
 msgid "Word Wrap"
 msgstr ""
@@ -758,92 +803,482 @@ msgctxt "Editor.OutputLog,Tip.DisplayOptions"
 msgid "Display Options"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:682
+#: src/editor/EditorApp.cpp:705
 msgctxt "Editor.Panels,ContentBrowser"
 msgid "Content Browser"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:699
+#: src/editor/EditorApp.cpp:723
 msgctxt "Editor.Panels,ContentDrawer"
 msgid "Content Drawer"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:698
+#: src/editor/EditorApp.cpp:722
 msgctxt "Editor.Panels,Details"
 msgid "Details"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:684
+#: src/editor/EditorApp.cpp:707
 msgctxt "Editor.Panels,GpuStats"
 msgid "GPU Stats"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:696
+#: src/editor/EditorApp.cpp:720
 msgctxt "Editor.Panels,Outliner"
 msgid "Outliner"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:683
+#: src/editor/EditorApp.cpp:706
 msgctxt "Editor.Panels,OutputLog"
 msgid "Output Log"
 msgstr ""
 
-#: src/editor/EditorApp.cpp:697
+#: src/editor/EditorApp.cpp:724
+msgctxt "Editor.Panels,ProjectSettings"
+msgid "Project Settings"
+msgstr ""
+
+#: src/editor/EditorApp.cpp:721
 msgctxt "Editor.Panels,Viewport"
 msgid "Viewport"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:78
+#: src/editor/ProjectSettingsPanel.cpp:366
+msgctxt "Editor.ProjectSettings,AndroidOverride"
+msgid "Android"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:47
+msgctxt "Editor.ProjectSettings,Cat.Description"
+msgid "Description"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:85
+msgctxt "Editor.ProjectSettings,Cat.General"
+msgid "General"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:51
+msgctxt "Editor.ProjectSettings,Cat.MapsModes"
+msgid "Maps & Modes"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:55
+msgctxt "Editor.ProjectSettings,Cat.Packaging"
+msgid "Packaging"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:89
+msgctxt "Editor.ProjectSettings,Cat.Rendering"
+msgid "Rendering"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:93
+msgctxt "Editor.ProjectSettings,Cat.XR"
+msgid "XR"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:48
+msgctxt "Editor.ProjectSettings,CatDesc.Description"
+msgid "Project identity, company, and package ID."
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:86
+msgctxt "Editor.ProjectSettings,CatDesc.General"
+msgid "Simulation tick rate and general runtime settings."
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:52
+msgctxt "Editor.ProjectSettings,CatDesc.MapsModes"
+msgid "Default scenes loaded on startup."
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:56
+msgctxt "Editor.ProjectSettings,CatDesc.Packaging"
+msgid "Asset packing list (edit Config/game.pack.txt directly)."
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:90
+msgctxt "Editor.ProjectSettings,CatDesc.Rendering"
+msgid "Post-processing, shadows, atmosphere, and per-platform overrides."
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:94
+msgctxt "Editor.ProjectSettings,CatDesc.XR"
+msgid "OpenXR auto-detection and tracking origin."
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:42
+msgctxt "Editor.ProjectSettings,Group.Engine"
+msgid "Engine"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:43
+msgctxt "Editor.ProjectSettings,Group.Platforms"
+msgid "Platforms"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:41
+msgctxt "Editor.ProjectSettings,Group.Project"
+msgid "Project"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:67
+msgctxt "Editor.ProjectSettings,Help.company"
+msgid "Company or publisher name used for packaging and write folders."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:85
+msgctxt "Editor.ProjectSettings,Help.engine"
+msgid "Engine association constraint (e.g. haruka>=0.1)."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:79
+msgctxt "Editor.ProjectSettings,Help.engineVersion"
+msgid "Minimum Haruka engine version recorded in the project file."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:61
+msgctxt "Editor.ProjectSettings,Help.name"
+msgid "Display name of the project."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:73
+msgctxt "Editor.ProjectSettings,Help.packageId"
+msgid "Android application package ID (e.g. com.company.app). Reconfigure Android after changing."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:109
+msgctxt "Editor.ProjectSettings,Help.render.ao"
+msgid "Enable screen-space ambient occlusion pass (can be overridden per platform)."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:115
+msgctxt "Editor.ProjectSettings,Help.render.bloom"
+msgid "Enable bloom post-process pass around bright areas."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:133
+msgctxt "Editor.ProjectSettings,Help.render.contactShadows"
+msgid "Enable screen-space contact shadows on lights."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:121
+msgctxt "Editor.ProjectSettings,Help.render.csmCascades"
+msgid "Number of directional shadow map cascades (1 or 2)."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:139
+msgctxt "Editor.ProjectSettings,Help.render.heightFog"
+msgid "Enable exponential height fog rendering."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:151
+msgctxt "Editor.ProjectSettings,Help.render.lightLimit"
+msgid "Max lights uploaded per frame (0 uses Config/engine.ini render.maxLights; max 4096)."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:145
+msgctxt "Editor.ProjectSettings,Help.render.reflectionCapture"
+msgid "Use ReflectionCapture components (off uses sky IBL only)."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:127
+msgctxt "Editor.ProjectSettings,Help.render.shadowDistance"
+msgid "Directional shadow coverage radius around the camera in meters (8 to 200)."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:101
+msgctxt "Editor.ProjectSettings,Help.sim.tickRate"
+msgid "Fixed simulation step frequency in Hz (72 to 240)."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:93
+msgctxt "Editor.ProjectSettings,Help.startScene"
+msgid "Logical /Game/ path to the .hscene opened on startup."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:171
+msgctxt "Editor.ProjectSettings,Help.xr.eyeHeight"
+msgid "Floor-to-eye height in meters when XR Height Mode is fixed (0.5 to 2.5)."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:165
+msgctxt "Editor.ProjectSettings,Help.xr.height"
+msgid "tracked uses headset floor space; fixed places eyes at XR Eye Height."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:159
+msgctxt "Editor.ProjectSettings,Help.xr.startInVr"
+msgid "Prepare OpenXR on startup; Play opens VR when a headset is found."
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:66
+msgctxt "Editor.ProjectSettings,Key.company"
+msgid "Company Name"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:84
+msgctxt "Editor.ProjectSettings,Key.engine"
+msgid "Engine Association"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:78
+msgctxt "Editor.ProjectSettings,Key.engineVersion"
+msgid "Engine Version"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:60
+msgctxt "Editor.ProjectSettings,Key.name"
+msgid "Project Name"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:72
+msgctxt "Editor.ProjectSettings,Key.packageId"
+msgid "Package ID"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:108
+msgctxt "Editor.ProjectSettings,Key.render.ao"
+msgid "Screen-Space Ambient Occlusion"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:114
+msgctxt "Editor.ProjectSettings,Key.render.bloom"
+msgid "Bloom"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:132
+msgctxt "Editor.ProjectSettings,Key.render.contactShadows"
+msgid "Contact Shadows"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:120
+msgctxt "Editor.ProjectSettings,Key.render.csmCascades"
+msgid "Shadow Cascades"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:138
+msgctxt "Editor.ProjectSettings,Key.render.heightFog"
+msgid "Height Fog"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:150
+msgctxt "Editor.ProjectSettings,Key.render.lightLimit"
+msgid "Per-Frame Light Limit"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:144
+msgctxt "Editor.ProjectSettings,Key.render.reflectionCapture"
+msgid "Reflection Captures"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:126
+msgctxt "Editor.ProjectSettings,Key.render.shadowDistance"
+msgid "Shadow Distance (m)"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:100
+msgctxt "Editor.ProjectSettings,Key.sim.tickRate"
+msgid "Simulation Tick Rate (Hz)"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:92
+msgctxt "Editor.ProjectSettings,Key.startScene"
+msgid "Game Default Scene"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:170
+msgctxt "Editor.ProjectSettings,Key.xr.eyeHeight"
+msgid "XR Eye Height (m)"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:164
+msgctxt "Editor.ProjectSettings,Key.xr.height"
+msgid "XR Height Mode"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:158
+msgctxt "Editor.ProjectSettings,Key.xr.startInVr"
+msgid "VR Auto-Detect"
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:64
+msgctxt "Editor.ProjectSettings,Packaging.Info"
+msgid "Edit Config/game.pack.txt to configure map, exclude, and stored rules."
+msgstr ""
+
+#: src/editor/ProjectSettingsPanel.cpp:69
+msgctxt "Editor.ProjectSettings,Packaging.OpenExplorer"
+msgid "Open in Explorer"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:59
+msgctxt "Editor.ProjectSettings,Sec.About"
+msgid "About"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:137
+msgctxt "Editor.ProjectSettings,Sec.Atmosphere"
+msgid "Atmosphere & Reflections"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:91
+msgctxt "Editor.ProjectSettings,Sec.DefaultMaps"
+msgid "Default Maps"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:77
+msgctxt "Editor.ProjectSettings,Sec.Engine"
+msgid "Engine"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:149
+msgctxt "Editor.ProjectSettings,Sec.Lighting"
+msgid "Lighting"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:107
+msgctxt "Editor.ProjectSettings,Sec.PostProcess"
+msgid "Post Processing"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:119
+msgctxt "Editor.ProjectSettings,Sec.Shadows"
+msgid "Shadows"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:99
+msgctxt "Editor.ProjectSettings,Sec.Simulation"
+msgid "Simulation"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:163
+msgctxt "Editor.ProjectSettings,Sec.XrRig"
+msgid "Tracking Origin"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:157
+msgctxt "Editor.ProjectSettings,Sec.XrStartup"
+msgid "Startup"
+msgstr ""
+
+#: src/editor/SettingsPanel.cpp:271
+msgctxt "Editor.Settings,AddAndroid"
+msgid "+ Android"
+msgstr ""
+
+#: src/editor/SettingsPanel.cpp:288
+msgctxt "Editor.Settings,RemoveAndroid"
+msgid "Remove Android override"
+msgstr ""
+
+#: src/editor/SettingsPanel.cpp:190
+msgctxt "Editor.Settings,RestartBanner"
+msgid "Restart the editor to apply some changes"
+msgstr ""
+
+#: src/editor/SettingsPanel.cpp:221
+msgctxt "Editor.Settings,SavedIn"
+msgid "Saved in: {0}"
+msgstr ""
+
+#: src/editor/SettingsPanel.cpp:27
+msgctxt "Editor.Settings,SearchHint"
+msgid "Search Settings"
+msgstr ""
+
+#: src/editor/SettingsPanel.cpp:176
+msgctxt "Editor.Settings,SearchNoMatch"
+msgid "No settings match '{0}'"
+msgstr ""
+
+#: src/editor/EditorChromePanels.cpp:84
 msgctxt "Editor.Toolbar,Open"
 msgid "Open"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:78
+#: src/editor/EditorChromePanels.cpp:84
 msgctxt "Editor.Toolbar,OpenTip"
 msgid "Open Scene (Ctrl+O)"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:56
+#: src/editor/EditorChromePanels.cpp:61
 msgctxt "Editor.Toolbar,Pause"
 msgid "Pause"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:55
+#: src/editor/EditorApp.cpp:1007
 msgctxt "Editor.Toolbar,Play"
 msgid "Play"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:79
+#: src/editor/EditorApp.cpp:1020
+msgctxt "Editor.Toolbar,PlayTip.AutomatedRun"
+msgid "Play (Desktop: automated run)"
+msgstr ""
+
+#: src/editor/EditorApp.cpp:1018
+msgctxt "Editor.Toolbar,PlayTip.DisabledByNoXr"
+msgid "Play (Desktop: --no-xr)"
+msgstr ""
+
+#: src/editor/EditorApp.cpp:1010
+msgctxt "Editor.Toolbar,PlayTip.HeadsetFound"
+msgid "Play (VR: headset ready)"
+msgstr ""
+
+#: src/editor/EditorApp.cpp:1012
+msgctxt "Editor.Toolbar,PlayTip.NoHeadset"
+msgid "Play (Desktop: no headset found)"
+msgstr ""
+
+#: src/editor/EditorApp.cpp:1023
+msgctxt "Editor.Toolbar,PlayTip.NotPrepared"
+msgid "Play (Desktop: VR not prepared - enable in Project Settings)"
+msgstr ""
+
+#: src/editor/EditorApp.cpp:1014
+msgctxt "Editor.Toolbar,PlayTip.Ready"
+msgid "Play (VR: ready)"
+msgstr ""
+
+#: src/editor/EditorApp.cpp:1016
+msgctxt "Editor.Toolbar,PlayTip.Unavailable"
+msgid "Play (Desktop: VR unavailable)"
+msgstr ""
+
+#: src/editor/EditorChromePanels.cpp:85
 msgctxt "Editor.Toolbar,Refresh"
 msgid "Refresh"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:79
+#: src/editor/EditorChromePanels.cpp:85
 msgctxt "Editor.Toolbar,RefreshTip"
 msgid "Refresh Content"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:58
+#: src/editor/EditorChromePanels.cpp:63
 msgctxt "Editor.Toolbar,Resume"
 msgid "Resume"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:59
+#: src/editor/EditorApp.cpp:1005
 msgctxt "Editor.Toolbar,ResumeTip"
 msgid "Resume Play"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:77
+#: src/editor/EditorChromePanels.cpp:83
 msgctxt "Editor.Toolbar,Save"
 msgid "Save"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:77
+#: src/editor/EditorChromePanels.cpp:83
 msgctxt "Editor.Toolbar,SaveTip"
 msgid "Save Scene (Ctrl+S)"
 msgstr ""
 
-#: src/editor/EditorChromePanels.cpp:57
+#: src/editor/EditorChromePanels.cpp:62
 msgctxt "Editor.Toolbar,Stop"
 msgid "Stop"
 msgstr ""

@@ -398,10 +398,24 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
 
     // XR 은 렌더러보다 먼저입니다. OpenXR 이 헤드셋이 연결된 GPU 를 고르고 Vulkan 인스턴스 · 장치를
     // 만들기 때문입니다(UE · Unity · Godot 같음). 런타임이나 헤드셋이 없으면 데스크톱으로 계속합니다.
-    // 켤지는 명령줄이 먼저이고, 없으면 앞단 정책을 따릅니다(게임 실행 파일은 프로젝트 설정 xr.startInVr, 2026-10-19).
-    xrWanted_ = options.xr.has_value() ? *options.xr : (policy_.startXrFromProject && project_.xrStartInVr);
-    if (xrWanted_ && !options.xr.has_value())
+    // 켤지는 명령줄이 먼저이고, 없으면 앞단 정책과 프로젝트 설정 xr.startInVr("VR auto-detect")을 따릅니다(V1).
+    // 숨은 창 · --headless · --synthetic-eyes 실행은 명령줄 --xr 이 없으면 OpenXR 을 켜지 않습니다.
+    hxrmode::StartupInput xrIn;
+    xrIn.commandLine    = options.xr;
+    xrIn.projectAllowed = policy_.startXrFromProject;
+    xrIn.projectValue   = project_.xrStartInVr;
+    xrIn.hiddenWindow   = options.hiddenWindow;
+    xrIn.headless       = options.headless;
+    xrIn.syntheticEyes  = options.syntheticEyes;
+    const hxrmode::StartupDecision xrDec = hxrmode::decideStartup(xrIn);
+    xrWanted_ = xrDec.initXr;
+    xrStatus_.startReason       = xrDec.reason;
+    xrStatus_.initTried         = xrWanted_;
+    xrStatus_.projectAutoDetect = project_.xrStartInVr;
+    if (xrDec.reason == hxrmode::StartReason::ProjectOn)
         HLOG(LogEngine, Log) << "XR requested by the project setting xr.startInVr (" << ProjectSettings::kPath << ")";
+    else if (xrDec.reason == hxrmode::StartReason::AutomatedRun)
+        HLOG(LogEngine, Log) << "XR skipped for automated run (" << hxrmode::automatedFlag(xrIn) << "; pass --xr to force)";
     double xrMs = 0.0;
     if (xrWanted_) {
         HPROF_SCOPE("Startup.Xr");
@@ -492,12 +506,16 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         rendererMs = stats_.msSinceBoot() - t0;
     }
     if (xr_) {
-        // 세션은 Play 때 만듭니다(syncXrWithPlay). 인스턴스는 쓸 수 없어도 남겨 둡니다. 렌더러의 Vulkan
+        // 세션은 Play 때 만듭니다(syncWithPlay). 인스턴스는 쓸 수 없어도 남겨 둡니다. 렌더러의 Vulkan
         // 인스턴스 · 장치를 그것으로 만들었을 수 있어서, 엔진이 끝날 때 렌더러 다음에 지웁니다.
         xrSession_->setUsable(renderer_->xrCompatible());
         if (xrSession_->usable()) HLOG(LogEngine, Log) << "XR ready; the headset session starts with Play";
         else           HLOG(LogEngine, Warning) << "XR is disabled for this run; continuing in desktop mode";
     }
+    xrStatus_.usable = xrSession_->usable();
+    if (xrStatus_.usable) xrStatus_.headset = hxrmode::HeadsetState::Present;
+    frontend_->setXrRunStatus(xrStatus_);
+    frontend_->setInitialProjectSettings(project_);
     if (options.xrRequired && !xrSession_->usable())
         throw std::runtime_error("XR is required on this platform, but the renderer could not use the OpenXR runtime's "
                                  "Vulkan device (see the Renderer and XR log lines above)");
@@ -560,7 +578,9 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     }
     auto* physics = modules_.registerModule(std::move(physicsModule));
     physics->setWorld(&world_);
+    physics->setDirectStep(true);   // D2a: 엔진이 고정 시뮬레이션 틱 누적기를 맡고 물리는 틱당 1스텝
     physics_ = physics;
+    HLOG(LogEngine, Log) << "Simulation tick rate: " << project_.simTickRate << " Hz";
     audio->setPhysics(physics);   // 소리 차폐 판정(2026-11-06, Audio_Design.md 9-4)
     // 편안함 설정은 월드 서비스로 둡니다(이동 컴포넌트 · 리그 높이가 읽음). 소리 크기와 함께 사용자 설정에서 적용합니다.
     world_.setService<ComfortSettings>(&comfort_);
@@ -592,7 +612,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     // XR 세션 제어(2026-11-18 S2). 세션이 끝나면 프레임 시간 분포를 남기고, 다음 Play 에서 바닥 · 원점 안내를 다시 합니다.
     {
         XrSessionController::Deps d;
-        d.xr = xr_.get(); d.renderer = renderer_.get(); d.physics = physics_; d.audio = audio_;
+        d.xr = xr_.get(); d.renderer = renderer_.get(); d.audio = audio_;
         d.frontend = frontend_.get(); d.window = window_.get(); d.policy = &policy_; d.xrRequired = options_.xrRequired;
         d.onSessionEnded = [this] { stats_.logPacing("XR session"); viewOrigin_->reset(); };
         xrSession_->bind(d);
@@ -909,6 +929,7 @@ struct Engine::FrameState {
     bool                xrBegun   = false;      // XR 프레임을 시작함(이번 프레임 안에 endFrame)
     XrViewChoice        view;                   // 화면 카메라와 그 XR 원점(프레임을 시작하기 전에 정함)
     float               dt        = 0.f;
+    float               displayAlpha = 1.f;   // 시뮬레이션 틱 사이 표시 보간 비율(D2b). 비Play/Pause 면 1(보간 없음)
     int                 winW = 0, winH = 0;
     float               mx = 0.f, my = 0.f;
     bool                lmb = false, lmbJustUp = false;
@@ -979,9 +1000,31 @@ bool Engine::beginLoop(FrameState& f) {
 // XR 프레임이 없습니다.
 void Engine::beginXrFrame(FrameState& f) {
     HPROF_SCOPE("Engine.BeginXrFrame");
-    xrSession_->syncWithPlay(frontend_->isPlaying() || frontend_->isPaused());
+    const bool inGame = frontend_->isPlaying() || frontend_->isPaused();
+    const hxrmode::PlayMode playMode = frontend_->wantsXrForPlay() ? hxrmode::PlayMode::Auto : hxrmode::PlayMode::Desktop;
+    xrSession_->syncWithPlay(inGame, playMode);
     xrSession_->pollWithoutSession();
     xrSession_->retryIfDue();
+    bool statusChanged = false;
+    if (xrStatus_.usable != xrSession_->usable()) {
+        xrStatus_.usable = xrSession_->usable();
+        if (!xrStatus_.usable) xrStatus_.headset = hxrmode::HeadsetState::Unknown;
+        statusChanged = true;
+    }
+    if (!inGame && xrSession_->usable() && xr_) {
+        const auto now = std::chrono::steady_clock::now();
+        if (headsetCheckAt_.time_since_epoch().count() == 0 ||
+            std::chrono::duration<double>(now - headsetCheckAt_).count() >= hxrmode::kHeadsetCheckIntervalSec) {
+            headsetCheckAt_ = now;
+            const hxrmode::HeadsetState next = xr_->headsetAvailable()
+                                             ? hxrmode::HeadsetState::Present : hxrmode::HeadsetState::Absent;
+            if (next != xrStatus_.headset) {
+                xrStatus_.headset = next;
+                statusChanged = true;
+            }
+        }
+    }
+    if (statusChanged) frontend_->setXrRunStatus(xrStatus_);
     // 화면 카메라가 씬 리그의 머리면 그 리그의 높이 모드를, 아니면 프로젝트 설정의 값을 씁니다. 프레임을 시작하기 전에 정해
     // 한 프레임 안에서는 바뀌지 않게 합니다.
     f.view = viewOrigin_->choose(world_);
@@ -1046,15 +1089,18 @@ void Engine::updatePlayState(FrameState& f, LoopState& loop) {
     const bool paused = front.isPaused() || (front.isPlaying() && xrFocusPaused_);
     f.playing         = front.isPlaying() && !xrFocusPaused_;
     if (inGame && !loop.prevInGame) {
+        world_.resetAllInterpolation();
         game_->onBeginPlay(*ctx_);
         modules_.beginPlayAll();
     }
     if (!inGame && loop.prevInGame) {
         game_->onEndPlay();
         modules_.endPlayAll();
-        // Play 동안 건 타이머 · 바꾼 시간 배율을 남기지 않습니다(에디터는 같은 월드를 씀, D2).
+        // Play 동안 건 타이머 · 바꾼 시간 배율 · 시뮬레이션 틱 누적기를 남기지 않습니다(에디터는 같은 월드를 씀, D2).
         world_.timers().clear();
         world_.setTimeScale(cvTimeScale_ ? cvTimeScale_->asFloat() : 1.f);
+        world_.resetAllInterpolation();
+        simAccum_.reset();
     }
     // 일시정지는 시작·끝 처리 뒤에 알립니다. Pause 상태에서 곧바로 Stop 하면 끝 처리가
     // 먼저 사운드를 멈추므로, 뒤따르는 재개 통지가 남은 소리를 다시 들려주지 않습니다.
@@ -1076,7 +1122,27 @@ void Engine::streamAssets() {
     updateUserSettings();
 }
 
-// 6. 틱. 앞단(에디터 UI) → 디버그 선 비우기 → 입력 → 월드 · 게임 · 모듈 → 따라오는 패널 → 월드 UI 포인터.
+static uint64_t hashWorldPoses(const World& w) {
+    uint64_t h = 14695981039346656037ULL;
+    auto mixBytes = [&](const void* data, size_t n) {
+        const auto* p = static_cast<const uint8_t*>(data);
+        for (size_t i = 0; i < n; ++i) {
+            h ^= p[i];
+            h *= 1099511628211ULL;
+        }
+    };
+    for (const auto& a : w.getActors()) {
+        const uint64_t  id  = a->id;
+        const glm::vec3 pos = a->worldPosition();
+        const glm::quat rot = a->worldRotation();
+        mixBytes(&id, sizeof(id));
+        mixBytes(&pos, sizeof(pos));
+        mixBytes(&rot, sizeof(rot));
+    }
+    return h;
+}
+
+// 6. 틱. 앞단(에디터 UI) → 디버그 선 비우기 → 입력 → 고정 시뮬레이션 틱(0회 이상) → 표시 단계(프레임 1회) → 따라오는 패널 → 월드 UI 포인터.
 void Engine::tickFrame(FrameState& f) {
     ScopedCpuTimer t(gFrameTimings().tick);
     if (!f.minimized) {
@@ -1087,6 +1153,16 @@ void Engine::tickFrame(FrameState& f) {
         // 그리는 프레임으로 합니다(hwin::chooseDesktopFrame).
         frontend_->tickWhileMinimized(f.dt);
     }
+    {
+        ProjectSettings livePs;
+        if (frontend_->consumeLiveProjectSettings(livePs)) {
+            project_.renderAo        = livePs.renderAo;
+            project_.renderBloom     = livePs.renderBloom;
+            project_.xrTrackedHeight = livePs.xrTrackedHeight;
+            project_.xrEyeHeight     = livePs.xrEyeHeight;
+            applyLiveUserSettings(false);
+        }
+    }
     // 디버그 선은 한 프레임용입니다. 에디터는 tick 에서 앞 프레임의 선을 가져가 그리므로, 그 뒤 · 월드 틱 전에
     // 비웁니다. 예전에는 에디터만 비워, 에디터가 없거나(게임 실행 파일) 최소화로 에디터 tick 을 건너뛰면 선이
     // 끝없이 쌓였습니다(2026-10-19).
@@ -1096,20 +1172,61 @@ void Engine::tickFrame(FrameState& f) {
     const bool gameInputBlocked = frontend_->blocksGameInput();
     HInputSystem::get().update(f.dt, *window_, frontend_->isTextInputActive() || gameInputBlocked);
     if (f.playing) {
+        const float simStep  = 1.f / project_.simTickRate;
+        const float maxDt    = cvMaxDt_ ? cvMaxDt_->asFloat() : 0.05f;
+        const int   maxTicks = std::max(1, (int)std::floor(maxDt * project_.simTickRate + 1e-4f));
+        const auto  stepRes  = simAccum_.advance(f.dt * world_.timeScale(), simStep, maxTicks);
+        if (stepRes.dropped) stats_.addDroppedSimTick();
+
+        for (int ti = 0; ti < stepRes.ticks; ++ti) {
+            world_.snapshotTickPoses();   // D2b: 틱 시작 전 이전 자세 보관
+            HInputSystem::get().beginSimTick();
+            {
+                ScopedCpuTimer tw(gFrameTimings().worldTick);
+                world_.tick(simStep);                      // 고정 틱 길이(시간 배율은 누적기 입력에 적용됨, D2a)
+                game_->onTick(world_.lastDt(), *ctx_);
+            }
+            {
+                ScopedCpuTimer tm(gFrameTimings().modules);
+                modules_.tickAll(world_.lastDt());         // 시뮬레이션 모듈(물리)
+            }
+            {
+                HPROF_SCOPE("World.TickPostPhysics");
+                world_.tickPostPhysics();   // 물리 뒤 컴포넌트(D5). 없으면 훑지 않음
+            }
+            HInputSystem::get().endSimTick();
+
+            if (options_.simTicks > 0 && !simTickDone_ && simAccum_.totalTicks >= options_.simTicks) {
+                simTickDone_ = true;
+                const uint64_t h = hashWorldPoses(world_);
+                char hbuf[32];
+                std::snprintf(hbuf, sizeof(hbuf), "%016llx", (unsigned long long)h);
+                HLOG(LogEngine, Log) << "SimTickHash: ticks=" << simAccum_.totalTicks << " hash=" << hbuf;
+                window_->setShouldClose(true);
+                break;
+            }
+        }
+        f.displayAlpha = stepRes.alpha;
         {
-            ScopedCpuTimer tw(gFrameTimings().worldTick);
-            world_.tick(f.dt);                      // 시간 배율을 곱해 진행(Docs/Gameplay_Tools.md D1)
-            game_->onTick(world_.lastDt(), *ctx_);   // 배율 1 이면 f.dt 와 같음
+            HPROF_SCOPE("World.TickDisplay");
+            world_.tickDisplay(f.dt);   // 표시 단계(프레임마다 1회): 애니메이션 · 파티클 · 로컬 머리/손 추적
+        }
+        // D2b: 표시 단계 뒤, 보간된 리그 루트 + 최신 머리 추적 값으로 소리 청취자 갱신 후 표시 모듈(소리) 1회 실행
+        if (audio_) {
+            const HXrInputState& xr  = HInputSystem::get().xr();
+            CameraComponent*     cam = CameraComponent::activeIn(world_);
+            if (xr.focused && xr.head.valid && cam)
+                audio_->setListenerPose(cam->xrOrigin(f.displayAlpha) * glm::translate(glm::mat4(1.f), xr.head.position)
+                                        * glm::mat4_cast(xr.head.orientation));
+            else
+                audio_->clearListenerPose();
+            audio_->setDisplayAlpha(f.displayAlpha);
         }
         {
             ScopedCpuTimer tm(gFrameTimings().modules);
-            modules_.tickAll(world_.lastDt());
+            modules_.tickDisplayAll(f.dt);
         }
-        {
-            HPROF_SCOPE("World.TickPostPhysics");
-            world_.tickPostPhysics();   // 물리 뒤 컴포넌트(D5). 없으면 훑지 않음
-        }
-        if (cvDebugLines_ && !cvDebugLines_->asBool()) hdebug::lines().clear();   // debug.lines 0: 이번 틱의 디버그 선을 버림
+        if (cvDebugLines_ && !cvDebugLines_->asBool()) hdebug::lines().clear();   // debug.lines 0: 이번 프레임의 디버그 선을 버림
     }
     // 머리를 따라오는 패널(3D UI 구간 7)을 먼저 옮기고, 그 자세로 포인터가 가리킵니다.
     if (f.playing) worldUi_.updateFollowPanels(world_, xr_ && xr_->hasSession(), f.dt);
@@ -1146,7 +1263,23 @@ void Engine::renderFrame(FrameState& f) {
     updateAccessibility(f);
     {
         HPROF_SCOPE("Engine.ExtractScene");
-        extractRenderScene(world_, sceneInput_);
+        extractRenderScene(world_, sceneInput_, f.displayAlpha);
+    }
+    if (!options_.logRenderPos.empty()) {
+        if (options_.logRenderPos == "@camera" && sceneInput_.camera.present) {
+            const glm::vec3 cp = glm::vec3(glm::inverse(sceneInput_.camera.view)[3]);
+            HLOG(LogEngine, Log) << "RenderPos[@camera]: frame=" << drawnFrames_
+                                 << " x=" << cp.x << " y=" << cp.y << " z=" << cp.z;
+        } else {
+            for (const RenderMesh& m : sceneInput_.meshes) {
+                if (m.debugName && options_.logRenderPos == m.debugName) {
+                    const glm::vec3 p(m.model[3]);
+                    HLOG(LogEngine, Log) << "RenderPos[" << m.debugName << "]: frame=" << drawnFrames_
+                                         << " x=" << p.x << " y=" << p.y << " z=" << p.z;
+                    break;
+                }
+            }
+        }
     }
     if (f.xrBegun) {
         XrFrameTarget target;
@@ -1206,10 +1339,10 @@ void Engine::updateAccessibility(const FrameState& f) {
     };
     const HXrInputState& xr = HInputSystem::get().xr();
     if (xr_ && xr_->hasSession() && xr.focused && xr.head.valid) {
-        fromMatrix(cam->xrOrigin() * glm::translate(glm::mat4(1.f), xr.head.position) * glm::mat4_cast(xr.head.orientation));
+        fromMatrix(cam->xrOrigin(f.displayAlpha) * glm::translate(glm::mat4(1.f), xr.head.position) * glm::mat4_cast(xr.head.orientation));
     } else if (synthetic_) {
         const auto* rigC = f.view.rig ? f.view.rig->getComponent<XrRigComponent>() : nullptr;
-        fromMatrix(cam->xrOrigin() * glm::translate(glm::mat4(1.f), glm::vec3(0.f, rigC ? rigC->eyeHeight : 0.f, 0.f)));
+        fromMatrix(cam->xrOrigin(f.displayAlpha) * glm::translate(glm::mat4(1.f), glm::vec3(0.f, rigC ? rigC->eyeHeight : 0.f, 0.f)));
     }
     const float aspect = synthetic_ ? (float)options_.syntheticEyeW / (float)std::max(options_.syntheticEyeH, 1u)
                        : (f.winW > 0 && f.winH > 0 ? (float)f.winW / (float)f.winH : 16.f / 9.f);

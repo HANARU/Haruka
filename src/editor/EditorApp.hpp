@@ -16,6 +16,7 @@
 #include "TextInputController.hpp"
 #include "OutlinerPanel.hpp"
 #include "DetailsPanel.hpp"
+#include "ProjectSettingsPanel.hpp"
 #include "ContentBrowserPanel.hpp"
 #include "GpuStatsPanel.hpp"
 #include "OutputLogPanel.hpp"
@@ -78,10 +79,11 @@ public:
     bool isInEditor() const { return playState_ == EPlayState::Editor;  }
 
     void beginPlay();
+    void beginPlayDesktop();
     void pausePlay();
     void stopPlay();
 
-    // 에디터의 실행 규칙(editor/EditorFrontend.cpp): 프로젝트 폴더를 직접 읽고 쓰고, VR 은 --xr 로만, Play 동안만.
+    // 에디터의 실행 규칙(editor/EditorFrontend.cpp): 프로젝트 폴더를 직접 읽고 쓰고, xr.startInVr(VR 자동 감지) · --xr 로 준비하며 Play 동안만.
     void   setFrontendConfig(const EngineFrontendConfig& config) { frontendConfig_ = config; }
     void   resolveRuntimePaths(const std::string& cliProjectArg) override;
     Policy policy() const override;
@@ -114,6 +116,15 @@ public:
     void setAudio(AudioSystem* audio) override { audio_ = audio; }
     // XR Play 동안 소리를 헤드셋 장치로 바꿀지(기본 켜짐). 엔진이 세션을 열고 닫을 때 묻습니다.
     bool headsetAudioInVr() const override { return headsetAudioInVr_; }
+    bool wantsXrForPlay() const override { return !playDesktopRequested_; }
+    void setXrRunStatus(const hxrmode::XrRunStatus& status) override { xrStatus_ = status; }
+    void setInitialProjectSettings(const ProjectSettings& ps) override { projectSettingsPanel_.setStartupProjectSettings(ps); }
+    bool consumeLiveProjectSettings(ProjectSettings& out) override {
+        if (!liveProjectDirty_) return false;
+        liveProjectDirty_ = false;
+        out = projectSettingsPanel_.liveProjectSettings();
+        return true;
+    }
 
     // 월드 UI 패널 포인터(3D UI 구간 5): Play 중 뷰포트가 게임 카메라를 보일 때만 광선을 줍니다.
     bool pointerRay(float mx, float my, float winW, float winH, glm::vec3& origin, glm::vec3& dir) const override;
@@ -132,9 +143,11 @@ private:
     EditorViewportController viewport_;
     StatusBarPanel      statusBar_;
     TextInputController textInput_;
-    OutlinerPanel       outlinerPanel_;
-    DetailsPanel        detailsPanel_;
-    ContentBrowserPanel contentPanel_;
+    OutlinerPanel        outlinerPanel_;
+    DetailsPanel         detailsPanel_;
+    ProjectSettingsPanel projectSettingsPanel_;
+    bool                 liveProjectDirty_ = false;
+    ContentBrowserPanel  contentPanel_;
     GpuStatsPanel       gpuStatsPanel_;
     OutputLogPanel      logPanel_;
     ComponentPicker     componentPicker_;   // 디테일의 Add Component 팝업(2026-11-21)
@@ -265,6 +278,9 @@ private:
     Transform undoSnapshot_;
 
     EPlayState  playState_     = EPlayState::Editor;
+    bool        playDesktopRequested_ = false;
+    hxrmode::XrRunStatus xrStatus_{};
+    std::string playTooltipText() const;
     std::string worldSnapshot_;
 
     // ── 명령 레지스트리 (H2b) ─────────────────────────────────────────────────
@@ -404,6 +420,7 @@ private:
     bool         headsetAudioInVr_ = true;  // Config/editor_state.txt 의 audioHeadsetInVr
     EHrtfMode    hrtfMode_{};               // Config/editor_state.txt 의 audioHrtf(2026-11-06). {} = Auto(0)
     void openAudioOutputDialog();
+    void openProjectSettings();
 
     // ── 모달 대화상자 (2026-10-15) ───────────────────────────────────────────
     // 화면 전체를 덮는 캐처 위에 가운데 패널을 띄웁니다. 열린 동안에는 다른 패널 · 뷰포트 · 단축키가
@@ -493,6 +510,10 @@ private:
     HTextEditState* focusedEdit();   // 포커스된 글 칸의 편집 상태(없으면 nullptr)
     std::string uiOutlinerCollapse_;
     bool        uiPlay_ = false;
+    bool        uiProjectSettings_ = false;
+    std::string uiPsCategory_;
+    std::string uiPsSearch_;
+    std::vector<std::string> uiPsSet_;
     std::string uiLayout_;
     std::string viewportDumpPath_;
     std::string uiGizmoMode_;

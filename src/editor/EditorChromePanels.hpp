@@ -17,6 +17,7 @@ public:
         const EditorContext* ctx = nullptr;
         std::function<bool()> isPlaying;
         std::function<bool()> isPaused;
+        std::function<std::string()> playTooltip;
         std::function<void()> onPlay;
         std::function<void()> onPause;
         std::function<void()> onStop;
@@ -30,12 +31,14 @@ public:
     void rebuild();
     void markDirty() { dirty_ = true; }
     void flushRebuild();
+    bool playButtonContains(glm::vec2 p) const;
 
 private:
     float s(float x) const { return deps_.ui->s(x); }
 
     Deps deps_;
     std::shared_ptr<SHorizontalBox> box_;
+    std::shared_ptr<SButton>        playButton_;
     bool dirty_ = false;
 };
 

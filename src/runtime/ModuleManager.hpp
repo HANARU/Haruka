@@ -28,7 +28,16 @@ public:
 
     void tickAll(float dt) {
         for (auto* m : order_) {
+            if (m->isDisplayModule()) continue;
             HPROF_SCOPE(m->name());   // 모듈 이름(정적 글, Docs/CPU_Profiling.md D8)
+            m->tick(dt);
+        }
+    }
+
+    void tickDisplayAll(float dt) {
+        for (auto* m : order_) {
+            if (!m->isDisplayModule()) continue;
+            HPROF_SCOPE(m->name());
             m->tick(dt);
         }
     }

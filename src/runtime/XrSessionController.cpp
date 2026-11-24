@@ -4,26 +4,37 @@
 #include "../core/FrameTimings.hpp"
 #include "../core/HLog.hpp"
 #include "../input/HInputSystem.hpp"
-#include "../physics/PhysicsSystem.hpp"
 #include "../platform/IWindow.hpp"
 #include "../renderer/Renderer.hpp"
 
 #include <cmath>
 #include <stdexcept>
 
-void XrSessionController::syncWithPlay(bool inGame) {
-    if (!usable_ || inGame == playWanted_) return;
-    playWanted_ = inGame;
+void XrSessionController::syncWithPlay(bool inGame, hxrmode::PlayMode mode) {
+    if (!usable_ || inGame == inPlay_) return;
+    inPlay_ = inGame;
     XrSystem& xr = *d_.xr;
     if (inGame) {
+        const bool headsetPresent = hxrmode::needsHeadsetCheck(mode, usable_, d_.xrRequired)
+                                    ? xr.headsetAvailable() : false;
+        const hxrmode::PlayDecision dec = hxrmode::decidePlay(mode, usable_, d_.xrRequired, headsetPresent);
+        sessionWanted_ = dec.openSession;
+        if (dec.log == hxrmode::PlayLog::DesktopChosen) {
+            HLOG(LogEngine, Log) << "Play on Desktop selected; this Play runs on the desktop only";
+        } else if (dec.log == hxrmode::PlayLog::NoHeadset) {
+            HLOG(LogEngine, Log) << "No VR headset detected; this Play runs on the desktop only";
+        }
         // 앞 Play 의 세션이 아직 끝나는 중이면(Stop 직후 곧바로 Play) 다 끝난 뒤 루프가 다시 엽니다. XR 이 필수인 플랫폼
         // (Quest)에서 첫 세션을 못 만들면 이유를 남기고 멈춥니다. 다시 시도해도 같은 이유로 실패하기 때문입니다(그래픽
         // 연결 · 액션 바인딩). 연결이 잠시 끊겼다 돌아오는 경우는 아래의 다시 열기가 맡습니다.
-        if (!xr.hasSession() && !start() && d_.xrRequired)
+        if (sessionWanted_ && !xr.hasSession() && !start() && d_.xrRequired)
             throw std::runtime_error("XR is required on this platform, but the XR session could not be created "
                                      "(see the XR log lines above)");
-    } else if (xr.hasSession() && !xr.requestExit()) {
-        end("Play stopped");   // 돌고 있지 않으면(헤드셋을 벗음 등) 요청할 것이 없어 바로 지웁니다
+    } else {
+        sessionWanted_ = false;
+        if (xr.hasSession() && !xr.requestExit()) {
+            end("Play stopped");   // 돌고 있지 않으면(헤드셋을 벗음 등) 요청할 것이 없어 바로 지웁니다
+        }
     }
 }
 
@@ -50,7 +61,6 @@ void XrSessionController::end(const char* reason) {
     d_.renderer->detachXrSwapchain();   // 장치가 쉬기를 기다린 뒤 이미지 뷰를 지움
     d_.xr->destroySession();
     HInputSystem::get().setXrInput({});
-    if (d_.physics) d_.physics->setStepRate(60.f);
     if (d_.onSessionEnded) d_.onSessionEnded();   // 프레임 시간 분포 로그, 다음 Play 에서 바닥 · 원점 안내를 다시
     if (d_.audio && !d_.audio->outputOverride().empty()) d_.audio->setOutputOverride("");   // 고른 출력 장치로 돌아감
     if (d_.audio) d_.audio->setXrActive(false);
@@ -81,7 +91,7 @@ void XrSessionController::retryIfDue() {
     // 헤드셋 연결이 끊겼다가 돌아오면 세션을 다시 엽니다(게임 실행 파일, 2026-10-19). 정해진 간격(처음 2초)으로 조용히
     // 확인합니다. XR 이 필수인 플랫폼은 데스크톱으로 계속할 수 없으므로, 처음 잃은 때부터 30초 안에 다시 돌지 않으면 끝냅니다
     // (DEF-155). 마감 시각은 다시 연 세션이 시작하지 못하고 또 잃어도 처음 것을 씁니다.
-    if (!(recovery_.pending && d_.xr && !d_.xr->hasSession() && playWanted_)) return;
+    if (!(recovery_.pending && d_.xr && !d_.xr->hasSession() && sessionWanted_)) return;
     const auto now = hxr::XrRecovery::Clock::now();
     if (recovery_.expired(now, d_.xrRequired)) {
         recovery_.cancel();
@@ -112,7 +122,7 @@ bool XrSessionController::beginFrame(XrSystem::FrameInfo& frame) {
         } else if (requested) {
             // Stop 으로 끝냈습니다. 끝내는 중에 다시 Play 를 눌렀으면 곧바로 엽니다.
             end("Play stopped");
-            if (playWanted_) start();
+            if (sessionWanted_) start();
         } else if (why == XrSystem::LossReason::Exiting && d_.policy->quitOnXrExit) {
             // 게임 실행 파일: 대시보드에서 종료하는 등 런타임이 끝내라고 하면 앱도 끝냅니다(2026-10-19, OpenXR 권고).
             end("the runtime asked the app to exit");
@@ -146,12 +156,6 @@ bool XrSessionController::beginFrame(XrSystem::FrameInfo& frame) {
         // 다시 연 세션이 5초 동안 이어서 돌면 복구가 끝난 것으로 봅니다(DEF-155). 그 전에 또 잃으면 처음 마감 시각을 씁니다.
         if (begun && recovery_.onFrameStarted(hxr::XrRecovery::Clock::now())) {
             HLOG(LogEngine, Log) << "XR: the reopened session is running";
-        }
-        // 물리 스텝을 헤드셋 주사율에 맞춥니다(1/60 이면 72 · 90Hz 에서 물체가 떨려 보임).
-        const float hz = xr.displayRefreshRate();
-        if (d_.physics && hz > 1.f && std::abs(d_.physics->stepRate() - hz) > 0.5f) {
-            d_.physics->setStepRate(hz);
-            HLOG(LogEngine, Log) << "Physics step matched to the headset: " << hz << " Hz";
         }
     }
     HInputSystem::get().setXrInput(xin);

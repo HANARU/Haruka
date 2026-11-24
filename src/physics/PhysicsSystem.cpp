@@ -871,7 +871,6 @@ void PhysicsSystem::tick(float dt) {
         rb->createdCenter_ = rb->center;
         rb->createdTrigger_ = rb->trigger;
         if (rb->contactEvents) impl_->notifyBodies.insert(rb->bodyId_);
-        rb->interpValid_   = false;
         rb->synced_        = false;   // 아직 물리가 액터에 쓴 적 없음
     }
 
@@ -893,7 +892,7 @@ void PhysicsSystem::tick(float dt) {
             // teleport 는 속도를 건드리지 않고, 옮기기 전후 자리의 잠든 바디도 깨웁니다.
             if (rb->synced_ && (t.position() != rb->syncedLocalPos_ || t.rotation() != rb->syncedLocalRot_)) {
                 teleport(rb->bodyId_, *a);
-                rb->interpValid_ = false;   // 순간 이동은 보간하지 않음(P4)
+                a->resetInterpolation();
             }
         } else if (rb->motionType == EMotionType::Kinematic) {
             const JPH::RVec3 bp = bi.GetPosition(id);
@@ -904,19 +903,6 @@ void PhysicsSystem::tick(float dt) {
         }
     }
 
-    // ── 힘 · 토크: 이번 틱의 충격량을 예산에 더합니다 ───────────────────────────
-    for (const auto& [id, ft] : frameForces_) {
-        ForceTorque& b = impulseBudget_[id];
-        b.force  += ft.force  * dt;
-        b.torque += ft.torque * dt;
-    }
-    frameForces_.clear();
-
-    // 렌더 보간(P4)을 켠 Dynamic 바디. 마지막 스텝 직전 자세를 앞 자세로 기억합니다.
-    std::vector<RigidBodyComponent*> interpolated;
-    for (RigidBodyComponent* rb : world_->componentsOf<RigidBodyComponent>())
-        if (rb->interpolate && rb->bodyId_ != 0xFFFFFFFFu && rb->motionType == EMotionType::Dynamic)
-            interpolated.push_back(rb);
     auto bodyPose = [&](const RigidBodyComponent* rb, glm::vec3& p, glm::quat& q) {
         const JPH::BodyID id(rb->bodyId_);
         const JPH::RVec3 bp = bi.GetPosition(id);
@@ -926,33 +912,8 @@ void PhysicsSystem::tick(float dt) {
     };
 
     // ── Fixed-step simulation ─────────────────────────────────────────────────
-    accumulator_ += dt;
-    const int steps = (int)std::floor(accumulator_ / step_);
-    for (int i = 0; i < steps; ++i) {
-        if (i == steps - 1)
-            for (RigidBodyComponent* rb : interpolated) bodyPose(rb, rb->interpPrevPos_, rb->interpPrevRot_);
-        // Kinematic: 틱 시작 자세에서 목표까지 스텝마다 나눠 옮깁니다. 마지막 스텝에 정확히 목표에 닿고,
-        // 그 속도로 부딪힌 Dynamic 바디를 밉니다.
-        const float alpha = float(i + 1) / float(steps);
-        for (const auto& k : kinematic) {
-            const glm::vec3 p = glm::mix(k.p0, k.p1, alpha);
-            const glm::quat q = glm::slerp(k.q0, k.q1, alpha);
-            bi.MoveKinematic(k.id, JPH::RVec3(p.x, p.y, p.z), JPH::Quat(q.x, q.y, q.z, q.w), step_);
-        }
-        // 힘 · 토크: 남은 충격량을 남은 스텝에 고르게 나눕니다. Jolt 는 건 힘을 이 스텝 한 번에만 씁니다.
-        const float share = 1.f / float(steps - i);
-        for (auto& [id, b] : impulseBudget_) {
-            const glm::vec3 j = b.force * share, l = b.torque * share;
-            b.force  -= j;
-            b.torque -= l;
-            const JPH::BodyID jid(id);
-            if (!bi.IsAdded(jid)) continue;
-            bi.AddForceAndTorque(jid, JPH::Vec3(j.x, j.y, j.z) / step_, JPH::Vec3(l.x, l.y, l.z) / step_);
-        }
-
-        const JPH::EPhysicsUpdateError err =
-            impl_->physics->Update(step_, 1, impl_->tempAllocator.get(), impl_->jobSystem.get());
-        // 접촉·바디 쌍 버퍼가 넘치면 일부 충돌을 건너뛴 것입니다. 예전에는 반환값을 버렸습니다(DEF-10).
+    int steps = 0;
+    auto warnOverflow = [&](JPH::EPhysicsUpdateError err) {
         if (err != JPH::EPhysicsUpdateError::None && !updateErrorWarned_) {
             updateErrorWarned_ = true;
             const auto has = [err](JPH::EPhysicsUpdateError f) { return ((uint32_t)err & (uint32_t)f) != 0; };
@@ -962,11 +923,60 @@ void PhysicsSystem::tick(float dt) {
                 << (has(JPH::EPhysicsUpdateError::ContactConstraintsFull) ? " contact-constraints" : "")
                 << " full; some contacts were ignored this step (warned once)";
         }
-        accumulator_ -= step_;
-        processContacts();   // 이 스텝의 접촉을 쌍으로 셈(알림은 틱 끝에 보냄, D4)
+    };
+
+    if (directStep_) {
+        // 엔진 고정 시뮬레이션 틱 모드(D2a): 틱 1회 = 물리 스텝 1회.
+        if (dt > 0.f) {
+            steps = 1;
+            for (const auto& k : kinematic) {
+                bi.MoveKinematic(k.id, JPH::RVec3(k.p1.x, k.p1.y, k.p1.z),
+                                 JPH::Quat(k.q1.x, k.q1.y, k.q1.z, k.q1.w), dt);
+            }
+            for (const auto& [id, ft] : frameForces_) {
+                const JPH::BodyID jid(id);
+                if (!bi.IsAdded(jid)) continue;
+                bi.AddForceAndTorque(jid, JPH::Vec3(ft.force.x, ft.force.y, ft.force.z),
+                                     JPH::Vec3(ft.torque.x, ft.torque.y, ft.torque.z));
+            }
+            frameForces_.clear();
+            warnOverflow(impl_->physics->Update(dt, 1, impl_->tempAllocator.get(), impl_->jobSystem.get()));
+            processContacts();
+        }
+    } else {
+        // 단독 사용 경로(PhysicsTest 등): 자체 누적기로 고정 스텝 실행.
+        for (const auto& [id, ft] : frameForces_) {
+            ForceTorque& b = impulseBudget_[id];
+            b.force  += ft.force  * dt;
+            b.torque += ft.torque * dt;
+        }
+        frameForces_.clear();
+
+        accumulator_ += dt;
+        steps = (int)std::floor(accumulator_ / step_);
+        for (int i = 0; i < steps; ++i) {
+            const float alpha = float(i + 1) / float(steps);
+            for (const auto& k : kinematic) {
+                const glm::vec3 p = glm::mix(k.p0, k.p1, alpha);
+                const glm::quat q = glm::slerp(k.q0, k.q1, alpha);
+                bi.MoveKinematic(k.id, JPH::RVec3(p.x, p.y, p.z), JPH::Quat(q.x, q.y, q.z, q.w), step_);
+            }
+            const float share = 1.f / float(steps - i);
+            for (auto& [id, b] : impulseBudget_) {
+                const glm::vec3 j = b.force * share, l = b.torque * share;
+                b.force  -= j;
+                b.torque -= l;
+                const JPH::BodyID jid(id);
+                if (!bi.IsAdded(jid)) continue;
+                bi.AddForceAndTorque(jid, JPH::Vec3(j.x, j.y, j.z) / step_, JPH::Vec3(l.x, l.y, l.z) / step_);
+            }
+
+            warnOverflow(impl_->physics->Update(step_, 1, impl_->tempAllocator.get(), impl_->jobSystem.get()));
+            accumulator_ -= step_;
+            processContacts();
+        }
+        if (steps > 0) impulseBudget_.clear();
     }
-    // 스텝이 없던 틱의 충격량은 다음 틱의 스텝에 넣습니다.
-    if (steps > 0) impulseBudget_.clear();
 
     // ── Sync transforms: Dynamic 바디의 월드 자세를 액터에 씁니다 ────────────────
     // 월드 세터로 씁니다. 부모가 있으면 부모의 지금 월드 트랜스폼으로 로컬을 구합니다(DEF-53). 잠든
@@ -977,20 +987,6 @@ void PhysicsSystem::tick(float dt) {
         if (rb->bodyId_ == 0xFFFFFFFFu || rb->motionType != EMotionType::Dynamic) continue;
         glm::vec3 p; glm::quat r;
         bodyPose(rb, p, r);
-        if (rb->interpolate) {
-            // 렌더 보간(P4, Fix Your Timestep): 마지막 두 스텝 사이를 남은 누적 시간 비율로 섞습니다. 스텝이 없던 틱은
-            // 지난 틱의 두 자세를 그대로 쓰고 비율만 늘립니다. 새 바디 · 순간 이동 뒤 첫 틱은 섞지 않습니다.
-            if (steps > 0) { rb->interpCurPos_ = p; rb->interpCurRot_ = r; }
-            if (!rb->interpValid_) {
-                rb->interpPrevPos_ = rb->interpCurPos_ = p;
-                rb->interpPrevRot_ = rb->interpCurRot_ = r;
-                rb->interpValid_   = true;
-            }
-            const float alpha = std::clamp(accumulator_ / step_, 0.f, 1.f);
-            p = glm::mix(rb->interpPrevPos_, rb->interpCurPos_, alpha);
-            const glm::quat to = glm::dot(rb->interpPrevRot_, rb->interpCurRot_) < 0.f ? -rb->interpCurRot_ : rb->interpCurRot_;
-            r = glm::normalize(glm::slerp(rb->interpPrevRot_, to, alpha));
-        }
         a->setWorldPosition(p);
         a->setWorldRotation(r);
         rb->syncedLocalPos_ = a->transform().position();

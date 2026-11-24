@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "../vfs/LogicalPath.hpp"
 #include "Utf8.hpp"
 #include <cmath>
@@ -31,8 +31,8 @@ struct ProjectSettings {
     //   xr.eyeHeight = 1.7               fixed 일 때(또는 런타임에 바닥 공간이 없을 때) 바닥에서 눈까지(m)
     bool  xrTrackedHeight = true;
     float xrEyeHeight     = 1.7f;
-    // 게임 실행 파일을 VR 로 시작할지(2026-10-19 사용자 결정, UE 의 Start in VR · Unity 의 Initialize XR on Startup 자리).
-    //   xr.startInVr = true | false   명령줄 --xr · --no-xr 이 이 값을 덮어씁니다. 에디터는 이 값을 보지 않고 --xr 로만 켭니다.
+    // VR 자동 감지(2026-10-19 사용자 결정, 2026-11-24 V1: 에디터도 읽음, UE 의 Start in VR · Unity 의 Initialize XR on Startup 자리).
+    //   xr.startInVr = true | false   명령줄 --xr · --no-xr 이 이 값을 덮어씁니다. 에디터는 Play 동안만 세션을 엽니다.
     bool  xrStartInVr     = false;
     // 후처리 패스 켬/끔(2026-11-01).
     //   render.ao    = true | false   화면 공간 AO(SSAO). 머티리얼 occlusion 텍스처는 그대로입니다.
@@ -54,6 +54,9 @@ struct ProjectSettings {
     bool     renderHeightFog         = true;
     bool     renderReflectionCapture = true;
     uint32_t renderLightLimit        = 0;
+    // 고정 시뮬레이션 틱 빈도(Hz, D2a/D2b). 기본 72 Hz (하한 72, 상한 240).
+    //   sim.tickRate = 72   (72 ~ 240 Hz; 72 미만은 72 로 올림)
+    float    simTickRate             = 72.f;
     // 플랫폼 접미사(2026-11-18): "이름.android = 값" 은 Android(Quest)에서만 같은 이름의 값을 덮어씁니다(줄 순서와 무관).
     // UE 의 플랫폼 ini 가 Default ini 를 덮는 것과 같은 자리입니다. 다른 플랫폼의 줄은 조용히 건너뜁니다. 입력 바인딩(input.*)에는
     // 붙일 수 없습니다. PC 에서 Quest 값을 시험하려면 명령줄 --settings-platform=android.
@@ -204,6 +207,17 @@ inline ProjectSettings parse(const std::string& text, std::vector<std::string>& 
                                                            + std::to_string((uint32_t)v));
                 s.renderLightLimit = (uint32_t)v;
             }
+        } else if (key == "sim.tickRate") {
+            char* endp = nullptr;
+            const float v = std::strtof(value.c_str(), &endp);
+            if (value.empty() || !endp || *endp != '\0' || !std::isfinite(v) || v > 240.f) {
+                messages.push_back("'sim.tickRate' must be a number from 72 to 240 (got '" + value + "'); using " + trimNumber(s.simTickRate));
+            } else if (v < 72.f) {
+                s.simTickRate = 72.f;
+                messages.push_back("'sim.tickRate' below 72 Hz is clamped to 72 (got '" + value + "')");
+            } else {
+                s.simTickRate = v;
+            }
         } else {
             messages.push_back("unknown setting '" + key + "'; skipped");
         }
@@ -237,6 +251,96 @@ inline ProjectSettings parse(const std::string& text, std::vector<std::string>& 
     }
     for (const auto& [key, value] : platformLines) apply(key, value);
     return s;
+}
+
+// project.ini / *.hproject 본문에서 key 의 값 줄만 바꿉니다(주석 · 줄 순서 · 다른 줄 · CRLF/LF 줄 끝 보존).
+// key 가 여러 번 나오면 모두 갱신하고, 없으면 파일 끝에 새 줄로 추가합니다.
+inline std::string setIniValue(const std::string& text, std::string_view key, std::string_view valueText) {
+    const std::string eol = (text.find("\r\n") != std::string::npos) ? "\r\n" : "\n";
+    std::string out;
+    out.reserve(text.size() + key.size() + valueText.size() + 16);
+    bool found = false;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        const size_t nl = text.find('\n', pos);
+        const size_t lineEnd = (nl == std::string::npos) ? text.size() : nl;
+        std::string_view raw(text.data() + pos, lineEnd - pos);
+        std::string lineEol;
+        if (nl != std::string::npos) {
+            if (!raw.empty() && raw.back() == '\r') {
+                raw.remove_suffix(1);
+                lineEol = "\r\n";
+            } else {
+                lineEol = "\n";
+            }
+        }
+        const std::string trimmed = trim(std::string(raw));
+        bool matched = false;
+        if (!trimmed.empty() && trimmed[0] != '#') {
+            const size_t eq = trimmed.find('=');
+            if (eq != std::string::npos && trim(trimmed.substr(0, eq)) == key) matched = true;
+        }
+        if (matched) {
+            out += std::string(key) + " = " + std::string(valueText) + lineEol;
+            found = true;
+        } else {
+            out.append(raw.data(), raw.size());
+            out += lineEol;
+        }
+        pos = (nl == std::string::npos) ? text.size() : nl + 1;
+    }
+    if (!found) {
+        if (!out.empty() && out.back() != '\n') out += eol;
+        out += std::string(key) + " = " + std::string(valueText) + eol;
+    }
+    return out;
+}
+
+inline std::string setIniBool(const std::string& text, std::string_view key, bool value) {
+    return setIniValue(text, key, value ? "true" : "false");
+}
+
+// project.ini / *.hproject 본문에서 key 에 해당하는 비주석 줄을 지웁니다(나머지 줄 · 주석 · 줄 끝 보존).
+inline std::string removeIniKey(const std::string& text, std::string_view key) {
+    std::string out;
+    out.reserve(text.size());
+    size_t pos = 0;
+    while (pos < text.size()) {
+        const size_t nl = text.find('\n', pos);
+        const size_t lineEnd = (nl == std::string::npos) ? text.size() : nl;
+        std::string_view raw(text.data() + pos, lineEnd - pos);
+        std::string lineEol;
+        if (nl != std::string::npos) {
+            if (!raw.empty() && raw.back() == '\r') {
+                raw.remove_suffix(1);
+                lineEol = "\r\n";
+            } else {
+                lineEol = "\n";
+            }
+        }
+        const std::string trimmed = trim(std::string(raw));
+        bool matched = false;
+        if (!trimmed.empty() && trimmed[0] != '#') {
+            const size_t eq = trimmed.find('=');
+            if (eq != std::string::npos && trim(trimmed.substr(0, eq)) == key) matched = true;
+        }
+        if (!matched) {
+            out.append(raw.data(), raw.size());
+            out += lineEol;
+        }
+        pos = (nl == std::string::npos) ? text.size() : nl + 1;
+    }
+    return out;
+}
+
+enum class IniWriteAction : uint8_t {
+    Write,          // 파일이 없거나 읽기에 성공하여 갱신된 내용을 씀
+    AbortReadError, // 파일이 존재하지만 읽기에 실패하여 덮어쓰지 않고 중단
+};
+
+inline IniWriteAction decideIniWrite(bool fileExists, bool readOk) {
+    if (fileExists && !readOk) return IniWriteAction::AbortReadError;
+    return IniWriteAction::Write;
 }
 
 } // namespace project_settings

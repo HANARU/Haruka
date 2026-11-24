@@ -1081,3 +1081,351 @@ msgstr "프로젝트 준비가 끝났습니다."
 msgctxt "Launcher,Progress.SkippedSuffix"
 msgid " (Skipped)"
 msgstr " (건너뜀)"
+
+msgctxt "Editor.Menu,Edit.ProjectSettings"
+msgid "Project Settings..."
+msgstr "프로젝트 설정..."
+
+msgctxt "Editor.Command,Play.PlayDesktop"
+msgid "Play on Desktop"
+msgstr "데스크톱으로 Play"
+
+msgctxt "Editor.Dialog,ProjectSettings.Status.HeadsetFound"
+msgid "This run: VR ready (headset detected; Play opens VR)"
+msgstr "이번 실행: VR 준비됨 (헤드셋 인식됨, Play 시 VR 실행)"
+
+msgctxt "Editor.Dialog,ProjectSettings.Status.NoHeadset"
+msgid "This run: VR ready (no headset detected; Play opens desktop)"
+msgstr "이번 실행: VR 준비됨 (헤드셋 없음, Play 시 데스크톱 실행)"
+
+msgctxt "Editor.Dialog,ProjectSettings.Status.Ready"
+msgid "This run: VR ready"
+msgstr "이번 실행: VR 준비됨"
+
+msgctxt "Editor.Dialog,ProjectSettings.Status.Unavailable"
+msgid "This run: VR unavailable (desktop only)"
+msgstr "이번 실행: VR 사용 불가 (데스크톱만)"
+
+msgctxt "Editor.Dialog,ProjectSettings.Status.DisabledByNoXr"
+msgid "This run: disabled by --no-xr"
+msgstr "이번 실행: --no-xr 로 꺼짐"
+
+msgctxt "Editor.Dialog,ProjectSettings.Status.AutomatedRun"
+msgid "This run: skipped for automated run"
+msgstr "이번 실행: 자동 실행이라 건너뜀"
+
+msgctxt "Editor.Dialog,ProjectSettings.Status.NotPrepared"
+msgid "This run: VR not prepared"
+msgstr "이번 실행: VR 준비 안 됨"
+
+msgctxt "Editor.Toolbar,PlayTip.HeadsetFound"
+msgid "Play (VR: headset ready)"
+msgstr "Play (VR: 헤드셋 준비됨)"
+
+msgctxt "Editor.Toolbar,PlayTip.NoHeadset"
+msgid "Play (Desktop: no headset found)"
+msgstr "Play (데스크톱: 헤드셋 없음)"
+
+msgctxt "Editor.Toolbar,PlayTip.Ready"
+msgid "Play (VR: ready)"
+msgstr "Play (VR: 준비됨)"
+
+msgctxt "Editor.Toolbar,PlayTip.Unavailable"
+msgid "Play (Desktop: VR unavailable)"
+msgstr "Play (데스크톱: VR 사용 불가)"
+
+msgctxt "Editor.Toolbar,PlayTip.DisabledByNoXr"
+msgid "Play (Desktop: --no-xr)"
+msgstr "Play (데스크톱: --no-xr)"
+
+msgctxt "Editor.Toolbar,PlayTip.AutomatedRun"
+msgid "Play (Desktop: automated run)"
+msgstr "Play (데스크톱: 자동 실행)"
+
+msgctxt "Editor.Toolbar,PlayTip.NotPrepared"
+msgid "Play (Desktop: VR not prepared - enable in Project Settings)"
+msgstr "Play (데스크톱: VR 준비 안 됨 - 프로젝트 설정에서 켬)"
+
+msgctxt "Editor.ProjectSettings,Sec.About"
+msgid "About"
+msgstr "정보"
+
+msgctxt "Editor.ProjectSettings,Key.name"
+msgid "Project Name"
+msgstr "프로젝트 이름"
+
+msgctxt "Editor.ProjectSettings,Help.name"
+msgid "Display name of the project."
+msgstr "프로젝트의 표시 이름입니다."
+
+msgctxt "Editor.ProjectSettings,Key.company"
+msgid "Company Name"
+msgstr "회사 이름"
+
+msgctxt "Editor.ProjectSettings,Help.company"
+msgid "Company or publisher name used for packaging and write folders."
+msgstr "패키징과 쓰기 폴더에 사용하는 회사 또는 제작사 이름입니다."
+
+msgctxt "Editor.ProjectSettings,Key.packageId"
+msgid "Package ID"
+msgstr "패키지 ID"
+
+msgctxt "Editor.ProjectSettings,Help.packageId"
+msgid "Android application package ID (e.g. com.company.app). Reconfigure Android after changing."
+msgstr "Android 앱 패키지 ID입니다(예: com.company.app). 바꾼 뒤 Android를 다시 구성해야 합니다."
+
+msgctxt "Editor.ProjectSettings,Sec.Engine"
+msgid "Engine"
+msgstr "엔진"
+
+msgctxt "Editor.ProjectSettings,Key.engineVersion"
+msgid "Engine Version"
+msgstr "엔진 버전"
+
+msgctxt "Editor.ProjectSettings,Help.engineVersion"
+msgid "Minimum Haruka engine version recorded in the project file."
+msgstr "프로젝트 파일에 기록된 최소 Haruka 엔진 버전입니다."
+
+msgctxt "Editor.ProjectSettings,Key.engine"
+msgid "Engine Association"
+msgstr "엔진 연결"
+
+msgctxt "Editor.ProjectSettings,Help.engine"
+msgid "Engine association constraint (e.g. haruka>=0.1)."
+msgstr "엔진 연결 조건입니다(예: haruka>=0.1)."
+
+msgctxt "Editor.ProjectSettings,Sec.DefaultMaps"
+msgid "Default Maps"
+msgstr "기본 맵"
+
+msgctxt "Editor.ProjectSettings,Key.startScene"
+msgid "Game Default Scene"
+msgstr "게임 기본 씬"
+
+msgctxt "Editor.ProjectSettings,Help.startScene"
+msgid "Logical /Game/ path to the .hscene opened on startup."
+msgstr "시작할 때 여는 .hscene의 논리 /Game/ 경로입니다."
+
+msgctxt "Editor.ProjectSettings,Sec.Simulation"
+msgid "Simulation"
+msgstr "시뮬레이션"
+
+msgctxt "Editor.ProjectSettings,Key.sim.tickRate"
+msgid "Simulation Tick Rate (Hz)"
+msgstr "시뮬레이션 틱 빈도 (Hz)"
+
+msgctxt "Editor.ProjectSettings,Help.sim.tickRate"
+msgid "Fixed simulation step frequency in Hz (72 to 240)."
+msgstr "고정 시뮬레이션 스텝 빈도(72 ~ 240 Hz)입니다."
+
+msgctxt "Editor.ProjectSettings,Sec.PostProcess"
+msgid "Post Processing"
+msgstr "후처리"
+
+msgctxt "Editor.ProjectSettings,Key.render.ao"
+msgid "Screen-Space Ambient Occlusion"
+msgstr "화면 공간 주변광 차폐 (SSAO)"
+
+msgctxt "Editor.ProjectSettings,Help.render.ao"
+msgid "Enable screen-space ambient occlusion pass (can be overridden per platform)."
+msgstr "화면 공간 AO 패스를 켭니다(플랫폼별 덮어쓰기 가능)."
+
+msgctxt "Editor.ProjectSettings,Key.render.bloom"
+msgid "Bloom"
+msgstr "블룸"
+
+msgctxt "Editor.ProjectSettings,Help.render.bloom"
+msgid "Enable bloom post-process pass around bright areas."
+msgstr "밝은 영역 주변의 블룸 후처리 패스를 켭니다."
+
+msgctxt "Editor.ProjectSettings,Sec.Shadows"
+msgid "Shadows"
+msgstr "그림자"
+
+msgctxt "Editor.ProjectSettings,Key.render.csmCascades"
+msgid "Shadow Cascades"
+msgstr "그림자 캐스케이드 수"
+
+msgctxt "Editor.ProjectSettings,Help.render.csmCascades"
+msgid "Number of directional shadow map cascades (1 or 2)."
+msgstr "방향광 그림자 맵 캐스케이드 수(1 또는 2)입니다."
+
+msgctxt "Editor.ProjectSettings,Key.render.shadowDistance"
+msgid "Shadow Distance (m)"
+msgstr "그림자 거리 (m)"
+
+msgctxt "Editor.ProjectSettings,Help.render.shadowDistance"
+msgid "Directional shadow coverage radius around the camera in meters (8 to 200)."
+msgstr "카메라 중심 방향광 그림자 반경(8 ~ 200 m)입니다."
+
+msgctxt "Editor.ProjectSettings,Key.render.contactShadows"
+msgid "Contact Shadows"
+msgstr "접촉 그림자"
+
+msgctxt "Editor.ProjectSettings,Help.render.contactShadows"
+msgid "Enable screen-space contact shadows on lights."
+msgstr "라이트의 화면 공간 접촉 그림자를 켭니다."
+
+msgctxt "Editor.ProjectSettings,Sec.Atmosphere"
+msgid "Atmosphere & Reflections"
+msgstr "대기 · 반사"
+
+msgctxt "Editor.ProjectSettings,Key.render.heightFog"
+msgid "Height Fog"
+msgstr "높이 안개"
+
+msgctxt "Editor.ProjectSettings,Help.render.heightFog"
+msgid "Enable exponential height fog rendering."
+msgstr "지수 높이 안개 렌더링을 켭니다."
+
+msgctxt "Editor.ProjectSettings,Key.render.reflectionCapture"
+msgid "Reflection Captures"
+msgstr "반사 캡처"
+
+msgctxt "Editor.ProjectSettings,Help.render.reflectionCapture"
+msgid "Use ReflectionCapture components (off uses sky IBL only)."
+msgstr "ReflectionCapture 컴포넌트를 사용합니다(끄면 하늘 IBL만 사용)."
+
+msgctxt "Editor.ProjectSettings,Sec.Lighting"
+msgid "Lighting"
+msgstr "조명"
+
+msgctxt "Editor.ProjectSettings,Key.render.lightLimit"
+msgid "Per-Frame Light Limit"
+msgstr "프레임당 라이트 상한"
+
+msgctxt "Editor.ProjectSettings,Help.render.lightLimit"
+msgid "Max lights uploaded per frame (0 uses Config/engine.ini render.maxLights; max 4096)."
+msgstr "프레임마다 올릴 최대 라이트 수입니다(0이면 Config/engine.ini 의 render.maxLights 사용, 최대 4096)."
+
+msgctxt "Editor.ProjectSettings,Sec.XrStartup"
+msgid "Startup"
+msgstr "시작"
+
+msgctxt "Editor.ProjectSettings,Key.xr.startInVr"
+msgid "VR Auto-Detect"
+msgstr "VR 자동 감지"
+
+msgctxt "Editor.ProjectSettings,Help.xr.startInVr"
+msgid "Prepare OpenXR on startup; Play opens VR when a headset is found."
+msgstr "시작할 때 OpenXR을 준비하고, Play 때 헤드셋이 있으면 VR로 엽니다."
+
+msgctxt "Editor.ProjectSettings,Sec.XrRig"
+msgid "Tracking Origin"
+msgstr "추적 원점"
+
+msgctxt "Editor.ProjectSettings,Key.xr.height"
+msgid "XR Height Mode"
+msgstr "XR 높이 모드"
+
+msgctxt "Editor.ProjectSettings,Help.xr.height"
+msgid "tracked uses headset floor space; fixed places eyes at XR Eye Height."
+msgstr "tracked 는 헤드셋 바닥 공간을 쓰고, fixed 는 눈높이를 XR 눈높이로 고정합니다."
+
+msgctxt "Editor.ProjectSettings,Key.xr.eyeHeight"
+msgid "XR Eye Height (m)"
+msgstr "XR 눈높이 (m)"
+
+msgctxt "Editor.ProjectSettings,Help.xr.eyeHeight"
+msgid "Floor-to-eye height in meters when XR Height Mode is fixed (0.5 to 2.5)."
+msgstr "XR 높이 모드가 fixed 일 때 바닥에서 눈까지의 높이(0.5 ~ 2.5 m)입니다."
+
+msgctxt "Editor.Panels,ProjectSettings"
+msgid "Project Settings"
+msgstr "프로젝트 설정"
+
+msgctxt "Editor.ProjectSettings,AndroidOverride"
+msgid "Android"
+msgstr "Android"
+
+msgctxt "Editor.ProjectSettings,Group.Project"
+msgid "Project"
+msgstr "프로젝트"
+
+msgctxt "Editor.ProjectSettings,Group.Engine"
+msgid "Engine"
+msgstr "엔진"
+
+msgctxt "Editor.ProjectSettings,Group.Platforms"
+msgid "Platforms"
+msgstr "플랫폼"
+
+msgctxt "Editor.ProjectSettings,Cat.Description"
+msgid "Description"
+msgstr "설명"
+
+msgctxt "Editor.ProjectSettings,CatDesc.Description"
+msgid "Project identity, company, and package ID."
+msgstr "프로젝트 이름, 회사, 패키지 ID입니다."
+
+msgctxt "Editor.ProjectSettings,Cat.MapsModes"
+msgid "Maps & Modes"
+msgstr "맵 및 모드"
+
+msgctxt "Editor.ProjectSettings,CatDesc.MapsModes"
+msgid "Default scenes loaded on startup."
+msgstr "시작할 때 여는 기본 씬입니다."
+
+msgctxt "Editor.ProjectSettings,Cat.Packaging"
+msgid "Packaging"
+msgstr "패키징"
+
+msgctxt "Editor.ProjectSettings,CatDesc.Packaging"
+msgid "Asset packing list (edit Config/game.pack.txt directly)."
+msgstr "에셋 묶음 목록입니다(Config/game.pack.txt 를 직접 편집)."
+
+msgctxt "Editor.ProjectSettings,Packaging.Info"
+msgid "Edit Config/game.pack.txt to configure map, exclude, and stored rules."
+msgstr "map, exclude, stored 규칙을 바꾸려면 Config/game.pack.txt 를 편집하십시오."
+
+msgctxt "Editor.ProjectSettings,Packaging.OpenExplorer"
+msgid "Open in Explorer"
+msgstr "탐색기에서 열기"
+
+msgctxt "Editor.ProjectSettings,Cat.General"
+msgid "General"
+msgstr "일반"
+
+msgctxt "Editor.ProjectSettings,CatDesc.General"
+msgid "Simulation tick rate and general runtime settings."
+msgstr "시뮬레이션 틱 빈도와 일반 실행 설정입니다."
+
+msgctxt "Editor.ProjectSettings,Cat.Rendering"
+msgid "Rendering"
+msgstr "렌더링"
+
+msgctxt "Editor.ProjectSettings,CatDesc.Rendering"
+msgid "Post-processing, shadows, atmosphere, and per-platform overrides."
+msgstr "후처리, 그림자, 대기, 플랫폼별 덮어쓰기 설정입니다."
+
+msgctxt "Editor.ProjectSettings,Cat.XR"
+msgid "XR"
+msgstr "XR"
+
+msgctxt "Editor.ProjectSettings,CatDesc.XR"
+msgid "OpenXR auto-detection and tracking origin."
+msgstr "OpenXR 자동 감지와 추적 원점 설정입니다."
+
+msgctxt "Editor.Settings,SearchHint"
+msgid "Search Settings"
+msgstr "설정 검색"
+
+msgctxt "Editor.Settings,SearchNoMatch"
+msgid "No settings match '{0}'"
+msgstr "'{0}'에 맞는 설정이 없습니다"
+
+msgctxt "Editor.Settings,RestartBanner"
+msgid "Restart the editor to apply some changes"
+msgstr "일부 변경 사항을 적용하려면 에디터를 다시 시작하십시오"
+
+msgctxt "Editor.Settings,SavedIn"
+msgid "Saved in: {0}"
+msgstr "저장 위치: {0}"
+
+msgctxt "Editor.Settings,AddAndroid"
+msgid "+ Android"
+msgstr "+ Android"
+
+msgctxt "Editor.Settings,RemoveAndroid"
+msgid "Remove Android override"
+msgstr "Android 덮어쓰기 지우기"

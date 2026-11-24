@@ -53,7 +53,10 @@ public:
     void        onBeginPlay()  override;
     void        onEndPlay()    override;
     void        onPauseChanged(bool paused) override;
+    bool        isDisplayModule() const override { return true; }
     const char* name() const   override { return "AudioSystem"; }
+    // 표시 보간 비율(D2b). 엔진이 표시 단계마다 넣습니다(단독 사용 기본값 1).
+    void        setDisplayAlpha(float alpha) { displayAlpha_ = alpha; }
 
     // 월드를 정하고 그 월드의 서비스로 자신을 넣습니다(게임 코드: world.service<AudioSystem>(), 2026-11-21). shutdown 이 뺍니다.
     void setWorld(World* w);
@@ -238,6 +241,7 @@ private:
     float audibleGain(const AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos) const;
     void  updateVirtual(AudioVoice& voice, const AudioComponent& ac, const glm::vec3& sourcePos, float dt);
     const PhysicsSystem* physics_ = nullptr;
+    float                displayAlpha_ = 1.f;
     glm::vec3            listenerPos_{ 0.f };
     glm::vec3            listenerPrevPos_{ 0.f };   // 도플러용 청취자 속도 추정(S1)
     glm::vec3            listenerVel_{ 0.f };

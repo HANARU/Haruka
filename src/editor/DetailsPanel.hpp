@@ -3,7 +3,7 @@
 #include "EditorContext.hpp"
 #include "EditorMenuModel.hpp"
 #include "TextInputController.hpp"
-#include "PropertyTextEdit.hpp"
+#include "PropertyRowKit.hpp"
 #include "ColorPickerPopup.hpp"
 #include "HCommandStack.hpp"
 #include "../core/HLog.hpp"
@@ -66,22 +66,7 @@ public:
     };
 
     // 행 하나의 동작(H3a): 되돌리기 화살표 · 오른쪽 메뉴(Reset to Default · Copy · Paste) · 덤프가 씁니다.
-    struct RowOps {
-        std::string                              label;      // 행 이름(덤프 · 시험이 찾는 이름)
-        PropDesc::Kind                           kind = PropDesc::Float;
-        std::function<bool()>                    canReset;   // 기본값과 다름(화살표 보임 · 메뉴 켜짐)
-        std::function<void()>                    reset;      // 기본값으로(Undo 한 단계)
-        std::function<std::string()>             copyText;   // 값을 글로
-        std::function<bool(const std::string&)> paste;      // 글을 값으로(Undo 한 단계), 모양이 틀리면 거짓
-        std::function<void()>                    openCombo;  // 열거 행: 콤보 열기(덤프)
-        std::function<void()>                    beginEdit;  // 글 행: 편집 시작(덤프)
-        // H3b
-        std::string                              english;    // 영어 원문 이름(속성 검색: 지금 문화권 이름 label 과 함께 봄)
-        std::function<bool(const std::string&)> acceptsAsset;   // 에셋 행: 그 경로의 종류를 받는가(끌어 놓기)
-        std::function<void(const std::string&)> setAsset;       // 에셋 행: 값 넣기(Undo 한 단계)
-        std::function<void()>                    openPicker;     // 에셋 행: 고르기 팝업 열기(덤프)
-        std::function<void(bool)>                openColor;      // 색 행: 색 선택기 열기(덤프, 참 = 네 성분 시험 값)
-    };
+    using RowOps = PropertyRowKit::RowOps;
 
     void init(Deps deps);
     std::shared_ptr<HWidget> build();
@@ -111,8 +96,8 @@ public:
     const std::shared_ptr<HPropertyColumns>& columns() const { return cols_; }
 
     // ── 글 칸(H3a) ── TextInputController 에 등록하는 글 칸 하나(편집 중인 행이 이 칸을 씀).
-    std::shared_ptr<HWidget> stringWidget() const { return strText_; }
-    TextInputField stringField();
+    std::shared_ptr<HWidget> stringWidget() const { return rowKit_.stringWidget(); }
+    TextInputField stringField() { return rowKit_.stringField(); }
 
     // ── 덤프 · 시험(H3a) ── 행 이름으로 찾습니다(같은 이름이 여럿이면 처음 행).
     const RowOps* findRow(const std::string& label) const;
@@ -156,24 +141,6 @@ private:
     // 지금 고른 소속 액터에서 path 로 시작하는 덮어쓰기가 있는지(build 때 한 번 구함).
     bool overridden(const std::string& prefix) const;
 
-    // 속성 행 하나(SPropertyRow, H3a): [이름 | 값][되돌리기]. 모든 종류가 이 틀을 씁니다(B10). into 가 비면 list_.
-    std::shared_ptr<SPropertyRow> addPropRow(const std::string& name, glm::vec4 nameColor, std::shared_ptr<HWidget> value,
-                                             std::shared_ptr<RowOps> ops, SVerticalBox* into = nullptr);
-    // 종류별 값 칸
-    std::shared_ptr<HWidget> numberField(std::function<float()> getter, std::function<void(float)> setter, float step,
-                                         ENumberUnit unit, glm::vec4 barColor, std::function<void()> bFn, std::function<void()> eFn);
-    std::shared_ptr<SVectorField> vectorField(const PropDesc& pd, std::function<float(int)> get, std::function<void(int, float)> set,
-                                              std::function<void()> bFn, std::function<void()> eFn);
-    std::shared_ptr<HWidget> colorField(const PropDesc& pd, std::function<float(int)> get, std::function<void(int, float)> set,
-                                        std::function<void()> bFn, std::function<void()> eFn,
-                                        std::function<void(const std::shared_ptr<HWidget>&)> openPicker, const std::shared_ptr<RowOps>& ops);
-    std::shared_ptr<HWidget> comboField(const PropDesc& pd, std::function<void(int)> choose, const std::shared_ptr<RowOps>& ops);
-    std::shared_ptr<HWidget> actorRefField(const PropDesc& pd, std::function<void(uint64_t)> choose);
-    std::shared_ptr<HWidget> checkField(std::function<bool()> getB, std::function<void(bool)> setB);
-    std::shared_ptr<HWidget> stringValue(const std::string& key, std::function<std::string()> get,
-                                         std::function<void(const std::string&)> commit, const std::shared_ptr<RowOps>& ops);
-    std::shared_ptr<HWidget> assetPathValue(const PropDesc& pd, std::function<void(const std::string&)> setPath,
-                                            const std::shared_ptr<RowOps>& ops);
     const RowOps* assetRowAt(glm::vec2 p) const;
     bool searching() const;
     bool rowMatches(const std::string& shown, const std::string& english) const;
@@ -188,14 +155,10 @@ private:
     bool   txExpanded_      = true;
     std::vector<std::string> overrides_;   // 고른 소속 액터의 덮어쓴 경로(build 때 구함)
 
-    // H3a: 열 나눔(패널 전체 공유) · 행 판정 · 메뉴를 연 행
+    // H3a · PS-D4: 열 나눔(패널 전체 공유) · 행 도구 · 메뉴를 연 행
     std::shared_ptr<HPropertyColumns> cols_ = std::make_shared<HPropertyColumns>();
-    std::vector<std::pair<std::weak_ptr<HWidget>, std::shared_ptr<RowOps>>> rowHits_;
-    std::shared_ptr<RowOps> menuRow_;
-    // H3a: 글 칸. 편집 중인 행 하나만 이 위젯을 씁니다(HReuse 로 같은 객체라 다시 만들어도 포커스가 이어짐).
-    std::shared_ptr<SEditableText> strText_ = HNew(SEditableText)->focusable(true);
-    PropertyTextEdit               str_;               // 편집 상태(확정 · 취소 규칙, 시험: tests/TextTest.cpp)
-    bool                           strShown_ = false;  // 지금 트리에 편집 칸이 있는가
+    PropertyRowKit                    rowKit_;
+    std::shared_ptr<RowOps>           menuRow_;
 
     // H3b: 속성 검색 칸(패널 위, 목록과 따로라 다시 만들어도 같은 객체)
     std::shared_ptr<SSearchBox> searchKeep_ = HNew(SSearchBox)->focusable(true);

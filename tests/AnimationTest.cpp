@@ -304,10 +304,10 @@ void testPlayer(const std::vector<MeshSourceData>& arm) {
     if (arm.empty() || !arm[0].skin || arm[0].skin->clips.size() != 4) { check(false, "모델이 없어 건너뜀"); return; }
     {
         Rig r(arm);
-        r.world.tick(0.25f);
+        r.world.tickDisplay(0.25f);
         check(r.anim->currentClip() == "Wave" && nearF(r.anim->time(), 0.25f), "자동 재생: 첫 클립 Wave, 0.25 초");
         check(nearQ(r.mesh->pose()[1].r, axisDeg({ 0, 0, 1 }, 22.5f)), "자세가 메시에 들어감(Upper 22.5°)");
-        r.world.tick(1.0f);
+        r.world.tickDisplay(1.0f);
         check(nearF(r.anim->time(), 0.25f, 1e-4f) && r.anim->isPlaying(), "반복: 1.25 초 → 0.25 초");
         std::vector<MeshSourceVertex> outv(arm[0].vertices.size());
         glm::vec3 smin, smax, bmin, bmax;
@@ -321,23 +321,23 @@ void testPlayer(const std::vector<MeshSourceData>& arm) {
         int finished = 0;
         std::string finName;
         r.anim->onFinished.add([&](const std::string& n) { ++finished; finName = n; });
-        r.world.tick(0.6f);
-        r.world.tick(0.6f);
-        r.world.tick(0.6f);
+        r.world.tickDisplay(0.6f);
+        r.world.tickDisplay(0.6f);
+        r.world.tickDisplay(0.6f);
         check(!r.anim->isPlaying() && nearF(r.anim->time(), 1.f) && finished == 1 && finName == "Bounce", "한 번 재생: 끝에서 멈추고 끝 알림 한 번");
         check(near3(r.mesh->pose()[3].s, { 2, 2, 2 }), "멈춘 자세 = 마지막 키(Hand 배율 2)");
     }
     {
         Rig r(arm);
         r.anim->speed = -1.f;
-        r.world.tick(0.25f);
+        r.world.tickDisplay(0.25f);
         check(nearF(r.anim->time(), 0.75f), "거꾸로 재생: 끝에서 시작해 0.75 초");
     }
     {
         Rig r(arm);
-        r.world.tick(0.25f);   // Wave 0.25
+        r.world.tickDisplay(0.25f);   // Wave 0.25
         r.anim->play("Bounce", 0.5f);
-        r.world.tick(0.25f);   // 페이드 반: Wave 0.5 와 Bounce 0.25 를 반씩
+        r.world.tickDisplay(0.25f);   // 페이드 반: Wave 0.5 와 Bounce 0.25 를 반씩
         const SkinSourceData& s = *arm[0].skin;
         hanim::Pose a, b, want;
         hskin::restPose(s, a); hanim::sample(s.clips[0], 0.5f, a);
@@ -346,14 +346,14 @@ void testPlayer(const std::vector<MeshSourceData>& arm) {
         bool same = true;
         for (size_t j = 0; j < 4; ++j) same = same && near3(r.mesh->pose()[j].t, want[j].t) && nearQ(r.mesh->pose()[j].r, want[j].r) && near3(r.mesh->pose()[j].s, want[j].s);
         check(same, "크로스페이드 중간 = 두 클립 자세의 반반");
-        r.world.tick(0.3f);
+        r.world.tickDisplay(0.3f);
         hskin::restPose(s, b); hanim::sample(s.clips[1], 0.55f, b);
         check(near3(r.mesh->pose()[0].t, b[0].t) && near3(r.mesh->pose()[3].s, b[3].s), "페이드가 끝나면 새 클립만");
         check(!r.anim->play("Nope"), "없는 클립 이름은 false");
     }
     {
         Rig r(arm);
-        r.world.tick(0.25f);
+        r.world.tickDisplay(0.25f);
         const hanim::Pose before = r.mesh->pose();
         r.anim->playAdditive("Bounce", 0.f);
         r.anim->setTime(0.25f);
@@ -362,7 +362,7 @@ void testPlayer(const std::vector<MeshSourceData>& arm) {
         for (size_t j = 0; j < 4; ++j) same = same && near3(r.mesh->pose()[j].t, before[j].t) && near3(r.mesh->pose()[j].s, before[j].s);
         check(same, "가산 층 무게 0 이면 바닥 자세 그대로");
         r.anim->setAdditiveWeight(1.f);
-        r.world.tick(0.5f);   // 가산 Bounce 0.5 초: Hand 배율 1.5 배
+        r.world.tickDisplay(0.5f);   // 가산 Bounce 0.5 초: Hand 배율 1.5 배
         check(nearF(r.mesh->pose()[3].s.x, 1.5f, 1e-4f), "가산 무게 1: Hand 배율이 1.5 배");
     }
     {
@@ -372,14 +372,14 @@ void testPlayer(const std::vector<MeshSourceData>& arm) {
         r.anim->addNotify("Wave", 0.f, "start");
         r.anim->addNotify("Wave", 0.5f, "mid");
         r.anim->addNotify("Bounce", 0.5f, "other");
-        r.world.tick(0.4f);
+        r.world.tickDisplay(0.4f);
         check(got.size() == 1 && got[0] == "start", "0 초 이벤트는 재생 첫 진행에 한 번");
-        r.world.tick(0.2f);
+        r.world.tickDisplay(0.2f);
         check(got.size() == 2 && got[1] == "mid", "0.5 초를 지나면 mid");
-        r.world.tick(0.5f);   // 0.6 → 1.1: 감으면서 start
+        r.world.tickDisplay(0.5f);   // 0.6 → 1.1: 감으면서 start
         check(got.size() == 3 && got[2] == "start", "반복 경계를 넘으면 start 가 다시");
         got.clear();
-        r.world.tick(3.0f);   // 0.1 → 3.1: mid 3번, start 3번, 지난 순서
+        r.world.tickDisplay(3.0f);   // 0.1 → 3.1: mid 3번, start 3번, 지난 순서
         int mids = 0, starts = 0;
         for (const auto& n : got) { mids += n == "mid"; starts += n == "start"; }
         check(mids == 3 && starts == 3 && got.size() == 6 && got[0] == "mid" && got[1] == "start", "큰 dt 도 빠짐없이 지난 순서로(3 바퀴)");
@@ -390,7 +390,7 @@ void testPlayer(const std::vector<MeshSourceData>& arm) {
         r.anim->clip = "Walk";
         r.anim->rootMotion = true;
         r.actor->setLocalRotation(axisDeg({ 0, 1, 0 }, 90.f));   // 액터가 +X 를 보게: 로컬 +Z 이동 → 월드 +X
-        for (int i = 0; i < 25; ++i) r.world.tick(0.1f);       // 2.5 초 = 2.5 바퀴
+        for (int i = 0; i < 25; ++i) r.world.tickDisplay(0.1f);       // 2.5 초 = 2.5 바퀴
         const glm::vec3 pos = r.actor->transform().position();
         check(near3(pos, { 2.5f, 0, 0 }, 1e-3f), "루트 모션: 2.5 바퀴 = 액터가 2.5 m(액터 회전 반영)");
         check(near3(r.mesh->pose()[0].t, { 0, 0, 0 }), "뿌리 관절은 제자리");
@@ -399,7 +399,7 @@ void testPlayer(const std::vector<MeshSourceData>& arm) {
         Rig r(arm);
         r.actor->addComponent<FakeHandPose>();
         const hanim::Pose before = r.mesh->pose();
-        r.world.tick(0.25f);
+        r.world.tickDisplay(0.25f);
         check(nearQ(r.mesh->pose()[1].r, before[1].r), "같은 액터에 손 자세가 있으면 자세를 쓰지 않음");
     }
     {
@@ -461,10 +461,10 @@ void testStateMachine(const std::vector<MeshSourceData>& arm) {
     machine->addState("Walk", "Walk");
     machine->addTransition(0, 1, 0.f, { { SM::Condition::BoolTrue, "moving", 0.f } });
     r.anim->setStateMachine(machine);
-    r.world.tick(0.1f);
+    r.world.tickDisplay(0.1f);
     check(r.anim->currentClip() == "Wave", "컴포넌트에 붙이면 시작 상태 클립");
     machine->setBool("moving", true);
-    r.world.tick(0.1f);
+    r.world.tickDisplay(0.1f);
     check(r.anim->currentClip() == "Walk", "파라미터를 바꾸면 다음 틱에 전환");
 }
 
@@ -485,7 +485,7 @@ void testMorph(const std::vector<MeshSourceData>& arm) {
         check(near3(glm::make_vec3(out[8].pos), glm::make_vec3(arm[0].vertices[8].pos)), "무게 0: 정점 = 바인드");
         r.anim->clip = "Flex";
         r.anim->loop = false;
-        r.world.tick(2.f);   // 끝 = 무게 1
+        r.world.tickDisplay(2.f);   // 끝 = 무게 1
         check(r.mesh->morphWeights().size() == 1 && nearF(r.mesh->morphWeights()[0], 1.f), "클립의 무게 트랙이 메시 무게를 정함");
         r.mesh->skinInto(out.data(), mn, mx);
         const glm::vec3 b8 = glm::make_vec3(arm[0].vertices[8].pos);
@@ -508,7 +508,7 @@ void testMorph(const std::vector<MeshSourceData>& arm) {
     glm::vec3 mn, mx;
     r.mesh->skinInto(out.data(), mn, mx);
     check(near3(glm::make_vec3(out[2].pos), { 2, 1.125f, 0 }), "기본 무게 0.25: 위 정점 +0.125, 노드 이동 +1");
-    r.world.tick(0.6f);
+    r.world.tickDisplay(0.6f);
     r.mesh->skinInto(out.data(), mn, mx);
     check(near3(glm::make_vec3(out[2].pos), { 2, 1.5f, 0 }), "STEP 무게 1(0.5 초 뒤): +0.5");
 }

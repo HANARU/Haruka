@@ -18,6 +18,8 @@ class SkinnedMeshComponent;
 // HandPoseComponent 가 있으면 손 자세가 관절을 정하므로 이 컴포넌트는 자세를 쓰지 않고 한 번 알립니다.
 class AnimationComponent : public Component {
 public:
+    AnimationComponent() { tickGroup = ETickGroup::Display; }
+
     // ── 저장하는 값 ──
     std::string clip;              // 처음 재생할 클립 이름(비면 모델의 첫 클립)
     bool        autoPlay   = true; // Play 를 시작하면 바로 재생

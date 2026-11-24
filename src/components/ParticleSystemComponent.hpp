@@ -16,7 +16,7 @@ public:
     vfx::EmitterDesc desc;
     bool             autoPlay = true;   // 시작할 때 생성을 시작함
 
-    ParticleSystemComponent() { tickGroup = ETickGroup::PostPhysics; }
+    ParticleSystemComponent() { tickGroup = ETickGroup::Display; }
 
     void play();
     void stop()  { emitting_ = false; }

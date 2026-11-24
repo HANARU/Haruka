@@ -54,14 +54,16 @@ void FrameStats::logPacing(const char* when) {
     const hperf::Distribution c = cpuFrames_.summary();
     const hperf::Distribution g = gpuFrames_.summary();
     const float budget = budgetMs_ > 0.f ? budgetMs_ : hperf::frameBudgetMs(0.f);
-    char buf[320];
+    char buf[360];
     std::snprintf(buf, sizeof(buf),
                   "Frame pacing (%s): %u frames, CPU frame median %.2f, p99 %.2f, max %.2f ms; GPU median %.2f, p99 %.2f, "
-                  "max %.2f ms; over budget %u (budget %.1f ms)",
-                  when, c.count, c.median, c.p99, c.max, g.median, g.p99, g.max, overBudget_, budget);
+                  "max %.2f ms; over budget %u (budget %.1f ms); dropped sim ticks %llu",
+                  when, c.count, c.median, c.p99, c.max, g.median, g.p99, g.max, overBudget_, budget,
+                  (unsigned long long)droppedSimTicks_);
     HLOG(LogEngine, Log) << buf;
     cpuFrames_.clear();
     gpuFrames_.clear();
-    overBudget_    = 0;
-    hitchesLogged_ = 0;
+    overBudget_      = 0;
+    hitchesLogged_   = 0;
+    droppedSimTicks_ = 0;
 }

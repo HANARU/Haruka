@@ -204,6 +204,25 @@ void EditorApp::openAudioOutputDialog() {
     openModal(std::move(m));
 }
 
+// ── 프로젝트 설정 창 (2026-11-24 PS1b) ─────────────────────────────────────────────
+void EditorApp::openProjectSettings() {
+    projectSettingsPanel_.reloadFiles();
+    projectSettingsPanel_.markDirty();
+    if (dock_.contains("ProjectSettings")) {
+        dock_.showPanel("ProjectSettings");
+        return;
+    }
+    int wx = 100, wy = 100, ww = 1600, wh = 900;
+    if (ctx_.window) {
+        ctx_.window->getWindowPos(wx, wy);
+        ctx_.window->getWindowSize(ww, wh);
+    }
+    const int pw = 960, ph = 640;
+    const int px = wx + std::max(0, (ww - pw) / 2);
+    const int py = wy + std::max(0, (wh - ph) / 2);
+    dock_.showPanelFloating("ProjectSettings", pw, ph, px, py);
+}
+
 void EditorApp::openSceneDialog() {
     if (blockedDuringPlay("opening a scene")) return;
     contentPanel_.scanScenes();

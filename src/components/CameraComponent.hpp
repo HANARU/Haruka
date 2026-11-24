@@ -55,7 +55,7 @@ public:
     // 오른쪽이 +X, 위가 +Y 입니다. 액터의 크기는 뷰에 넣지 않습니다(UE · Unity · Godot 공통).
     glm::vec3 forward() const;
     glm::vec3 up()      const;
-    glm::mat4 viewMatrix() const;
+    glm::mat4 viewMatrix(float alpha = 1.f) const;
     glm::mat4 projMatrix(float aspect) const;
 
     // 에디터 비행 카메라의 yaw/pitch(라디안)를 액터 회전으로 바꿉니다. yaw 가 늘면 오른쪽으로,
@@ -73,7 +73,7 @@ public:
     // 카메라 위치 + 요입니다.
     // 머리 추적 카메라의 부모가 리그가 아니면(2026-11-06, DEF-144) 엔진이 setXrTrackedParent 로 그 부모를 리그처럼 원점으로
     // 씁니다. 부모가 없으면 월드 원점(+ lift)입니다(hxr::chooseOrigin).
-    glm::mat4 xrOrigin() const;
+    glm::mat4 xrOrigin(float alpha = 1.f) const;
     void setXrRig(const Actor* rig, float lift) { xrRig_ = rig; xrRigLift_ = lift; implicitRig_ = false; worldOrigin_ = false; }
     void setXrImplicitRig(float drop, float lift) {
         xrRig_ = nullptr; xrRigLift_ = lift; implicitRig_ = true; implicitDrop_ = drop; worldOrigin_ = false;

@@ -21,10 +21,11 @@ glm::vec3 CameraComponent::up() const {
     return ownerRotation(owner) * glm::vec3(0.f, 1.f, 0.f);
 }
 
-glm::mat4 CameraComponent::viewMatrix() const {
+glm::mat4 CameraComponent::viewMatrix(float alpha) const {
     // 회전과 위치로 이뤄진 카메라 월드 자세의 역행렬입니다: R^T · T(-p).
-    const glm::quat inv = glm::conjugate(ownerRotation(owner));
-    const glm::vec3 pos = owner ? owner->worldPosition() : glm::vec3(0.f);
+    const glm::quat rot = owner ? glm::normalize(owner->displayWorldRotation(alpha)) : glm::quat(1.f, 0.f, 0.f, 0.f);
+    const glm::quat inv = glm::conjugate(rot);
+    const glm::vec3 pos = owner ? owner->displayWorldPosition(alpha) : glm::vec3(0.f);
     glm::mat4 view = glm::mat4_cast(inv);
     view[3] = glm::vec4(-(inv * pos), 1.f);
     return view;
@@ -34,22 +35,22 @@ glm::mat4 CameraComponent::projMatrix(float aspect) const {
     return hmath::perspectiveReverseZ(fovY, aspect, zNear);
 }
 
-glm::mat4 CameraComponent::xrOrigin() const {
+glm::mat4 CameraComponent::xrOrigin(float alpha) const {
     if (!owner) return glm::mat4(1.f);
     if (xrRig_) {
         // 리그는 바닥에 서 있고 머리 자세가 실제 키를 가집니다. 회전은 리그의 것을 그대로 씁니다(무중력에서 리그를 기울일 수 있음).
-        const glm::quat r = xrRig_->worldRotation();
-        return glm::translate(glm::mat4(1.f), xrRig_->worldPosition() + r * glm::vec3(0.f, xrRigLift_, 0.f)) *
+        const glm::quat r = xrRig_->displayWorldRotation(alpha);
+        return glm::translate(glm::mat4(1.f), xrRig_->displayWorldPosition(alpha) + r * glm::vec3(0.f, xrRigLift_, 0.f)) *
                glm::mat4_cast(r);
     }
     // 부모 없는 머리 추적 카메라(DEF-144): 추적 자세가 곧 월드 자세이므로 원점은 월드 원점입니다.
     if (worldOrigin_) return glm::translate(glm::mat4(1.f), glm::vec3(0.f, xrRigLift_, 0.f));
     // 정면을 수평면에 내린 방향의 요입니다. 똑바로 위 · 아래를 보면 요가 정해지지 않아 0 으로 둡니다.
-    const glm::vec3 f = forward();
+    const glm::vec3 f = glm::normalize(owner->displayWorldRotation(alpha)) * glm::vec3(0.f, 0.f, -1.f);
     const float yaw = (f.x * f.x + f.z * f.z > 1e-8f) ? std::atan2(-f.x, -f.z) : 0.f;
     // 보이지 않는 리그: 카메라 아래 바닥(drop)에 서고, 머리 기준 공간이면 lift 만큼 올립니다.
     const glm::vec3 lift = implicitRig_ ? glm::vec3(0.f, xrRigLift_ - implicitDrop_, 0.f) : glm::vec3(0.f);
-    return glm::translate(glm::mat4(1.f), owner->worldPosition() + lift) *
+    return glm::translate(glm::mat4(1.f), owner->displayWorldPosition(alpha) + lift) *
            glm::mat4_cast(glm::angleAxis(yaw, glm::vec3(0.f, 1.f, 0.f)));
 }
 

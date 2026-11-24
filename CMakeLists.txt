@@ -602,6 +602,9 @@ set(EDITOR_SOURCES
     src/editor/TextInputController.cpp
     src/editor/OutlinerPanel.cpp
     src/editor/DetailsPanel.cpp
+    src/editor/PropertyRowKit.cpp
+    src/editor/SettingsPanel.cpp
+    src/editor/ProjectSettingsPanel.cpp
     src/editor/ContentBrowserPanel.cpp
     src/editor/GpuStatsPanel.cpp
     src/editor/OutputLogPanel.cpp
@@ -1651,6 +1654,7 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         # H3a: 열거 콤보 = 오른쪽 메뉴와 같은 메뉴 위젯(키 · 체크 · 바깥 닫기)
         src/editor/EditorContextMenu.cpp
         src/editor/EditorMenuView.cpp
+        src/editor/PropertyRowKit.cpp
     )
     # 셰이더 · 글꼴을 가상 파일 시스템으로 읽습니다(2026-10-24).
     target_link_libraries(HarukaSlateTest PRIVATE haruka_vulkan glm::glm HarukaVfs haruka_nanosvg)
@@ -1779,6 +1783,27 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         set_target_properties(HarukaProjectOpsTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
     endif()
 
+    add_executable(HarukaSimTickTest tests/SimTickTest.cpp)
+    target_link_libraries(HarukaSimTickTest PRIVATE HarukaRuntime)
+    haruka_target_defaults(HarukaSimTickTest)
+    if(MSVC)
+        set_target_properties(HarukaSimTickTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
+    add_executable(HarukaXrRunModeTest tests/XrRunModeTest.cpp)
+    target_link_libraries(HarukaXrRunModeTest PRIVATE HarukaSim)
+    haruka_target_defaults(HarukaXrRunModeTest)
+    if(MSVC)
+        set_target_properties(HarukaXrRunModeTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
+    add_executable(HarukaProjectSettingsTest tests/ProjectSettingsTest.cpp)
+    target_link_libraries(HarukaProjectSettingsTest PRIVATE HarukaSim)
+    haruka_target_defaults(HarukaProjectSettingsTest)
+    if(MSVC)
+        set_target_properties(HarukaProjectSettingsTest PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+    endif()
+
     # HarukaRuntime 을 링크하지 않고 glm::glm 을 직접 쓰는 독립 시험에도 같은 GLM 규약을 둡니다.
     foreach(T HarukaGeometryTest HarukaActorTest HarukaStereoTest HarukaMathTest HarukaSceneTest HarukaLightTest
               HarukaAssetCacheTest HarukaRenderExtTest HarukaHeadlessTest HarukaEditCmdTest HarukaActorUndoTest
@@ -1793,7 +1818,8 @@ if(NOT ANDROID AND HARUKA_BUILD_TESTS)
         HarukaLogTest HarukaAudioTest HarukaSlateTest HarukaPhysicsTest HarukaStereoTest HarukaInputTest HarukaBatchTest
         HarukaRenderExtTest HarukaSceneTest HarukaLightTest HarukaAssetCacheTest HarukaSceneDocTest HarukaEditCmdTest HarukaDockTest
         HarukaVulkanBaselineTest HarukaBarrierTest HarukaMemoryTest HarukaHeadlessTest HarukaHandTest HarukaMathTest HarukaArchTest
-        HarukaWindowTest HarukaSceneQualityTest HarukaSpirvTest HarukaProjectOpsTest)
+        HarukaWindowTest HarukaSceneQualityTest HarukaSpirvTest HarukaProjectOpsTest HarukaSimTickTest HarukaXrRunModeTest
+        HarukaProjectSettingsTest)
     if(WIN32)
         list(APPEND HARUKA_TESTS HarukaVkImportTest)
     endif()
@@ -1852,6 +1878,9 @@ add_test(NAME dock_tree            COMMAND HarukaDockTest)
 add_test(NAME hand_skinning        COMMAND HarukaHandTest)
     add_test(NAME spirv_version        COMMAND HarukaSpirvTest ${SHADER_BIN_DIR})
     add_test(NAME project_ops          COMMAND HarukaProjectOpsTest)
+    add_test(NAME sim_tick             COMMAND HarukaSimTickTest)
+    add_test(NAME xr_run_mode          COMMAND HarukaXrRunModeTest)
+    add_test(NAME project_settings     COMMAND HarukaProjectSettingsTest)
     if(WIN32)
         add_test(NAME vulkan_imports   COMMAND HarukaVkImportTest $<TARGET_FILE:HarukaEngine> $<TARGET_FILE:HarukaGame>
                                                $<TARGET_FILE:HarukaSimLinkTest>

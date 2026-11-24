@@ -90,6 +90,8 @@ public:
 
     void closePanel(const std::string& id);
     void showPanel(const std::string& id);
+    // 패널이 아직 열려 있지 않으면 지정한 크기 · 자리의 떠 있는 OS 창으로 열고, 이미 열려 있으면 앞으로 가져옵니다(PS-D1).
+    void showPanelFloating(const std::string& id, int w, int h, int x, int y);
 
     // 스플리터 · 탭 입력 처리. winId 는 0 = 메인, 1.. = 떠 있는 창이고 좌표 · 버튼은 그 창 것입니다(M3b). 그 창의 창 상태(히트 목록 ·
     // 끌기 상태 · 미리보기)만 씁니다. window 는 그 창(커서 모양 · 카메라 모드). 이벤트를 소비했으면 true(handleInput 조기 return).

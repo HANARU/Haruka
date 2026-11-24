@@ -103,6 +103,33 @@ void World::tickPostPhysics() {
     flushDestroyQueue();
 }
 
+void World::tickDisplay(float dt) {
+    if (displayVersion_ != hcore::gStructureVersion) {
+        anyDisplay_ = false;
+        for (const auto& a : actors) {
+            for (const auto& c : a->getComponents())
+                if (c->tickGroup == ETickGroup::Display) { anyDisplay_ = true; break; }
+            if (anyDisplay_) break;
+        }
+        displayVersion_ = hcore::gStructureVersion;
+    }
+    if (!anyDisplay_) return;
+    const float sdt = dt * timeScale_;
+    ticking_ = true;
+    for (auto& a : actors)
+        if (a->activeInHierarchy()) a->tick(sdt, ETickGroup::Display);
+    ticking_ = false;
+    flushDestroyQueue();
+}
+
+void World::snapshotTickPoses() {
+    for (auto& a : actors) a->snapshotTickPose();
+}
+
+void World::resetAllInterpolation() {
+    for (auto& a : actors) a->resetInterpolation();
+}
+
 const std::vector<Actor*>& World::actorsWithTag(std::string_view tag) const {
     if (tagCacheStructure_ != hcore::gStructureVersion || tagCacheTags_ != tagVersion_) {
         tagCache_.clear();

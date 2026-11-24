@@ -119,8 +119,8 @@ void TrackedPoseComponent::tick(float /*dt*/) {
     // 바닥 기준 공간이 없으면 자세의 원점이 머리 높이라 눈높이만큼 올려 리그(바닥) 기준으로 맞춥니다.
     const glm::vec3 lift(0.f, xr.floorOffset, 0.f);
     if (p.valid) {
-        owner->setLocalPosition(p.position + lift);
-        owner->setLocalRotation(p.orientation);
+        // D2b: 로컬 추적 값 자체는 지연/보간 없이 그리기 직전 최신 값을 그대로 씁니다(부모 리그만 보간).
+        owner->teleportLocal(p.position + lift, p.orientation);
     }
     if (!showDebug || hand < 0) return;
     const HHandInput& h = xr.hands[hand];
@@ -214,8 +214,7 @@ Actor* RigLocomotionComponent::findHead(const Actor& rig) {
 void RigLocomotionComponent::rotateRigAbout(Actor& rig, const glm::vec3& pivot, const glm::vec3& axis, float angleRad) {
     const glm::quat q = glm::angleAxis(angleRad, glm::normalize(axis));
     const glm::vec3 p = rig.worldPosition();
-    rig.setWorldPosition(pivot + q * (p - pivot));
-    rig.setWorldRotation(glm::normalize(q * rig.worldRotation()));
+    rig.teleportTo(pivot + q * (p - pivot), glm::normalize(q * rig.worldRotation()));
 }
 
 void RigLocomotionComponent::tick(float dt) {
@@ -364,7 +363,7 @@ void RigLocomotionComponent::tickTeleport(Actor& rig, const glm::vec3& headPos) 
     if (t < 0.3f) {                                   // 스틱을 놓음 → 옮기기
         aiming_ = false;
         if (ok) {
-            rig.setWorldPosition(hxr::teleportRigPosition(rig.worldPosition(), headPos, arc.point));
+            rig.teleportPosition(hxr::teleportRigPosition(rig.worldPosition(), headPos, arc.point));
             fallSpeed_ = 0.f;
             if (const auto* tp = hand->getComponent<TrackedPoseComponent>()) in.haptic(tp->handIndex(), 0.3f, 0.03f);
         }

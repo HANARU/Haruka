@@ -827,8 +827,8 @@ void AudioSystem::updateListener() {
     } else {
         if (!listener) return;
         // 카메라와 같은 규약(CameraComponent::forward · up 과 같은 식)
-        const glm::quat r = glm::normalize(listener->worldRotation());
-        pos = listener->worldPosition();
+        const glm::quat r = glm::normalize(listener->displayWorldRotation(displayAlpha_));
+        pos = listener->displayWorldPosition(displayAlpha_);
         fwd = r * glm::vec3(0.f, 0.f, -1.f);
         up  = r * glm::vec3(0.f, 1.f, 0.f);
     }
@@ -897,7 +897,7 @@ void AudioSystem::tick(float dt) {
         if (!ac->voice_) continue;
         routeVoice(*ac->voice_, componentBus(*ac, ac->voice_));   // 플레이 중에 bus 를 바꿔도 따라감
 
-        const glm::vec3 pos = a->worldPosition();
+        const glm::vec3 pos = a->displayWorldPosition(displayAlpha_);
         ma_sound_set_position(&ac->voice_->sound, pos.x, pos.y, pos.z);
         applySettings(*ac->voice_, *ac);
         // 최대 거리 밖 무음(silentBeyondMax): miniaudio 곡선에 배율을 곱해 최대 거리에서 0 이 되게 합니다.

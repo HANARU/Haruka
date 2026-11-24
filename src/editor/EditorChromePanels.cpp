@@ -25,6 +25,10 @@ void EditorToolbar::flushRebuild() {
     rebuild();
 }
 
+bool EditorToolbar::playButtonContains(glm::vec2 p) const {
+    return playButton_ && playButton_->isVisible() && playButton_->cachedGeometry().contains(p);
+}
+
 void EditorToolbar::rebuild() {
     if (!box_) return;
     box_->clearSlots();
@@ -38,13 +42,14 @@ void EditorToolbar::rebuild() {
 
     // Play · Pause · Stop 은 아이콘만(20px, D3). 아이콘 파일이 없으면 예전 글자를 그립니다.
     auto playBtn = [&](const char* icon, glm::vec4 iconColor, const std::string& label, glm::vec4 norm, glm::vec4 hov,
-                       bool en, const std::string& tip, std::function<void()> fn) {
+                       bool en, const std::string& tip, std::function<void()> fn) -> std::shared_ptr<SButton> {
         auto b = deps_.ui->iconButton(icon, 20.f, iconColor, "", 13.f, EditorUiKit::kTextBody, {EditorTheme::space12, 6.f},
                                       norm, hov, std::move(fn), label.c_str());
         b->enabled.set(en);
         b->tooltip.set(tip);
         box_->addSlot(b, HR::ESizeRule::Auto);
         box_->addSlot(deps_.ui->spacer(), HR::ESizeRule::Fixed, s(EditorTheme::space2));
+        return b;
     };
 
     glm::vec4 playNorm  = playing ? EditorTheme::okBg   : EditorTheme::ctlNormal;
@@ -55,8 +60,9 @@ void EditorToolbar::rebuild() {
     const std::string tPlay  = HTEXT("Editor.Toolbar", "Play", "Play").toString();
     const std::string tPause = HTEXT("Editor.Toolbar", "Pause", "Pause").toString();
     const std::string tStop  = HTEXT("Editor.Toolbar", "Stop", "Stop").toString();
-    playBtn("play",   EditorTheme::ok,    paused ? HTEXT("Editor.Toolbar", "Resume", "Resume").toString() : tPlay, playNorm, EditorTheme::okHover,
+    playButton_ = playBtn("play",   EditorTheme::ok,    paused ? HTEXT("Editor.Toolbar", "Resume", "Resume").toString() : tPlay, playNorm, EditorTheme::okHover,
             true, paused ? HTEXT("Editor.Toolbar", "ResumeTip", "Resume Play").toString() : tPlay, deps_.onPlay);
+    if (deps_.playTooltip) playButton_->tooltip.bind(deps_.playTooltip);
     playBtn("pause",  EditorTheme::warn,  tPause, pauseNorm, EditorTheme::warnHover,
             inGame, tPause, deps_.onPause);
     playBtn("square", EditorTheme::error, tStop,  stopNorm,  EditorTheme::errorHover,

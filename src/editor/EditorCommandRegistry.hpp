@@ -236,12 +236,14 @@ inline std::vector<EditorCommand> defaultSpecs() {
     // ── 단축키 없는 명령 ──
     v.push_back(cmd("View.GizmoSize", HTEXT("Editor.Menu", "Edit.GizmoSize", "Gizmo Size (S/M/L)"), "scaling", {}));
     v.push_back(cmd("Edit.AudioOutput", HTEXT("Editor.Menu", "Edit.AudioOutput", "Audio Output..."), "volume-2", {}));
+    v.push_back(cmd("Edit.ProjectSettings", HTEXT("Editor.Menu", "Edit.ProjectSettings", "Project Settings..."), "sliders-horizontal", {}));
     v.push_back(cmd("Actor.AddEmpty", HTEXT("Editor.Menu", "Actor.AddEmpty", "Add Empty"), "plus", {}));
     v.push_back(cmd("Actor.AttachToPrev", HTEXT("Editor.Menu", "Actor.AttachToPrev", "Attach To Prev Selected"), "link", {}));
     v.push_back(cmd("Actor.Detach", HTEXT("Editor.Menu", "Actor.Detach", "Detach Selected"), "unlink", {}));
     v.push_back(cmd("Window.ResetLayout", HTEXT("Editor.Menu", "View.ResetLayout", "Reset Layout"), "layout-grid", {}));
     // 툴바(모양은 그대로, 같은 명령 id 로 부름)
     v.push_back(cmd("Play.Play", HTEXT("Editor.Command", "Play.Play", "Play"), "play", {}));
+    v.push_back(cmd("Play.PlayDesktop", HTEXT("Editor.Command", "Play.PlayDesktop", "Play on Desktop"), "monitor", {}));
     v.push_back(cmd("Play.Pause", HTEXT("Editor.Command", "Play.Pause", "Pause"), "pause", {}));
     v.push_back(cmd("Play.Stop", HTEXT("Editor.Command", "Play.Stop", "Stop"), "square", {}));
     v.push_back(cmd("Content.Refresh", HTEXT("Editor.Command", "Content.Refresh", "Refresh Content"), "refresh-cw", {}));

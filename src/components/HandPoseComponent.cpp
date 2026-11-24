@@ -14,6 +14,7 @@
 #include <sstream>
 
 HandPoseComponent::HandPoseComponent() {
+    tickGroup = ETickGroup::Display;
     for (int f = 0; f < hhand::kFingerCount; ++f)
         for (int k = 0; k < 3; ++k) maxFlexDeg[f][k] = hhand::kDefaultMaxFlexDeg[f][k];
     for (int& j : jointMap_) j = -1;

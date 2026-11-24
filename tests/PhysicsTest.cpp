@@ -621,62 +621,38 @@ int main() {
         check(ps.raycast({ 5.f, 10.f, -3.f }, { 0.f, -1.f, 0.f }, 20.f, hs) && std::fabs(hs.point.y - 0.5f) < 1e-3f,
               "구도 오프셋 자리(z = −3)에 있음");
         ComponentFieldWriter fw;
-        rs->interpolate = true;
         rs->writeFields(fw);
         RigidBodyComponent back;
         for (const auto& kv : fw.fields()) back.readField(kv.first, kv.second);
-        check(back.center == glm::vec3(0.f, 0.f, -3.f) && back.interpolate, "center · interpolate 직렬화 왕복");
+        check(back.center == glm::vec3(0.f, 0.f, -3.f), "center 직렬화 왕복");
+        check(back.readField("interpolate", "true"), "예전 interpolate 키는 경고 없이 무시(D2b)");
         RigidBodyComponent plain;
         ComponentFieldWriter fw2;
         plain.writeFields(fw2);
         bool extra = false;
         for (const auto& kv : fw2.fields()) extra = extra || kv.first == "center" || kv.first == "interpolate";
-        check(!extra, "기본값(오프셋 0 · 보간 끔)이면 쓰지 않음");
+        check(!extra, "기본값(오프셋 0)이면 쓰지 않음");
         RigidBodyComponent bad;
         check(bad.readField("center", "1 nan 2") && bad.center == glm::vec3(0.f), "깨진 오프셋은 기본값 유지");
         ps.shutdown();
     }
 
-    // ── P4: 동적 바디 렌더 보간 ─────────────────────────────────────────────────────
+    // ── P4 -> D2b: 공통 표시 보간 + 순간 이동(Actor::displayWorldMatrix / teleportPosition) ──
     {
-        std::printf("\n-- P4: 렌더 보간 --\n");
-        auto slide = [](bool interp, std::vector<float>& xs, float& teleX) {
-            World w;
-            PhysicsSystem ps;
-            ps.startup();
-            ps.setWorld(&w);
-            ps.setGravity({ 0.f, 0.f, 0.f });
-            ps.setStepRate(60.f);
-            Actor* b = w.spawnActor("Slider");
-            b->setLocalScale({ 0.2f, 0.2f, 0.2f });
-            auto* rb = b->addComponent<RigidBodyComponent>();
-            rb->motionType  = EMotionType::Dynamic;
-            rb->interpolate = interp;
-            ps.tick(1.f / 60.f);
-            rb->setLinearVelocity({ 6.f, 0.f, 0.f });
-            for (int i = 0; i < 30; ++i) { ps.tick(1.f / 180.f); xs.push_back(b->worldPosition().x); }   // 화면 180 Hz, 물리 60 Hz
-            b->setLocalPosition({ 5.f, 0.f, 0.f });   // 게임 코드가 옮김(순간 이동)
-            ps.tick(1.f / 180.f);
-            teleX = b->worldPosition().x;
-            ps.shutdown();
-        };
-        std::vector<float> xi, xn;
-        float ti = 0.f, tn = 0.f;
-        slide(true, xi, ti);
-        slide(false, xn, tn);
-        int still = 0;
-        for (size_t i = 1; i < xn.size(); ++i) still += std::fabs(xn[i] - xn[i - 1]) < 1e-6f;
-        bool even = true;
-        for (size_t i = 6; i < xi.size(); ++i) {
-            const float d = xi[i] - xi[i - 1];
-            even = even && d > 0.02f && d < 0.047f;   // 6 m/s ÷ 180 Hz = 0.033 m
-        }
-        std::printf("  (참고) 보간 끔: 제자리 틱 %d / %zu\n", still, xn.size() - 1);
-        check(still >= 15, "(준비) 보간을 끄면 물리 스텝 사이 틱에서 물체가 멈춤(계단)");
-        check(even, "보간을 켜면 틱마다 고르게 움직임");
-        check(xi.back() <= xn.back() + 1e-5f && xn.back() - xi.back() < 0.11f, "보간한 자리는 바디보다 한 스텝 안쪽 뒤");
-        check(std::fabs(ti - 5.f) < 0.12f, "순간 이동은 보간하지 않고 바로 그 자리");
-        (void)tn;
+        std::printf("\n-- D2b: 공통 표시 보간 --\n");
+        World w;
+        Actor* b = w.spawnActor("Slider");
+        b->setLocalPosition({ 0.f, 0.f, 0.f });
+        w.snapshotTickPoses();
+        b->setLocalPosition({ 6.f, 0.f, 0.f });
+        const float x0 = b->displayWorldPosition(0.f).x;
+        const float xm = b->displayWorldPosition(0.5f).x;
+        const float x1 = b->displayWorldPosition(1.f).x;
+        check(std::fabs(x0 - 0.f) < 1e-5f && std::fabs(xm - 3.f) < 1e-5f && std::fabs(x1 - 6.f) < 1e-5f,
+              "displayWorldPosition(alpha) 가 이전 틱(0)과 현재 틱(6) 사이를 보간");
+        check(std::fabs(b->worldPosition().x - 6.f) < 1e-5f, "시뮬레이션 Transform 은 그대로 유지됨");
+        b->teleportPosition({ 20.f, 0.f, 0.f });
+        check(std::fabs(b->displayWorldPosition(0.5f).x - 20.f) < 1e-5f, "순간 이동 직후에는 보간 없이 즉시 목표 자리");
     }
 
     // ── P5: 속도 추적 잡기 ──────────────────────────────────────────────────────────

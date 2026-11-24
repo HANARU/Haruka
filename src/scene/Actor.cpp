@@ -75,6 +75,58 @@ void Actor::setWorldRotation(const glm::quat& q) {
     setLocalRotation(glm::normalize(glm::inverse(parent_->worldRotation()) * q));
 }
 
+void Actor::teleportTo(const glm::vec3& worldPos, const glm::quat& worldRot) {
+    setWorldPosition(worldPos);
+    setWorldRotation(worldRot);
+    resetInterpolation();
+}
+
+void Actor::teleportPosition(const glm::vec3& worldPos) {
+    setWorldPosition(worldPos);
+    resetInterpolation();
+}
+
+void Actor::teleportRotation(const glm::quat& worldRot) {
+    setWorldRotation(worldRot);
+    resetInterpolation();
+}
+
+glm::mat4 Actor::displayWorldMatrix(float alpha) const {
+    if (alpha >= 1.f || !anyInterp()) return worldMatrix();
+    const bool selfInterp = interpValid_ && localVersion_ != prevTickLocalVer_;
+    glm::mat4 localM;
+    if (selfInterp) {
+        const glm::vec3 p = glm::mix(prevTickTransform_.position(), transform_.position(), alpha);
+        const glm::quat q0 = prevTickTransform_.rotation();
+        glm::quat q1 = transform_.rotation();
+        if (glm::dot(q0, q1) < 0.f) q1 = -q1;
+        const glm::quat r = glm::normalize(glm::slerp(q0, q1, alpha));
+        const glm::vec3 s = glm::mix(prevTickTransform_.scale(), transform_.scale(), alpha);
+        localM = glm::translate(glm::mat4(1.f), p) * glm::mat4_cast(r) * glm::scale(glm::mat4(1.f), s);
+    } else {
+        localM = transform_.matrix();
+    }
+    return parent_ ? parent_->displayWorldMatrix(alpha) * localM : localM;
+}
+
+glm::vec3 Actor::displayWorldPosition(float alpha) const {
+    if (alpha >= 1.f || !anyInterp()) return worldPosition();
+    return glm::vec3(displayWorldMatrix(alpha)[3]);
+}
+
+glm::quat Actor::displayWorldRotation(float alpha) const {
+    if (alpha >= 1.f || !anyInterp()) return worldRotation();
+    const bool selfInterp = interpValid_ && localVersion_ != prevTickLocalVer_;
+    glm::quat localR = transform_.rotation();
+    if (selfInterp) {
+        const glm::quat q0 = prevTickTransform_.rotation();
+        glm::quat q1 = transform_.rotation();
+        if (glm::dot(q0, q1) < 0.f) q1 = -q1;
+        localR = glm::normalize(glm::slerp(q0, q1, alpha));
+    }
+    return parent_ ? parent_->displayWorldRotation(alpha) * localR : localR;
+}
+
 void Actor::setActive(bool v) {
     if (activeSelf_ == v) return;
     activeSelf_ = v;

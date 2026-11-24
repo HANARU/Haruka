@@ -18,9 +18,46 @@ class Actor;
 
 // 종류 아이콘 이름 · 색 · 대신할 글자(콘텐츠 브라우저 · 디테일 에셋 칸 · 에셋 고르기 팝업 공용, H3b).
 namespace hcbui {
-glm::vec4   kindColor(hcb::AssetKind k);
-const char* kindIcon(hcb::AssetKind k);
-const char* kindFallback(hcb::AssetKind k);
+inline glm::vec4 kindColor(hcb::AssetKind k) {
+    switch (k) {
+        case hcb::AssetKind::Folder:  return EditorTheme::srgb(0xC9A44A);
+        case hcb::AssetKind::Scene:   return EditorTheme::badgeScene;
+        case hcb::AssetKind::Model:   return EditorTheme::badgeModel;
+        case hcb::AssetKind::Audio:   return EditorTheme::badgeAudio;
+        case hcb::AssetKind::Cue:     return EditorTheme::srgb(0xD98A3A);
+        case hcb::AssetKind::Prefab:  return EditorTheme::badgePrefab;
+        case hcb::AssetKind::Nav:     return EditorTheme::srgb(0x3FB6A8);
+        case hcb::AssetKind::Texture: return EditorTheme::srgb(0xB06FD8);
+        default:                      return EditorTheme::textSecondary;
+    }
+}
+inline const char* kindIcon(hcb::AssetKind k) {
+    switch (k) {
+        case hcb::AssetKind::Folder:  return "folder";
+        case hcb::AssetKind::Scene:   return "film";
+        case hcb::AssetKind::Model:   return "box";
+        case hcb::AssetKind::Audio:   return "music";
+        case hcb::AssetKind::Cue:     return "volume-2";
+        case hcb::AssetKind::Prefab:  return "package";
+        case hcb::AssetKind::Nav:     return "map";
+        case hcb::AssetKind::Texture: return "image";
+        default:                      return "file";
+    }
+}
+// 아이콘 파일이 없을 때 그릴 글자(예전 목록의 배지와 같은 모양).
+inline const char* kindFallback(hcb::AssetKind k) {
+    switch (k) {
+        case hcb::AssetKind::Folder:  return "[D]";
+        case hcb::AssetKind::Scene:   return "[S]";
+        case hcb::AssetKind::Model:   return "[M]";
+        case hcb::AssetKind::Audio:   return "[A]";
+        case hcb::AssetKind::Cue:     return "[C]";
+        case hcb::AssetKind::Prefab:  return "[P]";
+        case hcb::AssetKind::Nav:     return "[N]";
+        case hcb::AssetKind::Texture: return "[T]";
+        default:                      return "[?]";
+    }
+}
 } // namespace hcbui
 
 // 하단 Content Browser 탭(S6c → 2026-11-21 UE 방식으로 다시 짬).

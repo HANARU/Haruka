@@ -7,10 +7,12 @@
 #include "../core/Subtitles.hpp"
 #include "../components/SubtitlePanel.hpp"
 #include "../core/CVar.hpp"
+#include "../core/SimTick.hpp"
 #include "../core/TraceRecorder.hpp"
 #include "../nav/NavSystem.hpp"
 #include "IEngineFrontend.hpp"
 #include "EngineOptions.hpp"
+#include "XrRunMode.hpp"
 #include "FrameStats.hpp"
 #include "WorldUiDriver.hpp"
 #include "../renderer/RenderSceneInput.hpp"
@@ -127,6 +129,8 @@ private:
     IEngineFrontend::Policy          policy_;   // 부팅할 때 앞단에서 한 번 받음(에셋 루트 · VR 시작 · XR 처리 규칙)
     bool                             xrWanted_       = false;   // 이번 실행에서 VR 을 원함(명령줄 또는 정책)
     bool                             xrFocusPaused_  = false;   // 헤드셋 초점을 잃어 게임을 멈춘 중(policy_.pauseOnXrFocusLoss)
+    hxrmode::XrRunStatus             xrStatus_{};               // 이번 실행의 XR 상태(에디터 툴팁 · Project Settings)
+    std::chrono::steady_clock::time_point headsetCheckAt_{};    // 편집 중 마지막 헤드셋 확인 시각
 
     // ── 창 없는 실행 · 합성 눈 · 자동 확인 (2026-10-31, 패키징 2단계) ─────────────────────────
     EngineOptions options_;                    // 부팅할 때 받은 옵션(프레임 수 · 시간 제한 · 캡처 경로)
@@ -159,8 +163,10 @@ private:
 
     // ── 동적 모듈 레지스트리 (Physics, Audio, …) ────────────────────────────────
     ModuleManager                  modules_;
-    PhysicsSystem*                 physics_ = nullptr;   // modules_ 소유. XR 주사율에 스텝을 맞출 때 · 패널 가림 판정에 씁니다
+    PhysicsSystem*                 physics_ = nullptr;   // modules_ 소유. 패널 가림 판정 · 고정 틱 모드에 씁니다
     AudioSystem*                   audio_   = nullptr;   // modules_ 소유. XR 중 청취자를 머리 자세에 둘 때 씁니다
+    hsim::SimAccumulator           simAccum_;            // 고정 시뮬레이션 틱 누적기(D2a)
+    bool                           simTickDone_ = false; // --sim-ticks 도달 여부
 
     // ── 앞단 (에디터 또는 게임, 2026-10-19) ─────────────────────────────────────
     // 생성자 첫머리에 받아 정책을 읽고, init 은 코어 서비스가 생긴 뒤에 부릅니다. 예전 에디터 자리라 파괴 순서도 같습니다

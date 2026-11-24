@@ -28,10 +28,6 @@ public:
     // 물체 가운데가 아닌 메시(바닥에 피벗을 둔 상자 등)에 충돌체를 맞출 때 씁니다(UE Box Collision 의 상대 위치, Unity Center).
     // Convex Hull · Mesh 는 메시 자체가 자리를 정하므로 쓰지 않습니다.
     glm::vec3     center { 0.f };
-    // 렌더 보간(P4, 2026-11-17): 켜면 Dynamic 바디의 액터 자세를 마지막 두 물리 스텝 사이로 보간해 씁니다. 물리 스텝(기본
-    // 헤드셋 주사율)보다 화면이 자주 그려질 때(데스크톱 165 Hz 창 등) 물체가 계단처럼 움직이지 않습니다. 대신 한 스텝만큼
-    // 늦게 보입니다(Godot physics interpolation · Unity Rigidbody.interpolation 과 같은 방식). 물리 자체는 바뀌지 않습니다.
-    bool          interpolate = false;
     // 충돌 레이어(2026-11-20, Docs/Physics_Joints_And_Events.md D1 · D2): 프로젝트의 레이어 표(PhysicsLayerTable) 슬롯 번호 0 ~ 15.
     // 0 = Default. 살아 있는 몸에 바로 씁니다.
     int           layer       = 0;
@@ -105,10 +101,6 @@ public:
     float          createdMass_   = 1.f;
     bool           createdTrigger_ = false;
     glm::vec3      createdCenter_ { 0.f };
-    // 렌더 보간 상태(P4): 마지막 스텝 앞 · 뒤의 바디 월드 자세. interpValid_ 가 거짓이면(새 바디 · 순간 이동) 앞 = 뒤.
-    glm::vec3      interpPrevPos_ { 0.f }, interpCurPos_ { 0.f };
-    glm::quat      interpPrevRot_ { 1.f, 0.f, 0.f, 0.f }, interpCurRot_ { 1.f, 0.f, 0.f, 0.f };
-    bool           interpValid_   = false;
     // 물리가 마지막으로 액터에 쓴 로컬 자세(Dynamic). 다음 틱에 액터의 로컬 자세가 이와 다르면 게임
     // 코드가 옮긴 것이라 바디를 그 자리로 순간 이동합니다(DEF-19).
     glm::vec3      syncedLocalPos_ { 0.f };

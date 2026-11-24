@@ -70,7 +70,6 @@ bool RigidBodyComponent::setMotionRuntime(EMotionType m) {
         physSys_->setMotionKinematic(bodyId_, m == EMotionType::Kinematic);
         createdMotion_ = m;   // 바디를 다시 만들 이유가 아님
         synced_        = false;   // 물리가 다음 틱에 쓴 자세부터 순간 이동 판정
-        interpValid_   = false;   // 손을 따라가던 자세에서 보간을 다시 시작(P4)
     }
     return true;
 }
@@ -110,7 +109,6 @@ void RigidBodyComponent::onTransformCommitted() {
     const glm::vec3 d  = glm::abs(sc - createdScale_);
     if (std::max({ d.x, d.y, d.z }) > 1e-5f) { rebuildBody(); return; }
     physSys_->teleport(bodyId_, *owner);
-    interpValid_ = false;
 }
 
 std::vector<PropDesc> RigidBodyComponent::buildProps() {
@@ -158,9 +156,6 @@ std::vector<PropDesc> RigidBodyComponent::buildProps() {
         makePropToggle("Continuous Collision",
             [p]{ return p->continuous; },
             [p](bool v){ p->continuous = v; if (p->hasBody()) p->physSys_->setContinuous(p->bodyId_, v); }).withDefault(false),
-        makePropToggle("Interpolate",
-            [p]{ return p->interpolate; },
-            [p](bool v){ p->interpolate = v; p->interpValid_ = false; }).withDefault(false),
         makePropFloat("Mass",        PropColor::Neutral, 0.1f,
             [p]{ return p->mass; },
             [p](float v){ p->mass = std::max(0.001f, v); }, PropUnit::Size).withDefault(1.f),
@@ -239,7 +234,6 @@ void RigidBodyComponent::writeFields(ComponentFieldWriter& w) const {
     w.v3("halfExtent",  { halfExtent.x, halfExtent.y, halfExtent.z });
     if (continuous) w.b("continuous", true);   // 기본값이면 쓰지 않음(기존 씬 파일이 바뀌지 않게)
     if (center != glm::vec3(0.f)) w.v3("center", center);
-    if (interpolate) w.b("interpolate", true);
     if (layer != 0) w.i("layer", layer);   // 기본값은 쓰지 않음(옛 씬 파일이 바뀌지 않게, D2)
     if (trigger) w.b("trigger", true);
     if (contactEvents) w.b("contactEvents", true);
@@ -253,7 +247,7 @@ bool RigidBodyComponent::readField(const std::string& key, const std::string& va
     else if (key == "restitution") ok = fieldparse::toFloat(value, restitution);
     else if (key == "mass")        ok = fieldparse::toFloat(value, mass);
     else if (key == "continuous")  ok = fieldparse::toBool(value, continuous);
-    else if (key == "interpolate") ok = fieldparse::toBool(value, interpolate);
+    else if (key == "interpolate") {}   // D2b: 공통 표시 보간으로 대체됨, 옛 씬 파일 호환을 위해 경고 없이 무시
     else if (key == "trigger")     ok = fieldparse::toBool(value, trigger);
     else if (key == "contactEvents") ok = fieldparse::toBool(value, contactEvents);
     else if (key == "layer") {
