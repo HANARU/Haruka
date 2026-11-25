@@ -160,7 +160,7 @@ PostPass::Params Renderer::postParams() const {
                         lighting_calibration::kBaseExposure };
     // 접촉 그림자는 AO 패스에서 계산해 AO 와 함께 합성합니다. AO 를 끄고 접촉 그림자만 켜면 AO 패스를 돌리되 세기 1 로 그 결과만 곱합니다.
     const bool contact = shadowCasterSlot_ >= 0 && contactLength_ > 0.f;
-    p.aoOn    = (aoOn_ || contact) && msaaSamples_ != VK_SAMPLE_COUNT_1_BIT;
+    p.aoOn    = (aoOn_ || contact) && msaaSamples_ != VK_SAMPLE_COUNT_1_BIT && renderTier_ != RenderTier::Mobile;
     if (!aoOn_ && contact && p.aoOn) p.aoStrength = 1.f;
     p.bloomOn = bloomOn_;
     // 카메라 노출 보정(EV, 2026-11-17 노출 배선): 기준 노출 × 2^EV. 카메라가 없거나 0 이면 기준 그대로.
@@ -994,11 +994,10 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
         // 불투명 끝(서브패스 1)과 반투명 끝(서브패스 2)에서 확장을 부릅니다. 멀티뷰면 첫 눈 차례에 두 눈을 한 번에 그리고,
         // 둘째 눈의 Main 칸에는 타임스탬프만 찍습니다(Main 시간 = 두 눈 합, 읽는 쪽은 그대로).
         if (!multiview || k == 0) {
-            std::function<void(uint32_t)> geoHook;
+            std::function<void(HRenderStage, uint32_t)> geoHook;
             if (extGeo)
-                geoHook = [&, v](uint32_t subpass) {
-                    HRenderStageContext c = stageCtx(subpass == 1 ? HRenderStage::OpaqueEnd
-                                                                   : HRenderStage::TransparentEnd, multiview ? 0 : v);
+                geoHook = [&, v](HRenderStage stage, uint32_t subpass) {
+                    HRenderStageContext c = stageCtx(stage, multiview ? 0 : v);
                     c.multiview   = multiview;
                     c.renderPass  = multiview ? geometry_.mainPassMultiview() : geometry_.mainPass();
                     c.subpass     = subpass;
@@ -1017,15 +1016,23 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
 
         // ── 렌더 확장: 메인 패스 뒤 · AO 앞(AfterScene) ─────────────────────────
         if (extScene) {
-            fullBarrier();
-            HRenderStageContext c = stageCtx(HRenderStage::AfterScene, v);
-            c.hdrImage    = geometry_.hdrImage(fi);
-            c.hdrLayer    = layer;
-            c.hdrView     = geometry_.hdrView(fi, layer);
-            c.depthView   = geometry_.depthView(layer);
-            c.sceneExtent = rc_.renderExtent;
-            passRegistry_.dispatch(c);
-            fullBarrier();
+            if (rc_.renderTier == RenderTier::Mobile) {
+                if (!afterSceneMobileWarned_) {
+                    afterSceneMobileWarned_ = true;
+                    HLOG(LogRenderer, Warning) << "Render extension stage AfterScene is skipped in Mobile render tier "
+                                               << "(depth/HDR stay in tile memory)";
+                }
+            } else {
+                fullBarrier();
+                HRenderStageContext c = stageCtx(HRenderStage::AfterScene, v);
+                c.hdrImage    = geometry_.hdrImage(fi);
+                c.hdrLayer    = layer;
+                c.hdrView     = geometry_.hdrView(fi, layer);
+                c.depthView   = geometry_.depthView(layer);
+                c.sceneExtent = rc_.renderExtent;
+                passRegistry_.dispatch(c);
+                fullBarrier();
+            }
         }
 
         // ── AO (linDepth + SSAO, half-res) ───────────────────────────────────

@@ -8,9 +8,11 @@
 #include "SkinnedMeshComponent.hpp"
 #include "StaticMeshComponent.hpp"
 #include "SubtitlePanel.hpp"
+#include "VrStatsPanel.hpp"
 #include "UIPanelComponent.hpp"
 #include "XrComponents.hpp"
 #include "../scene/Actor.hpp"
+#include "../renderer/MeshHandle.hpp"
 #include "../core/Accessibility.hpp"
 #include "../scene/World.hpp"
 #include <glm/gtc/matrix_transform.hpp>
@@ -175,6 +177,15 @@ void extractRenderScene(const World& world, RenderSceneInput& out, float display
         rp.onTop       = true;   // 자막은 늘 읽혀야 하므로 앞의 물체에 가려지지 않게(UE Stereo Layer · Unity Overlay 와 같은 몫)
         out.panels.push_back(rp);
     }
+    if (VrStatsPanel* vp = world.service<VrStatsPanel>(); vp && vp->visible()) {
+        RenderUIPanel rp;
+        rp.key         = reinterpret_cast<uint64_t>(vp);
+        rp.source      = vp;
+        rp.model       = vp->model();
+        rp.textureSize = vp->textureSize();
+        rp.onTop       = true;
+        out.panels.push_back(rp);
+    }
 
     out.particles.clear();
     for (const ParticleSystemComponent* ps : world.componentsOf<ParticleSystemComponent>()) {
@@ -206,4 +217,12 @@ void extractRenderScene(const World& world, RenderSceneInput& out, float display
         d.shape     = (int32_t)dc->shape;
         out.decals.push_back(d);
     }
+}
+
+uint32_t countWorldTris(const World& world) {
+    uint32_t total = 0;
+    for (const StaticMeshComponent* sm : StaticMeshComponent::visibleIn(world)) {
+        if (sm && sm->mesh) total += sm->mesh->indexCount / 3u;
+    }
+    return total;
 }

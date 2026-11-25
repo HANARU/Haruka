@@ -174,6 +174,12 @@ inline const std::vector<SettingDef>& entries() {
           HTEXT("Editor.ProjectSettings", "Help.xr.eyeHeight", "Floor-to-eye height in meters when XR Height Mode is fixed (0.5 to 2.5)."),
           SettingKind::Float, true, xr_rig::kMinEyeHeight, xr_rig::kMaxEyeHeight, 0.05f, {}, "", false, xr_rig::kDefaultEyeHeight, "",
           ApplyTiming::Live, false, false },
+        { SettingsFile::ProjectIni, "debug.vrStatsButton", "Platforms", "XR",
+          HTEXT("Editor.ProjectSettings", "Sec.XrDebug", "In-Headset Debug"),
+          HTEXT("Editor.ProjectSettings", "Key.debug.vrStatsButton", "VR Stats Overlay Button"),
+          HTEXT("Editor.ProjectSettings", "Help.debug.vrStatsButton", "Left-hand controller button that toggles the in-headset performance overlay (x, y, or none)."),
+          SettingKind::Enum, false, 0.0, 0.0, 1.f, { "x", "y", "none" }, "", false, 0.0, "x",
+          ApplyTiming::Live, false, false },
     };
     return kEntries;
 }
@@ -190,7 +196,7 @@ inline const std::vector<const char*>& parseKnownScalarKeys() {
         "startScene", "sim.tickRate",
         "render.ao", "render.bloom", "render.csmCascades", "render.shadowDistance",
         "render.contactShadows", "render.heightFog", "render.reflectionCapture", "render.lightLimit",
-        "xr.startInVr", "xr.height", "xr.eyeHeight",
+        "xr.startInVr", "xr.height", "xr.eyeHeight", "debug.vrStatsButton",
     };
     return kKeys;
 }

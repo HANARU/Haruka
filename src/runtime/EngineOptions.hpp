@@ -1,5 +1,6 @@
 #pragma once
 #include "../platform/PlatformContext.hpp"
+#include "../renderer/RenderTier.hpp"
 #include "../xr/XrPerfLevelLogic.hpp"
 #include "StressRampLogic.hpp"
 
@@ -48,6 +49,7 @@ struct EngineOptions {
     float       xrScale       = 1.0f;    // --xr-scale=<0.5..1.5> : XR 눈 해상도 배율(합성 눈 포함)
     float       xrRefreshHz   = 0.f;     // --xr-refresh=<Hz> : XR 화면 주사율 요청(0 = 런타임 기본)
     hxr::XrPerfLevelPair xrPerfLevel{};  // --xr-perf-level=<cpu>:<gpu> : XR_EXT_performance_settings 요청
+    bool        vrStats       = false;   // --vr-stats : 헤드셋 안 성능 오버레이를 처음부터 켬(VS1)
     hstress::StressSpec stress{};        // --stress=<축>[:시작:증가:최대] · --stress-step-seconds · --stress-budget-ms
     // --no-multiview : 두 눈의 메인 패스를 멀티뷰(viewMask 0b11)로 한 번에 그리지 않고 눈마다 그림(Quest 에서 이득 비교 ·
     // 멀티뷰 탓인지 가르는 진단, 2026-11-18). 장치의 멀티뷰 기능은 그래도 켭니다.
@@ -62,6 +64,7 @@ struct EngineOptions {
     // render.ao. 진단용이라 프로젝트 설정을 덮어씁니다.
     std::optional<bool> ssao;
     std::optional<bool> bloom;           // --bloom · --no-bloom : 블룸을 켜거나 끔(설정 저장 없음, QP1 보완)
+    std::optional<RenderTier> renderTier; // --render-tier=desktop|mobile : 렌더 티어 강제(없으면 Android=mobile, 그 밖=desktop)
     bool                autoLod = true;  // --no-auto-lod : glTF 자동 LOD 를 컴포넌트에 배정하지 않음(O13 검증용)
     // --texture-compression=off|auto|bc|astc : 미리 압축한 텍스처(KTX2)를 쓸 대상(Docs/Texture_Compression.md D8). 빈 값 = auto
     // (게임 묶음을 마운트한 창 있는 게임 실행 파일만 플랫폼 대상, 그 밖은 off).

@@ -340,7 +340,15 @@ PropDesc ProjectSettingsPanel::makePropForKey(const hps_schema::SettingDef& def,
                 .withDefault(def.defaultNumber);
         }
         case hps_schema::SettingKind::Enum: {
-            auto getI = [readPs]() -> int { return readPs().xrTrackedHeight ? 0 : 1; };
+            auto getI = [readPs, k, opts = def.enumOptions]() -> int {
+                if (k == "debug.vrStatsButton") {
+                    const std::string& v = readPs().debugVrStatsButton;
+                    for (size_t i = 0; i < opts.size(); ++i)
+                        if (v == opts[i]) return static_cast<int>(i);
+                    return 0;
+                }
+                return readPs().xrTrackedHeight ? 0 : 1;
+            };
             auto setI = [this, file, k, opts = def.enumOptions](int idx) {
                 if (idx >= 0 && idx < (int)opts.size()) writeIniKey(file, k, opts[(size_t)idx]);
             };

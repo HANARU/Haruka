@@ -1093,6 +1093,21 @@ msgctxt "Editor.ProjectSettings,Key.xr.eyeHeight"
 msgid "XR Eye Height (m)"
 msgstr ""
 
+#: src/core/ProjectSettingsSchema.hpp:177
+msgctxt "Editor.ProjectSettings,Sec.XrDebug"
+msgid "In-Headset Debug"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:178
+msgctxt "Editor.ProjectSettings,Key.debug.vrStatsButton"
+msgid "VR Stats Overlay Button"
+msgstr ""
+
+#: src/core/ProjectSettingsSchema.hpp:179
+msgctxt "Editor.ProjectSettings,Help.debug.vrStatsButton"
+msgid "Left-hand controller button that toggles the in-headset performance overlay (x, y, or none)."
+msgstr ""
+
 #: src/core/ProjectSettingsSchema.hpp:164
 msgctxt "Editor.ProjectSettings,Key.xr.height"
 msgid "XR Height Mode"

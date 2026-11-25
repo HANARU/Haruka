@@ -57,6 +57,8 @@ struct ProjectSettings {
     // 고정 시뮬레이션 틱 빈도(Hz, D2a/D2b). 기본 72 Hz (하한 72, 상한 240).
     //   sim.tickRate = 72   (72 ~ 240 Hz; 72 미만은 72 로 올림)
     float    simTickRate             = 72.f;
+    // 헤드셋 안 성능 오버레이 토글 버튼(VS1, 2026-11-25): x | y | none.
+    std::string debugVrStatsButton   = "x";
     // 플랫폼 접미사(2026-11-18): "이름.android = 값" 은 Android(Quest)에서만 같은 이름의 값을 덮어씁니다(줄 순서와 무관).
     // UE 의 플랫폼 ini 가 Default ini 를 덮는 것과 같은 자리입니다. 다른 플랫폼의 줄은 조용히 건너뜁니다. 입력 바인딩(input.*)에는
     // 붙일 수 없습니다. PC 에서 Quest 값을 시험하려면 명령줄 --settings-platform=android.
@@ -218,6 +220,9 @@ inline ProjectSettings parse(const std::string& text, std::vector<std::string>& 
             } else {
                 s.simTickRate = v;
             }
+        } else if (key == "debug.vrStatsButton") {
+            if (value == "x" || value == "y" || value == "none") s.debugVrStatsButton = value;
+            else messages.push_back("'debug.vrStatsButton' must be x, y, or none (got '" + value + "'); using x");
         } else {
             messages.push_back("unknown setting '" + key + "'; skipped");
         }

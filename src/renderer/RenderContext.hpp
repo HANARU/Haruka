@@ -7,6 +7,7 @@
 #include "../memory/HarukaAllocator.hpp"
 #include "../vfs/Vfs.hpp"
 #include "BarrierCompat.hpp"
+#include "RenderTier.hpp"
 #include "VulkanBaseline.hpp"
 
 // 셰이더 바이너리를 논리 경로("shaders/pbr.frag.spv")로 읽습니다. 가상 파일 시스템이 실행 폴더의 낱개 파일이나 묶음
@@ -54,6 +55,7 @@ public:
     bool       texCompressionBC   = false;
     bool       texCompressionASTC = false;
     bool       noLazyMsaa         = false;   // --no-lazy-msaa : MSAA 컬러를 Zone B 에 둠(DEF-183)
+    RenderTier renderTier         = RenderTier::Desktop;   // 시작 시 결정, 실행 중 불변(M1)
 
     // ── 생성 헬퍼 ─────────────────────────────────────────────────────────────
     VkShaderModule createShaderModule(const std::vector<char>& code) const;

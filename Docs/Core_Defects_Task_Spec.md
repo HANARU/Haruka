@@ -2513,3 +2513,4 @@ P1 뒤 구간 1 ~ 7 을 이어 구현했습니다(사용자 "추천안대로 진
 | 번호 | 심각도 | 내용 | 상태 |
 |---|---|---|---|
 | DEF-184 | HIGH(새로 받은 저장소) | Blank 템플릿의 시작 씬 `Templates/Blank/Content/scenes/Start.hscene` 이 `.gitignore` 의 `*.hscene` 규칙에 걸려 E4(61672eb)부터 저장소에 없었습니다. 이 기계에는 파일이 남아 있어 드러나지 않았고, 새로 받은 저장소에서는 `project_ops` 시험(`Content/scenes/Start.hscene exists`)이 실패하고 템플릿으로 만든 프로젝트에 `project.ini` 의 `startScene` 이 가리키는 씬이 없습니다. | **해결 · 2026-11-25**: `.gitignore` 에 `!/Templates/*/Content/scenes/**/*.hscene` 예외, 씬 파일 추가 |
+| DEF-185 | MEDIUM(렌더 확장) | DEF-183 이후 Desktop 메인 패스는 서브패스 2개(0 = 깊이 전처리, 1 = 불투명 + 반투명)뿐인데, `RenderExtension.hpp` 기본값(`transparentSubpass = 2`), `Renderer::addRenderExtension`, `RenderTier::mainPassSubpass`가 `TransparentEnd`에 서브패스 번호 `2`를 넘겨 확장이 파이프라인을 만들면 존재하지 않는 서브패스를 참조하게 됩니다. | **해결 · 2026-11-25**: Desktop 불투명 · 반투명 모두 서브패스 `1`(Mobile `0`)로 정정, `RenderExtension.hpp` 주석 · 기본값 및 `mainPassSubpass` 단위 시험 수정 |

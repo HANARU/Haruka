@@ -93,7 +93,8 @@ void GeometryPass::createParticlePipelines(VkRenderPass rp, PipelineSet& ps) {
     ci.pViewportState = &vs; ci.pRasterizationState = &rs;
     ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
     ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
-    ci.layout = particleLayout_; ci.renderPass = rp; ci.subpass = 1;
+    ci.layout = particleLayout_; ci.renderPass = rp;
+    ci.subpass = (rc_->renderTier == RenderTier::Mobile) ? 0u : 1u;
 
     cba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;                       // 가산
     VkResult r = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.particleAdd);

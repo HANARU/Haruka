@@ -10,6 +10,7 @@
 #include "../src/runtime/GpuLogAccumulator.hpp"
 #include "../src/runtime/MemLogUtil.hpp"
 #include "../src/runtime/StressRampLogic.hpp"
+#include "../src/core/VrStatsLogic.hpp"
 #include "../src/xr/XrScaleLogic.hpp"
 #include "../src/core/FramePacing.hpp"
 #include "../src/runtime/XrRecovery.hpp"
@@ -599,6 +600,105 @@ int main() {
             const std::string line = hmemlog::formatMemLine(3, 384ULL * 1024 * 1024, 512.4);
             check(line == "Mem: core heap chunks 3 (384 MB committed), process RSS 512.4 MB",
                   "QP3 메모리 줄 형식 확인");
+        }
+
+        // VS1 / VS1b 새 단위 시험 1: 토글 가장자리 판정(누름 유지 · 매핑 충돌 · Y/none)
+        {
+            using namespace hvrstats;
+            check(shouldToggleVrStats({ true, false, false, VrStatsButton::X }),
+                  "VS1 누름 가장자리 + 미충돌 시 토글");
+            check(!shouldToggleVrStats({ true, true, false, VrStatsButton::X }),
+                  "VS1 누름 유지 중에는 토글 안 함");
+            check(!shouldToggleVrStats({ false, true, false, VrStatsButton::X }),
+                  "VS1 뗌 가장자리에서는 토글 안 함");
+            check(!shouldToggleVrStats({ true, false, true, VrStatsButton::X }),
+                  "VS1 게임 입력에 묶여 있으면 토글 안 함");
+            check(!shouldToggleVrStats({ true, false, false, VrStatsButton::None }),
+                  "VS1 none 설정 시 토글 안 함");
+            check(shouldToggleVrStats({ true, false, false, VrStatsButton::Y }),
+                  "VS1b Y 설정 시 토글");
+        }
+
+        // VS1 / VS1b 새 단위 시험 2: 색 구간 판정(예산 ms · FPS 달성률)
+        {
+            using namespace hvrstats;
+            check(classifyBudget(9.9f, 11.1f) == BudgetZone::Under, "VS1 90% 미만은 예산 안");
+            check(classifyBudget(10.0f, 11.1f) == BudgetZone::Warn90To100, "VS1 90~100% 구간");
+            check(classifyBudget(11.1f, 11.1f) == BudgetZone::Warn90To100, "VS1 예산 경계 100%");
+            check(classifyBudget(11.2f, 11.1f) == BudgetZone::Over, "VS1 예산 초과");
+
+            check(classifyFps(88.5f, 90.f) == BudgetZone::Under, "VS1b FPS 98% 이상은 초록");
+            check(classifyFps(90.f * 0.98f, 90.f) == BudgetZone::Under, "VS1b FPS 98% 경계");
+            check(classifyFps(85.0f, 90.f) == BudgetZone::Warn90To100, "VS1b FPS 90~98% 노랑");
+            check(classifyFps(90.f * 0.90f, 90.f) == BudgetZone::Warn90To100, "VS1b FPS 90% 경계");
+            check(classifyFps(80.9f, 90.f) == BudgetZone::Over, "VS1b FPS 90% 미만 빨강");
+        }
+
+        // VS1b 새 단위 시험 4: 0.5초 누적 평균 및 지난 1초 FPS(평균 · 최소)
+        {
+            using namespace hvrstats;
+            VrStatsAccumulator acc;
+            acc.addFrame(2.0f, 10.0f, 0.25f);
+            acc.addFrame(4.0f, 20.0f, 0.25f);
+            check(acc.samples == 2, "VS1b 0.5초 갱신 전까지 누적 유지");
+            const auto w1 = acc.flushRefreshWindow(0.f, 0.f);
+            check(std::fabs(w1.cpuWorkMs - 3.0f) < 1e-4f && std::fabs(w1.frameMs - 15.0f) < 1e-4f && acc.samples == 0,
+                  "VS1b 0.5초 갱신 시점에만 평균 계산 후 비움");
+
+            // 1초 창 완성(총 1.0초, 4프레임, 최장 프레임 40 ms -> avg 4.0, min 25.0)
+            acc.addFrame(1.0f, 10.0f, 0.25f);
+            acc.addFrame(1.0f, 40.0f, 0.25f);
+            const auto w2 = acc.flushRefreshWindow(0.f, 0.f);
+            check(std::fabs(w2.fpsAvg - 4.0f) < 1e-4f && std::fabs(w2.fpsMin - 25.0f) < 1e-4f,
+                  "VS1b 지난 1초 FPS 평균(프레임/초) 및 최소(최장 프레임 역수)");
+        }
+
+        // VS1 새 단위 시험 3: 표시 문자열 형식
+        {
+            using namespace hvrstats;
+            VrStatsSnapshot s;
+            s.fpsAvg = 89.5f; s.fpsMin = 87.f; s.targetHz = 90.f; s.frameMs = 11.1f;
+            s.gpuTotalMs = 8.40f; s.shadowMs = 1.20f; s.mainMs = 4.50f; s.aoMs = 1.10f;
+            s.bloomMs = 0.90f; s.tonemapMs = 0.40f; s.uiMs = 0.30f;
+            s.cpuWorkMs = 2.10f;
+            s.eyeW = 1440; s.eyeH = 1584; s.xrScale = 1.0f; s.msaaSamples = 4;
+            s.perfLevel = "sustained_high:sustained_high";
+            s.heapChunks = 4; s.heapCommittedBytes = 448ULL * 1024 * 1024; s.rssMb = 256.5;
+            s.drawCalls = 120; s.tris = 45000;
+            const auto lines = formatVrStatsLines(s);
+            check(lines.size() == 6 &&
+                  lines[0].find("FPS") != std::string::npos && lines[0].find("90 Hz") != std::string::npos &&
+                  lines[1].find("GPU  total  8.40 ms") != std::string::npos && lines[1].find("CPU work  2.10 ms") != std::string::npos &&
+                  lines[2].find("shd 1.20  main 4.50") != std::string::npos &&
+                  lines[3].find("1440x1584 (x1.00)  MSAA 4x  Perf sustained_high:sustained_high") != std::string::npos &&
+                  lines[4].find("chunks 4 (448 MB)  RSS 256.5 MB") != std::string::npos &&
+                  lines[5].find("Draw 120") != std::string::npos && lines[5].find("Tris 45000") != std::string::npos,
+                  "VS1 오버레이 표시 문자열 6행 형식");
+        }
+        // M1: 렌더 티어 선택 규칙 · --render-tier 인자 해석
+        {
+            check(defaultRenderTier(true) == RenderTier::Mobile, "M1 기본 티어: Android = mobile");
+            check(defaultRenderTier(false) == RenderTier::Desktop, "M1 기본 티어: 비 Android = desktop");
+            check(resolveRenderTier(std::nullopt, true) == RenderTier::Mobile, "M1 미지정 시 Android = mobile");
+            check(resolveRenderTier(std::nullopt, false) == RenderTier::Desktop, "M1 미지정 시 비 Android = desktop");
+            check(resolveRenderTier(RenderTier::Desktop, true) == RenderTier::Desktop, "M1 Android 에서 desktop 강제");
+            check(resolveRenderTier(RenderTier::Mobile, false) == RenderTier::Mobile, "M1 PC 에서 mobile 강제");
+            check(std::string(renderTierName(RenderTier::Desktop)) == "desktop", "M1 티어 이름 desktop");
+            check(std::string(renderTierName(RenderTier::Mobile)) == "mobile", "M1 티어 이름 mobile");
+
+            std::vector<std::string> u;
+            auto def = parse({}, u);
+            check(!def.renderTier.has_value() && u.empty(), "M1 --render-tier 미지정 시 nullopt");
+            auto mob = parse({ "--render-tier=mobile" }, u);
+            check(mob.renderTier == RenderTier::Mobile && u.empty(), "M1 --render-tier=mobile 해석");
+            auto dsk = parse({ "--render-tier=desktop" }, u);
+            check(dsk.renderTier == RenderTier::Desktop && u.empty(), "M1 --render-tier=desktop 해석");
+            auto bad = parse({ "--render-tier=quest", "--render-tier=" }, u);
+            check(!bad.renderTier.has_value() && u.size() == 2, "M1 잘못된 --render-tier 값은 경고 목록(unknown)으로 보내고 기본값 유지");
+            check(mainPassSubpass(RenderTier::Mobile, false) == 0u &&
+                  mainPassSubpass(RenderTier::Mobile, true) == 0u, "M1 Mobile 티어 확장 서브패스 번호 = 0");
+            check(mainPassSubpass(RenderTier::Desktop, false) == 1u &&
+                  mainPassSubpass(RenderTier::Desktop, true) == 1u, "M1 Desktop 티어 확장 서브패스 번호(DEF-185: 불투명 · 반투명 모두 1)");
         }
     }
 

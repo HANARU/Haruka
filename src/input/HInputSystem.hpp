@@ -87,6 +87,7 @@ public:
     void bindXrButton(const std::string& action, HXrButton button);
     void bindPad     (const std::string& action, HPadButton button);
     void unbind      (const std::string& action);   // 키 · 버튼 바인딩 모두
+    bool hasXrButtonBinding(HXrButton button) const;
     void bindAxis    (const std::string& axis, HXrAxis source);
     void bindPadAxis (const std::string& axis, HPadAxis source);
     // 키 두 개를 축으로: pos 를 누르면 +1, neg 를 누르면 -1, 둘 다면 0 (2026-10-15).

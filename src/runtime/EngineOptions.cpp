@@ -75,6 +75,7 @@ bool parseXrPerfOption(const std::string& a, EngineOptions& o, bool& valid) {
     }
     if (a == "--bloom")    { o.bloom = true;  valid = true; return true; }
     if (a == "--no-bloom") { o.bloom = false; valid = true; return true; }
+    if (a == "--vr-stats") { o.vrStats = true; valid = true; return true; }
     if (valueOf(a, "--stress", v)) {
         valid = hstress::parseStressSpec(v, o.stress);
         return true;
@@ -126,6 +127,11 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             else unknown.push_back(a);
         }
         else if (a == "--no-multiview")   o.multiview     = false;
+        else if (valueOf(a, "--render-tier", v)) {
+            RenderTier t{};
+            if (parseRenderTier(v, t)) o.renderTier = t;
+            else unknown.push_back(a);
+        }
         else if (a == "--ssao")           o.ssao          = true;
         else if (a == "--no-ssao")        o.ssao          = false;
         else if (a == "--no-auto-lod")    o.autoLod       = false;

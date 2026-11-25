@@ -110,6 +110,9 @@ public:
     // 장치의 멀티뷰 기능은 그래도 켭니다(셰이더가 gl_ViewIndex 를 씀). 언제든 부를 수 있고 다음 프레임부터 반영됩니다.
     void setMultiview(bool on) { multiview_ = on; }
     bool multiview() const     { return multiview_; }
+    // 렌더 티어(M1): init 전에 한 번 설정하고 실행 중에는 바꾸지 않습니다.
+    void       setRenderTier(RenderTier tier) { renderTier_ = tier; }
+    RenderTier renderTier() const             { return renderTier_; }
     // 후처리 패스 켬/끔(project.ini render.ao · render.bloom, --ssao · --no-ssao). 끈 패스는 기록하지 않습니다.
     // 프레임마다 읽으므로 init 앞뒤 어느 때 불러도 됩니다. 프레임 단위 값입니다(블룸 이미지 한 벌을 두 눈이
     // 함께 쓰므로 눈마다 다르게 두지 않음).
@@ -128,8 +131,9 @@ public:
     const Quality& quality() const { return quality_; }
     void setAoEnabled(bool on) { aoOn_ = on; }
     void setBloomEnabled(bool on) { bloomOn_ = on; }
-    bool aoEnabled() const     { return aoOn_ && msaaSamples_ != VK_SAMPLE_COUNT_1_BIT; }
+    bool aoEnabled() const     { return aoOn_ && msaaSamples_ != VK_SAMPLE_COUNT_1_BIT && renderTier_ != RenderTier::Mobile; }
     bool bloomEnabled() const  { return bloomOn_; }
+    int  msaaSampleCount() const { return static_cast<int>(msaaSamples_); }
     struct StartupTimings {
         double deviceMs    = 0.0;
         double allocMs     = 0.0;
@@ -341,6 +345,8 @@ private:
     bool               forceDedicatedMsaa_ = false;   // --vk-dedicated-msaa
     int                preferredGpu_ = -1;            // --gpu=N
     bool               multiview_ = true;             // --no-multiview 면 거짓(setMultiview)
+    RenderTier         renderTier_ = RenderTier::Desktop;
+    bool               afterSceneMobileWarned_ = false;
     int                stereoMainPassMode_ = -1;      // 직전 두 눈 프레임의 메인 패스(1 멀티뷰 · 0 눈마다, 로그용)
     Quality            quality_;                      // 품질 단계(setQuality)
     // SSAO · 블룸 켜기의 유일한 출처. postParams() 가 PostPass push 상수와 FrameUBO(screenParams.w ·

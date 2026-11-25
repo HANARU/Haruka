@@ -1330,6 +1330,18 @@ msgctxt "Editor.ProjectSettings,Help.xr.eyeHeight"
 msgid "Floor-to-eye height in meters when XR Height Mode is fixed (0.5 to 2.5)."
 msgstr "XR 높이 모드가 fixed 일 때 바닥에서 눈까지의 높이(0.5 ~ 2.5 m)입니다."
 
+msgctxt "Editor.ProjectSettings,Sec.XrDebug"
+msgid "In-Headset Debug"
+msgstr "헤드셋 안 디버그"
+
+msgctxt "Editor.ProjectSettings,Key.debug.vrStatsButton"
+msgid "VR Stats Overlay Button"
+msgstr "VR 성능 오버레이 버튼"
+
+msgctxt "Editor.ProjectSettings,Help.debug.vrStatsButton"
+msgid "Left-hand controller button that toggles the in-headset performance overlay (x, y, or none)."
+msgstr "헤드셋 안 성능 오버레이를 켜고 끄는 왼손 컨트롤러 버튼입니다 (x, y, none)."
+
 msgctxt "Editor.Panels,ProjectSettings"
 msgid "Project Settings"
 msgstr "프로젝트 설정"

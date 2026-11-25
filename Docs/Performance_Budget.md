@@ -26,6 +26,7 @@ Quest Pro 단독 실행(목표 90 Hz, 프레임 예산 **11.1 ms**) 기준으로
 
 ## Quest Pro 실측 결과표 (90 Hz, 예산 11.1 ms)
 > 내일 헤드셋 실측(`Handoff\Check_Quest.bat` → `[6] Stress ramp`) 후 채웁니다.
+> Quest(Android)는 기본으로 `--render-tier=mobile`(깊이 전처리 끔 · AO 끔 · 블룸 끔)로 실행됩니다. Desktop 경로와 비교할 때는 `--render-tier=desktop`을, Mobile 티어에서 블룸을 켜고 비교할 때는 `--bloom`을 함께 넘깁니다.
 
 | 축 | 기준 ms | 단위 비용 | 추정 한도 | Last Under | First Over | 목표 Hz | 비고 |
 |---|---|---|---|---|---|---|---|
@@ -70,3 +71,8 @@ Quest Pro 단독 실행(목표 90 Hz, 프레임 예산 **11.1 ms**) 기준으로
 1. `perf`에서 `tonemap` 비용이 무시할 수준이고 `main` + `ao` + `bloom`이 지배적이면 (a)는 제외.
 2. `ao` · `bloom`을 유지하면서 `main` 프래그먼트 비용을 줄여야 하면 (b)를 선택.
 3. `empty` 고정 비용(중간 타깃 대역폭 · `ao` · `bloom` · `tonemap`) 자체가 11.1 ms 예산의 대부분이면 (c)(또는 `--no-ssao` + `--no-bloom` 조합)를 검토.
+
+## 헤드셋 안 오버레이 (`stat vr` / `--vr-stats` / 왼손 X)
+- Quest 단독과 PC VR Play 모두에서 헤드셋을 쓴 채 FPS · GPU 패스별 ms · CPU work ms · 해상도/MSAA/성능 레벨 · 힙 청크/RSS · 드로우/삼각형 수를 바로 확인할 수 있는 엔진 소유 3D UI 패널입니다(`VrStatsPanel`, 0.5초마다 갱신, 예산 색 구분).
+- **토글:** 왼손 컨트롤러 X 버튼(`project.ini` `debug.vrStatsButton`, 기본 `x`, `y`/`none` 선택 가능) · 콘솔 명령 `stat vr` · 시작 인자 `--vr-stats`. 게임 입력이 해당 버튼에 바인딩된 경우에는 토글하지 않습니다(3D UI 패널 클릭은 트리거 사용).
+- **측정 표시:** 오버레이가 켜진 동안에는 `--gpu-log` 줄과 `--stress` 단계 줄에 `overlay on`이 붙습니다.

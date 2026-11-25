@@ -6,6 +6,7 @@
 #include "../core/Accessibility.hpp"
 #include "../core/Subtitles.hpp"
 #include "../components/SubtitlePanel.hpp"
+#include "../components/VrStatsPanel.hpp"
 #include "../core/CVar.hpp"
 #include "../core/SimTick.hpp"
 #include "../core/TraceRecorder.hpp"
@@ -89,6 +90,12 @@ private:
     AccessibilityState                   access_;
     SubtitleQueue                        subtitles_;
     SubtitlePanel                        subtitlePanel_;
+    VrStatsPanel                         vrStatsPanel_;
+    bool                                 vrStatsPrevBtnDown_ = false;
+    uint32_t                             vrStatsPrevDrawn_   = 0;
+    hgpu::GpuLogAccumulator              vrStatsGpuAccum_;
+    hvrstats::VrStatsAccumulator         vrStatsAccum_;
+    std::chrono::steady_clock::time_point vrStatsPrevWall_{};
     NavSystem                            nav_;                // 내비게이션 월드 서비스(Docs/Navigation_AI.md D7)
     std::string                          accessLogged_;
     CVarRegistry::CVar*                  cvVignetteDebug_ = nullptr;   // comfort.vignetteDebug(비네트 모양 확인용)

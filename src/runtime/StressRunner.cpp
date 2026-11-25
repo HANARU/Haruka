@@ -4,6 +4,7 @@
 #include "../components/CameraComponent.hpp"
 #include "../components/LightComponent.hpp"
 #include "../components/ParticleSystemComponent.hpp"
+#include "../components/RenderExtract.hpp"
 #include "../components/StaticMeshComponent.hpp"
 #include "../components/UIPanelComponent.hpp"
 #include "../core/AppPaths.hpp"
@@ -23,18 +24,6 @@
 #include <fstream>
 
 static constinit HLogCategory LogStress{ "Stress", ELogVerbosity::Log };
-
-namespace {
-
-uint32_t countWorldTris(const World& world) {
-    uint32_t total = 0;
-    for (const StaticMeshComponent* sm : StaticMeshComponent::visibleIn(world)) {
-        if (sm && sm->mesh) total += sm->mesh->indexCount / 3u;
-    }
-    return total;
-}
-
-} // namespace
 
 void StressRunner::init(const hstress::StressSpec& spec, World& world, AssetManager& assets, Renderer& renderer,
                         SubtitleQueue* subtitles) {
@@ -317,7 +306,7 @@ void StressRunner::spawnStepActors(uint32_t n) {
     lastTris_ = countWorldTris(*world_);
 }
 
-bool StressRunner::onFrame(float cpuWorkMs, float frameMs, float refreshHz) {
+bool StressRunner::onFrame(float cpuWorkMs, float frameMs, float refreshHz, bool overlayOn) {
     if (schedule_.finished) return true;
     if (refreshHz > 0.f) lastRefreshHz_ = refreshHz;
 
@@ -353,12 +342,12 @@ bool StressRunner::onFrame(float cpuWorkMs, float frameMs, float refreshHz) {
     const uint32_t            n          = schedule_.currentN;
     const float               deltaMs    = schedule_.hasBase ? (avg.totalMs - schedule_.baseGpuMs) : 0.f;
 
-    char line[352];
+    char line[368];
     std::snprintf(
         line, sizeof(line),
-        "Stress step: axis=%s n=%u, GPU ms %.3f (%+.3f ms) (shadow %.3f main %.3f ao %.3f bloom %.3f tonemap %.3f), CPU work ms %.3f, frame ms %.3f, tris %u, draws %u",
+        "Stress step: axis=%s n=%u, GPU ms %.3f (%+.3f ms) (shadow %.3f main %.3f ao %.3f bloom %.3f tonemap %.3f), CPU work ms %.3f, frame ms %.3f, tris %u, draws %u%s",
         hstress::axisName(spec_.axis), n, avg.totalMs, deltaMs, avg.shadowMs, avg.mainMs, avg.aoMs, avg.bloomMs, avg.tonemapMs,
-        cpuWorkAvg, frameAvg, lastTris_, lastDraws_);
+        cpuWorkAvg, frameAvg, lastTris_, lastDraws_, overlayOn ? ", overlay on" : "");
     HLOG(LogStress, Log) << line;
 
     char csv[288];

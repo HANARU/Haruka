@@ -537,6 +537,7 @@ set(RUNTIME_SOURCES
     src/components/RenderExtract.cpp
     src/components/StaticMeshComponent.cpp
     src/components/SubtitlePanel.cpp
+    src/components/VrStatsPanel.cpp
     src/components/AssetRebind.cpp
     src/components/CoreComponents.cpp
     src/components/XrComponents.cpp

@@ -4,6 +4,7 @@
 #include <vector>
 #include "HPass.hpp"
 #include "../RenderContext.hpp"
+#include "../RenderExtension.hpp"
 #include "../RenderTypes.hpp"
 #include "../ParticleOrder.hpp"
 
@@ -79,9 +80,9 @@ public:
         // CPU 드로우 (subpass 0/1 은 opaqueItems, subpass 2 는 transparentItems)
         const std::vector<DrawItem>* opaqueItems      = nullptr;
         const std::vector<DrawItem>* transparentItems = nullptr;
-        // 렌더 확장 지점(DEF-17). 불투명 서브패스 끝(인자 1)과 반투명 서브패스의 반투명 뒤 · 기즈모 앞
-        // (인자 2)에서 부릅니다. 확장이 바꾼 상태는 이 패스가 뒤에서 다시 설정합니다.
-        const std::function<void(uint32_t subpass)>* subpassHook = nullptr;
+        // 렌더 확장 지점(DEF-17). 불투명 끝(OpaqueEnd)과 반투명 뒤 · 기즈모 앞(TransparentEnd)에서 부릅니다.
+        // 둘째 인자는 실제 Vulkan 서브패스 번호입니다(Desktop: 1/2, Mobile: 0).
+        const std::function<void(HRenderStage, uint32_t subpass)>* subpassHook = nullptr;
         bool overlays = true;   // 에디터 선 · 기즈모 · 월드 UI 포인터를 그림(반사 캡처는 끔)
         // 그릴 영역(왼쪽 위 원점). 0 이면 렌더 크기 전체. 반사 캡처가 면마다 작은 정사각형만 그리는 데 씁니다(2026-11-17).
         VkExtent2D area{ 0, 0 };

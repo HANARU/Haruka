@@ -85,6 +85,7 @@
 ### I1 게임패드 (platform + input)
 - [x] `HGamepadState` · `HPadButton` · `HPadAxis` · `hgamepad::pick`(D1 · D2), `IWindow::readGamepad` 기본 구현, GLFW 구현(연결 · 해제 로그)
 - [x] `pad:` 동작 · 축 소스(D3), `setGamepad` 로 가짜 장치 주입, 해제 시 `Released`. 엔진 기본 바인딩 · 샘플 `project.ini` 의 `MoveX` · `MoveY` 에 `pad:left.x` · `pad:left.y` 를 더함
+- [x] **헤드셋 성능 오버레이 버튼:** 왼손 X 버튼(`HXrButton::LeftPrimary`, `project.ini` `debug.vrStatsButton`, 기본 `x`)은 게임 바인딩(`HInputSystem::hasXrButtonBinding`)과 충돌하지 않을 때만 오버레이를 토글합니다(3D UI 패널 클릭은 트리거 사용).
 
 ### I2 수정자 (input)
 - [x] `input.mod.<축>` 해석(데드존 원형 · 축별, 감도, 반전, 곡선), 기본값(D4), project.ini · 사용자 설정 둘 다

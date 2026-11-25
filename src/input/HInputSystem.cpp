@@ -186,6 +186,18 @@ void HInputSystem::unbind(const std::string& action) {
     touch();
 }
 
+bool HInputSystem::hasXrButtonBinding(HXrButton button) const {
+    for (const Layer& layer : layers()) {
+        if (!layer.ctx) continue;
+        for (const auto& [name, b] : layer.ctx->actions) {
+            (void)name;
+            if (std::find(b.buttons.begin(), b.buttons.end(), button) != b.buttons.end())
+                return true;
+        }
+    }
+    return false;
+}
+
 void HInputSystem::bindAxis(const std::string& axis, HXrAxis source) {
     AxisBinding& b = contexts_[kDefaultContext].axes[axis];
     b.xr.push_back(source);

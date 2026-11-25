@@ -23,7 +23,7 @@ public:
               SubtitleQueue* subtitles);
 
     // 매 프레임 drawFrame 뒤 호출. 끝나면 true 를 돌려줍니다(엔진이 창을 닫음).
-    bool onFrame(float cpuWorkMs, float frameMs, float refreshHz);
+    bool onFrame(float cpuWorkMs, float frameMs, float refreshHz, bool overlayOn = false);
     bool finished() const { return schedule_.finished; }
 
 private:

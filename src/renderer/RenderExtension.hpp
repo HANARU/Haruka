@@ -5,9 +5,9 @@
 // CompositorEffect, Unity URP 의 Renderer Feature(RenderPassEvent), UE 의 SceneViewExtension 처럼
 // 고정된 지점 방식입니다. 렌더 그래프(Bevy)는 렌더러를 다시 짜는 규모라 쓰지 않았습니다.
 //
-// 메인 패스는 한 렌더 패스 안의 서브패스 3개(깊이 → 불투명 → 반투명)입니다(Quest 타일 GPU 를 위한
-// 구조). 그래서 불투명 끝 · 반투명 끝 지점은 별도 패스가 아니라 그 서브패스 안에서 그립니다. 파이프라인은
-// HRenderDeviceInfo::mainPass 와 그 서브패스 번호로 만들어야 합니다.
+// 메인 패스는 한 렌더 패스 안의 서브패스 2개(0 = 깊이 전처리, 1 = 불투명 + 반투명; DEF-183 이후, Mobile 티어는
+// 서브패스 1개)입니다(Quest 타일 GPU 를 위한 구조). 그래서 불투명 끝 · 반투명 끝 지점은 별도 패스가 아니라 그
+// 서브패스 안에서 그립니다. 파이프라인은 HRenderDeviceInfo::mainPass 와 그 서브패스 번호로 만들어야 합니다.
 //
 // 지점마다 눈별로 부릅니다(단안 1번, 스테레오 2번). 같은 지점에 확장이 여럿이면 등록한 순서대로 부릅니다.
 // 렌더러는 단일 스레드라(Threading.md) 등록 · 해제 · 기록이 모두 메인 스레드에서 일어납니다.
@@ -58,7 +58,7 @@ struct HRenderDeviceInfo {
     VkRenderPass          mainPass = VK_NULL_HANDLE;         // OpaqueEnd · TransparentEnd 가 열려 있는 렌더 패스(눈마다)
     VkRenderPass          mainPassMultiview = VK_NULL_HANDLE;   // 같은 구조에 viewMask 0b11(두 눈을 한 번에, 위 머리말)
     uint32_t              opaqueSubpass      = 1;
-    uint32_t              transparentSubpass = 2;
+    uint32_t              transparentSubpass = 1;
     // 메인 패스 색 · AfterScene 의 HDR 이미지 포맷. HDR 의 알파 채널은 후처리 가중치입니다(3D UI 패널, 2026-11-16):
     // 1 = 노출 · AO · 블룸 · 톤매핑을 받음(장면), 0 = 받지 않음(UI 패널). 장면을 그리는 확장은 colorWriteMask 에서
     // 알파를 빼거나 알파 블렌드를 (ZERO, ONE) 으로 두어 값을 그대로 두십시오.

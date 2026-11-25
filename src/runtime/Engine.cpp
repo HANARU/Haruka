@@ -30,6 +30,7 @@
 #include <fstream>
 #include <sstream>
 #include "../components/CoreComponents.hpp"
+#include "../components/StaticMeshComponent.hpp"
 #include "../components/XrComponents.hpp"
 #include "../components/CameraComponent.hpp"
 #include "../components/RenderExtract.hpp"
@@ -466,6 +467,13 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     renderer_->setForcedMsaa(options.msaaSamples);
     renderer_->setPreferredGpu(options.gpuIndex);
     renderer_->setMultiview(options.multiview);
+#ifdef __ANDROID__
+    constexpr bool kIsAndroid = true;
+#else
+    constexpr bool kIsAndroid = false;
+#endif
+    const RenderTier renderTier = resolveRenderTier(options.renderTier, kIsAndroid);
+    renderer_->setRenderTier(renderTier);
     // 품질 단계(2026-11-18, 성능 안정화 2-2). project.ini 의 render.* 품질 키(플랫폼 접미사 줄 포함).
     {
         Renderer::Quality q;
@@ -498,8 +506,11 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         }
     }
     // 후처리 패스 켬/끔(프로젝트 설정 render.ao · render.bloom). --ssao · --no-ssao 가 AO 를 덮어씁니다.
-    renderer_->setPostFeatures(userSettings_.getBool("render.ao", project_.renderAo),
-                               userSettings_.getBool("render.bloom", project_.renderBloom));
+    // Mobile 티어에서는 AO 를 항상 끄고, 블룸은 기본으로 끕니다(--bloom 으로만 켬).
+    const bool defaultBloom = (renderTier == RenderTier::Mobile)
+        ? false
+        : userSettings_.getBool("render.bloom", project_.renderBloom);
+    renderer_->setPostFeatures(userSettings_.getBool("render.ao", project_.renderAo), defaultBloom);
     if (options.ssao.has_value()) renderer_->setAoEnabled(*options.ssao);
     if (options.bloom.has_value()) renderer_->setBloomEnabled(*options.bloom);
     if (!renderer_->aoEnabled() || !renderer_->bloomEnabled()) {
@@ -620,6 +631,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     world_.setService<AccessibilityState>(&access_);   // 접근성(Docs/Accessibility.md D2): 글자 배율 · 비네트 · 앉은 자세
     world_.setService<SubtitleQueue>(&subtitles_);     // 자막 큐(D3): 소리 · 게임 코드가 줄을 넣음
     world_.setService<SubtitlePanel>(&subtitlePanel_); // 자막 표시(D4): 추출이 패널 목록 끝에 더함
+    world_.setService<VrStatsPanel>(&vrStatsPanel_);   // 헤드셋 안 성능 오버레이(VS1)
     world_.setService<CVarRegistry>(&cvars_);
     // 내비게이션(Docs/Navigation_AI.md D4 · D7): 경로 질의 서비스, 콘솔 nav.build · nav.info · nav.debug
     nav_.setWorld(&world_);
@@ -671,6 +683,9 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     }
     if (options_.stress.enabled)
         stress_.init(options_.stress, world_, *assets_, *renderer_, &subtitles_);
+    if (options_.vrStats)
+        vrStatsPanel_.setRequested(true);
+    vrStatsPanel_.setXrActive((xr_ && xr_->hasSession()) || synthetic_);
     const double modulesMs = std::max(0.0, (stats_.msSinceBoot() - modulesT0) - firstSceneMs);
     // 게임 모듈까지 등록을 마쳤으니, 명령줄 · ini 로 들어왔는데 끝내 등록되지 않은 CVar 이름을 알리고 첫 변경 콜백을 부릅니다.
     for (const std::string& n : cvars_.pendingNames())
@@ -753,6 +768,19 @@ void Engine::setupCVars() {
                                        HLOG(LogEngine, Log) << "Debug lines: " << (v.asBool() ? "on" : "off") << " (cvar debug.lines)";
                                    });
     trace_.registerCommands(cvars_);   // trace.start · trace.stop(Docs/CPU_Profiling.md D6)
+    cvars_.addCommand("stat", "stat vr: toggle the in-headset performance overlay",
+                      [this](const std::vector<std::string>& args) -> std::string {
+                          if (args.size() != 1 || args[0] != "vr") return "usage: stat vr";
+                          const bool xrActive = (xr_ && xr_->hasSession()) || synthetic_;
+                          if (!xrActive) {
+                              HLOG(LogEngine, Log) << "stat vr: XR is not active (use GPU Stats panel or --synthetic-eyes; desktop: bottom panel -> GPU Stats tab)";
+                              return "XR is not active (use GPU Stats panel: bottom panel -> GPU Stats tab)";
+                          }
+                          const bool on = vrStatsPanel_.toggleRequested();
+                          vrStatsPanel_.setXrActive(true);
+                          HLOG(LogEngine, Log) << "VR stats overlay: " << (on ? "on" : "off");
+                          return on ? "vr stats on" : "vr stats off";
+                      });
     // 접근성(Docs/Accessibility.md D3 · D7): 자막 확인 · 앉은 자세 다시 맞추기.
     cvars_.addCommand("subtitle.say", "subtitle.say <text> [speaker] [seconds]: show a subtitle line (quote text with spaces)",
                       [this](const std::vector<std::string>& args) -> std::string {
@@ -852,7 +880,9 @@ void Engine::applyLiveUserSettings(bool startup) {
         postLogged_ = std::string("AO ") + (renderer_->aoEnabled() ? "on" : "off") + ", Bloom " + (renderer_->bloomEnabled() ? "on" : "off");
     } else if (renderer_) {
         const bool ao = options_.ssao.has_value() ? *options_.ssao : userSettings_.getBool("render.ao", project_.renderAo);
-        const bool bloom = options_.bloom.has_value() ? *options_.bloom : userSettings_.getBool("render.bloom", project_.renderBloom);
+        const bool bloom = options_.bloom.has_value()
+            ? *options_.bloom
+            : (renderer_->renderTier() == RenderTier::Mobile ? false : userSettings_.getBool("render.bloom", project_.renderBloom));
         renderer_->setPostFeatures(ao, bloom);
         const std::string post = std::string("AO ") + (renderer_->aoEnabled() ? "on" : "off") + ", Bloom "
                                  + (renderer_->bloomEnabled() ? "on" : "off");
@@ -992,6 +1022,7 @@ int Engine::run() {
     loop.timeLimitSec = options_.timeoutSec > 0.f ? options_.timeoutSec : (options_.frames > 0 ? 60.f : 0.f);
     stats_.startLoop();
     gpuLogWindowStart_ = LoopState::Clock::now();
+    vrStatsPrevWall_   = gpuLogWindowStart_;
     while (true) {
         HPROF_SCOPE("Frame");
         FrameState f;
@@ -1366,7 +1397,7 @@ void Engine::updateAccessibility(const FrameState& f) {
     if (cvVignetteDebug_ && cvVignetteDebug_->asFloat() > 0.f) access_.setVignette(cvVignetteDebug_->asFloat());
     if (f.playing) subtitles_.update(f.dt);
     subtitlePanel_.update(subtitles_, access_.access);
-    if (!subtitlePanel_.visible()) return;
+    if (!subtitlePanel_.visible() && !vrStatsPanel_.visible()) return;
     CameraComponent* cam = f.view.cam ? f.view.cam : CameraComponent::activeIn(world_);
     if (!cam || !cam->owner) return;
     glm::vec3 pos = cam->owner->worldPosition();
@@ -1385,6 +1416,9 @@ void Engine::updateAccessibility(const FrameState& f) {
         const auto* rigC = f.view.rig ? f.view.rig->getComponent<XrRigComponent>() : nullptr;
         fromMatrix(cam->xrOrigin(f.displayAlpha) * glm::translate(glm::mat4(1.f), glm::vec3(0.f, rigC ? rigC->eyeHeight : 0.f, 0.f)));
     }
+    if (vrStatsPanel_.visible())
+        vrStatsPanel_.place(pos, rot, f.dt);
+    if (!subtitlePanel_.visible()) return;
     const float aspect = synthetic_ ? (float)options_.syntheticEyeW / (float)std::max(options_.syntheticEyeH, 1u)
                        : (f.winW > 0 && f.winH > 0 ? (float)f.winW / (float)f.winH : 16.f / 9.f);
     subtitlePanel_.place(pos, rot, headLocked, cam->fovY, aspect);
@@ -1440,10 +1474,11 @@ void Engine::endLoop(FrameState& f, LoopState& loop) {
         const float elapsed = std::chrono::duration<float>(LoopState::Clock::now() - gpuLogWindowStart_).count();
         if (elapsed >= static_cast<float>(options_.gpuLogSec) && gpuLogAccum_.frames() > 0) {
             const hgpu::GpuLogAverage avg = gpuLogAccum_.flush();
-            char buf[224];
+            char buf[240];
             std::snprintf(buf, sizeof(buf),
-                          "GPU ms (%.1f s, %u frames): shadow %.3f, main %.3f, ao %.3f, bloom %.3f, tonemap %.3f, ui %.3f, total %.3f",
-                          elapsed, avg.frames, avg.shadowMs, avg.mainMs, avg.aoMs, avg.bloomMs, avg.tonemapMs, avg.uiMs, avg.totalMs);
+                          "GPU ms (%.1f s, %u frames): shadow %.3f, main %.3f, ao %.3f, bloom %.3f, tonemap %.3f, ui %.3f, total %.3f%s",
+                          elapsed, avg.frames, avg.shadowMs, avg.mainMs, avg.aoMs, avg.bloomMs, avg.tonemapMs, avg.uiMs, avg.totalMs,
+                          vrStatsPanel_.visible() ? " (overlay on)" : "");
             HLOG(LogEngine, Log) << buf;
             HLOG(LogEngine, Log) << hmemlog::formatMemLine(renderer_->coreHeapCommittedChunks(),
                                                            renderer_->coreHeapCommittedBytes(),
@@ -1451,6 +1486,28 @@ void Engine::endLoop(FrameState& f, LoopState& loop) {
             gpuLogWindowStart_ = LoopState::Clock::now();
         }
     }
+
+    // ── 헤드셋 안 성능 오버레이 토글 · 0.5초 갱신(VS1 / VS1b) ───────────────────────
+    const bool vrStatsXrActive = (xr_ && xr_->hasSession()) || synthetic_;
+    if (vrStatsXrActive) {
+        hvrstats::VrStatsButton cfgBtn = hvrstats::VrStatsButton::X;
+        hvrstats::parseVrStatsButton(project_.debugVrStatsButton, cfgBtn);
+        const HXrInputState& xrIn = HInputSystem::get().xr();
+        const bool btnDown = (cfgBtn == hvrstats::VrStatsButton::X) ? (xrIn.focused && xrIn.hands[0].active && xrIn.hands[0].primary)
+                           : (cfgBtn == hvrstats::VrStatsButton::Y) ? (xrIn.focused && xrIn.hands[0].active && xrIn.hands[0].secondary)
+                           : false;
+        const HXrButton xrBtn = (cfgBtn == hvrstats::VrStatsButton::Y) ? HXrButton::LeftSecondary : HXrButton::LeftPrimary;
+        const bool boundInGame = (cfgBtn != hvrstats::VrStatsButton::None) && HInputSystem::get().hasXrButtonBinding(xrBtn);
+        if (hvrstats::shouldToggleVrStats({ btnDown, vrStatsPrevBtnDown_, boundInGame, cfgBtn })) {
+            const bool on = vrStatsPanel_.toggleRequested();
+            HInputSystem::get().haptic(0, 0.35f, 0.03f);
+            HLOG(LogEngine, Log) << "VR stats overlay: " << (on ? "on" : "off");
+        }
+        vrStatsPrevBtnDown_ = btnDown;
+    } else {
+        vrStatsPrevBtnDown_ = false;
+    }
+    vrStatsPanel_.setXrActive(vrStatsXrActive);
 
     // FPS 제목(0.5 초마다). VR 을 원했는데 쓸 수 없거나(런타임 · 헤드셋 없음) 연결이 끊겨 기다리는 중이면 제목에 알립니다(2026-10-19).
     const char* vrNote = (xrWanted_ && !xrSession_->usable()) ? "  |  VR unavailable"
@@ -1460,12 +1517,67 @@ void Engine::endLoop(FrameState& f, LoopState& loop) {
     // 루프 1 회 전체입니다. 이것이 실제 프레임 간격이며, 위 구간들의 합과
     // 크게 벌어지면 그 차이가 곧 "어느 계측기에도 잡히지 않는 시간"입니다.
     const float loopMs = std::chrono::duration<float, std::milli>(FrameState::Clock::now() - f.loopT0).count();
+    if (vrStatsPanel_.visible()) {
+        const auto now = LoopState::Clock::now();
+        const float wallDt = std::chrono::duration<float>(now - vrStatsPrevWall_).count();
+        vrStatsPrevWall_ = now;
+        const auto& ft = gFrameTimings();
+        const float waitMs = ft.xrWait.last + ft.fenceWait.last + ft.acquire.last + ft.imgFence.last + ft.present.last;
+        const float cpuWorkMs = std::max(0.f, loopMs - waitMs);
+        if (drawnFrames_ > vrStatsPrevDrawn_) {
+            vrStatsPrevDrawn_ = drawnFrames_;
+            const Renderer::GpuTimings t = renderer_->getTimings();
+            vrStatsGpuAccum_.add({ t.shadowMs, t.mainMs, t.aoMs, t.bloomMs, t.tonemapMs, t.uiMs, t.totalMs });
+            vrStatsAccum_.addFrame(cpuWorkMs, loopMs, wallDt);
+        }
+        if (vrStatsPanel_.refreshDue(f.dt)) {
+            hvrstats::VrStatsSnapshot snap;
+            const auto winAvg = vrStatsAccum_.flushRefreshWindow(cpuWorkMs, loopMs);
+            snap.fpsAvg    = winAvg.fpsAvg;
+            snap.fpsMin    = winAvg.fpsMin;
+            snap.cpuWorkMs = winAvg.cpuWorkMs;
+            snap.frameMs   = winAvg.frameMs;
+            const float hz = (f.xrBegun && xr_) ? xr_->displayRefreshRate() : 0.f;
+            snap.targetHz = hz > 0.f ? hz : 90.f;
+
+            const hgpu::GpuLogAverage gavg = vrStatsGpuAccum_.frames() > 0 ? vrStatsGpuAccum_.flush() : hgpu::GpuLogAverage{};
+            snap.gpuTotalMs = gavg.totalMs;
+            snap.shadowMs   = gavg.shadowMs;
+            snap.mainMs     = gavg.mainMs;
+            snap.aoMs       = gavg.aoMs;
+            snap.bloomMs    = gavg.bloomMs;
+            snap.tonemapMs  = gavg.tonemapMs;
+            snap.uiMs       = gavg.uiMs;
+
+            const auto synthDim = hxr::scaleEyeExtent(options_.syntheticEyeW, options_.syntheticEyeH, 0, 0, options_.xrScale);
+            const VkExtent2D eyeExt = (xr_ && xr_->hasSession()) ? xr_->eyeExtent()
+                                    : VkExtent2D{ synthDim.width, synthDim.height };
+            snap.eyeW        = eyeExt.width;
+            snap.eyeH        = eyeExt.height;
+            snap.xrScale     = options_.xrScale;
+            snap.msaaSamples = renderer_->msaaSampleCount();
+            if (options_.xrPerfLevel.set()) {
+                snap.perfLevel = std::string(hxr::perfLevelName(options_.xrPerfLevel.cpu)) + ":" + hxr::perfLevelName(options_.xrPerfLevel.gpu);
+            }
+            snap.heapChunks         = renderer_->coreHeapCommittedChunks();
+            snap.heapCommittedBytes = renderer_->coreHeapCommittedBytes();
+            snap.rssMb              = hmemlog::queryProcessRssMb();
+            snap.drawCalls          = renderer_->getFrameStats().drawCalls;
+            snap.tris               = countWorldTris(world_);
+            vrStatsPanel_.updateData(snap);
+        }
+    } else {
+        vrStatsPrevWall_ = LoopState::Clock::now();
+        vrStatsAccum_.reset();
+        vrStatsGpuAccum_.reset();
+    }
+
     if (options_.stress.enabled && !loop.closeAsked) {
         const auto& ft = gFrameTimings();
         const float waitMs = ft.xrWait.last + ft.fenceWait.last + ft.acquire.last + ft.imgFence.last + ft.present.last;
         const float cpuWorkMs = std::max(0.f, loopMs - waitMs);
         const float refreshHz = (f.xrBegun && xr_) ? xr_->displayRefreshRate() : 0.f;
-        if (stress_.onFrame(cpuWorkMs, loopMs, refreshHz)) {
+        if (stress_.onFrame(cpuWorkMs, loopMs, refreshHz, vrStatsPanel_.visible())) {
             loop.closeAsked = true;
             win.setShouldClose(true);
         }

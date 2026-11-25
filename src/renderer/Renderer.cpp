@@ -146,7 +146,13 @@ void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
         rc_.pipelineCache = pipelineCache_;
         rc_.msaaSamples   = msaaSamples_;
         rc_.noLazyMsaa    = noLazyMsaa_;
+        rc_.renderTier    = renderTier_;
         if (noLazyMsaa_) HLOG(LogRenderer, Log) << "MSAA memory: Zone B (--no-lazy-msaa)";
+        HLOG(LogRenderer, Log) << "Render tier: " << renderTierName(renderTier_)
+                               << (renderTier_ == RenderTier::Mobile
+                                       ? (std::string(" (depth prepass off, bloom ") + (bloomOn_ ? "on" : "off") + ", AO off)")
+                                       : (std::string(" (depth prepass on, bloom ") + (bloomOn_ ? "on" : "off")
+                                          + ", AO " + (aoEnabled() ? "on" : "off") + ")"));
         rc_.swapFormat    = swapchain_->format();
         rc_.depthFormat   = depthFormat;
         rc_.extent        = swapchain_->extent();
@@ -1181,8 +1187,8 @@ void Renderer::addRenderExtension(std::shared_ptr<IRenderExtension> ext) {
     info.frameSetLayout     = frames_.frameLayout();
     info.mainPass           = geometry_.mainPass();
     info.mainPassMultiview  = geometry_.mainPassMultiview();
-    info.opaqueSubpass      = 1;
-    info.transparentSubpass = 2;
+    info.opaqueSubpass      = mainPassSubpass(rc_.renderTier, false);
+    info.transparentSubpass = mainPassSubpass(rc_.renderTier, true);
     info.hdrFormat          = GeometryPass::kHdrFormat;
     try {
         ext->create(info);
