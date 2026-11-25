@@ -107,10 +107,10 @@ void PostPass::create(RenderContext& rc) {
             throw std::runtime_error("Failed to create post desc layout!");
     }
 
-    // Pipeline layout — push constants: 강도 · 노출 · 플래그 · UV 범위 · 비네트 · 색 보정 행렬(PostPC, 96바이트)
+    // Pipeline layout — push constants: 강도 · 노출 · 플래그 · UV 범위 · 비네트 · 색 보정 행렬 · debugMode(PostPC, 100바이트)
     {
         VkPushConstantRange pcr{};
-        pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; pcr.offset = 0; pcr.size = 96;
+        pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; pcr.offset = 0; pcr.size = 100;
         VkPipelineLayoutCreateInfo pli{};
         pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pli.setLayoutCount = 1; pli.pSetLayouts = &setLayout_;
@@ -217,8 +217,9 @@ void PostPass::recordTonemap(VkCommandBuffer cmd, const Output& out, const Param
     struct PostPC { float aoStr, bloomStr, exposure, enableAO, enableBloom, encodeSrgb;
                     float uvScale[2], uvOffset[2];
                     float vignette, colorFilter;
-                    float colorCol[3][4]; };
-    static_assert(sizeof(PostPC) == 96, "PostPC must match post.frag Params");
+                    float colorCol[3][4];
+                    float debugMode; };
+    static_assert(sizeof(PostPC) == 100, "PostPC must match post.frag Params");
     // sRGB 이미지면 GPU 가 저장할 때 선형 → sRGB 로 바꿉니다. 그때 셰이더가 또 바꾸면 두 번 들어가
     // 화면이 밝고 흐려졌습니다(DEF-96). UNORM 이미지에서만 셰이더가 곡선을 적용합니다.
     const float encodeSrgb = isSrgbFormat(out.format) ? 0.f : 1.f;
@@ -226,7 +227,8 @@ void PostPass::recordTonemap(VkCommandBuffer cmd, const Output& out, const Param
     PostPC ppc{ params.aoStrength, params.bloomStrength, params.exposure,
                 params.aoOn ? 1.f : 0.f, params.bloomOn ? 1.f : 0.f, encodeSrgb,
                 { out.uvScale[0], out.uvScale[1] }, { out.uvOffset[0], out.uvOffset[1] },
-                params.vignette, params.colorFilter > 0 ? 1.f : 0.f, {} };
+                params.vignette, params.colorFilter > 0 ? 1.f : 0.f, {},
+                static_cast<float>(params.debugMode) };
     const glm::mat3 cm = haccess::colorCorrection(params.colorFilter);
     for (int c = 0; c < 3; ++c)
         for (int r = 0; r < 3; ++r) ppc.colorCol[c][r] = cm[c][r];

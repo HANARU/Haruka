@@ -3,6 +3,7 @@
 #include "../renderer/RenderTypes.hpp"
 #include "../input/HXrInput.hpp"
 #include "../platform/PlatformContext.hpp"
+#include "XrPerfLevelLogic.hpp"
 
 #include <array>
 #include <cstdint>
@@ -99,6 +100,10 @@ public:
     VkExtent2D eyeExtent() const;
     // 헤드셋 주사율(Hz). 물리 스텝을 맞출 때 씁니다. 모르면 0.
     float displayRefreshRate() const;
+    // 스왑체인 눈 해상도 배율(--xr-scale)과 요청 주사율(--xr-refresh). 세션 시작 전에 설정합니다.
+    void setEyeScale(float scale);
+    void setRequestedRefreshRate(float hz);
+    void setPerfLevel(hxr::XrPerfLevelPair levels);
 
     // ── 기준 공간 (2026-10-15, 2026-10-16 리그 높이 모드) ──────────────────────
     // XR 에는 언제나 리그가 있습니다(씬의 XrRigComponent, 없으면 엔진이 붙이는 보이지 않는 리그). 리그의 높이 모드에 따라

@@ -160,13 +160,14 @@ PostPass::Params Renderer::postParams() const {
                         lighting_calibration::kBaseExposure };
     // 접촉 그림자는 AO 패스에서 계산해 AO 와 함께 합성합니다. AO 를 끄고 접촉 그림자만 켜면 AO 패스를 돌리되 세기 1 로 그 결과만 곱합니다.
     const bool contact = shadowCasterSlot_ >= 0 && contactLength_ > 0.f;
-    p.aoOn    = aoOn_ || contact;
-    if (!aoOn_ && contact) p.aoStrength = 1.f;
+    p.aoOn    = (aoOn_ || contact) && msaaSamples_ != VK_SAMPLE_COUNT_1_BIT;
+    if (!aoOn_ && contact && p.aoOn) p.aoStrength = 1.f;
     p.bloomOn = bloomOn_;
     // 카메라 노출 보정(EV, 2026-11-17 노출 배선): 기준 노출 × 2^EV. 카메라가 없거나 0 이면 기준 그대로.
     p.exposure *= std::exp2(cameraExposureEv_);
     p.vignette    = cameraVignette_;      // 접근성(Docs/Accessibility.md D6 · D9)
     p.colorFilter = cameraColorFilter_;
+    p.debugMode   = debugPostMode_;
     return p;
 }
 
@@ -769,7 +770,7 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
         if (vkGetQueryPoolResults(device, timestampPool_, fi * TS, TS,
                 sizeof(ts), ts, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
             float ns2ms = timestampPeriod_ * 1e-6f;
-            // 슬롯 배치: 0 시작 / 1 섀도 / 눈 v 마다 2+4v 메인(3서브패스+resolve) · 3+4v AO ·
+            // 슬롯 배치: 0 시작 / 1 섀도 / 눈 v 마다 2+4v 메인(2서브패스+resolve) · 3+4v AO ·
             //           4+4v Bloom · 5+4v 톤매핑 / 마지막 UI
             // 패스별 시간은 두 눈의 합입니다. 눈 사이의 배리어는 다음 눈의 메인에 들어갑니다.
             // 예전에는 6 개를 기록하고 5 개만 읽어 UI 패스가 총합에서 빠져 있었고,
@@ -780,7 +781,7 @@ bool Renderer::drawFrame(const RenderSceneInput& scene, const XrFrameTarget* xr)
             uint64_t prev = ts[1];
             for (uint32_t v = 0; v < kMaxViews; ++v) {
                 const uint32_t b = 2 + kTsPerView * v;
-                mainMs  += float(ts[b]     - prev)      * ns2ms;   // 3 서브패스 + resolve
+                mainMs  += float(ts[b]     - prev)      * ns2ms;   // 2 서브패스 + resolve
                 aoMs    += float(ts[b + 1] - ts[b])     * ns2ms;
                 bloomMs += float(ts[b + 2] - ts[b + 1]) * ns2ms;
                 toneMs  += float(ts[b + 3] - ts[b + 2]) * ns2ms;

@@ -42,6 +42,7 @@ public:
         bool  bloomOn = true;
         float vignette    = 0.f;   // 0 이면 비네트 단계를 건너뜀(Docs/Accessibility.md D6)
         int   colorFilter = 0;     // 0 이면 색 보정 단계를 건너뜀(D9)
+        int   debugMode   = 0;     // DEF-183 진단: 0=보통, 1=solid, 2=raw, 3=nobloom, 4=nan
     };
     // overlay 가 있으면 톤매핑을 그린 뒤 같은 렌더 패스 안에서 부릅니다(렌더 확장의 AfterTonemap, DEF-17).
     // 인자는 지금 열린 렌더 패스입니다. 뷰포트 · 시저는 out.rect 로 설정되어 있습니다.

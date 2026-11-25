@@ -53,6 +53,7 @@ public:
     // 장치 생성 때 켠 블록 압축 기능(Docs/Texture_Compression.md D10). 켜지 않은 압축 형식은 쓸 수 없습니다.
     bool       texCompressionBC   = false;
     bool       texCompressionASTC = false;
+    bool       noLazyMsaa         = false;   // --no-lazy-msaa : MSAA 컬러를 Zone B 에 둠(DEF-183)
 
     // ── 생성 헬퍼 ─────────────────────────────────────────────────────────────
     VkShaderModule createShaderModule(const std::vector<char>& code) const;

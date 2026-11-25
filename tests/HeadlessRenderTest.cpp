@@ -7,6 +7,10 @@
 // 실행: build/Release/HarukaHeadlessTest.exe
 
 #include "../src/runtime/EngineOptions.hpp"
+#include "../src/runtime/GpuLogAccumulator.hpp"
+#include "../src/runtime/MemLogUtil.hpp"
+#include "../src/runtime/StressRampLogic.hpp"
+#include "../src/xr/XrScaleLogic.hpp"
 #include "../src/core/FramePacing.hpp"
 #include "../src/runtime/XrRecovery.hpp"
 #include "../src/platform/android/AndroidWindow.hpp"
@@ -402,7 +406,202 @@ int main() {
             "--restart-wait-pid=4321",
         };
         check(filtered == expected, "filterRestartArgs: 공백·한글·따옴표 유지, 시험 인자 제거, wait-pid 갱신");
+
+        u.clear();
+        auto dp = hopt::parse({ "--debug-post=solid", "--no-lazy-msaa", "--msaa=1" }, u);
+        check(dp.debugPost == "solid" && dp.noLazyMsaa && dp.msaaSamples == 1 && u.empty(),
+              "DEF-183 진단 인자 해석(--debug-post, --no-lazy-msaa, --msaa=1)");
+        u.clear();
+        dp = hopt::parse({ "--debug-post=bad", "--msaa=8" }, u);
+        check(dp.debugPost.empty() && dp.msaaSamples == 0 && u.size() == 2,
+              "잘못된 --debug-post · --msaa 거부");
+        const auto dpFiltered = hopt::filterRestartArgs({ "--project=P", "--debug-post=nan", "--no-lazy-msaa", "--msaa=2" }, 10);
+        check(dpFiltered == std::vector<std::string>({ "--project=P", "--restart-wait-pid=10" }),
+              "filterRestartArgs: DEF-183 진단 인자 제거");
+
+        // QP1 새 단위 시험 1: 인자 해석(--gpu-log, --xr-scale, --xr-refresh)
+        u.clear();
+        auto qp = hopt::parse({ "--gpu-log=5", "--xr-scale=0.8", "--xr-refresh=72" }, u);
+        check(qp.gpuLogSec == 5 && std::abs(qp.xrScale - 0.8f) < 1e-4f && std::abs(qp.xrRefreshHz - 72.f) < 1e-4f && u.empty(),
+              "QP1 인자 해석(--gpu-log=5, --xr-scale=0.8, --xr-refresh=72)");
+        u.clear();
+        qp = hopt::parse({ "--gpu-log=1", "--gpu-log=60", "--xr-scale=0.5", "--xr-scale=1.5" }, u);
+        check(qp.gpuLogSec == 60 && std::abs(qp.xrScale - 1.5f) < 1e-4f && u.empty(),
+              "QP1 경계값 허용(gpu-log 1..60, xr-scale 0.5..1.5)");
+        u.clear();
+        qp = hopt::parse({ "--gpu-log=0", "--gpu-log=61", "--gpu-log=abc",
+                           "--xr-scale=0.49", "--xr-scale=1.51", "--xr-scale=bad",
+                           "--xr-refresh=0", "--xr-refresh=-72", "--xr-refresh=bad" }, u);
+        check(qp.gpuLogSec == 0 && std::abs(qp.xrScale - 1.0f) < 1e-4f && qp.xrRefreshHz == 0.f && u.size() == 9,
+              "QP1 범위 밖 · 잘못된 값 거부");
+
+        // QP1 새 단위 시험 2: 배율 계산(자르기 · 8의 배수)
+        {
+            const auto d0 = hxr::scaleEyeExtent(1440, 1584, 2048, 2048, 0.8f);
+            check(d0.width == 1152 && d0.height == 1264 && (d0.width % 8 == 0) && (d0.height % 8 == 0),
+                  "XR 배율 0.8 (1440x1584 -> 1152x1264, 8의 배수)");
+            const auto d1 = hxr::scaleEyeExtent(512, 512, 0, 0, 0.8f);
+            check(d1.width == 408 && d1.height == 408, "합성 눈 배율 0.8 (512x512 -> 408x408)");
+            const auto d2 = hxr::scaleEyeExtent(1800, 1800, 2048, 2000, 1.5f);
+            check(d2.width == 2048 && d2.height == 2000 && d2.width <= 2048 && d2.height <= 2000,
+                  "XR 배율 1.5 시 maxImageRectWidth/Height 로 자름");
+            const auto d3 = hxr::scaleEyeExtent(1000, 1000, 1005, 1005, 1.2f);
+            check(d3.width == 1000 && d3.height == 1000 && (d3.width % 8 == 0),
+                  "max 가 8의 배수가 아니어도 max 이하의 8의 배수로 맞춤");
+        }
+
+        // QP1 새 단위 시험 3: 구간 평균 누적기
+        {
+            hgpu::GpuLogAccumulator acc;
+            const auto emptyAvg = acc.flush();
+            check(emptyAvg.frames == 0 && emptyAvg.totalMs == 0.f, "빈 누적기 flush 는 0");
+            acc.add({ 1.f, 10.f, 2.f, 3.f, 1.f, 0.5f, 17.5f });
+            acc.add({ 3.f, 14.f, 4.f, 5.f, 3.f, 1.5f, 30.5f });
+            check(acc.frames() == 2, "누적 프레임 수 2");
+            const auto avg = acc.flush();
+            check(avg.frames == 2 &&
+                  std::abs(avg.shadowMs - 2.f) < 1e-4f &&
+                  std::abs(avg.mainMs - 12.f) < 1e-4f &&
+                  std::abs(avg.aoMs - 3.f) < 1e-4f &&
+                  std::abs(avg.bloomMs - 4.f) < 1e-4f &&
+                  std::abs(avg.tonemapMs - 2.f) < 1e-4f &&
+                  std::abs(avg.uiMs - 1.f) < 1e-4f &&
+                  std::abs(avg.totalMs - 24.f) < 1e-4f,
+                  "구간 평균 산술 평균 계산");
+            check(acc.frames() == 0, "flush 후 누적기 초기화");
+        }
+
+        // QP2 보완 + 새 단위 시험 1: --no-bloom / --stress 인자 해석
+        {
+            u.clear();
+            auto nb = hopt::parse({ "--no-bloom", "--stress=draws:100:50:300", "--stress-step-seconds=2.5", "--stress-budget-ms=13.9" }, u);
+            check(nb.bloom.has_value() && !*nb.bloom &&
+                  nb.stress.enabled && nb.stress.axis == hstress::StressAxis::Draws &&
+                  nb.stress.start == 100 && nb.stress.step == 50 && nb.stress.max == 300 &&
+                  std::abs(nb.stress.effectiveStepSeconds() - 2.5f) < 1e-4f &&
+                  std::abs(nb.stress.budgetMs - 13.9f) < 1e-4f && u.empty(),
+                  "QP2 인자 해석(--no-bloom, --stress, --stress-step-seconds, --stress-budget-ms)");
+            u.clear();
+            auto emptyDef = hopt::parse({ "--stress=empty" }, u);
+            check(emptyDef.stress.enabled && emptyDef.stress.axis == hstress::StressAxis::Empty &&
+                  std::abs(emptyDef.stress.effectiveStepSeconds() - 10.f) < 1e-4f && u.empty(),
+                  "QP2 empty 축 기본 단계 시간 10초");
+            u.clear();
+            auto badStress = hopt::parse({ "--stress=nope", "--stress=draws:10:0:100", "--stress=draws:100:10:50",
+                                           "--stress-step-seconds=0.5", "--stress-budget-ms=0" }, u);
+            check(!badStress.stress.enabled && u.size() == 5,
+                  "QP2 잘못된 --stress 인자 거부");
+        }
+
+        // QP2 새 단위 시험 2: 단계 일정(0 단계 · 버림 구간 · 멈춤 조건 max(예산, 기준))
+        {
+            check(hstress::StressSchedule::inDiscardWindow(0.99f, 3.0f), "첫 1초 버림 구간");
+            check(!hstress::StressSchedule::inDiscardWindow(1.01f, 3.0f), "1초 이후 측정 구간");
+
+            hstress::StressSpec sp;
+            sp.enabled = true; sp.axis = hstress::StressAxis::Draws;
+            sp.start = 100; sp.step = 100; sp.max = 500;
+            hstress::StressSchedule sch;
+            sch.begin(sp);
+            check(sch.currentN == 0 && !sch.hasBase, "QP2b 모든 축은 n=0 기준 단계부터 시작");
+            check(sch.advanceAfterStep(5.0f, 11.1f, sp) && sch.hasBase && std::abs(sch.baseGpuMs - 5.0f) < 1e-4f && sch.currentN == 100,
+                  "QP2b 0 단계 후 start(100) 로 진행");
+            check(sch.advanceAfterStep(15.0f, 11.1f, sp) && sch.currentN == 200, "130% 초과 1회차는 계속");
+            check(sch.advanceAfterStep(10.0f, 11.1f, sp) && sch.currentN == 300, "정상 복귀 시 연속 카운트 초기화");
+            check(sch.advanceAfterStep(15.0f, 11.1f, sp) && sch.currentN == 400, "다시 130% 초과 1회차 계속");
+            check(!sch.advanceAfterStep(15.0f, 11.1f, sp) && sch.finished, "130% 초과 2단계 연속 시 멈춤");
+
+            // 기준이 예산보다 클 때 멈춤 기준은 max(예산, 기준) * 1.3
+            sch.begin(sp);
+            check(sch.advanceAfterStep(20.0f, 11.1f, sp) && sch.currentN == 100, "기준 20ms > 예산 11.1ms");
+            check(sch.advanceAfterStep(24.0f, 11.1f, sp) && sch.currentN == 200, "24ms <= 20*1.3(26ms) 이므로 계속");
+            check(sch.advanceAfterStep(27.0f, 11.1f, sp) && sch.currentN == 300, "26ms 초과 1회차 계속");
+            check(!sch.advanceAfterStep(27.0f, 11.1f, sp) && sch.finished, "max(예산, 기준)*1.3 초과 2연속 시 멈춤");
+
+            sch.begin(sp);
+            sch.advanceAfterStep(5.0f, 11.1f, sp);
+            sch.currentN = 500;
+            check(!sch.advanceAfterStep(5.0f, 11.1f, sp) && sch.finished, "최대 도달 시 멈춤");
+        }
+
+        // QP2 새 단위 시험 3: 무릎점 판정 + 최소제곱 기울기 · 추정 한도 · over at base
+        {
+            const std::vector<hstress::StressStepRecord> steps = {
+                { 0, 2, 5.1f }, { 100, 1202, 7.1f }, { 200, 2402, 9.1f }, { 300, 3602, 11.1f }, { 400, 4802, 13.1f }
+            };
+            const auto reg = hstress::computeRegression(steps, hstress::StressAxis::Draws, 11.1f, 5.1f);
+            check(reg.hasSlope && std::abs(reg.unitCostMs - 2.0f) < 1e-3f &&
+                  !reg.overAtBase && reg.hasEstLimit && std::abs(reg.estLimit - 300.0) < 1.0,
+                  "QP2b 최소제곱 기울기(2.0 ms/100) 및 추정 한도(300)");
+
+            const std::vector<hstress::StressStepRecord> triSteps = {
+                { 0, 0, 4.0f }, { 16, 100000, 6.5f }, { 32, 200000, 9.0f }
+            };
+            const auto triReg = hstress::computeRegression(triSteps, hstress::StressAxis::Tris, 11.1f, 4.0f);
+            check(triReg.hasSlope && std::abs(triReg.unitCostMs - 2.5f) < 1e-3f,
+                  "QP2b tris 축 단위 비용(2.5 ms/100k tris)");
+
+            const auto overReg = hstress::computeRegression(steps, hstress::StressAxis::Draws, 11.1f, 12.0f);
+            check(overReg.overAtBase && !overReg.hasEstLimit, "QP2b 기준이 예산을 넘으면 over at base");
+
+            const std::vector<hstress::StressStepRecord> kSteps = {
+                { 100, 0, 7.5f }, { 200, 0, 11.0f }, { 300, 0, 11.2f }, { 400, 0, 14.0f }
+            };
+            const auto kp = hstress::computeKneePoint(kSteps, 11.1f);
+            check(kp.hasLastUnder && kp.lastUnderN == 200 && std::abs(kp.lastUnderMs - 11.0f) < 1e-4f &&
+                  kp.hasFirstOver && kp.firstOverN == 300 && std::abs(kp.firstOverMs - 11.2f) < 1e-4f,
+                  "무릎점 판정(last under = 200, first over = 300)");
+            const auto kpAllUnder = hstress::computeKneePoint({ { 100, 0, 5.f }, { 200, 0, 8.f } }, 11.1f);
+            check(kpAllUnder.hasLastUnder && kpAllUnder.lastUnderN == 200 && !kpAllUnder.hasFirstOver,
+                  "모두 예산 이하일 때 first over 없음");
+            const auto kpFirstOver = hstress::computeKneePoint({ { 100, 0, 12.f } }, 11.1f);
+            check(!kpFirstOver.hasLastUnder && kpFirstOver.hasFirstOver && kpFirstOver.firstOverN == 100,
+                  "첫 단계부터 초과 시 last under 없음");
+        }
+
+        // QP2 새 단위 시험 4: 배치가 결정적인지
+        {
+            const hstress::StressVec3 o{ 0.f, 1.7f, 0.f }, f{ 0.f, 0.f, -1.f }, r{ 1.f, 0.f, 0.f }, uVec{ 0.f, 1.f, 0.f };
+            bool same = true;
+            bool inRange = true;
+            for (uint32_t i = 0; i < 64; ++i) {
+                const auto a = hstress::placeStressGrid(i, 64, o, f, r, uVec);
+                const auto b = hstress::placeStressGrid(i, 64, o, f, r, uVec);
+                if (a.x != b.x || a.y != b.y || a.z != b.z) same = false;
+                const float dist = -a.z;
+                if (dist < 3.0f || dist > 8.0f) inRange = false;
+            }
+            check(same && inRange, "배치 결정성 및 카메라 앞 3 ~ 8 m 범위 유지");
+        }
+
+        // QP3 새 단위 시험 1: --xr-perf-level 해석
+        {
+            u.clear();
+            auto pl = hopt::parse({ "--xr-perf-level=sustained_high:boost" }, u);
+            check(pl.xrPerfLevel.set() &&
+                  pl.xrPerfLevel.cpu == hxr::XrPerfLevel::SustainedHigh &&
+                  pl.xrPerfLevel.gpu == hxr::XrPerfLevel::Boost && u.empty(),
+                  "QP3 --xr-perf-level=sustained_high:boost 해석");
+            u.clear();
+            pl = hopt::parse({ "--xr-perf-level=power_savings:sustained_low" }, u);
+            check(pl.xrPerfLevel.set() &&
+                  pl.xrPerfLevel.cpu == hxr::XrPerfLevel::PowerSavings &&
+                  pl.xrPerfLevel.gpu == hxr::XrPerfLevel::SustainedLow && u.empty(),
+                  "QP3 --xr-perf-level=power_savings:sustained_low 해석");
+            u.clear();
+            pl = hopt::parse({ "--xr-perf-level=sustained_high", "--xr-perf-level=bad:boost", "--xr-perf-level=boost:bad:extra" }, u);
+            check(!pl.xrPerfLevel.set() && u.size() == 3,
+                  "QP3 잘못된 --xr-perf-level 거부");
+        }
+
+        // QP3 새 단위 시험 2: 메모리 줄 형식
+        {
+            const std::string line = hmemlog::formatMemLine(3, 384ULL * 1024 * 1024, 512.4);
+            check(line == "Mem: core heap chunks 3 (384 MB committed), process RSS 512.4 MB",
+                  "QP3 메모리 줄 형식 확인");
+        }
     }
+
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
     return g_failed ? 1 : 0;
 }

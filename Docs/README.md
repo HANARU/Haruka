@@ -36,6 +36,7 @@
 | [Transparency_Temporal_Design.md](Transparency_Temporal_Design.md) | 반투명(볼록 2패스)·TAA 처리 |
 | [Viewport_Render_Design.md](Viewport_Render_Design.md) | 뷰포트 렌더(renderExtent 분리)·좌표 단일화 |
 | [RendererRefactor.md](RendererRefactor.md) | 렌더러 구조: RenderContext·GpuScene·FrameResources·passes |
+| [Performance_Budget.md](Performance_Budget.md) | 성능 예산표(Quest Pro 90 Hz): 부하 램프(`--stress`) 방법 · 축 정의 · 무릎점 결과표 |
 | [Primitive_And_Lighting_Design.md](Primitive_And_Lighting_Design.md) | 절차 도형·라이팅 규약(단위·머티리얼) |
 | [Audio_Design.md](Audio_Design.md) | 오디오: 재생 규칙(일시정지·비활성), 청취자·3D 감쇠 설정, 씬 형식, 시험 음원, 공간 음향, 12절 버스 그래프 · 스냅숏 · 더킹 · 리미터 · 사운드 큐(2026-11-21) |
 | [Engine_Basics_Design.md](Engine_Basics_Design.md) | 엔진 기본 기능 보강(2026-10-15): 씬 관리 · 편집 기본기(ID 기반 Undo · 다중 선택 · 클립보드) · 플레이어 리그와 입력 · 잡기, 제안서 대조 결정 |

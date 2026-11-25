@@ -34,8 +34,10 @@
 #include "../components/CameraComponent.hpp"
 #include "../components/RenderExtract.hpp"
 #include "../xr/SyntheticEyes.hpp"
+#include "../xr/XrScaleLogic.hpp"
 #include "../vfs/PathUtf8.hpp"
 #include "ShaderManifest.hpp"
+#include "MemLogUtil.hpp"
 #include "XrSessionController.hpp"
 #include "XrViewOrigin.hpp"
 #include "../core/FrameTimings.hpp"
@@ -421,7 +423,14 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         HPROF_SCOPE("Startup.Xr");
         const double t0 = stats_.msSinceBoot();
         xr_ = std::make_unique<XrSystem>();
-        if (!xr_->init(options.platform)) xr_.reset();
+        xr_->setEyeScale(options.xrScale);
+        xr_->setRequestedRefreshRate(options.xrRefreshHz);
+        xr_->setPerfLevel(options.xrPerfLevel);
+        if (!xr_->init(options.platform)) {
+            const bool standby = hxrmode::shouldStandbyForHeadset(
+                { xrWanted_, xr_->hasInstance(), xr_->ready(), options.xrRequired });
+            if (!standby) xr_.reset();
+        }
         xrMs = stats_.msSinceBoot() - t0;
     }
     if (options.xrRequired && (!xr_ || !xr_->ready()))
@@ -452,6 +461,9 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     renderer_->setForceNoSync2(options.vkNoSync2);
     renderer_->setTextureCompression(texTarget == htex::Target::BC, texTarget == htex::Target::ASTC);
     renderer_->setForceDedicatedMsaa(options.vkDedicatedMsaa);
+    renderer_->setDebugPost(options.debugPost);
+    renderer_->setNoLazyMsaa(options.noLazyMsaa);
+    renderer_->setForcedMsaa(options.msaaSamples);
     renderer_->setPreferredGpu(options.gpuIndex);
     renderer_->setMultiview(options.multiview);
     // 품질 단계(2026-11-18, 성능 안정화 2-2). project.ini 의 render.* 품질 키(플랫폼 접미사 줄 포함).
@@ -489,10 +501,12 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     renderer_->setPostFeatures(userSettings_.getBool("render.ao", project_.renderAo),
                                userSettings_.getBool("render.bloom", project_.renderBloom));
     if (options.ssao.has_value()) renderer_->setAoEnabled(*options.ssao);
+    if (options.bloom.has_value()) renderer_->setBloomEnabled(*options.bloom);
     if (!renderer_->aoEnabled() || !renderer_->bloomEnabled()) {
         HLOG(LogEngine, Log) << "Post:" << (renderer_->aoEnabled() ? "" : " AO off")
                              << (renderer_->bloomEnabled() ? "" : " Bloom off") << " ("
                              << (options.ssao.has_value() && !*options.ssao ? "--no-ssao, " : "")
+                             << (options.bloom.has_value() && !*options.bloom ? "--no-bloom, " : "")
                              << ProjectSettings::kPath
                              << (userSettings_.has("render.ao") || userSettings_.has("render.bloom")
                                      ? std::string(" + ") + UserSettings::kPath : std::string())
@@ -535,7 +549,25 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         if (xrSession_->usable()) {
             HLOG(LogEngine, Warning) << "--synthetic-eyes is ignored while XR is enabled";
         } else {
-            synthetic_ = renderer_->attachSyntheticEyes({ options.syntheticEyeW, options.syntheticEyeH });
+            const hxr::EyeDimensions synthDim =
+                hxr::scaleEyeExtent(options.syntheticEyeW, options.syntheticEyeH, 0, 0, options.xrScale);
+            synthetic_ = renderer_->attachSyntheticEyes({ synthDim.width, synthDim.height });
+            if (synthetic_) {
+                char scaleBuf[16];
+                std::snprintf(scaleBuf, sizeof(scaleBuf), "%.2f", options.xrScale);
+                HLOG(LogEngine, Log) << "Swapchain: " << synthDim.width << "x" << synthDim.height
+                                     << " (scale " << scaleBuf << " of recommended " << options.syntheticEyeW << "x"
+                                     << options.syntheticEyeH << ")";
+                if (options.xrRefreshHz > 0.f) {
+                    HLOG(LogEngine, Warning) << "--xr-refresh=" << options.xrRefreshHz
+                                             << " ignored without an active XR runtime (XR_FB_display_refresh_rate unavailable)";
+                }
+                if (options.xrPerfLevel.set()) {
+                    HLOG(LogEngine, Warning) << "--xr-perf-level=" << hxr::perfLevelName(options.xrPerfLevel.cpu)
+                                             << ":" << hxr::perfLevelName(options.xrPerfLevel.gpu)
+                                             << " ignored without an active XR runtime (XR_EXT_performance_settings unavailable)";
+                }
+            }
         }
     }
     if (headless_ && !xrSession_->usable() && !synthetic_) {
@@ -637,6 +669,8 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         frontend_->openInitialScene(options_.scenePath.empty() ? project_.startScene : options_.scenePath);
         firstSceneMs = stats_.msSinceBoot() - t0;
     }
+    if (options_.stress.enabled)
+        stress_.init(options_.stress, world_, *assets_, *renderer_, &subtitles_);
     const double modulesMs = std::max(0.0, (stats_.msSinceBoot() - modulesT0) - firstSceneMs);
     // 게임 모듈까지 등록을 마쳤으니, 명령줄 · ini 로 들어왔는데 끝내 등록되지 않은 CVar 이름을 알리고 첫 변경 콜백을 부릅니다.
     for (const std::string& n : cvars_.pendingNames())
@@ -818,7 +852,8 @@ void Engine::applyLiveUserSettings(bool startup) {
         postLogged_ = std::string("AO ") + (renderer_->aoEnabled() ? "on" : "off") + ", Bloom " + (renderer_->bloomEnabled() ? "on" : "off");
     } else if (renderer_) {
         const bool ao = options_.ssao.has_value() ? *options_.ssao : userSettings_.getBool("render.ao", project_.renderAo);
-        renderer_->setPostFeatures(ao, userSettings_.getBool("render.bloom", project_.renderBloom));
+        const bool bloom = options_.bloom.has_value() ? *options_.bloom : userSettings_.getBool("render.bloom", project_.renderBloom);
+        renderer_->setPostFeatures(ao, bloom);
         const std::string post = std::string("AO ") + (renderer_->aoEnabled() ? "on" : "off") + ", Bloom "
                                  + (renderer_->bloomEnabled() ? "on" : "off");
         if (post != postLogged_) {
@@ -956,6 +991,7 @@ int Engine::run() {
     loop.runStart     = loop.prev;
     loop.timeLimitSec = options_.timeoutSec > 0.f ? options_.timeoutSec : (options_.frames > 0 ? 60.f : 0.f);
     stats_.startLoop();
+    gpuLogWindowStart_ = LoopState::Clock::now();
     while (true) {
         HPROF_SCOPE("Frame");
         FrameState f;
@@ -1397,6 +1433,25 @@ void Engine::endLoop(FrameState& f, LoopState& loop) {
         win.setShouldClose(true);
     }
 
+    if (options_.gpuLogSec > 0 && drawnFrames_ > gpuLogPrevDrawn_) {
+        gpuLogPrevDrawn_ = drawnFrames_;
+        const Renderer::GpuTimings t = renderer_->getTimings();
+        gpuLogAccum_.add({ t.shadowMs, t.mainMs, t.aoMs, t.bloomMs, t.tonemapMs, t.uiMs, t.totalMs });
+        const float elapsed = std::chrono::duration<float>(LoopState::Clock::now() - gpuLogWindowStart_).count();
+        if (elapsed >= static_cast<float>(options_.gpuLogSec) && gpuLogAccum_.frames() > 0) {
+            const hgpu::GpuLogAverage avg = gpuLogAccum_.flush();
+            char buf[224];
+            std::snprintf(buf, sizeof(buf),
+                          "GPU ms (%.1f s, %u frames): shadow %.3f, main %.3f, ao %.3f, bloom %.3f, tonemap %.3f, ui %.3f, total %.3f",
+                          elapsed, avg.frames, avg.shadowMs, avg.mainMs, avg.aoMs, avg.bloomMs, avg.tonemapMs, avg.uiMs, avg.totalMs);
+            HLOG(LogEngine, Log) << buf;
+            HLOG(LogEngine, Log) << hmemlog::formatMemLine(renderer_->coreHeapCommittedChunks(),
+                                                           renderer_->coreHeapCommittedBytes(),
+                                                           hmemlog::queryProcessRssMb());
+            gpuLogWindowStart_ = LoopState::Clock::now();
+        }
+    }
+
     // FPS 제목(0.5 초마다). VR 을 원했는데 쓸 수 없거나(런타임 · 헤드셋 없음) 연결이 끊겨 기다리는 중이면 제목에 알립니다(2026-10-19).
     const char* vrNote = (xrWanted_ && !xrSession_->usable()) ? "  |  VR unavailable"
                        : xrSession_->retryPending()           ? "  |  VR disconnected" : "";
@@ -1405,6 +1460,16 @@ void Engine::endLoop(FrameState& f, LoopState& loop) {
     // 루프 1 회 전체입니다. 이것이 실제 프레임 간격이며, 위 구간들의 합과
     // 크게 벌어지면 그 차이가 곧 "어느 계측기에도 잡히지 않는 시간"입니다.
     const float loopMs = std::chrono::duration<float, std::milli>(FrameState::Clock::now() - f.loopT0).count();
+    if (options_.stress.enabled && !loop.closeAsked) {
+        const auto& ft = gFrameTimings();
+        const float waitMs = ft.xrWait.last + ft.fenceWait.last + ft.acquire.last + ft.imgFence.last + ft.present.last;
+        const float cpuWorkMs = std::max(0.f, loopMs - waitMs);
+        const float refreshHz = (f.xrBegun && xr_) ? xr_->displayRefreshRate() : 0.f;
+        if (stress_.onFrame(cpuWorkMs, loopMs, refreshHz)) {
+            loop.closeAsked = true;
+            win.setShouldClose(true);
+        }
+    }
     gFrameTimings().loopTotal.add(loopMs);
     // 프레임 시간 분포와 끊김 로그(2026-11-18, 성능 안정화 1-1). XR 세션 · 합성 눈 프레임만 셉니다.
     if (f.xrBegun || f.drewSynthetic)
@@ -1486,11 +1551,12 @@ int Engine::finishRun() {
         HLOG(LogEngine, Log) << buf;
     }
     const uint32_t errors = Renderer::validationErrorCount();
-    const int      code   = hopt::headlessExitCode(drawnFrames_, options_.frames, timedOut_, errors, blank);
+    const bool     stressDone = options_.stress.enabled && stress_.finished();
+    const int      code   = hopt::headlessExitCode(drawnFrames_, stressDone ? 0 : options_.frames, timedOut_, errors, blank);
     const char*    validationNote = Renderer::isValidationActive() ? "" : " (not checked)";
     const std::string summary = "Run summary: drawn " + std::to_string(drawnFrames_) + "/" + std::to_string(options_.frames) +
-                                ", validation errors " + std::to_string(errors) + validationNote + ", " + captureNote + ", exit code " +
-                                std::to_string(code);
+                                ", validation errors " + std::to_string(errors) + validationNote + ", " + captureNote +
+                                (stressDone ? ", stress finished" : "") + ", exit code " + std::to_string(code);
     if (code == hopt::kExitOk) { HLOG(LogEngine, Log) << summary; }
     else                       { HLOG(LogEngine, Error) << summary; }
     return code;

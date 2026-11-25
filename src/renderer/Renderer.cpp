@@ -67,6 +67,14 @@ VKAPI_ATTR VkBool32 VKAPI_CALL Renderer::debugCallback(
 
 // ── init / cleanup ────────────────────────────────────────────────────────────
 
+void Renderer::setDebugPost(const std::string& mode) {
+    if      (mode == "solid")   debugPostMode_ = 1;
+    else if (mode == "raw")     debugPostMode_ = 2;
+    else if (mode == "nobloom") debugPostMode_ = 3;
+    else if (mode == "nan")     debugPostMode_ = 4;
+    else                        debugPostMode_ = 0;
+}
+
 void Renderer::setQuality(const Quality& q) {
     quality_ = q;
     shadow_.configure(q.csmCascades, q.shadowDistance);
@@ -75,6 +83,10 @@ void Renderer::setQuality(const Quality& q) {
 void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
     window       = win;
     deviceHooks_ = deviceHooks;
+    if (debugPostMode_ != 0) {
+        static const char* const kNames[] = { "", "solid", "raw", "nobloom", "nan" };
+        HLOG(LogRenderer, Log) << "Debug post: " << kNames[debugPostMode_] << " (--debug-post)";
+    }
     // 창이 표면을 주지 않으면(--headless · Quest) 표면 · 스왑체인 없이 XR 이미지에만 그립니다(2026-10-31).
     headless_    = !window->providesSurface();
     auto elapsedMs = [](std::chrono::steady_clock::time_point t0) {
@@ -133,6 +145,8 @@ void Renderer::init(IWindow* win, IVulkanDeviceHooks* deviceHooks) {
         rc_.allocator     = &allocator;
         rc_.pipelineCache = pipelineCache_;
         rc_.msaaSamples   = msaaSamples_;
+        rc_.noLazyMsaa    = noLazyMsaa_;
+        if (noLazyMsaa_) HLOG(LogRenderer, Log) << "MSAA memory: Zone B (--no-lazy-msaa)";
         rc_.swapFormat    = swapchain_->format();
         rc_.depthFormat   = depthFormat;
         rc_.extent        = swapchain_->extent();
@@ -792,10 +806,26 @@ void Renderer::pickPhysicalDevice() {
     }
     VkSampleCountFlags counts = p.limits.framebufferColorSampleCounts &
                                 p.limits.framebufferDepthSampleCounts;
-    if      (counts & VK_SAMPLE_COUNT_4_BIT) msaaSamples_ = VK_SAMPLE_COUNT_4_BIT;
-    else if (counts & VK_SAMPLE_COUNT_2_BIT) msaaSamples_ = VK_SAMPLE_COUNT_2_BIT;
-    else                                      msaaSamples_ = VK_SAMPLE_COUNT_1_BIT;
-    HLOG(LogRenderer, Log) << "MSAA: " << (uint32_t)msaaSamples_ << "x";
+    if (forcedMsaa_ > 0) {
+        const VkSampleCountFlagBits req = forcedMsaa_ == 1 ? VK_SAMPLE_COUNT_1_BIT
+                                        : forcedMsaa_ == 2 ? VK_SAMPLE_COUNT_2_BIT
+                                                           : VK_SAMPLE_COUNT_4_BIT;
+        if (counts & req) {
+            msaaSamples_ = req;
+            HLOG(LogRenderer, Log) << "MSAA: " << (uint32_t)msaaSamples_ << "x (--msaa=" << forcedMsaa_ << ")";
+            if (msaaSamples_ == VK_SAMPLE_COUNT_1_BIT)
+                HLOG(LogRenderer, Log) << "SSAO disabled for 1x MSAA (linDepth requires multisample depth)";
+        } else {
+            HLOG(LogRenderer, Warning) << "--msaa=" << forcedMsaa_ << " not supported by device; using auto";
+            forcedMsaa_ = 0;
+        }
+    }
+    if (forcedMsaa_ == 0) {
+        if      (counts & VK_SAMPLE_COUNT_4_BIT) msaaSamples_ = VK_SAMPLE_COUNT_4_BIT;
+        else if (counts & VK_SAMPLE_COUNT_2_BIT) msaaSamples_ = VK_SAMPLE_COUNT_2_BIT;
+        else                                      msaaSamples_ = VK_SAMPLE_COUNT_1_BIT;
+        HLOG(LogRenderer, Log) << "MSAA: " << (uint32_t)msaaSamples_ << "x";
+    }
     timestampPeriod_ = p.limits.timestampPeriod;
 }
 

@@ -100,6 +100,10 @@ public:
     void setTextureCompression(bool bc, bool astc) { wantTexBC_ = bc; wantTexASTC_ = astc; }
     // --vk-dedicated-msaa: MSAA 컬러를 핵심 힙 밖 별도 할당으로(지연 할당 타입이 없는 데스크톱에서 DEF-06 경로 시험).
     void setForceDedicatedMsaa(bool on) { forceDedicatedMsaa_ = on; }
+    // DEF-183 진단 인자: --debug-post · --no-lazy-msaa · --msaa=1|2|4
+    void setDebugPost(const std::string& mode);
+    void setNoLazyMsaa(bool on) { noLazyMsaa_ = on; }
+    void setForcedMsaa(int samples) { forcedMsaa_ = samples; }
     // --gpu=N: vkEnumeratePhysicalDevices 순서의 N 번째 GPU 를 씁니다(-1 = 처음 쓸 수 있는 것). init 전에 부릅니다.
     void setPreferredGpu(int index) { preferredGpu_ = index; }
     // --no-multiview: 두 눈의 메인 패스를 멀티뷰로 한 번에 그리지 않고 눈마다 그립니다(진단 · 비교용, 2026-11-18).
@@ -123,7 +127,8 @@ public:
     void setQuality(const Quality& q);
     const Quality& quality() const { return quality_; }
     void setAoEnabled(bool on) { aoOn_ = on; }
-    bool aoEnabled() const     { return aoOn_; }
+    void setBloomEnabled(bool on) { bloomOn_ = on; }
+    bool aoEnabled() const     { return aoOn_ && msaaSamples_ != VK_SAMPLE_COUNT_1_BIT; }
     bool bloomEnabled() const  { return bloomOn_; }
     struct StartupTimings {
         double deviceMs    = 0.0;
@@ -294,6 +299,8 @@ public:
     void            endOneTimeCmd(VkCommandBuffer c) { rc_.endOneTimeCmd(c); }
 
     AllocStats getAllocStats() const { return allocator.getStats(); }
+    uint32_t   coreHeapCommittedChunks() const { return allocator.committedChunkCount(); }
+    uint64_t   coreHeapCommittedBytes()  const { return allocator.allocatedSize(); }
     // 머티리얼 텍스처 메모리(Docs/Texture_Compression.md D12). rgbaBytes = 같은 텍스처를 RGBA8 + 밉으로 올렸을 때.
     struct TextureMemory {
         uint32_t textures = 0, compressed = 0;
@@ -367,6 +374,9 @@ private:
     // ── MSAA 샘플 수 (rc_로 전파) ─────────────────────────────────────────────
     VkSampleCountFlagBits msaaSamples_ = VK_SAMPLE_COUNT_4_BIT;
     VkFormat              depthFormat  = VK_FORMAT_UNDEFINED;
+    int                   debugPostMode_ = 0;   // DEF-183: 0=보통, 1=solid, 2=raw, 3=nobloom, 4=nan
+    bool                  noLazyMsaa_    = false;
+    int                   forcedMsaa_    = 0;   // 0=자동, 1|2|4=강제
 
     // ── Geometry (main 3-subpass + MSAA/depth/HDR + 라인 오버레이) ────────────
     GeometryPass geometry_;

@@ -27,6 +27,7 @@ layout(push_constant) uniform Params {
     vec4  colorCol0;     // 보정 행렬 열(xyz)
     vec4  colorCol1;
     vec4  colorCol2;
+    float debugMode;     // DEF-183 진단: 0=보통, 1=solid, 2=raw, 3=nobloom, 4=nan
 };
 
 // 선형 → sRGB (IEC 61966-2-1 곡선).
@@ -43,8 +44,21 @@ vec3 ACESFilm(vec3 x) {
 }
 
 void main() {
+    if (debugMode > 0.5 && debugMode < 1.5) { // solid
+        outColor = vec4(1.0, 0.0, 1.0, 1.0);
+        return;
+    }
+
     vec2 uv  = inUV * uvScale + uvOffset;
     vec4 src = texture(hdrImage, uv);
+
+    if (debugMode > 1.5 && debugMode < 2.5) { // raw: 노출 · 블룸 · 톤매핑 건너뜀
+        vec3 rawOut = clamp(src.rgb, 0.0, 1.0);
+        if (encodeSrgb > 0.5) rawOut = linearToSrgb(rawOut);
+        outColor = vec4(rawOut, 1.0);
+        return;
+    }
+
     vec3 hdr = src.rgb * exposure;
 
     // SSAO — multiplicative on whole output (approximation for forward rendering)
@@ -54,8 +68,11 @@ void main() {
     }
 
     // Bloom additive
-    if (bloomEnabled > 0.5) {
-        vec3 bloom = texture(bloomImage, uv).rgb;
+    vec3 bloom = vec3(0.0);
+    bool bloomBad = false;
+    if (bloomEnabled > 0.5 && !(debugMode > 2.5 && debugMode < 3.5)) {
+        bloom = texture(bloomImage, uv).rgb;
+        bloomBad = any(isnan(bloom)) || any(isinf(bloom));
         hdr += bloom * bloomStrength;
     }
 
@@ -77,6 +94,13 @@ void main() {
         float r     = length((inUV - 0.5) * 2.0);
         float inner = mix(0.95, 0.3, vignette);
         ldr *= 1.0 - min(2.0 * vignette, 1.0) * smoothstep(inner, inner + 0.45, r);
+    }
+
+    if (debugMode > 3.5) { // nan: HDR · 블룸 · 최종 결과에 NaN/Inf 가 있으면 자홍색
+        if (any(isnan(src.rgb)) || any(isinf(src.rgb)) || bloomBad || any(isnan(ldr)) || any(isinf(ldr))) {
+            outColor = vec4(1.0, 0.0, 1.0, 1.0);
+            return;
+        }
     }
 
     if (encodeSrgb > 0.5) ldr = linearToSrgb(ldr);

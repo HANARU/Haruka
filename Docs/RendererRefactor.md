@@ -25,7 +25,7 @@ updateUBO → updateLightSSBO → buildDrawCommands(CPU)
   ↓
 [TS0] Shadow (CPU 드로우 리스트, 2048² depth)
 [TS1] Cull (compute, opaque indirect 버퍼 생성)
-      Main 3-subpass: DepthPre(indirect) → Opaque(indirect) → Transparent(CPU 정렬)
+      Main 2-subpass: DepthPre(CPU) → Color(Opaque + Transparent + Particles + Panels + Overlays)
 [TS2] LinDepth(half-res) → SSAO(half-res)
 [TS3] Bloom (threshold + 4×down + 4×up = 9 드로우)
 [TS4] Post (ACES + TAA resolve + bloom/SSAO 합성) → TAA 히스토리 blit → UI(HSlate)
@@ -54,7 +54,7 @@ src/renderer/
 │   ├── HPass.hpp              # 수명주기 인터페이스
 │   ├── ShadowPass.hpp/.cpp
 │   ├── CullPass.hpp/.cpp
-│   ├── GeometryPass.hpp/.cpp  # main 3-subpass + 라인 오버레이
+│   ├── GeometryPass.hpp/.cpp  # main 2-subpass + 라인 오버레이
 │   ├── AOPass.hpp/.cpp        # linDepth + SSAO 2-스테이지 한 모듈
 │   ├── BloomPass.hpp/.cpp
 │   └── PostPass.hpp/.cpp      # ACES/TAA + TAA 히스토리 + UI 훅

@@ -49,6 +49,51 @@ bool valueOf(const std::string& a, const char* name, std::string& value) {
     return true;
 }
 
+bool parseXrPerfOption(const std::string& a, EngineOptions& o, bool& valid) {
+    std::string v;
+    if (valueOf(a, "--gpu-log", v)) {
+        uint32_t sec = 0;
+        valid = parseUint(v, sec) && sec >= 1 && sec <= 60;
+        if (valid) o.gpuLogSec = sec;
+        return true;
+    }
+    if (valueOf(a, "--xr-scale", v)) {
+        float sc = 0.f;
+        valid = parsePositiveFloat(v, sc) && sc >= 0.5f && sc <= 1.5f;
+        if (valid) o.xrScale = sc;
+        return true;
+    }
+    if (valueOf(a, "--xr-refresh", v)) {
+        float hz = 0.f;
+        valid = parsePositiveFloat(v, hz);
+        if (valid) o.xrRefreshHz = hz;
+        return true;
+    }
+    if (valueOf(a, "--xr-perf-level", v)) {
+        valid = hxr::parsePerfLevelPair(v, o.xrPerfLevel);
+        return true;
+    }
+    if (a == "--bloom")    { o.bloom = true;  valid = true; return true; }
+    if (a == "--no-bloom") { o.bloom = false; valid = true; return true; }
+    if (valueOf(a, "--stress", v)) {
+        valid = hstress::parseStressSpec(v, o.stress);
+        return true;
+    }
+    if (valueOf(a, "--stress-step-seconds", v)) {
+        float sec = 0.f;
+        valid = parsePositiveFloat(v, sec) && sec >= 1.0f && sec <= 60.0f;
+        if (valid) { o.stress.stepSeconds = sec; o.stress.stepSecondsSet = true; }
+        return true;
+    }
+    if (valueOf(a, "--stress-budget-ms", v)) {
+        float ms = 0.f;
+        valid = parsePositiveFloat(v, ms) && ms >= 0.1f && ms <= 100.0f;
+        if (valid) { o.stress.budgetMs = ms; o.stress.budgetMsSet = true; }
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 namespace hopt {
@@ -56,6 +101,11 @@ namespace hopt {
 EngineOptions parse(const std::vector<std::string>& args, std::vector<std::string>& unknown) {
     EngineOptions o;
     for (const std::string& a : args) {
+        bool perfValid = false;
+        if (parseXrPerfOption(a, o, perfValid)) {
+            if (!perfValid) unknown.push_back(a);
+            continue;
+        }
         std::string v;
         if      (a == "--xr")             o.xr            = true;
         else if (a == "--no-xr")          o.xr            = false;
@@ -66,6 +116,15 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (a == "--vk-no-sync2")    o.vkNoSync2     = true;
         else if (a == "--vk-dedicated-msaa") o.vkDedicatedMsaa = true;
         else if (a == "--vk-fail-init")   o.vkFailInit    = true;
+        else if (a == "--no-lazy-msaa")   o.noLazyMsaa    = true;
+        else if (valueOf(a, "--debug-post", v)) {
+            if (v == "solid" || v == "raw" || v == "nobloom" || v == "nan") o.debugPost = v;
+            else unknown.push_back(a);
+        }
+        else if (valueOf(a, "--msaa", v)) {
+            if (v == "1" || v == "2" || v == "4") o.msaaSamples = std::atoi(v.c_str());
+            else unknown.push_back(a);
+        }
         else if (a == "--no-multiview")   o.multiview     = false;
         else if (a == "--ssao")           o.ssao          = true;
         else if (a == "--no-ssao")        o.ssao          = false;

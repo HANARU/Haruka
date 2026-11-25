@@ -530,6 +530,7 @@ set(RUNTIME_SOURCES
     src/runtime/XrSessionController.cpp
     src/runtime/XrViewOrigin.cpp
     src/runtime/EngineOptions.cpp
+    src/runtime/StressRunner.cpp
     src/runtime/ShaderManifest.cpp
     src/components/CameraComponent.cpp
     src/components/LightComponent.cpp

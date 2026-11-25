@@ -134,18 +134,22 @@ void GeometryPass::create(RenderContext& rc, VkPipelineLayout pbrLayout,
 // 단안과 멀티뷰 패스는 첨부 · 서브패스 · 의존성이 같고, 멀티뷰만 서브패스마다 viewMask 0b11 입니다. 멀티뷰 패스의 서브패스
 // 사이 의존성은 VIEW_LOCAL 입니다(눈 v 의 다음 서브패스는 눈 v 의 앞 서브패스만 기다림, 타일 GPU 가 눈마다 이어 그릴 수 있음).
 // correlation mask 0b11 은 두 눈이 거의 같은 화면이라는 힌트입니다(드라이버가 비닝 등을 함께 할 수 있음).
+// 메인 패스: 서브패스 2개(0 = 깊이 전처리, 1 = 불투명 + 투명 + 파티클 + 패널 + 라인 + MSAA resolve).
+// Adreno 650(Quest)이 두 서브패스(1 · 2)에 걸쳐 MSAA 색을 쓰고 마지막 서브패스(2)에서만 resolve 하면
+// resolve 를 빠뜨리는 드라이버 문제가 있어 컬러 패스를 서브패스 1 하나로 통합했습니다(DEF-183).
 VkRenderPass GeometryPass::createMainRenderPass(bool multiview) const {
     const RenderContext& rc = *rc_;
     const VkFormat hdrFmt = kHdrFormat;
+    const bool noMsaa     = (rc.msaaSamples == VK_SAMPLE_COUNT_1_BIT);
 
     VkAttachmentDescription atts[3] = {};
     atts[0].format = hdrFmt; atts[0].samples = rc.msaaSamples;
     atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    atts[0].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    atts[0].storeOp = noMsaa ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
     atts[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     atts[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     atts[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    atts[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    atts[0].finalLayout = noMsaa ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     atts[1].format = rc.depthFormat; atts[1].samples = rc.msaaSamples;
     atts[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     atts[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -166,27 +170,22 @@ VkRenderPass GeometryPass::createMainRenderPass(bool multiview) const {
     VkAttachmentReference depthRead { 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL };
     VkAttachmentReference resolveRef{ 2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
 
-    VkSubpassDescription subpasses[3] = {};
+    VkSubpassDescription subpasses[2] = {};
     subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpasses[0].pDepthStencilAttachment = &depthWrite;
     subpasses[1].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpasses[1].colorAttachmentCount = 1; subpasses[1].pColorAttachments = &colorRef;
     subpasses[1].pDepthStencilAttachment = &depthRead;
-    subpasses[2].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpasses[2].colorAttachmentCount = 1; subpasses[2].pColorAttachments = &colorRef;
-    subpasses[2].pDepthStencilAttachment = &depthRead;
-    subpasses[2].pResolveAttachments = &resolveRef;
+    subpasses[1].pResolveAttachments = noMsaa ? nullptr : &resolveRef;
 
-    VkSubpassDependency deps[4] = {};
+    VkSubpassDependency deps[3] = {};
     // External → subpass 0 (wait for shadow pass to finish writing depth)
     deps[0].srcSubpass = VK_SUBPASS_EXTERNAL; deps[0].dstSubpass = 0;
     deps[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     deps[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     deps[0].srcAccessMask = 0; deps[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    // 깊이(att[1])는 서브패스 0 에서 쓰고, 0 → 1 에서 읽기 전용 레이아웃으로 바뀐 뒤, 마지막 사용
-    // 서브패스(2)가 끝날 때 storeOp STORE 로 저장됩니다. 저장은 LATE_FRAGMENT_TESTS 단계의 깊이
-    // 쓰기라서, 레이아웃 전환(쓰기)과의 순서를 0 → 1 → 2 의존성으로 이어 둡니다. 예전에는 두 의존성이
-    // 깊이 쓰기를 포함하지 않아 동기화 검증이 WRITE_AFTER_WRITE 를 보고했습니다(2026-11-01).
+    // 깊이(att[1])는 서브패스 0 에서 쓰고, 0 → 1 에서 읽기 전용 레이아웃으로 바뀐 뒤, 서브패스 1 끝에서
+    // storeOp STORE 로 저장됩니다(DEF-148).
     constexpr VkPipelineStageFlags kDepthStages =
         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     constexpr VkAccessFlags kDepthRW =
@@ -198,34 +197,25 @@ VkRenderPass GeometryPass::createMainRenderPass(bool multiview) const {
     deps[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     deps[1].dstAccessMask = kDepthRW | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     deps[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-    // Subpass 1 → 2: opaque done, continue transparent (깊이는 위 사슬을 이어 저장까지 닿게 함)
-    deps[2].srcSubpass = 1; deps[2].dstSubpass = 2;
+    // Subpass 1 → External: HDR resolve 는 톤매핑 · 블룸이, 저장된 깊이는 AO 의 linDepth 가 읽습니다.
+    deps[2].srcSubpass = 1; deps[2].dstSubpass = VK_SUBPASS_EXTERNAL;
     deps[2].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | kDepthStages;
-    deps[2].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | kDepthStages;
-    deps[2].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    deps[2].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | kDepthRW;
-    deps[2].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
-    // Subpass 2 → External: HDR resolve 는 톤매핑 · 블룸이, 저장된 깊이는 AO 의 linDepth 가
-    // 프래그먼트 셰이더에서 읽습니다. 깊이 저장(LATE_FRAGMENT_TESTS 쓰기)도 그 읽기에 보이게 합니다.
-    deps[3].srcSubpass = 2; deps[3].dstSubpass = VK_SUBPASS_EXTERNAL;
-    deps[3].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | kDepthStages;
-    deps[3].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    deps[3].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    deps[3].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    deps[2].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[2].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    deps[2].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
     VkRenderPassCreateInfo rpci{};
     rpci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    rpci.attachmentCount = 3; rpci.pAttachments = atts;
-    rpci.subpassCount = 3; rpci.pSubpasses = subpasses;
-    rpci.dependencyCount = 4; rpci.pDependencies = deps;
+    rpci.attachmentCount = noMsaa ? 2u : 3u; rpci.pAttachments = atts;
+    rpci.subpassCount = 2; rpci.pSubpasses = subpasses;
+    rpci.dependencyCount = 3; rpci.pDependencies = deps;
 
     constexpr uint32_t kBothEyes = (1u << kMaxViews) - 1u;   // 0b11
-    const uint32_t viewMasks[3] = { kBothEyes, kBothEyes, kBothEyes };
+    const uint32_t viewMasks[2] = { kBothEyes, kBothEyes };
     VkRenderPassMultiviewCreateInfo mvci{ VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
     if (multiview) {
         deps[1].dependencyFlags |= VK_DEPENDENCY_VIEW_LOCAL_BIT;
-        deps[2].dependencyFlags |= VK_DEPENDENCY_VIEW_LOCAL_BIT;
-        mvci.subpassCount         = 3;
+        mvci.subpassCount         = 2;
         mvci.pViewMasks           = viewMasks;
         mvci.correlationMaskCount = 1;
         mvci.pCorrelationMasks    = &kBothEyes;
@@ -313,11 +303,14 @@ void GeometryPass::acquireSizeDependent() {
     // 위의 MSAA 깊이는 지연 할당할 수 없습니다: SAMPLED 이고 STORE 하며 최종 레이아웃이 READ_ONLY 입니다. AO 의 linDepth 와
     // 렌더 확장 AfterScene 이 읽습니다. 깊이 resolve 나 SSAO 끄기를 넣을 때 다시 판단합니다.
     // 두 층이어도 지연 할당이면 실제 메모리가 거의 들지 않습니다(타일 안에서만 씀).
-    msaaImage_ = rc_->createImage(w, h, 1, layers_, rc_->msaaSamples,
-        hdrFmt, VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
-        0, msaaAlloc_, ImageMemory::LazyPreferred);
-    makeViews(msaaImage_, hdrFmt, VK_IMAGE_ASPECT_COLOR_BIT, msaaLayerView_, msaaArrayView_);
+    const bool noMsaa = (rc_->msaaSamples == VK_SAMPLE_COUNT_1_BIT);
+    if (!noMsaa) {
+        msaaImage_ = rc_->createImage(w, h, 1, layers_, rc_->msaaSamples,
+            hdrFmt, VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+            0, msaaAlloc_, rc_->noLazyMsaa ? ImageMemory::ZoneB : ImageMemory::LazyPreferred);
+        makeViews(msaaImage_, hdrFmt, VK_IMAGE_ASPECT_COLOR_BIT, msaaLayerView_, msaaArrayView_);
+    }
 
     // HDR resolve targets (per frame-in-flight)
     for (int i = 0; i < MAX_FRAMES; i++) {
@@ -331,10 +324,10 @@ void GeometryPass::acquireSizeDependent() {
 
     // 단안 프레임버퍼: 프레임 슬롯 · 층마다 하나. 멀티뷰 프레임버퍼: 프레임 슬롯마다 하나(배열 뷰, layers 는 1 이어야 함).
     auto makeFramebuffer = [&](VkRenderPass rp, VkImageView msaa, VkImageView depth, VkImageView hdr) {
-        VkImageView atts[] = { msaa, depth, hdr };
+        VkImageView atts[] = { noMsaa ? hdr : msaa, depth, hdr };
         VkFramebufferCreateInfo fci{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
         fci.renderPass = rp;
-        fci.attachmentCount = 3; fci.pAttachments = atts;
+        fci.attachmentCount = noMsaa ? 2u : 3u; fci.pAttachments = atts;
         fci.width = w; fci.height = h; fci.layers = 1;
         VkFramebuffer fb = VK_NULL_HANDLE;
         if (vkCreateFramebuffer(rc_->device, &fci, nullptr, &fb) != VK_SUCCESS)
@@ -461,10 +454,10 @@ void GeometryPass::createPipelineSet(VkRenderPass rp, PipelineSet& ps) {
         ps.opaque = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
                                            rp, 1, rc_->msaaSamples, false, vert, frag, &si);
         ps.transparentBack  = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                                rp, 2, rc_->msaaSamples, true, vert, frag, &si,
+                                                rp, 1, rc_->msaaSamples, true, vert, frag, &si,
                                                 VK_CULL_MODE_FRONT_BIT);   // 뒷면 먼저
         ps.transparentFront = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                                rp, 2, rc_->msaaSamples, true, vert, frag, &si,
+                                                rp, 1, rc_->msaaSamples, true, vert, frag, &si,
                                                 VK_CULL_MODE_BACK_BIT);    // 앞면 나중
         // 거울 변환(행렬식 < 0) 메시용 변형: 감기 방향이 뒤집혀 앞면을 시계 방향으로 봅니다(DEF-170).
         constexpr VkFrontFace cw = VK_FRONT_FACE_CLOCKWISE;
@@ -472,10 +465,10 @@ void GeometryPass::createPipelineSet(VkRenderPass rp, PipelineSet& ps) {
                                            rp, 1, rc_->msaaSamples, false, vert, frag, &si,
                                            VK_CULL_MODE_FLAG_BITS_MAX_ENUM, cw);
         ps.transparentBackMirrored  = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                                rp, 2, rc_->msaaSamples, true, vert, frag, &si,
+                                                rp, 1, rc_->msaaSamples, true, vert, frag, &si,
                                                 VK_CULL_MODE_FRONT_BIT, cw);
         ps.transparentFrontMirrored = buildPBRPipeline(rc_->device, rc_->pipelineCache, pbrLayout_,
-                                                rp, 2, rc_->msaaSamples, true, vert, frag, &si,
+                                                rp, 1, rc_->msaaSamples, true, vert, frag, &si,
                                                 VK_CULL_MODE_BACK_BIT, cw);
         vkDestroyShaderModule(rc_->device, vert, nullptr);
         vkDestroyShaderModule(rc_->device, frag, nullptr);
@@ -563,7 +556,7 @@ void GeometryPass::createPipelineSet(VkRenderPass rp, PipelineSet& ps) {
         ci.pViewportState = &vs; ci.pRasterizationState = &rs;
         ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
         ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
-        ci.layout = linePipelineLayout_; ci.renderPass = rp; ci.subpass = 2;
+        ci.layout = linePipelineLayout_; ci.renderPass = rp; ci.subpass = 1;
         if (vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.line) != VK_SUCCESS)
             throw std::runtime_error("Failed to create line pipeline!");
 
@@ -653,7 +646,7 @@ void GeometryPass::createPipelineSet(VkRenderPass rp, PipelineSet& ps) {
         ci.pViewportState = &vs; ci.pRasterizationState = &rs;
         ci.pMultisampleState = &ms; ci.pColorBlendState = &cb;
         ci.pDepthStencilState = &ds; ci.pDynamicState = &dyn;
-        ci.layout = panelLayout_; ci.renderPass = rp; ci.subpass = 2;
+        ci.layout = panelLayout_; ci.renderPass = rp; ci.subpass = 1;
         VkResult r = vkCreateGraphicsPipelines(rc_->device, rc_->pipelineCache, 1, &ci, nullptr, &ps.panel);
         // 맨 위 패널(자막): 깊이 검사도 하지 않습니다. 다른 패널을 다 그린 뒤에 그려 그 위에 놓입니다.
         if (r == VK_SUCCESS) {
@@ -756,7 +749,8 @@ void GeometryPass::recordImpl(VkCommandBuffer cmd, uint32_t frameIdx, VkRenderPa
     rpbi.framebuffer     = fb;
     const VkExtent2D ext = (in.area.width && in.area.height) ? in.area : rc_->renderExtent;
     rpbi.renderArea      = {{0,0}, ext};
-    rpbi.clearValueCount = 3; rpbi.pClearValues = clearVals;
+    rpbi.clearValueCount = (rc_->msaaSamples == VK_SAMPLE_COUNT_1_BIT) ? 2u : 3u;
+    rpbi.pClearValues    = clearVals;
     vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 
     VkViewport vp{ 0, 0, (float)ext.width, (float)ext.height, 0.f, 1.f };
@@ -867,8 +861,7 @@ void GeometryPass::recordImpl(VkCommandBuffer cmd, uint32_t frameIdx, VkRenderPa
         boundIndex16 = -1;   // 확장이 인덱스 버퍼를 바꿨을 수 있음: 다음 드로에서 다시 바인딩
     }
 
-    // — Subpass 2: Transparent PBR + line overlay ———————————————————————————
-    vkCmdNextSubpass(cmd, VK_SUBPASS_CONTENTS_INLINE);
+    // — Transparent PBR + particles + panels + overlays (same subpass 1; DEF-183) ————
     if (in.transparentItems && !in.transparentItems->empty()) {
         // A1: 볼록 메시의 앞/뒤 셸 블렌드 순서를 맞추려면 뒷면을 먼저, 앞면을 나중에
         // 그립니다. 파이프라인 두 개가 depthWrite=FALSE·같은 pbrLayout_ 을 공유하므로,
@@ -981,7 +974,7 @@ void GeometryPass::recordImpl(VkCommandBuffer cmd, uint32_t frameIdx, VkRenderPa
 
     vkCmdEndRenderPass(cmd);
 
-    // 렌더패스 전체(3 서브패스 + MSAA resolve) 가 끝난 시점입니다.
+    // 렌더패스 전체(2 서브패스 + MSAA resolve) 가 끝난 시점입니다.
     // 예전에는 불투명 서브패스 직후에 찍혀 있어서, 투명 서브패스와 라인 오버레이와
     // resolve 가 전부 다음 구간(AO+Bloom)으로 넘어가 라벨이 거짓말을 하고 있었습니다.
     if (tsPool)

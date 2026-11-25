@@ -1,4 +1,5 @@
 #include "XrSystem.hpp"
+#include "XrScaleLogic.hpp"
 #include "XrVersion.hpp"
 #include "../core/HLog.hpp"
 
@@ -92,11 +93,15 @@ struct XrSystem::Impl {
     XrSystem::LossReason lossReason = XrSystem::LossReason::None;   // lost 의 이유(createSession 이 지움)
     bool           exitRequested = false;   // requestExit 로 끝내는 중
     bool           hasRefreshRateExt = false;
+    bool           hasPerfSettingsExt = false;
     XrEnvironmentBlendMode blendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 
     std::vector<VkImage> images;
     VkFormat             format = VK_FORMAT_UNDEFINED;
     VkExtent2D           eyeExtent{};
+    float                eyeScale           = 1.0f;
+    float                requestedRefreshHz = 0.f;
+    hxr::XrPerfLevelPair perfLevels{};
     std::array<XrView, kMaxViews> views{};   // 이번 프레임 locateViews 결과(endFrame 이 그대로 씀)
     bool                 viewsValid = false;
     float                periodHz   = 0.f;   // predictedDisplayPeriod 에서 구한 주사율
@@ -121,6 +126,9 @@ struct XrSystem::Impl {
     PFN_xrGetVulkanGraphicsDevice2KHR       getVkDevice      = nullptr;
     PFN_xrCreateVulkanDeviceKHR             createVkDevice   = nullptr;
     PFN_xrGetDisplayRefreshRateFB           getRefreshRate   = nullptr;
+    PFN_xrEnumerateDisplayRefreshRatesFB    enumRefreshRates = nullptr;
+    PFN_xrRequestDisplayRefreshRateFB       requestRefreshRate = nullptr;
+    PFN_xrPerfSettingsSetPerformanceLevelEXT setPerfLevelFn    = nullptr;
 
     // 실패를 로그에 남기고 false 를 돌려줍니다.
     bool ok(XrResult r, const char* what) const {
@@ -224,6 +232,8 @@ bool XrSystem::init(const PlatformContext& platform) {
     std::vector<const char*> enabled = { XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME };
     m.hasRefreshRateExt = has(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
     if (m.hasRefreshRateExt) enabled.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+    m.hasPerfSettingsExt = has(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
+    if (m.hasPerfSettingsExt) enabled.push_back(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
     m.hasLocalFloor = has(XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
     if (m.hasLocalFloor) enabled.push_back(XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
     m.hasAudioGuid = has(kOculusAudioGuidExt);
@@ -285,7 +295,14 @@ bool XrSystem::init(const PlatformContext& platform) {
                   m.load("xrCreateVulkanInstanceKHR",           m.createVkInstance) &&
                   m.load("xrGetVulkanGraphicsDevice2KHR",       m.getVkDevice) &&
                   m.load("xrCreateVulkanDeviceKHR",             m.createVkDevice);
-    if (m.hasRefreshRateExt) m.load("xrGetDisplayRefreshRateFB", m.getRefreshRate);
+    if (m.hasRefreshRateExt) {
+        m.load("xrGetDisplayRefreshRateFB", m.getRefreshRate);
+        m.load("xrEnumerateDisplayRefreshRatesFB", m.enumRefreshRates);
+        m.load("xrRequestDisplayRefreshRateFB", m.requestRefreshRate);
+    }
+    if (m.hasPerfSettingsExt) {
+        m.load("xrPerfSettingsSetPerformanceLevelEXT", m.setPerfLevelFn);
+    }
     // 세션을 만들기 전에 반드시 불러야 합니다(안 부르면 xrCreateSession 이 실패).
     XrGraphicsRequirementsVulkan2KHR req{ XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN2_KHR };
     if (!loaded || !m.ok(m.getRequirements(m.instance, m.systemId, &req), "xrGetVulkanGraphicsRequirements2KHR")) {
@@ -416,7 +433,12 @@ bool XrSystem::Impl::createSwapchain(VkFormat preferred) {
     xrEnumerateViewConfigurationViews(instance, systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
                                       vc, &vc, cfg.data());
     // 두 눈이 같은 크기를 권한다고 보고 한 장의 두 층 배열에 담습니다(조사에서 권한 방식).
-    eyeExtent = { cfg[0].recommendedImageRectWidth, cfg[0].recommendedImageRectHeight };
+    const uint32_t recW = cfg[0].recommendedImageRectWidth;
+    const uint32_t recH = cfg[0].recommendedImageRectHeight;
+    const uint32_t maxW = cfg[0].maxImageRectWidth;
+    const uint32_t maxH = cfg[0].maxImageRectHeight;
+    const hxr::EyeDimensions scaled = hxr::scaleEyeExtent(recW, recH, maxW, maxH, eyeScale);
+    eyeExtent = { scaled.width, scaled.height };
 
     uint32_t fc = 0;
     xrEnumerateSwapchainFormats(session, 0, &fc, nullptr);
@@ -449,6 +471,10 @@ bool XrSystem::Impl::createSwapchain(VkFormat preferred) {
         return false;
     images.clear();
     for (const auto& im : imgs) images.push_back(im.image);
+    char scaleBuf[16];
+    std::snprintf(scaleBuf, sizeof(scaleBuf), "%.2f", eyeScale);
+    HLOG(LogXR, Log) << "Swapchain: " << eyeExtent.width << "x" << eyeExtent.height
+                     << " (scale " << scaleBuf << " of recommended " << recW << "x" << recH << ")";
     HLOG(LogXR, Log) << "Swapchain: " << eyeExtent.width << "x" << eyeExtent.height
                      << " per eye, 2 layers, " << ic << " images, VkFormat " << chosen;
     return true;
@@ -626,6 +652,65 @@ void XrSystem::pollEvents() {
                 bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
                 const XrResult br = xrBeginSession(m.session, &bi);
                 m.running = m.ok(br, "xrBeginSession");
+                if (m.running && m.requestedRefreshHz > 0.f) {
+                    if (!m.hasRefreshRateExt || !m.enumRefreshRates || !m.requestRefreshRate) {
+                        HLOG(LogXR, Warning) << "XR_FB_display_refresh_rate is not supported; ignoring --xr-refresh="
+                                             << m.requestedRefreshHz;
+                    } else {
+                        uint32_t rc = 0;
+                        std::vector<float> rates;
+                        if (XR_SUCCEEDED(m.enumRefreshRates(m.session, 0, &rc, nullptr)) && rc > 0) {
+                            rates.resize(rc);
+                            if (XR_FAILED(m.enumRefreshRates(m.session, rc, &rc, rates.data()))) rates.clear();
+                        }
+                        const bool supported = std::any_of(rates.begin(), rates.end(), [&](float hz) {
+                            return std::abs(hz - m.requestedRefreshHz) < 0.5f;
+                        });
+                        if (!supported) {
+                            std::string avail;
+                            for (size_t i = 0; i < rates.size(); ++i) {
+                                if (i > 0) avail += ", ";
+                                char b[16];
+                                std::snprintf(b, sizeof(b), "%.0f", rates[i]);
+                                avail += b;
+                            }
+                            HLOG(LogXR, Warning) << "Display refresh rate " << m.requestedRefreshHz
+                                                 << " Hz is not supported (available: "
+                                                 << (avail.empty() ? "none" : avail) << ")";
+                        } else if (m.ok(m.requestRefreshRate(m.session, m.requestedRefreshHz),
+                                        "xrRequestDisplayRefreshRateFB")) {
+                            const float nowHz = displayRefreshRate();
+                            char reqB[16], nowB[16];
+                            std::snprintf(reqB, sizeof(reqB), "%.0f", m.requestedRefreshHz);
+                            std::snprintf(nowB, sizeof(nowB), "%.0f", nowHz);
+                            HLOG(LogXR, Log) << "Display refresh: requested " << reqB << ", now " << nowB;
+                        }
+                    }
+                }
+                if (m.running && m.perfLevels.set()) {
+                    if (!m.hasPerfSettingsExt || !m.setPerfLevelFn) {
+                        HLOG(LogXR, Warning) << "XR_EXT_performance_settings is not supported; ignoring --xr-perf-level";
+                    } else {
+                        auto toXrLv = [](hxr::XrPerfLevel lv) -> XrPerfSettingsLevelEXT {
+                            switch (lv) {
+                                case hxr::XrPerfLevel::PowerSavings:  return XR_PERF_SETTINGS_LEVEL_POWER_SAVINGS_EXT;
+                                case hxr::XrPerfLevel::SustainedLow:  return XR_PERF_SETTINGS_LEVEL_SUSTAINED_LOW_EXT;
+                                case hxr::XrPerfLevel::SustainedHigh: return XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT;
+                                case hxr::XrPerfLevel::Boost:         return XR_PERF_SETTINGS_LEVEL_BOOST_EXT;
+                                case hxr::XrPerfLevel::Unset:         return XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT;
+                            }
+                            return XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT;
+                        };
+                        const bool okCpu = m.ok(m.setPerfLevelFn(m.session, XR_PERF_SETTINGS_DOMAIN_CPU_EXT, toXrLv(m.perfLevels.cpu)),
+                                                "xrPerfSettingsSetPerformanceLevelEXT(CPU)");
+                        const bool okGpu = m.ok(m.setPerfLevelFn(m.session, XR_PERF_SETTINGS_DOMAIN_GPU_EXT, toXrLv(m.perfLevels.gpu)),
+                                                "xrPerfSettingsSetPerformanceLevelEXT(GPU)");
+                        if (okCpu && okGpu) {
+                            HLOG(LogXR, Log) << "XR perf level: cpu " << hxr::perfLevelName(m.perfLevels.cpu)
+                                             << ", gpu " << hxr::perfLevelName(m.perfLevels.gpu);
+                        }
+                    }
+                }
                 if (!m.running) {
                     // 시작하지 못한 세션은 잃은 것으로 둡니다(DEF-155). 예전에는 running=false 로 남고 다시 시도하는 곳이 없어,
                     // 데스크톱 화면이 없는 Quest 는 빈 화면인 채 끝나지 않았습니다. 인스턴스를 잃었으면 InstanceLost, 그 밖에는
@@ -651,6 +736,14 @@ void XrSystem::pollEvents() {
             m.lost       = true;
             m.lossReason = LossReason::InstanceLost;
             break;
+        case XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB: {
+            const auto& e = *reinterpret_cast<XrEventDataDisplayRefreshRateChangedFB*>(&ev);
+            char fromB[16], toB[16];
+            std::snprintf(fromB, sizeof(fromB), "%.0f", e.fromDisplayRefreshRate);
+            std::snprintf(toB, sizeof(toB), "%.0f", e.toDisplayRefreshRate);
+            HLOG(LogXR, Log) << "Display refresh changed: " << fromB << " -> " << toB;
+            break;
+        }
         case XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED: {
             for (int h = 0; h < 2; ++h) {
                 XrInteractionProfileState ps{ XR_TYPE_INTERACTION_PROFILE_STATE };
@@ -900,3 +993,7 @@ float XrSystem::displayRefreshRate() const {
     }
     return m.periodHz;
 }
+
+void XrSystem::setEyeScale(float scale) { impl_->eyeScale = scale; }
+void XrSystem::setRequestedRefreshRate(float hz) { impl_->requestedRefreshHz = hz; }
+void XrSystem::setPerfLevel(hxr::XrPerfLevelPair levels) { impl_->perfLevels = levels; }

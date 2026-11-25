@@ -1,5 +1,7 @@
 #pragma once
 #include "../platform/PlatformContext.hpp"
+#include "../xr/XrPerfLevelLogic.hpp"
+#include "StressRampLogic.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -39,6 +41,14 @@ struct EngineOptions {
     bool        vkNoSync2     = false;   // --vk-no-sync2 : synchronization2 가 있어도 1.0 배리어로 기록(DEF-04 대체 경로 시험)
     bool        vkDedicatedMsaa = false; // --vk-dedicated-msaa : MSAA 컬러를 핵심 힙 밖 별도 할당으로(DEF-06 경로 시험)
     bool        vkFailInit    = false;   // --vk-fail-init : volkInitialize 실패 경로를 흉내 냄(E0a 실패 길 시험)
+    std::string debugPost;               // --debug-post=solid|raw|nobloom|nan : Quest 검정 화면 등 톤매핑 진단(DEF-183)
+    bool        noLazyMsaa    = false;   // --no-lazy-msaa : MSAA 컬러 지연 할당 대신 Zone B 사용(DEF-183)
+    int         msaaSamples   = 0;       // --msaa=1|2|4 : MSAA 샘플 수 강제(0 = 자동, DEF-183)
+    uint32_t    gpuLogSec     = 0;       // --gpu-log=<1..60> : 실행 중 N 초마다 GPU 패스 평균 시간 로그(0 = 끔)
+    float       xrScale       = 1.0f;    // --xr-scale=<0.5..1.5> : XR 눈 해상도 배율(합성 눈 포함)
+    float       xrRefreshHz   = 0.f;     // --xr-refresh=<Hz> : XR 화면 주사율 요청(0 = 런타임 기본)
+    hxr::XrPerfLevelPair xrPerfLevel{};  // --xr-perf-level=<cpu>:<gpu> : XR_EXT_performance_settings 요청
+    hstress::StressSpec stress{};        // --stress=<축>[:시작:증가:최대] · --stress-step-seconds · --stress-budget-ms
     // --no-multiview : 두 눈의 메인 패스를 멀티뷰(viewMask 0b11)로 한 번에 그리지 않고 눈마다 그림(Quest 에서 이득 비교 ·
     // 멀티뷰 탓인지 가르는 진단, 2026-11-18). 장치의 멀티뷰 기능은 그래도 켭니다.
     bool        multiview     = true;
@@ -51,6 +61,7 @@ struct EngineOptions {
     // --ssao · --no-ssao : 화면 공간 AO 를 켜거나 끔(AO 를 뺀 비교 실측 · 끔 경로 시험). 없으면 프로젝트 설정
     // render.ao. 진단용이라 프로젝트 설정을 덮어씁니다.
     std::optional<bool> ssao;
+    std::optional<bool> bloom;           // --bloom · --no-bloom : 블룸을 켜거나 끔(설정 저장 없음, QP1 보완)
     bool                autoLod = true;  // --no-auto-lod : glTF 자동 LOD 를 컴포넌트에 배정하지 않음(O13 검증용)
     // --texture-compression=off|auto|bc|astc : 미리 압축한 텍스처(KTX2)를 쓸 대상(Docs/Texture_Compression.md D8). 빈 값 = auto
     // (게임 묶음을 마운트한 창 있는 게임 실행 파일만 플랫폼 대상, 그 밖은 off).
@@ -208,7 +219,7 @@ inline constexpr int kExitEnsure     = 5;   // HENSURE 가 실패함(크래시 �
 
 // 자동 확인 실행인지(프레임 수 · 시간 제한 · 캡처 중 하나). 이때만 종료 코드가 결과를 알립니다.
 inline bool isAutomated(const EngineOptions& o) {
-    return o.frames > 0 || o.timeoutSec > 0.f || !o.capturePath.empty() || !o.uiDumpPath.empty();
+    return o.frames > 0 || o.timeoutSec > 0.f || !o.capturePath.empty() || !o.uiDumpPath.empty() || o.stress.enabled;
 }
 
 // wanted 가 0 이면 프레임 수는 보지 않습니다.

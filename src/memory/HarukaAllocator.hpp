@@ -92,6 +92,12 @@ public:
     // 조회
     uint32_t       memTypeIndex()  const { return memType;     }
     VkDeviceSize   allocatedSize() const { return heapSize;    }
+    uint32_t       committedChunkCount() const {
+        uint32_t n = 0;
+        for (size_t i = 0; i < kTotalChunks; ++i)
+            if (chunks_[i].mem != VK_NULL_HANDLE) ++n;
+        return n;
+    }
 
     // Zone B 에서 지금 잡혀 있는 바이트(빈 목록 합의 나머지 + 큰 요청 전용 할당). 텍스처 메모리 로그(Docs/Texture_Compression.md D12)가 씁니다.
     VkDeviceSize zoneBUsed() const {

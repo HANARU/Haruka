@@ -12,6 +12,8 @@
 #include "../nav/NavSystem.hpp"
 #include "IEngineFrontend.hpp"
 #include "EngineOptions.hpp"
+#include "GpuLogAccumulator.hpp"
+#include "StressRunner.hpp"
 #include "XrRunMode.hpp"
 #include "FrameStats.hpp"
 #include "WorldUiDriver.hpp"
@@ -145,6 +147,10 @@ private:
     uint32_t      syntheticImage_ = 0;         // 다음에 그릴 합성 눈 이미지
     uint32_t      lastSynthetic_  = UINT32_MAX;   // 마지막으로 그린 합성 눈 이미지(캡처용)
     bool          timedOut_       = false;
+    uint32_t      gpuLogPrevDrawn_ = 0;
+    hgpu::GpuLogAccumulator               gpuLogAccum_;
+    std::chrono::steady_clock::time_point gpuLogWindowStart_{};
+    StressRunner                          stress_;
 
     // ── 프레임 단계가 쓰는 객체 (2026-11-18 S2, 예전 Engine 멤버 · 메인 루프 구간을 옮김) ─────────────────
     FrameStats                           stats_;       // FPS 제목 · 프레임 시간 분포 · 끊김 로그 · 시작 시간
