@@ -29,6 +29,8 @@
 # 그 밖의 .hscene(예전 에디터가 실행 폴더에 남기던 scene.hscene 등)은 무시합니다.
 *.hscene
 !/Projects/Samples/Content/scenes/**/*.hscene
+# 템플릿의 시작 씬은 새 프로젝트에 복사되므로 저장소에 넣습니다(DEF-184).
+!/Templates/*/Content/scenes/**/*.hscene
 
 # ── 로컬 전용 에셋(2026-11-06) ──
 # 이 기계에서만 쓰는 시험용 에셋과 씬은 저장소와 배포 묶음(Packaging/game.pack.txt 의

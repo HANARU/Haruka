@@ -1,0 +1,51 @@
+# Haruka Scene v7
+ACTOR:Sun
+GUID:1111222233334444
+POS:0 0 0
+ROT:-50 0 0
+QUAT:-0.42261826 0 0 0.90630779
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:LightComponent
+enabled=1
+type=directional
+color=1 1 1
+intensity=3
+attenuationRadius=10
+innerConeAngle=15
+outerConeAngle=30
+useTemperature=0
+temperatureK=6500
+castShadows=1
+END_COMPONENT
+END_ACTOR
+ACTOR:Ground
+GUID:2222333344445555
+POS:0 -0.1 0
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:20 0.2 20
+ACTIVE:1
+COMPONENT:StaticMeshComponent
+enabled=1
+visible=1
+transparent=0
+prim=box|0x0|0|0.0000
+primMaterial=color B4B4B4FF 0 0.6
+END_COMPONENT
+END_ACTOR
+ACTOR:MainCamera
+GUID:3333444455556666
+POS:0 1.6 3
+ROT:0 0 0
+QUAT:0 0 0 1
+SCALE:1 1 1
+ACTIVE:1
+COMPONENT:CameraComponent
+enabled=1
+fovY=75
+zNear=0.05
+zFar=1000
+primary=1
+END_COMPONENT
+END_ACTOR

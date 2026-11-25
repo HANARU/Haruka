@@ -2506,3 +2506,10 @@ P1 뒤 구간 1 ~ 7 을 이어 구현했습니다(사용자 "추천안대로 진
 ### Quest 성능 측정 준비 (QP1, 2026-11-24)
 - XrDemo GPU 한계(평균 44 FPS, GPU 95 %)의 병목 패스와 손잡이 효과를 한 번의 헤드셋 착용으로 비교하기 위해 `--gpu-log=<1..60>`(구간 산술 평균 주기 로그), `--xr-scale=<0.5..1.5>`(8의 배수 정렬 및 `maxImageRect` 제한, 합성 눈 포함), `--xr-refresh=<Hz>`(`XR_FB_display_refresh_rate`)를 추가하고 `Handoff/quest/quest_run.py`에 `perf` 시나리오(6변형 A/B 표)를 더했습니다.
 - 주의: Adreno 같은 타일 GPU에서는 렌더 패스 내부 분할이 타일 메모리에서 일어나므로, 렌더 패스 **사이**에 찍은 GPU 타임스탬프만 신뢰할 수 있습니다.
+
+## 저장소 점검 (2026-11-25)
+커밋을 주제별로 나눌 때 중간 상태를 저장소 파일만으로 따로 꺼내 빌드 · 시험해 보다가 찾았습니다.
+
+| 번호 | 심각도 | 내용 | 상태 |
+|---|---|---|---|
+| DEF-184 | HIGH(새로 받은 저장소) | Blank 템플릿의 시작 씬 `Templates/Blank/Content/scenes/Start.hscene` 이 `.gitignore` 의 `*.hscene` 규칙에 걸려 E4(61672eb)부터 저장소에 없었습니다. 이 기계에는 파일이 남아 있어 드러나지 않았고, 새로 받은 저장소에서는 `project_ops` 시험(`Content/scenes/Start.hscene exists`)이 실패하고 템플릿으로 만든 프로젝트에 `project.ini` 의 `startScene` 이 가리키는 씬이 없습니다. | **해결 · 2026-11-25**: `.gitignore` 에 `!/Templates/*/Content/scenes/**/*.hscene` 예외, 씬 파일 추가 |
