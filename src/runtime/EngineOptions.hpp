@@ -157,6 +157,9 @@ struct EngineOptions {
     std::string uiPsCategory;               // --ui-ps-category=<분류> : Project Settings 분류 고르기(덤프 전용)
     std::string uiPsSearch;                 // --ui-ps-search=<검색어> : Project Settings 검색어(덤프 전용)
     std::vector<std::string> uiPsSet;       // --ui-ps-set=<키>=<값> (여러 번) : Project Settings 쓰기 시험(사본 프로젝트 전용)
+    bool        uiEditorPreferences = false; // --ui-editor-preferences : 첫 프레임 뒤 Editor Preferences 창 열기(PS1d)
+    std::string uiEpCategory;               // --ui-ep-category=<분류> : Editor Preferences 분류 고르기(덤프 전용)
+    std::string uiEpSearch;                 // --ui-ep-search=<검색어> : Editor Preferences 검색어(덤프 전용)
     std::string uiLayout;                // --ui-layout=<file> : 도크 배치 파일 읽기 전용 오버라이드(에디터 전용)
     std::string viewportDumpPath;        // --viewport-dump=<file> : 마지막 프레임 에디터 선·삼각형 덤프(에디터 전용)
     std::string uiGizmoMode;             // --ui-gizmo-mode=select|move|rotate|scale : 기즈모 모드(에디터 전용)
@@ -173,6 +176,13 @@ struct EngineOptions {
     // 로그로 남김(H1b 계측). nocache 는 예전 방식(원하는 크기 캐시 · 배치 건너뛰기 없음)으로 돌림. 1 = 켬, 2 = nocache.
     int         uiLayoutStats = 0;
 
+    // ── 다시 시작 (PS1c, 2026-11-24) ───────────────────────────────────────────
+    uint32_t    restartWaitPid = 0;      // --restart-wait-pid=<PID> : 새 에디터가 창을 만들기 전에 이전 PID 종료 대기(최대 10초)
+    bool        restartDryRun  = false;  // --restart-dry-run : 새 프로세스를 띄우지 않고 명령줄만 로그
+    bool        uiRestart      = false;  // --ui-restart : 첫 프레임 뒤 Editor.Restart 명령 실행(시험 전용)
+    bool        uiVrNotify     = false;  // --ui-vr-notify : VR 늦은 연결 알림 띠 표시(덤프 시험 전용)
+    std::vector<std::string> rawArgs;    // main() 이 받은 원래 인자(argv[1..])
+
     // ── 플랫폼 진입점이 정하는 것 (명령줄 아님, 2026-10-31 패키징 3단계) ────────────────────────────
     PlatformContext platform;            // Android: android_app · JavaVM · 액티비티
     // XR 이 없으면 시작하지 않음(Quest 는 데스크톱으로 계속할 화면이 없음). 런타임 · 헤드셋을 못 쓰거나 세션을 못 만들면
@@ -185,6 +195,9 @@ namespace hopt {
 
 // 모르는 인자와 값이 잘못된 인자는 unknown 에 담깁니다(경고만 하고 무시).
 EngineOptions parse(const std::vector<std::string>& args, std::vector<std::string>& unknown);
+
+// 다시 시작 시 한 번만 쓰는 시험 · 자동 인자를 거르고 --restart-wait-pid=<PID> 를 붙입니다(PS1c).
+std::vector<std::string> filterRestartArgs(const std::vector<std::string>& args, uint32_t waitPid);
 
 // 창 없는 자동 실행의 종료 코드. 1 은 FATAL(예외)입니다.
 inline constexpr int kExitOk         = 0;

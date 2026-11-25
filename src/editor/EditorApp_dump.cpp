@@ -88,6 +88,14 @@ void EditorApp::setOptions(const EngineOptions& options) {
     uiPsCategory_       = options.uiPsCategory;
     uiPsSearch_         = options.uiPsSearch;
     uiPsSet_            = options.uiPsSet;
+    uiEditorPreferences_ = options.uiEditorPreferences;
+    uiEpCategory_       = options.uiEpCategory;
+    uiEpSearch_         = options.uiEpSearch;
+    restartDryRun_      = options.restartDryRun;
+    headlessRun_        = options.headless;
+    uiRestart_          = options.uiRestart;
+    uiVrNotify_         = options.uiVrNotify;
+    rawCliArgs_         = options.rawArgs;
     uiLayout_           = options.uiLayout;
     viewportDumpPath_   = options.viewportDumpPath;
     uiGizmoMode_        = options.uiGizmoMode;
@@ -424,6 +432,24 @@ void EditorApp::applyDumpState() {
         if (!uiPsSearch_.empty())   projectSettingsPanel_.setSearch(uiPsSearch_);
         projectSettingsPanel_.rebuild();
     }
+    if (uiEditorPreferences_) {
+        openEditorPreferences(uiEpCategory_);
+        if (!uiEpSearch_.empty()) editorPreferencesPanel_.setSearch(uiEpSearch_);
+        editorPreferencesPanel_.rebuild();
+    }
+    if (uiVrNotify_) {
+        xrStatus_.initTried = true;
+        xrStatus_.usable    = false;
+        xrStatus_.standby   = true;
+        xrStatus_.headset   = hxrmode::HeadsetState::Present;
+        const auto dec = hxrmode::decideLateConnect({ xrStatus_.standby, true, vrLateConnectNotified_ });
+        if (dec.notify) {
+            vrLateConnectNotified_ = true;
+            showVrLateConnectBanner();
+        }
+        toolbar_.markDirty();
+    }
+    if (uiRestart_) commands_.execute("Editor.Restart");
     if (!uiGizmoMode_.empty()) {
         if      (uiGizmoMode_ == "select") gizmoMode_ = 0;
         else if (uiGizmoMode_ == "move")   gizmoMode_ = 1;

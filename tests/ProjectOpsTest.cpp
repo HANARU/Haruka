@@ -406,6 +406,17 @@ int main() {
         check(hprojops::saveLastProjectLocation(settingsUserDir, savedLoc) &&
               fs::equivalent(hprojops::loadLastProjectLocation(settingsUserDir), savedLoc),
               "saveLastProjectLocation / loadLastProjectLocation round-trip");
+
+        // PS1c: shared command line quoting & process helpers
+        const std::string cmd = hprojops::formatCommandLine({
+            "C:\\Program Files\\HarukaEngine.exe",
+            "--project=C:\\내 폴더\\My \"Proj\"",
+            "--restart-wait-pid=42"
+        });
+        check(cmd == "\"C:\\Program Files\\HarukaEngine.exe\" \"--project=C:\\내 폴더\\My \\\"Proj\\\"\" --restart-wait-pid=42",
+              "formatCommandLine quotes spaces, Korean, and embedded quotes");
+        check(hprojops::currentProcessId() != 0 && !hprojops::currentExecutablePath().empty(),
+              "currentProcessId and currentExecutablePath are non-empty");
     }
 
     std::error_code rmEc;

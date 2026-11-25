@@ -151,6 +151,9 @@ XrSystem::XrSystem() : impl_(std::make_unique<Impl>()) {}
 XrSystem::~XrSystem() { shutdown(); }
 
 bool XrSystem::ready() const { return impl_->systemId != XR_NULL_SYSTEM_ID; }
+bool XrSystem::hasInstance() const {
+    return impl_->instance != XR_NULL_HANDLE && impl_->lossReason != LossReason::InstanceLost;
+}
 bool XrSystem::hasSession() const { return impl_->session != XR_NULL_HANDLE; }
 bool XrSystem::sessionRunning() const { return impl_->running; }
 bool XrSystem::sessionLost() const { return impl_->lost; }
@@ -263,8 +266,7 @@ bool XrSystem::init(const PlatformContext& platform) {
                              << "). Connect the headset (for Quest, start Quest Link) before launching. "
                                 "Continuing in desktop mode.";
         m.systemId = XR_NULL_SYSTEM_ID;
-        xrDestroyInstance(m.instance);
-        m.instance = XR_NULL_HANDLE;
+        // PS-D11: 런타임 인스턴스는 남겨 두고 편집 중 헤드셋 연결을 감시합니다.
         return false;
     }
     XrSystemProperties sp{ XR_TYPE_SYSTEM_PROPERTIES };

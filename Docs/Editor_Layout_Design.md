@@ -197,7 +197,7 @@ Panel(레지스트리 등록 단위) = { id, title, factory() -> shared_ptr<HWid
   누름 메뉴가 같은 위젯(`EditorMenuView`)으로 그립니다.
 - 구성(UE5 를 따라 소제목으로 묶음, 메뉴 줄 이름은 그대로):
   File(Scene: New · Open | Save: Save · Save As), Edit(History: Undo · Redo | Edit: Copy · Paste · Duplicate · Delete |
-  Configuration: Language ▸ · Audio Output...), Actor(Create: Add Empty | Hierarchy: Attach To Prev Selected · Detach Selected),
+  Configuration: Language ▸ · Audio Output... · Editor Preferences... · Project Settings...), Actor(Create: Add Empty | Hierarchy: Attach To Prev Selected · Detach Selected),
   View(Viewport: Frame Selected · Gizmo Size), Window(Panels: 등록된 패널 + 열림 체크 | Layout: Reset Layout).
   예전 자리에서 옮긴 것: Frame Selected · Gizmo Size(Edit → View), Reset Layout(View → Window), Language(View → Edit 하위 메뉴).
 - 키보드: 열린 메뉴에서 ↑ ↓(소제목 · 구분선 · 꺼진 항목 건너뜀) · Enter · → (하위 메뉴 · 다음 메뉴) · ← (하위 닫기 · 이전 메뉴) ·

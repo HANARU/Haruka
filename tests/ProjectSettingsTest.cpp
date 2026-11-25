@@ -1,6 +1,7 @@
 // 프로젝트 설정 정본 표(ProjectSettingsSchema) · ini 한 줄 쓰기/지우기 단위 시험 (PS1a, 2026-11-24).
 #include "../src/core/ProjectSettings.hpp"
 #include "../src/core/ProjectSettingsSchema.hpp"
+#include "../src/core/EditorPreferencesSchema.hpp"
 #include "../src/core/ProjectDescriptor.hpp"
 #include "../src/core/HText.hpp"
 
@@ -137,10 +138,64 @@ static void testIniWriteAndRemove() {
     }
 }
 
+static void testEditorPreferencesSchema() {
+    std::printf("editor preferences schema\n");
+    const auto& defs = heprefs::entries();
+    check(defs.size() == 5, "EditorPreferencesSchema has 5 entries");
+    for (const heprefs::SettingDef& d : defs) {
+        check(d.file == heprefs::PrefFile::EditorState,
+              std::string("storage file is EditorState (not project.ini) for ") + d.key);
+        check(std::string(heprefs::storageFile(d.file)) == "Saved/Config/editor_state.txt",
+              std::string("storagePath is Saved/Config/editor_state.txt for ") + d.key);
+    }
+
+    // 기본값이 parseEditorState("") 및 EditorStateData 기본값과 일치하는지 확인
+    std::vector<std::string> w;
+    const heprefs::EditorStateData defState = heprefs::parseEditorState("", w);
+    check(w.empty(), "empty editor_state.txt parses with no warnings");
+    for (const heprefs::SettingDef& d : defs) {
+        const std::string k = d.key;
+        if (k == "culture")
+            check(defState.culture == d.defaultString, "culture schema default matches EditorStateData");
+        else if (k == "gizmoSize")
+            check(defState.gizmoSize == d.defaultString &&
+                  std::string(heprefs::gizmoNameFromFactor(heprefs::gizmoFactorFromName(d.defaultString))) == d.defaultString,
+                  "gizmoSize schema default matches EditorStateData and factor round-trip");
+        else if (k == "audioOutput")
+            check(defState.audioOutput == d.defaultString, "audioOutput schema default matches EditorStateData");
+        else if (k == "audioHeadsetInVr")
+            check(defState.audioHeadsetInVr == d.defaultBool, "audioHeadsetInVr schema default matches EditorStateData");
+        else if (k == "audioHrtf")
+            check(defState.audioHrtf == d.defaultString, "audioHrtf schema default matches EditorStateData");
+    }
+
+    // 열거형 범위 · 왕복 확인
+    heprefs::EditorStateData s;
+    s.lastScene        = "/Game/scenes/Test.hscene";
+    s.culture          = "ko";
+    s.gizmoSize        = "large";
+    s.audioOutput      = "dev-1";
+    s.audioHeadsetInVr = false;
+    s.audioHrtf        = "on";
+    const std::string txt = heprefs::formatEditorState(s);
+    const heprefs::EditorStateData rt = heprefs::parseEditorState(txt, w);
+    check(w.empty() && rt.lastScene == s.lastScene && rt.culture == s.culture &&
+          rt.gizmoSize == s.gizmoSize && rt.audioOutput == s.audioOutput &&
+          rt.audioHeadsetInVr == s.audioHeadsetInVr && rt.audioHrtf == s.audioHrtf,
+          "editor_state.txt format/parse round-trip preserves all keys");
+
+    // 잘못된 값 경고 및 기본값 복귀
+    std::vector<std::string> badW;
+    const heprefs::EditorStateData bad = heprefs::parseEditorState("gizmoSize=huge\naudioHrtf=bogus\n", badW);
+    check(badW.size() == 2 && bad.gizmoSize == "medium" && bad.audioHrtf == "auto",
+          "invalid gizmoSize/audioHrtf warn and fall back to defaults");
+}
+
 int main() {
     testSchemaCoverage();
     testSchemaMatchesParse();
     testIniWriteAndRemove();
+    testEditorPreferencesSchema();
     std::printf("ProjectSettingsTest: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

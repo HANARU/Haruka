@@ -98,6 +98,16 @@ void ProjectSettingsPanel::init(Deps deps) {
     src.buildItems        = [this] { return buildItems(); };
     src.onReload          = [this] { reloadFiles(); };
     src.hasRestartChanges = [this] { return hasRestartChanges(); };
+    src.restartBannerAction = [this]() -> std::shared_ptr<HWidget> {
+        if (!deps_.ui || !deps_.onRestart) return nullptr;
+        const bool enabled = !deps_.canRestart || deps_.canRestart();
+        const glm::vec4 fg = enabled ? EditorUiKit::kTextBody : EditorUiKit::kTextDim;
+        return deps_.ui->textButton(
+            HTEXT("Editor.Settings", "RestartNow", "Restart Now").toString(),
+            12.f, fg, { 10.f, 3.f }, EditorTheme::ctlNormal,
+            enabled ? EditorTheme::ctlHover : EditorTheme::ctlNormal,
+            [this] { if (deps_.onRestart) deps_.onRestart(); });
+    };
 
     panel_.init(std::move(sd), std::move(src));
 }
@@ -398,6 +408,9 @@ std::string ProjectSettingsPanel::xrStatusText(const hxrmode::XrRunStatus& s) {
         case hxrmode::StatusKind::Ready:
             return HTEXT("Editor.Dialog", "ProjectSettings.Status.Ready",
                          "This run: VR ready").toString();
+        case hxrmode::StatusKind::RestartNeeded:
+            return HTEXT("Editor.Dialog", "ProjectSettings.Status.RestartNeeded",
+                         "This run: headset connected - restart required").toString();
         case hxrmode::StatusKind::Unavailable:
             return HTEXT("Editor.Dialog", "ProjectSettings.Status.Unavailable",
                          "This run: VR unavailable (desktop only)").toString();

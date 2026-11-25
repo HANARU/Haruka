@@ -336,6 +336,8 @@ void EditorApp::handleFloatInput(EditorWindow& w) {
         detailsPanel_.openRowMenuAt(m);
     if (f.rightPressed && !modal_ && hwininput::panelGetsPointer(dock_.floatOfPanel("ProjectSettings"), id) && dock_.panelActiveIn(id, "ProjectSettings"))
         projectSettingsPanel_.openRowMenuAt(m);
+    if (f.rightPressed && !modal_ && hwininput::panelGetsPointer(dock_.floatOfPanel("EditorPreferences"), id) && dock_.panelActiveIn(id, "EditorPreferences"))
+        editorPreferencesPanel_.openRowMenuAt(m);
     // Esc: 이 창 키(GLFW 키 상태는 창마다)로 closeOnEscape 팝업을 닫습니다.
     if (!popups.empty() && w.window->isKeyDown(HInput::KEY_ESCAPE)) popups.dismissOnEscape();
     // 콘텐츠 브라우저: 누름 · 끌기 시작(놓기는 메인 처리가 메인 뷰포트 좌표로).

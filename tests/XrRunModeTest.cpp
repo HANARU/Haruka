@@ -130,6 +130,10 @@ static void testStatusKind() {
 
     s = {}; s.initTried = true; s.usable = false;
     check(hxrmode::statusKind(s) == hxrmode::StatusKind::Unavailable, "status Unavailable");
+    s = {}; s.initTried = true; s.usable = false; s.standby = true; s.headset = hxrmode::HeadsetState::Absent;
+    check(hxrmode::statusKind(s) == hxrmode::StatusKind::Unavailable, "status standby+Absent is Unavailable");
+    s.headset = hxrmode::HeadsetState::Present;
+    check(hxrmode::statusKind(s) == hxrmode::StatusKind::RestartNeeded, "status standby+Present is RestartNeeded");
     s = {}; s.startReason = hxrmode::StartReason::CommandLineNoXr;
     check(hxrmode::statusKind(s) == hxrmode::StatusKind::DisabledByNoXr, "status DisabledByNoXr");
     s = {}; s.startReason = hxrmode::StartReason::AutomatedRun;
@@ -190,11 +194,40 @@ static void testIniEdit() {
           "decideIniWrite aborts when existing file failed to read");
 }
 
+static void testLateConnect() {
+    std::printf("late connect standby and notification\n");
+    check(hxrmode::shouldStandbyForHeadset({ true, true, false, false }),
+          "standby true when xrWanted + instanceCreated + !systemReady + !xrRequired");
+    check(!hxrmode::shouldStandbyForHeadset({ true, false, false, false }),
+          "standby false when no OpenXR runtime (instanceCreated=false)");
+    check(!hxrmode::shouldStandbyForHeadset({ true, true, true, false }),
+          "standby false when systemReady");
+    check(!hxrmode::shouldStandbyForHeadset({ true, true, false, true }),
+          "standby false when xrRequired");
+    check(!hxrmode::shouldStandbyForHeadset({ false, true, false, false }),
+          "standby false when !xrWanted");
+
+    check(hxrmode::shouldPollHeadset(false, true, false), "poll in editor when usable");
+    check(hxrmode::shouldPollHeadset(false, false, true), "poll in editor when standby");
+    check(!hxrmode::shouldPollHeadset(false, false, false), "no poll when neither usable nor standby");
+    check(!hxrmode::shouldPollHeadset(true, true, true), "no poll during Play");
+
+    const auto d1 = hxrmode::decideLateConnect({ true, false, false });
+    check(!d1.notify && !d1.markNotified, "no notify when headset absent");
+    const auto d2 = hxrmode::decideLateConnect({ true, true, false });
+    check(d2.notify && d2.markNotified, "notify once when standby + headset present");
+    const auto d3 = hxrmode::decideLateConnect({ true, true, d2.markNotified });
+    check(!d3.notify && d3.markNotified, "do not notify again after alreadyNotified");
+    const auto d4 = hxrmode::decideLateConnect({ false, true, false });
+    check(!d4.notify && !d4.markNotified, "no notify when not in standby");
+}
+
 int main() {
     testStartupDecision();
     testPlayDecision();
     testStatusKind();
     testIniEdit();
+    testLateConnect();
     std::printf("XrRunModeTest: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

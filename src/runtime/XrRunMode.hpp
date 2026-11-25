@@ -89,11 +89,12 @@ struct XrRunStatus {
     StartReason  startReason       = StartReason::ProjectOff;
     bool         initTried         = false;   // 시작 때 OpenXR 을 준비하려 했음
     bool         usable            = false;   // 준비가 끝나 Play 에서 세션을 열 수 있음
+    bool         standby           = false;   // 런타임은 있으나 시작 때 헤드셋이 없어 데스크톱으로 열림(헤드셋 대기 중)
     bool         projectAutoDetect = false;   // 시작 때 읽은 xr.startInVr
     HeadsetState headset           = HeadsetState::Unknown;   // 편집 중 마지막 헤드셋 확인 결과
     bool operator==(const XrRunStatus& o) const {
         return startReason == o.startReason && initTried == o.initTried && usable == o.usable &&
-               projectAutoDetect == o.projectAutoDetect && headset == o.headset;
+               standby == o.standby && projectAutoDetect == o.projectAutoDetect && headset == o.headset;
     }
     bool operator!=(const XrRunStatus& o) const { return !(*this == o); }
 };
@@ -103,6 +104,7 @@ enum class StatusKind : uint8_t {
     HeadsetFound,     // VR 준비됨, 헤드셋 인식됨 → Play = VR
     NoHeadset,        // VR 준비됨, 헤드셋 없음 → Play = 데스크톱
     Ready,            // VR 준비됨, 아직 헤드셋을 확인하지 않음
+    RestartNeeded,    // 시작 때 헤드셋이 없어 데스크톱으로 열렸으나 지금 헤드셋 연결됨 → 다시 시작 필요(PS-D11)
     NotPrepared,      // 프로젝트 값이 꺼져 있음(Project Settings 에서 켬)
     Unavailable,      // 준비하려 했지만 런타임 · 헤드셋이 없었음(이번 실행은 데스크톱만)
     DisabledByNoXr,   // 명령줄 --no-xr
@@ -115,12 +117,52 @@ inline StatusKind statusKind(const XrRunStatus& s) {
         if (s.headset == HeadsetState::Absent)  return StatusKind::NoHeadset;
         return StatusKind::Ready;
     }
-    if (s.initTried) return StatusKind::Unavailable;
+    if (s.initTried) {
+        if (s.standby && s.headset == HeadsetState::Present) return StatusKind::RestartNeeded;
+        return StatusKind::Unavailable;
+    }
     switch (s.startReason) {
         case StartReason::CommandLineNoXr: return StatusKind::DisabledByNoXr;
         case StartReason::AutomatedRun:    return StatusKind::AutomatedRun;
         default:                           return StatusKind::NotPrepared;
     }
+}
+
+// ── VR 늦은 연결 감지 · 알림 (PS-D11) ────────────────────────────────────────
+struct StandbyInput {
+    bool xrWanted        = false;
+    bool instanceCreated = false;
+    bool systemReady     = false;
+    bool xrRequired      = false;
+};
+
+// 시작 때 OpenXR 인스턴스는 만들었지만 헤드셋이 없을 때 인스턴스를 남겨 대기할지.
+// 런타임 자체가 없으면(instanceCreated == false) 확인하지 않습니다.
+inline bool shouldStandbyForHeadset(const StandbyInput& in) {
+    return in.xrWanted && in.instanceCreated && !in.systemReady && !in.xrRequired;
+}
+
+// 편집 중(Play 아님)에 헤드셋을 주기적으로 확인할지.
+inline bool shouldPollHeadset(bool inGame, bool usable, bool standby) {
+    return !inGame && (usable || standby);
+}
+
+struct LateConnectInput {
+    bool standby         = false;
+    bool headsetPresent  = false;
+    bool alreadyNotified = false;
+};
+
+struct LateConnectDecision {
+    bool notify       = false;
+    bool markNotified = false;
+};
+
+// 대기 중 헤드셋이 잡히면 한 번만 알림을 띄웁니다.
+inline LateConnectDecision decideLateConnect(const LateConnectInput& in) {
+    if (!in.standby || !in.headsetPresent || in.alreadyNotified)
+        return { false, in.alreadyNotified };
+    return { true, true };
 }
 
 // 편집 중 헤드셋 확인 간격(초). 사용자 결정: 2초 이하.

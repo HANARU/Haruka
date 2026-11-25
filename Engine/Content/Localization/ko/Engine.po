@@ -1429,3 +1429,167 @@ msgstr "+ Android"
 msgctxt "Editor.Settings,RemoveAndroid"
 msgid "Remove Android override"
 msgstr "Android 덮어쓰기 지우기"
+
+msgctxt "Editor.Menu,Section.Editor"
+msgid "Editor"
+msgstr "에디터"
+
+msgctxt "Editor.Menu,File.Restart"
+msgid "Restart Editor"
+msgstr "에디터 다시 시작"
+
+msgctxt "Editor.Dialog,Verb.Restarting"
+msgid "restarting"
+msgstr "다시 시작하기"
+
+msgctxt "Editor.Settings,RestartNow"
+msgid "Restart Now"
+msgstr "지금 다시 시작"
+
+msgctxt "Editor.Dialog,ProjectSettings.Status.RestartNeeded"
+msgid "This run: headset connected - restart required"
+msgstr "이번 실행: 헤드셋 연결됨 - 다시 시작 필요"
+
+msgctxt "Editor.Toolbar,PlayTip.RestartNeeded"
+msgid "Play (Desktop: headset connected - restart required)"
+msgstr "Play (데스크톱: 헤드셋 연결됨 - 다시 시작 필요)"
+
+msgctxt "Editor.Viewport,VrConnectedBanner"
+msgid "VR headset connected. Restart the editor to use VR."
+msgstr "VR 헤드셋이 연결되었습니다. VR 을 쓰려면 에디터를 다시 시작하십시오."
+
+msgctxt "Editor.Menu,Edit.EditorPreferences"
+msgid "Editor Preferences..."
+msgstr "에디터 개인 설정..."
+
+msgctxt "Editor.Panels,EditorPreferences"
+msgid "Editor Preferences"
+msgstr "에디터 개인 설정"
+
+msgctxt "Editor.Preferences,Group.General"
+msgid "General"
+msgstr "일반"
+
+msgctxt "Editor.Preferences,Group.Audio"
+msgid "Audio"
+msgstr "오디오"
+
+msgctxt "Editor.Preferences,Cat.RegionLanguage"
+msgid "Region & Language"
+msgstr "지역 및 언어"
+
+msgctxt "Editor.Preferences,CatDesc.RegionLanguage"
+msgid "Editor display language."
+msgstr "에디터 표시 언어입니다."
+
+msgctxt "Editor.Preferences,Cat.Viewport"
+msgid "Viewport"
+msgstr "뷰포트"
+
+msgctxt "Editor.Preferences,CatDesc.Viewport"
+msgid "Viewport gizmo and interaction preferences."
+msgstr "뷰포트 기즈모 및 조작 개인 설정입니다."
+
+msgctxt "Editor.Preferences,Cat.Audio"
+msgid "Audio"
+msgstr "오디오"
+
+msgctxt "Editor.Preferences,CatDesc.Audio"
+msgid "Editor audio output device, VR headset routing, and 3D spatialization."
+msgstr "에디터 소리 출력 장치, VR 헤드셋 전달, 3D 공간 음향 설정입니다."
+
+msgctxt "Editor.Preferences,Sec.Language"
+msgid "Language"
+msgstr "언어"
+
+msgctxt "Editor.Preferences,Key.culture"
+msgid "Editor Language"
+msgstr "에디터 언어"
+
+msgctxt "Editor.Preferences,Help.culture"
+msgid "Display language for editor menus, panels, and dialogs."
+msgstr "에디터 메뉴, 패널, 대화상자에 쓰이는 표시 언어입니다."
+
+msgctxt "Editor.Preferences,Sec.Gizmo"
+msgid "Gizmo"
+msgstr "기즈모"
+
+msgctxt "Editor.Preferences,Key.gizmoSize"
+msgid "Gizmo Size"
+msgstr "기즈모 크기"
+
+msgctxt "Editor.Preferences,Help.gizmoSize"
+msgid "Transform gizmo screen scale (Small, Medium, or Large)."
+msgstr "변환 기즈모 화면 크기입니다(작게, 보통, 크게)."
+
+msgctxt "Editor.Preferences,GizmoSize.Small"
+msgid "Small"
+msgstr "작게"
+
+msgctxt "Editor.Preferences,GizmoSize.Medium"
+msgid "Medium"
+msgstr "보통"
+
+msgctxt "Editor.Preferences,GizmoSize.Large"
+msgid "Large"
+msgstr "크게"
+
+msgctxt "Editor.Preferences,Sec.Output"
+msgid "Output"
+msgstr "출력"
+
+msgctxt "Editor.Preferences,Key.audioOutput"
+msgid "Output Device"
+msgstr "출력 장치"
+
+msgctxt "Editor.Preferences,Help.audioOutput"
+msgid "Audio playback device used by the editor (empty = system default)."
+msgstr "에디터가 소리를 내보내는 재생 장치입니다(비우면 시스템 기본)."
+
+msgctxt "Editor.Preferences,Audio.SystemDefault"
+msgid "System default"
+msgstr "시스템 기본"
+
+msgctxt "Editor.Preferences,Sec.VrAudio"
+msgid "VR Audio"
+msgstr "VR 오디오"
+
+msgctxt "Editor.Preferences,Key.audioHeadsetInVr"
+msgid "Headset Audio During VR Play"
+msgstr "VR Play 동안 헤드셋으로 소리 내기"
+
+msgctxt "Editor.Preferences,Help.audioHeadsetInVr"
+msgid "Route editor audio to the VR headset during VR Play (applies from the next Play)."
+msgstr "VR Play 동안 에디터 소리를 헤드셋 장치로 보냅니다(다음 Play 부터 적용)."
+
+msgctxt "Editor.Preferences,Sec.Spatialization"
+msgid "Spatialization"
+msgstr "공간 음향"
+
+msgctxt "Editor.Preferences,Key.audioHrtf"
+msgid "3D Audio (HRTF)"
+msgstr "3D 오디오 (HRTF)"
+
+msgctxt "Editor.Preferences,Help.audioHrtf"
+msgid "Binaural HRTF mode: Auto (VR Play only), On (headphones), or Off (stereo panning)."
+msgstr "입체 음향(HRTF) 방식입니다: 자동(VR Play 만), 켬(헤드폰), 끔(스테레오)."
+
+msgctxt "Editor.Preferences,Hrtf.Auto"
+msgid "Auto (VR Play only)"
+msgstr "자동 (VR Play 만)"
+
+msgctxt "Editor.Preferences,Hrtf.On"
+msgid "On (headphones)"
+msgstr "켬 (헤드폰)"
+
+msgctxt "Editor.Preferences,Hrtf.Off"
+msgid "Off (stereo panning)"
+msgstr "끔 (스테레오)"
+
+msgctxt "Editor.Preferences,AudioStatus"
+msgid "Now playing on: {0}{1}  |  HRTF: {2}"
+msgstr "현재 재생: {0}{1}  |  HRTF: {2}"
+
+msgctxt "Editor.Preferences,AudioStatus.Headset"
+msgid " (headset during VR Play)"
+msgstr " (VR Play 동안 헤드셋)"

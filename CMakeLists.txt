@@ -605,6 +605,7 @@ set(EDITOR_SOURCES
     src/editor/PropertyRowKit.cpp
     src/editor/SettingsPanel.cpp
     src/editor/ProjectSettingsPanel.cpp
+    src/editor/EditorPreferencesPanel.cpp
     src/editor/ContentBrowserPanel.cpp
     src/editor/GpuStatsPanel.cpp
     src/editor/OutputLogPanel.cpp

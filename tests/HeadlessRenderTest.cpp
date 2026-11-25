@@ -357,6 +357,52 @@ int main() {
         check(!q.pending && !q.recovering && q.runSince == XrRecovery::TimePoint{}, "그만두면 기다림 · 복구 상태를 모두 비움");
     }
 
+    std::printf("\n== 8. 다시 시작 인자 거르기 (PS1c) ==\n");
+    {
+        std::vector<std::string> u;
+        auto o = hopt::parse({ "--restart-wait-pid=1234", "--restart-dry-run", "--ui-restart", "--ui-vr-notify" }, u);
+        check(o.restartWaitPid == 1234 && o.restartDryRun && o.uiRestart && o.uiVrNotify && u.empty(),
+              "다시 시작 · VR 알림 옵션 해석");
+        o = hopt::parse({ "--restart-wait-pid=0", "--restart-wait-pid=abc" }, u);
+        check(o.restartWaitPid == 0 && u.size() == 2, "잘못된 --restart-wait-pid 거부");
+
+        const std::vector<std::string> raw = {
+            "--project=C:\\내 프로젝트\\My \"Game\" Dir",
+            "--write-root=D:\\임시 폴더\\wr",
+            "--gpu=1",
+            "--xr",
+            "--culture=ko",
+            "--hidden-window",
+            "--headless",
+            "--frames=10",
+            "--timeout=5",
+            "--sim-ticks=60",
+            "--ui-dump=out.txt",
+            "--ui-project-settings",
+            "--ui-restart",
+            "--ui-vr-notify",
+            "--viewport-dump=vp.txt",
+            "--capture=out.png",
+            "--user-setting=render.ao=false",
+            "--user-setting-at=5:render.ao=true",
+            "--console-at=3:stat",
+            "--touch-asset-at=4:/Game/a.hasset",
+            "--trace=t.json",
+            "--trace-frames=1-5",
+            "--restart-wait-pid=99",
+            "--restart-dry-run",
+        };
+        const std::vector<std::string> filtered = hopt::filterRestartArgs(raw, 4321);
+        const std::vector<std::string> expected = {
+            "--project=C:\\내 프로젝트\\My \"Game\" Dir",
+            "--write-root=D:\\임시 폴더\\wr",
+            "--gpu=1",
+            "--xr",
+            "--culture=ko",
+            "--restart-wait-pid=4321",
+        };
+        check(filtered == expected, "filterRestartArgs: 공백·한글·따옴표 유지, 시험 인자 제거, wait-pid 갱신");
+    }
     std::printf("\n결과: %s (실패 %d)\n", g_failed ? "FAIL" : "PASS", g_failed);
     return g_failed ? 1 : 0;
 }

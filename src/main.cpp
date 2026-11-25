@@ -98,8 +98,10 @@ int main(int argc, char** argv) {
     frontendConfig.engineContentDir = HARUKA_ENGINE_CONTENT_DIR;
 #endif
     std::unique_ptr<IEngineFrontend> frontend = createEngineFrontend(frontendConfig);
+    std::vector<std::string> rawCliArgs(argv + (argc > 0 ? 1 : 0), argv + argc);
     std::vector<std::string> unknownArgs;
-    const EngineOptions options = hopt::parse(std::vector<std::string>(argv + (argc > 0 ? 1 : 0), argv + argc), unknownArgs);
+    EngineOptions options = hopt::parse(rawCliArgs, unknownArgs);
+    options.rawArgs = std::move(rawCliArgs);
     frontend->resolveRuntimePaths(options.projectDir);
     bool writeRootOk = false;
     if (!options.writeRoot.empty()) {
@@ -169,6 +171,21 @@ int main(int argc, char** argv) {
         HLOG(LogEngine, Warning) << "Could not install the crash handler; a crash will leave no report";
     if (const std::filesystem::path prev = hcrash::takePending(crashRoot); !prev.empty())
         HLOG(LogEngine, Warning) << "The previous run stopped with a crash; report: " << prev.generic_string();
+
+#ifdef _WIN32
+    if (options.restartWaitPid != 0) {
+        HANDLE prevProc = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(options.restartWaitPid));
+        if (prevProc != nullptr) {
+            HLOG(LogEngine, Log) << "Waiting for previous process (PID " << options.restartWaitPid << ") to exit...";
+            const DWORD waitRes = WaitForSingleObject(prevProc, 10000);
+            CloseHandle(prevProc);
+            if (waitRes == WAIT_TIMEOUT) {
+                HLOG(LogEngine, Warning) << "Timed out waiting for previous process (PID " << options.restartWaitPid
+                                         << ") after 10 s; continuing";
+            }
+        }
+    }
+#endif
 
     int exitCode = EXIT_SUCCESS;
     uint32_t errorsBeforeTeardown = 0;

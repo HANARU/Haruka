@@ -424,7 +424,7 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
         if (!xr_->init(options.platform)) xr_.reset();
         xrMs = stats_.msSinceBoot() - t0;
     }
-    if (options.xrRequired && !xr_)
+    if (options.xrRequired && (!xr_ || !xr_->ready()))
         throw std::runtime_error("XR is required on this platform, but the OpenXR runtime or headset is not available "
                                  "(see the XR log lines above)");
 
@@ -502,17 +502,18 @@ Engine::Engine(const EngineOptions& options, std::unique_ptr<IEngineFrontend> fr
     {
         HPROF_SCOPE("Startup.Renderer");   // Vulkan 장치 · 파이프라인 · IBL 굽기
         const double t0 = stats_.msSinceBoot();
-        renderer_->init(window_.get(), xr_.get());
+        renderer_->init(window_.get(), (xr_ && xr_->ready()) ? xr_.get() : nullptr);
         rendererMs = stats_.msSinceBoot() - t0;
     }
-    if (xr_) {
+    if (xr_ && xr_->ready()) {
         // 세션은 Play 때 만듭니다(syncWithPlay). 인스턴스는 쓸 수 없어도 남겨 둡니다. 렌더러의 Vulkan
         // 인스턴스 · 장치를 그것으로 만들었을 수 있어서, 엔진이 끝날 때 렌더러 다음에 지웁니다.
         xrSession_->setUsable(renderer_->xrCompatible());
         if (xrSession_->usable()) HLOG(LogEngine, Log) << "XR ready; the headset session starts with Play";
         else           HLOG(LogEngine, Warning) << "XR is disabled for this run; continuing in desktop mode";
     }
-    xrStatus_.usable = xrSession_->usable();
+    xrStatus_.usable  = xrSession_->usable();
+    xrStatus_.standby = (xr_ && !xr_->ready() && xr_->hasInstance());
     if (xrStatus_.usable) xrStatus_.headset = hxrmode::HeadsetState::Present;
     frontend_->setXrRunStatus(xrStatus_);
     frontend_->setInitialProjectSettings(project_);
@@ -1011,7 +1012,11 @@ void Engine::beginXrFrame(FrameState& f) {
         if (!xrStatus_.usable) xrStatus_.headset = hxrmode::HeadsetState::Unknown;
         statusChanged = true;
     }
-    if (!inGame && xrSession_->usable() && xr_) {
+    if (xrStatus_.standby && (!xr_ || !xr_->hasInstance())) {
+        xrStatus_.standby = false;
+        statusChanged = true;
+    }
+    if (hxrmode::shouldPollHeadset(inGame, xrSession_->usable(), xrStatus_.standby) && xr_) {
         const auto now = std::chrono::steady_clock::now();
         if (headsetCheckAt_.time_since_epoch().count() == 0 ||
             std::chrono::duration<double>(now - headsetCheckAt_).count() >= hxrmode::kHeadsetCheckIntervalSec) {

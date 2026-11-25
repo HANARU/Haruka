@@ -20,6 +20,8 @@
 #include "../sceneio/PrefabManager.hpp"
 #include "../sceneio/PrefabRules.hpp"
 #include "../sceneio/SceneSerializer.hpp"
+#include "../audio/AudioSystem.hpp"
+#include "../core/TextUtf.hpp"
 #include "../platform/IWindow.hpp"
 #include "../input/HInputSystem.hpp"
 #include "../components/XrComponents.hpp"
@@ -259,6 +261,8 @@ void EditorApp::initPanels() {
             { EFocusTarget::TextField,     [this] { return detailsPanel_.searchWidget(); },   [this] { return detailsPanel_.searchField(); } },
             { EFocusTarget::TextField,     [this] { return projectSettingsPanel_.searchWidget(); }, [this] { return projectSettingsPanel_.searchField(); } },
             { EFocusTarget::TextField,     [this] { return projectSettingsPanel_.stringWidget(); }, [this] { return projectSettingsPanel_.stringField(); } },
+            { EFocusTarget::TextField,     [this] { return editorPreferencesPanel_.searchWidget(); }, [this] { return editorPreferencesPanel_.searchField(); } },
+            { EFocusTarget::TextField,     [this] { return editorPreferencesPanel_.stringWidget(); }, [this] { return editorPreferencesPanel_.stringField(); } },
             { EFocusTarget::TextField,     [this] { return assetPicker_.searchWidget(); },    [this] { return assetPicker_.field(); } },
             { EFocusTarget::TextField,     [this] { return colorPicker_.hexWidget(); },       [this] { return colorPicker_.hexField(); } },
         }
@@ -335,7 +339,78 @@ void EditorApp::initPanels() {
     psDeps.browseToAsset         = [this](const std::string& path) { browseToAsset(path); };
     psDeps.onLiveSettingsChanged = [this] { liveProjectDirty_ = true; };
     psDeps.xrStatus              = [this]() -> const hxrmode::XrRunStatus& { return xrStatus_; };
+    psDeps.onRestart             = [this] { commands_.execute("Editor.Restart"); };
+    psDeps.canRestart            = [this] { return canRestart(); };
     projectSettingsPanel_.init(std::move(psDeps));
+
+    EditorPreferencesPanel::Deps epDeps;
+    epDeps.ui          = &ui_;
+    epDeps.openMenu    = [this](glm::vec2 at, std::vector<EditorMenuEntry> entries) {
+        contextMenu_.open(at, std::move(entries), "EditorPreferences");
+    };
+    epDeps.openCombo   = [this](const std::shared_ptr<HWidget>& anchor, std::vector<EditorMenuEntry> entries, int highlight) {
+        contextMenu_.openBelow(anchor, std::move(entries), "EditorPreferences", highlight);
+    };
+    epDeps.isComboOpen = [this](const HWidget* w) { return contextMenu_.isOpenBelow(w); };
+    epDeps.closeMenu   = [this] { if (contextMenu_.isOpen() && contextMenu_.panel() == "EditorPreferences") contextMenu_.close(); };
+    epDeps.focusText   = [this](const std::shared_ptr<HWidget>& w) { textInput_.setFocusWidget(w); };
+    epDeps.getState    = [this]() -> heprefs::EditorStateData {
+        heprefs::EditorStateData s;
+        s.lastScene        = lastScene_;
+        s.culture          = culture_.empty() ? std::string("en") : culture_;
+        s.gizmoSize        = gizmoSize_;
+        s.audioOutput      = audioOutput_;
+        s.audioHeadsetInVr = headsetAudioInVr_;
+        s.audioHrtf        = AudioSystem::hrtfModeName(hrtfMode_);
+        return s;
+    };
+    epDeps.setCulture = [this](const std::string& c) { pendingCulture_ = c; };
+    epDeps.setGizmoSize = [this](const std::string& sz) {
+        gizmoSize_ = heprefs::isValidGizmoSize(sz) ? sz : std::string("medium");
+        viewport_.gizmo().setSizeFactor(heprefs::gizmoFactorFromName(gizmoSize_));
+        saveEditorState();
+    };
+    epDeps.setAudioOutput = [this](const std::string& id) {
+        audioOutput_ = id;
+        if (audio_) audio_->setOutputDevice(id);
+        saveEditorState();
+    };
+    epDeps.setAudioHeadsetInVr = [this](bool v) {
+        headsetAudioInVr_ = v;
+        saveEditorState();
+        HLOG(LogEditor, Log) << "Headset audio during VR Play: " << (headsetAudioInVr_ ? "on" : "off")
+                             << " (applies from the next Play)";
+    };
+    epDeps.setAudioHrtf = [this](const std::string& mode) {
+        if (AudioSystem::hrtfModeFromText(mode, hrtfMode_)) {
+            if (audio_) audio_->setHrtfMode(hrtfMode_);
+            saveEditorState();
+        }
+    };
+    epDeps.listAudioDevices = [this]() -> std::vector<EditorPreferencesPanel::AudioDeviceChoice> {
+        std::vector<EditorPreferencesPanel::AudioDeviceChoice> out;
+        if (!audio_) return out;
+        const std::vector<AudioOutputDevice> devs = audio_->outputDevices();
+        for (size_t i = 0; i < devs.size(); ++i) {
+            const AudioOutputDevice& d = devs[i];
+            std::string label = hutf::displayLabel(d.name, "Device " + std::to_string(i + 1)) +
+                                (d.isDefault ? "  (Windows default)" : "");
+            for (const auto& prev : out)
+                if (prev.label == label) { label += " #" + std::to_string(i + 1); break; }
+            out.push_back({ d.id, std::move(label) });
+        }
+        return out;
+    };
+    epDeps.audioStatusText = [this]() -> std::string {
+        if (!audio_) return {};
+        const std::string dev = hutf::displayLabel(audio_->activeOutputName(), "(none)");
+        const std::string ovr = audio_->overrideActive()
+                              ? HTEXT("Editor.Preferences", "AudioStatus.Headset", " (headset during VR Play)").toString()
+                              : std::string();
+        return HText::format(HTEXT("Editor.Preferences", "AudioStatus", "Now playing on: {0}{1}  |  HRTF: {2}"),
+                             { dev, ovr, audio_->hrtfStatus() }).toString();
+    };
+    editorPreferencesPanel_.init(std::move(epDeps));
     assetPicker_.init({ &ui_,
                         [this]() -> const hcb::ContentIndex* { return &contentPanel_.index(); },
                         [this](const std::shared_ptr<HWidget>& w) { textInput_.setFocusWidget(w); },
@@ -594,7 +669,7 @@ void EditorApp::tick(float dt) {
     }
     contentPanel_.tick(bottomTab_ == 0);
 
-    if (dumpMode_ && !dumpStateApplied_ && dumpFrameCount_ >= 1) {
+    if ((dumpMode_ || uiRestart_ || uiVrNotify_) && !dumpStateApplied_ && dumpFrameCount_ >= 1) {
         applyDumpState();
         dumpStateApplied_ = true;
     }
@@ -668,7 +743,9 @@ void EditorApp::buildWidgetTree() {
     // 통계를 상수 패딩으로 밀어내는 방식이면 폰트·uiScale·툴바 축약 단계가 바뀔 때마다
     // 어긋나는데, HSlate 에는 클리핑이 없어 글자끼리 경고 없이 그대로 포개집니다.
     auto vpBar = vpToolbar_.build();
+    vrBannerHost_ = HNew(BR)->background(EditorTheme::transparent);
     auto vpLayer = HNew(VR)
+        ->addSlot(vrBannerHost_, VR::ESizeRule::Auto, 0.f, HPadding{}, EHAlign::Fill)
         ->addSlot(vpBar, VR::ESizeRule::Auto, 0.f, HPadding{}, EHAlign::Left)
         ->addSlot(spacer(), VR::ESizeRule::Fixed, s(6.f))
         ->addSlot(HNew(BR)->background(EditorTheme::statsBackdrop)->padding(HPadding{s(6.f), s(4.f)})
@@ -714,6 +791,7 @@ void EditorApp::buildWidgetTree() {
             ->addSlot(tabBar,         VR::ESizeRule::Fixed, s(EditorTheme::tabH))
             ->addSlot(bottomHost_,    VR::ESizeRule::Fill));
     auto projectSettingsPanel = projectSettingsPanel_.build();
+    auto editorPreferencesPanel = editorPreferencesPanel_.build();
 
     // ── Register panels (신규 위젯도 add 한 줄이면 도킹 대상 — 확장성 seam) ──────
     // 제목은 지금 문화권 글(글자 체계 T3). 패널 id 는 레이아웃 파일 · 코드가 쓰는 이름이라 번역하지 않습니다.
@@ -722,6 +800,7 @@ void EditorApp::buildWidgetTree() {
     panelReg_.add("Details",  HTEXT("Editor.Panels", "Details", "Details").toString(),       detailsPanel);
     panelReg_.add("Bottom",   HTEXT("Editor.Panels", "ContentDrawer", "Content Drawer").toString(), bottomPanel);
     panelReg_.add("ProjectSettings", HTEXT("Editor.Panels", "ProjectSettings", "Project Settings").toString(), projectSettingsPanel);
+    panelReg_.add("EditorPreferences", HTEXT("Editor.Panels", "EditorPreferences", "Editor Preferences").toString(), editorPreferencesPanel);
 
     // 저장된 레이아웃을 복원하고(등록된 패널 기준으로 검증), 없거나 손상되면 기본 배치로 폴백합니다.
     // uiScale 변경 등으로 buildWidgetTree 가 재호출될 때는 dockRoot_ 가 이미 살아 있으므로 재로딩하지
@@ -811,9 +890,11 @@ void EditorApp::buildMenus() {
         else if (id == "Details")  cmd.icon = "sliders-horizontal";
         else if (id == "Bottom")   cmd.icon = "folder";
         else if (id == "ProjectSettings") cmd.icon = "sliders-horizontal";
+        else if (id == "EditorPreferences") cmd.icon = "sliders-horizontal";
         cmd.execute   = [this, id] {
-            if (id == "ProjectSettings") openProjectSettings();
-            else                         dock_.showPanel(id);
+            if (id == "ProjectSettings")        openProjectSettings();
+            else if (id == "EditorPreferences") openEditorPreferences();
+            else                                dock_.showPanel(id);
         };
         cmd.isChecked = [this, id] { return dock_.contains(id); };
         commands_.add(std::move(cmd));
@@ -828,6 +909,8 @@ void EditorApp::buildMenus() {
         E::heading(HTEXT("Editor.Menu", "Section.Save", "Save").toString()),
         E::cmd("File.SaveScene"),
         E::cmd("File.SaveSceneAs"),
+        E::heading(HTEXT("Editor.Menu", "Section.Editor", "Editor").toString()),
+        E::cmd("Editor.Restart"),
     }, 0.f, "File" });
     defs.push_back({ HTEXT("Editor.Menu", "Edit", "Edit").toString(), {
         E::heading(HTEXT("Editor.Menu", "Section.History", "History").toString()),
@@ -841,6 +924,7 @@ void EditorApp::buildMenus() {
         E::heading(HTEXT("Editor.Menu", "Section.Configuration", "Configuration").toString()),
         E::submenu(HTEXT("Editor.Menu", "View.Language", "Language").toString(), std::move(languages), "globe", "Language"),
         E::cmd("Edit.AudioOutput"),
+        E::cmd("Edit.EditorPreferences"),
         E::cmd("Edit.ProjectSettings"),
     }, 0.f, "Edit" });
     defs.push_back({ HTEXT("Editor.Menu", "Actor", "Actor").toString(), {
@@ -875,6 +959,7 @@ void EditorApp::registerCommands() {
     commands_.bind("File.OpenScene",   [this] { openSceneDialog(); });
     commands_.bind("File.SaveScene",   [this] { saveScene(); });
     commands_.bind("File.SaveSceneAs", [this] { saveSceneAs(); });
+    commands_.bind("Editor.Restart",   [this] { requestRestart(); }, [this] { return canRestart(); });
     commands_.bind("Edit.Undo", [this] { undo(); },
                    [this] { return cmdStack_.canUndo() && !viewport_.gizmo().isDragging(); });
     commands_.bind("Edit.Redo", [this] { redo(); },
@@ -884,33 +969,51 @@ void EditorApp::registerCommands() {
     commands_.bind("Edit.Duplicate", [this] { duplicateSelection(); }, hasRoots);
     commands_.bind("Edit.Delete",    [this] { deleteSelection(); },
                    [this, hasRoots] { return ctx_.world && ctx_.assets && hasRoots(); });
-    // 디테일 · 프로젝트 설정 속성 행 오른쪽 메뉴(H3a · PS1b).
+    // 디테일 · 프로젝트 설정 · 에디터 개인 설정 속성 행 오른쪽 메뉴(H3a · PS1b · PS1d).
     auto psMenu = [this] { return contextMenu_.panel() == "ProjectSettings"; };
-    commands_.bind("Details.ResetToDefault", [this, psMenu] {
-        if (psMenu()) { projectSettingsPanel_.resetMenuRow(); projectSettingsPanel_.markDirty(); }
-        else          { detailsPanel_.resetMenuRow(); detailsPanel_.markDirty(); }
-    }, [this, psMenu] { return psMenu() ? projectSettingsPanel_.menuRowCanReset() : detailsPanel_.menuRowCanReset(); });
-    commands_.bind("Details.CopyValue", [this, psMenu] {
+    auto epMenu = [this] { return contextMenu_.panel() == "EditorPreferences"; };
+    commands_.bind("Details.ResetToDefault", [this, psMenu, epMenu] {
+        if (psMenu())      { projectSettingsPanel_.resetMenuRow(); projectSettingsPanel_.markDirty(); }
+        else if (epMenu()) { editorPreferencesPanel_.resetMenuRow(); editorPreferencesPanel_.markDirty(); }
+        else               { detailsPanel_.resetMenuRow(); detailsPanel_.markDirty(); }
+    }, [this, psMenu, epMenu] {
+        return psMenu() ? projectSettingsPanel_.menuRowCanReset()
+             : epMenu() ? editorPreferencesPanel_.menuRowCanReset() : detailsPanel_.menuRowCanReset();
+    });
+    commands_.bind("Details.CopyValue", [this, psMenu, epMenu] {
         if (!ctx_.window) return;
-        ctx_.window->setClipboardText(psMenu() ? projectSettingsPanel_.menuRowText() : detailsPanel_.menuRowText());
-    }, [this, psMenu] { return ctx_.window && (psMenu() ? projectSettingsPanel_.menuRowCanCopy() : detailsPanel_.menuRowCanCopy()); });
-    commands_.bind("Details.PasteValue", [this, psMenu] {
+        ctx_.window->setClipboardText(psMenu() ? projectSettingsPanel_.menuRowText()
+                                    : epMenu() ? editorPreferencesPanel_.menuRowText() : detailsPanel_.menuRowText());
+    }, [this, psMenu, epMenu] {
+        return ctx_.window && (psMenu() ? projectSettingsPanel_.menuRowCanCopy()
+                             : epMenu() ? editorPreferencesPanel_.menuRowCanCopy() : detailsPanel_.menuRowCanCopy());
+    });
+    commands_.bind("Details.PasteValue", [this, psMenu, epMenu] {
         const std::string text = ctx_.window ? ctx_.window->getClipboardText() : std::string();
-        const bool ok = psMenu() ? projectSettingsPanel_.pasteMenuRow(text) : detailsPanel_.pasteMenuRow(text);
+        const bool ok = psMenu() ? projectSettingsPanel_.pasteMenuRow(text)
+                      : epMenu() ? editorPreferencesPanel_.pasteMenuRow(text) : detailsPanel_.pasteMenuRow(text);
         if (!ok) HLOG(LogEditor, Warning) << "Paste: the clipboard text does not fit this property";
-        if (psMenu()) projectSettingsPanel_.markDirty();
-        else          detailsPanel_.markDirty();
-    }, [this, psMenu] { return ctx_.window && (psMenu() ? projectSettingsPanel_.menuRowCanPaste() : detailsPanel_.menuRowCanPaste()); });
+        if (psMenu())      projectSettingsPanel_.markDirty();
+        else if (epMenu()) editorPreferencesPanel_.markDirty();
+        else               detailsPanel_.markDirty();
+    }, [this, psMenu, epMenu] {
+        return ctx_.window && (psMenu() ? projectSettingsPanel_.menuRowCanPaste()
+                             : epMenu() ? editorPreferencesPanel_.menuRowCanPaste() : detailsPanel_.menuRowCanPaste());
+    });
     commands_.bind("View.FrameSelected", [this] { frameSelection(); },
                    [this] { return viewport_.cameraActor() && viewport_.camera() && !ctx_.selection.empty(); });
-    // 기즈모 크기(카메라 거리 배율)를 작게 0.08 · 보통 0.12 · 크게 0.18 로 돌립니다. 툴바는 폭 사다리 때문에 칩을 더하지 않습니다.
+    // 기즈모 크기(카메라 거리 배율)를 작게 0.08 · 보통 0.12 · 크게 0.18 로 돌리고 editor_state.txt 에 저장합니다(PS1d).
     commands_.bind("View.GizmoSize", [this] {
         const float f = viewport_.gizmo().sizeFactor();
         const float n = f < 0.10f ? 0.12f : (f < 0.15f ? 0.18f : 0.08f);
         viewport_.gizmo().setSizeFactor(n);
-        HLOG(LogEditor, Log) << "Gizmo size " << (n < 0.10f ? "small" : (n < 0.15f ? "medium" : "large"));
+        gizmoSize_ = heprefs::gizmoNameFromFactor(n);
+        saveEditorState();
+        editorPreferencesPanel_.markDirty();
+        HLOG(LogEditor, Log) << "Gizmo size " << gizmoSize_;
     });
-    commands_.bind("Edit.AudioOutput", [this] { openAudioOutputDialog(); });
+    commands_.bind("Edit.AudioOutput", [this] { openEditorPreferences("Audio"); });
+    commands_.bind("Edit.EditorPreferences", [this] { openEditorPreferences(); });
     commands_.bind("Edit.ProjectSettings", [this] { openProjectSettings(); });
     commands_.bind("Actor.AddEmpty", [this] {
         selectOnly(ctx_.world->spawnActor(outlinerPanel_.nextActorName()));
@@ -1012,6 +1115,9 @@ std::string EditorApp::playTooltipText() const {
             return HTEXT("Editor.Toolbar", "PlayTip.NoHeadset", "Play (Desktop: no headset found)").toString();
         case hxrmode::StatusKind::Ready:
             return HTEXT("Editor.Toolbar", "PlayTip.Ready", "Play (VR: ready)").toString();
+        case hxrmode::StatusKind::RestartNeeded:
+            return HTEXT("Editor.Toolbar", "PlayTip.RestartNeeded",
+                         "Play (Desktop: headset connected - restart required)").toString();
         case hxrmode::StatusKind::Unavailable:
             return HTEXT("Editor.Toolbar", "PlayTip.Unavailable", "Play (Desktop: VR unavailable)").toString();
         case hxrmode::StatusKind::DisabledByNoXr:
@@ -1023,6 +1129,62 @@ std::string EditorApp::playTooltipText() const {
             return HTEXT("Editor.Toolbar", "PlayTip.NotPrepared",
                          "Play (Desktop: VR not prepared - enable in Project Settings)").toString();
     }
+}
+
+void EditorApp::setXrRunStatus(const hxrmode::XrRunStatus& status) {
+    xrStatus_ = status;
+    const auto dec = hxrmode::decideLateConnect({
+        xrStatus_.standby,
+        xrStatus_.headset == hxrmode::HeadsetState::Present,
+        vrLateConnectNotified_
+    });
+    if (dec.notify) {
+        vrLateConnectNotified_ = true;
+        showVrLateConnectBanner();
+    }
+    projectSettingsPanel_.markDirty();
+    toolbar_.markDirty();
+}
+
+void EditorApp::showVrLateConnectBanner() {
+    if (!vrBannerHost_) return;
+    using HR = SHorizontalBox;
+    auto banner = HNew(HR);
+    banner->addSlot(ui_.icon("alert-triangle", 14.f, EditorTheme::warn, "!", 12.f),
+                    HR::ESizeRule::Fixed, s(20.f), {}, EVAlign::Center);
+    banner->addSlot(spacer(), HR::ESizeRule::Fixed, s(6.f));
+    banner->addSlot(HNew(STextBlock)
+                        ->text(HTEXT("Editor.Viewport", "VrConnectedBanner",
+                                     "VR headset connected. Restart the editor to use VR.").toString())
+                        ->fontSize(s(12.f))->color(EditorUiKit::kTextBody)
+                        ->hAlign(EHAlign::Left)->vAlign(EVAlign::Center),
+                    HR::ESizeRule::Fill);
+    const bool enabled = canRestart();
+    const glm::vec4 fg = enabled ? EditorUiKit::kTextBody : EditorUiKit::kTextDim;
+    banner->addSlot(ui_.textButton(
+        HTEXT("Editor.Settings", "RestartNow", "Restart Now").toString(),
+        12.f, fg, { 10.f, 3.f }, EditorTheme::ctlNormal,
+        enabled ? EditorTheme::ctlHover : EditorTheme::ctlNormal,
+        [this] { commands_.execute("Editor.Restart"); }),
+        HR::ESizeRule::Auto);
+    banner->addSlot(spacer(), HR::ESizeRule::Fixed, s(4.f));
+    banner->addSlot(ui_.textButton(
+        "x", 11.f, EditorUiKit::kTextDim, { 6.f, 2.f }, EditorTheme::transparent, EditorTheme::ctlHover,
+        [this] { hideVrLateConnectBanner(); }),
+        HR::ESizeRule::Auto);
+    vrBannerHost_->background(EditorTheme::warnBg)
+                 ->borderColor(EditorTheme::warn)
+                 ->borderThickness(EditorTheme::borderThin)
+                 ->padding(HPadding{ s(10.f), s(4.f) })
+                 ->content(banner);
+}
+
+void EditorApp::hideVrLateConnectBanner() {
+    if (!vrBannerHost_) return;
+    vrBannerHost_->background(EditorTheme::transparent)
+                 ->borderThickness(0.f)
+                 ->padding(HPadding{})
+                 ->content(nullptr);
 }
 
 void EditorApp::beginPlay() {
@@ -1102,6 +1264,7 @@ void EditorApp::flushChromeRebuilds() {
     toolbar_.flushRebuild();
     detailsPanel_.flushRebuild();
     projectSettingsPanel_.flushRebuild();
+    editorPreferencesPanel_.flushRebuild();
     logPanel_.flushRebuilds(bottomTab_ == 1);
     componentPicker_.flushRebuild();
     assetPicker_.flushRebuild();
@@ -1516,6 +1679,8 @@ void EditorApp::handleInputEvents(float mouseX, float mouseY,
                 detailsPanel_.openRowMenuAt(p);
             if (!modal_ && dock_.panelActiveInMain("ProjectSettings") && hwininput::panelGetsPointer(dock_.floatOfPanel("ProjectSettings"), 0))
                 projectSettingsPanel_.openRowMenuAt(p);
+            if (!modal_ && dock_.panelActiveInMain("EditorPreferences") && hwininput::panelGetsPointer(dock_.floatOfPanel("EditorPreferences"), 0))
+                editorPreferencesPanel_.openRowMenuAt(p);
         }
         prevRightDown_ = rightDown;
         // Esc: closeOnEscape 팝업(오른쪽 메뉴)을 닫습니다. Add Component 는 검색 칸의 Esc(onCancel)가 닫습니다.

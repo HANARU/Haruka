@@ -26,6 +26,8 @@ public:
         std::function<void(const std::string&)> browseToAsset;
         std::function<void()>                   onLiveSettingsChanged;
         std::function<const hxrmode::XrRunStatus&()> xrStatus;
+        std::function<void()>                   onRestart;
+        std::function<bool()>                   canRestart;
     };
 
     void init(Deps deps);

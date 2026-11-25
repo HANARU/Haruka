@@ -37,7 +37,8 @@ public:
     // 1. 인스턴스와 헤드셋을 준비합니다. 실패해도 예외 없이 false 를 돌려주고 이유를 로그에 남깁니다. Android 는 platform 의
     //    JavaVM · 액티비티로 로더를 먼저 초기화합니다(2026-10-31).
     bool init(const PlatformContext& platform = {});
-    bool ready() const;   // init 이 성공했고 세션을 만들 수 있음
+    bool ready() const;         // init 이 성공했고 세션을 만들 수 있음
+    bool hasInstance() const;   // OpenXR 인스턴스가 살아 있음(헤드셋 대기 상태 포함, PS-D11)
 
     // 2. IVulkanDeviceHooks (렌더러가 부름)
     bool             vulkanApiRange(uint32_t& minApi, uint32_t& maxApi) const override;

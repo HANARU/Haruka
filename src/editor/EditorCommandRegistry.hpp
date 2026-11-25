@@ -216,6 +216,7 @@ inline std::vector<EditorCommand> defaultSpecs() {
                     { chord(HInput::KEY_S, true, S::Off) }, false, true));
     v.push_back(cmd("File.SaveSceneAs", HTEXT("Editor.Menu", "File.SaveSceneAs", "Save Scene As..."), "file-pen",
                     { chord(HInput::KEY_S, true, S::On) }, false, true));
+    v.push_back(cmd("Editor.Restart", HTEXT("Editor.Menu", "File.Restart", "Restart Editor"), "refresh-cw", {}));
     v.push_back(cmd("File.OpenScene", HTEXT("Editor.Menu", "File.OpenScene", "Open Scene..."), "folder-open",
                     { chord(HInput::KEY_O, true, S::Any) }, false, true));
     v.push_back(cmd("File.NewScene", HTEXT("Editor.Menu", "File.NewScene", "New Scene"), "file",
@@ -236,6 +237,7 @@ inline std::vector<EditorCommand> defaultSpecs() {
     // ── 단축키 없는 명령 ──
     v.push_back(cmd("View.GizmoSize", HTEXT("Editor.Menu", "Edit.GizmoSize", "Gizmo Size (S/M/L)"), "scaling", {}));
     v.push_back(cmd("Edit.AudioOutput", HTEXT("Editor.Menu", "Edit.AudioOutput", "Audio Output..."), "volume-2", {}));
+    v.push_back(cmd("Edit.EditorPreferences", HTEXT("Editor.Menu", "Edit.EditorPreferences", "Editor Preferences..."), "sliders-horizontal", {}));
     v.push_back(cmd("Edit.ProjectSettings", HTEXT("Editor.Menu", "Edit.ProjectSettings", "Project Settings..."), "sliders-horizontal", {}));
     v.push_back(cmd("Actor.AddEmpty", HTEXT("Editor.Menu", "Actor.AddEmpty", "Add Empty"), "plus", {}));
     v.push_back(cmd("Actor.AttachToPrev", HTEXT("Editor.Menu", "Actor.AttachToPrev", "Attach To Prev Selected"), "link", {}));

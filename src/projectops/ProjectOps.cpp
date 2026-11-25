@@ -333,6 +333,25 @@ ProcessOutput launchProcess(const std::vector<std::string>& args,
                             const fs::path& workingDir,
                             bool waitForExit) {
     ProcessOutput res;
+    const LaunchResult lr = launchExecutable(args, workingDir, waitForExit);
+    res.launched = lr.launched;
+    res.exitCode = lr.exitCode;
+    res.launchError = lr.error;
+    return res;
+}
+#endif
+
+} // namespace
+
+LaunchResult launchExecutable(const std::vector<std::string>& args,
+                              const std::filesystem::path& workingDir,
+                              bool waitForExit) {
+    LaunchResult res;
+#ifdef _WIN32
+    if (args.empty()) {
+        res.error = "No executable arguments";
+        return res;
+    }
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
@@ -353,7 +372,7 @@ ProcessOutput launchProcess(const std::vector<std::string>& args,
     );
     if (!ok) {
         const DWORD err = GetLastError();
-        res.launchError = "CreateProcessW failed (error " + std::to_string(err) + ")";
+        res.error = "CreateProcessW failed (error " + std::to_string(err) + ")";
         return res;
     }
     res.launched = true;
@@ -367,11 +386,52 @@ ProcessOutput launchProcess(const std::vector<std::string>& args,
     }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+#else
+    (void)args;
+    (void)workingDir;
+    (void)waitForExit;
+    res.error = "launchExecutable is only supported on Windows";
+#endif
     return res;
 }
-#endif
 
-} // namespace
+std::string formatCommandLine(const std::vector<std::string>& args) {
+#ifdef _WIN32
+    return wideToUtf8(buildCommandLine(args));
+#else
+    std::string out;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (i > 0) out.push_back(' ');
+        out += args[i];
+    }
+    return out;
+#endif
+}
+
+std::filesystem::path currentExecutablePath() {
+#ifdef _WIN32
+    std::wstring buf(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD len = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        if (len == 0) return {};
+        if (len < buf.size()) {
+            buf.resize(len);
+            return std::filesystem::path(buf);
+        }
+        buf.resize(buf.size() * 2);
+    }
+#else
+    return {};
+#endif
+}
+
+uint32_t currentProcessId() {
+#ifdef _WIN32
+    return static_cast<uint32_t>(GetCurrentProcessId());
+#else
+    return 0;
+#endif
+}
 
 bool isValidProjectName(std::string_view name) {
     if (name.empty()) return false;

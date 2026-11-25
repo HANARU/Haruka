@@ -122,6 +122,19 @@ std::filesystem::path loadLastProjectLocation(const std::filesystem::path& userD
 bool saveLastProjectLocation(const std::filesystem::path& userDir, const std::filesystem::path& location);
 
 // ── Open project & shell helpers ────────────────────────────────────────────
+struct LaunchResult {
+    bool launched = false;
+    int exitCode = 0;
+    std::string error;
+};
+
+LaunchResult launchExecutable(const std::vector<std::string>& args,
+                              const std::filesystem::path& workingDir = {},
+                              bool waitForExit = false);
+std::string formatCommandLine(const std::vector<std::string>& args);
+std::filesystem::path currentExecutablePath();
+uint32_t currentProcessId();
+
 OpResult planOpenProject(const std::filesystem::path& projectDir, OpenPlan& outPlan);
 OpResult openProject(const std::filesystem::path& projectDir,
                      const std::filesystem::path& userDir,

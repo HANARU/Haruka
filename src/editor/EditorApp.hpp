@@ -17,6 +17,7 @@
 #include "OutlinerPanel.hpp"
 #include "DetailsPanel.hpp"
 #include "ProjectSettingsPanel.hpp"
+#include "EditorPreferencesPanel.hpp"
 #include "ContentBrowserPanel.hpp"
 #include "GpuStatsPanel.hpp"
 #include "OutputLogPanel.hpp"
@@ -117,7 +118,7 @@ public:
     // XR Play 동안 소리를 헤드셋 장치로 바꿀지(기본 켜짐). 엔진이 세션을 열고 닫을 때 묻습니다.
     bool headsetAudioInVr() const override { return headsetAudioInVr_; }
     bool wantsXrForPlay() const override { return !playDesktopRequested_; }
-    void setXrRunStatus(const hxrmode::XrRunStatus& status) override { xrStatus_ = status; }
+    void setXrRunStatus(const hxrmode::XrRunStatus& status) override;
     void setInitialProjectSettings(const ProjectSettings& ps) override { projectSettingsPanel_.setStartupProjectSettings(ps); }
     bool consumeLiveProjectSettings(ProjectSettings& out) override {
         if (!liveProjectDirty_) return false;
@@ -144,9 +145,10 @@ private:
     StatusBarPanel      statusBar_;
     TextInputController textInput_;
     OutlinerPanel        outlinerPanel_;
-    DetailsPanel         detailsPanel_;
-    ProjectSettingsPanel projectSettingsPanel_;
-    bool                 liveProjectDirty_ = false;
+    DetailsPanel           detailsPanel_;
+    ProjectSettingsPanel   projectSettingsPanel_;
+    EditorPreferencesPanel editorPreferencesPanel_;
+    bool                   liveProjectDirty_ = false;
     ContentBrowserPanel  contentPanel_;
     GpuStatsPanel       gpuStatsPanel_;
     OutputLogPanel      logPanel_;
@@ -419,8 +421,14 @@ private:
     std::string  audioOutput_;              // Config/editor_state.txt 의 audioOutput
     bool         headsetAudioInVr_ = true;  // Config/editor_state.txt 의 audioHeadsetInVr
     EHrtfMode    hrtfMode_{};               // Config/editor_state.txt 의 audioHrtf(2026-11-06). {} = Auto(0)
-    void openAudioOutputDialog();
+    std::string  gizmoSize_        = "medium"; // Config/editor_state.txt 의 gizmoSize(PS1d)
     void openProjectSettings();
+    void openEditorPreferences(const std::string& category = {});
+    bool canRestart() const;
+    void requestRestart();
+    void performRestart();
+    void showVrLateConnectBanner();
+    void hideVrLateConnectBanner();
 
     // ── 모달 대화상자 (2026-10-15) ───────────────────────────────────────────
     // 화면 전체를 덮는 캐처 위에 가운데 패널을 띄웁니다. 열린 동안에는 다른 패널 · 뷰포트 · 단축키가
@@ -514,6 +522,16 @@ private:
     std::string uiPsCategory_;
     std::string uiPsSearch_;
     std::vector<std::string> uiPsSet_;
+    bool        uiEditorPreferences_ = false;
+    std::string uiEpCategory_;
+    std::string uiEpSearch_;
+    bool        restartDryRun_ = false;
+    bool        headlessRun_   = false;
+    bool        uiRestart_     = false;
+    bool        uiVrNotify_    = false;
+    std::vector<std::string> rawCliArgs_;
+    bool        vrLateConnectNotified_ = false;
+    std::shared_ptr<SBorder> vrBannerHost_;
     std::string uiLayout_;
     std::string viewportDumpPath_;
     std::string uiGizmoMode_;

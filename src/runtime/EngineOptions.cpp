@@ -163,6 +163,9 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
         else if (valueOf(a, "--ui-ps-category", v)) o.uiPsCategory = v;
         else if (valueOf(a, "--ui-ps-search", v))   o.uiPsSearch   = v;
         else if (valueOf(a, "--ui-ps-set", v))      o.uiPsSet.push_back(v);
+        else if (a == "--ui-editor-preferences") o.uiEditorPreferences = true;
+        else if (valueOf(a, "--ui-ep-category", v)) o.uiEpCategory = v;
+        else if (valueOf(a, "--ui-ep-search", v))   o.uiEpSearch   = v;
         else if (a == "--ui-add-component") o.uiAddComponent = true;
         else if (valueOf(a, "--ui-content-folder", v))   o.uiContentFolder = v;
         else if (valueOf(a, "--ui-content-search", v))   o.uiContentSearch = v;
@@ -351,9 +354,59 @@ EngineOptions parse(const std::vector<std::string>& args, std::vector<std::strin
             if (!v.empty()) o.projectDir = v;
             else unknown.push_back(a);
         }
+        else if (valueOf(a, "--restart-wait-pid", v)) {
+            uint32_t pid = 0;
+            if (parseUint(v, pid) && pid > 0) o.restartWaitPid = pid;
+            else unknown.push_back(a);
+        }
+        else if (a == "--restart-dry-run") o.restartDryRun = true;
+        else if (a == "--ui-restart")      o.uiRestart     = true;
+        else if (a == "--ui-vr-notify")    o.uiVrNotify    = true;
         else unknown.push_back(a);
     }
     return o;
+}
+
+std::vector<std::string> filterRestartArgs(const std::vector<std::string>& args, uint32_t waitPid) {
+    auto startsWith = [](const std::string& s, const char* prefix) {
+        const size_t n = std::char_traits<char>::length(prefix);
+        return s.size() >= n && s.compare(0, n, prefix) == 0;
+    };
+    auto isOneShotRestartExcluded = [&](const std::string& a) {
+        if (a == "--hidden-window" || a == "--headless" || a == "--synthetic-eyes" ||
+            a == "--vk-fail-init" || a == "--switch-sync" || a == "--restart-dry-run" ||
+            a == "--no-lazy-msaa")
+            return true;
+        if (startsWith(a, "--debug-post=") || startsWith(a, "--msaa=")) return true;
+        if (startsWith(a, "--ui-"))               return true;
+        if (startsWith(a, "--frames="))           return true;
+        if (startsWith(a, "--timeout="))          return true;
+        if (startsWith(a, "--fixed-dt="))         return true;
+        if (startsWith(a, "--sim-ticks="))        return true;
+        if (startsWith(a, "--log-render-pos="))   return true;
+        if (startsWith(a, "--capture="))          return true;
+        if (startsWith(a, "--capture-eye="))      return true;
+        if (startsWith(a, "--viewport-dump="))    return true;
+        if (startsWith(a, "--synthetic-eyes=") || startsWith(a, "--synthetic-eye-size=")) return true;
+        if (startsWith(a, "--debug-crash="))      return true;
+        if (startsWith(a, "--switch-scene="))     return true;
+        if (startsWith(a, "--user-setting=") || startsWith(a, "--user-setting-at=")) return true;
+        if (startsWith(a, "--console-at="))       return true;
+        if (startsWith(a, "--touch-asset-at="))   return true;
+        if (startsWith(a, "--trace=") || startsWith(a, "--trace-frames=")) return true;
+        if (startsWith(a, "--restart-wait-pid=")) return true;
+        return false;
+    };
+
+    std::vector<std::string> out;
+    out.reserve(args.size() + 1);
+    for (const std::string& a : args) {
+        if (!isOneShotRestartExcluded(a))
+            out.push_back(a);
+    }
+    if (waitPid != 0)
+        out.push_back("--restart-wait-pid=" + std::to_string(waitPid));
+    return out;
 }
 
 } // namespace hopt

@@ -18,6 +18,8 @@
 #include "../core/TextUtf.hpp"
 #include "../audio/AudioSystem.hpp"
 #include "../platform/IWindow.hpp"
+#include "../projectops/ProjectOps.hpp"
+#include "../runtime/EngineOptions.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -37,35 +39,28 @@ static constexpr const char* kStatePath = "Config/editor_state.txt";
 // 실행 파일 기준입니다(2026-10-19, core/AppPaths.hpp).
 void EditorApp::loadEditorState() {
     std::string text;
-    if (!hfile::readAll(happ::inWriteRoot(kStatePath), text)) return;
-    std::istringstream in(text);
-    std::string line;
-    while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.empty() || line[0] == '#') continue;
-        const size_t eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        const std::string key = project_settings::trim(line.substr(0, eq));
-        const std::string val = project_settings::trim(line.substr(eq + 1));
-        if (key == "lastScene") lastScene_ = val;
-        else if (key == "culture") culture_ = val;
-        else if (key == "audioOutput") audioOutput_ = val;
-        else if (key == "audioHeadsetInVr") headsetAudioInVr_ = (val != "0");
-        else if (key == "audioHrtf" && !AudioSystem::hrtfModeFromText(val, hrtfMode_))
-            HLOG(LogEditorScene, Warning) << "Editor state: unknown audioHrtf '" << val << "' (auto, on, off); using auto";
-    }
+    if (!hfile::readAll(happ::inWriteRoot(heprefs::kStateRelPath), text)) return;
+    std::vector<std::string> warnings;
+    const heprefs::EditorStateData s = heprefs::parseEditorState(text, warnings);
+    for (const std::string& w : warnings) HLOG(LogEditorScene, Warning) << w;
+    lastScene_        = s.lastScene;
+    culture_          = (s.culture == "en") ? std::string() : s.culture;
+    gizmoSize_        = s.gizmoSize;
+    audioOutput_      = s.audioOutput;
+    headsetAudioInVr_ = s.audioHeadsetInVr;
+    AudioSystem::hrtfModeFromText(s.audioHrtf, hrtfMode_);
 }
 
 void EditorApp::saveEditorState() const {
-    std::string text = "# Haruka editor state for this machine (not part of the project).\n";
-    if (!lastScene_.empty()) text += "lastScene=" + lastScene_ + "\n";
-    if (!culture_.empty() && culture_ != "en") text += "culture=" + culture_ + "\n";   // 에디터 언어(글자 체계 T3)
-    // 소리 출력 장치(비면 시스템 기본)와 XR Play 동안 헤드셋으로 바꿀지(2026-10-16).
-    if (!audioOutput_.empty()) text += "audioOutput=" + audioOutput_ + "\n";
-    text += std::string("audioHeadsetInVr=") + (headsetAudioInVr_ ? "1" : "0") + "\n";
-    text += std::string("audioHrtf=") + AudioSystem::hrtfModeName(hrtfMode_) + "\n";   // HRTF 를 켜는 때(2026-11-06)
+    heprefs::EditorStateData s;
+    s.lastScene        = lastScene_;
+    s.culture          = culture_.empty() ? std::string("en") : culture_;
+    s.gizmoSize        = gizmoSize_;
+    s.audioOutput      = audioOutput_;
+    s.audioHeadsetInVr = headsetAudioInVr_;
+    s.audioHrtf        = AudioSystem::hrtfModeName(hrtfMode_);
     std::string err;
-    if (!hfile::writeAtomic(happ::inWriteRoot(kStatePath), text, &err))
+    if (!hfile::writeAtomic(happ::inWriteRoot(heprefs::kStateRelPath), heprefs::formatEditorState(s), &err))
         HLOG(LogEditorScene, Warning) << "Editor state not saved: " << err;
 }
 
@@ -91,12 +86,15 @@ void EditorApp::applyCulture(const std::string& c, bool save) {
     buildWidgetTree();
     outlinerPanel_.rebuild();
     detailsPanel_.rebuild();
+    projectSettingsPanel_.rebuild();
+    editorPreferencesPanel_.rebuild();
     rebuildBottomPanel();
     toolbar_.markDirty();
 }
 
 void EditorApp::openInitialScene(const std::string& startScene) {
     loadEditorState();
+    viewport_.gizmo().setSizeFactor(heprefs::gizmoFactorFromName(gizmoSize_));
     {
         const std::string c = !cultureOverride_.empty() ? cultureOverride_ : culture_;
         if (!c.empty() && c != htext::culture()) applyCulture(c, false);
@@ -145,66 +143,7 @@ void EditorApp::newScene() {
     });
 }
 
-// ── 소리 출력 장치 (2026-10-16) ──────────────────────────────────────────────────
-// 목록에서 고르면 바로 그 장치로 바꾸고 Config/editor_state.txt 에 기억합니다. 마지막 항목은 XR Play 동안 헤드셋 장치로
-// 바꿀지 켜고 끄는 줄입니다. UI 글꼴이 ASCII 만 그리므로 장치 이름의 한글은 빼고 보여 줍니다(로그에는 원래 이름).
-void EditorApp::openAudioOutputDialog() {
-    if (!audio_) {
-        HLOG(LogEditorScene, Warning) << "Audio output: no audio system";
-        return;
-    }
-    const std::vector<AudioOutputDevice> devices = audio_->outputDevices();
-    ModalSpec m;
-    m.title   = HTEXT("Editor.Dialog", "Audio.Title", "Audio Output").toString();
-    m.message = "Now playing on: " + hutf::displayLabel(audio_->activeOutputName(), "(none)") +
-                (audio_->overrideActive() ? " (headset during VR Play)" : "") +   // 헤드셋 장치가 실제로 열렸을 때만(DEF-147)
-                "\nChoose the editor's output device:";
-    // 항목 글 -> 동작. 같은 이름의 장치가 둘이면 번호를 붙여 구별합니다.
-    std::vector<std::pair<std::string, std::function<void()>>> items;
-    auto choose = [this](const std::string& id) {
-        audioOutput_ = id;
-        audio_->setOutputDevice(id);
-        saveEditorState();
-    };
-    items.push_back({ std::string(audioOutput_.empty() ? "> " : "  ") + "System default", [choose] { choose(""); } });
-    for (size_t i = 0; i < devices.size(); ++i) {
-        const AudioOutputDevice& d = devices[i];
-        std::string label = std::string(hutf::equalsIgnoreCase(d.id, audioOutput_) ? "> " : "  ") +
-                            hutf::displayLabel(d.name, "Device " + std::to_string(i + 1)) +
-                            (d.isDefault ? "  (Windows default)" : "");
-        for (const auto& it : items)
-            if (it.first == label) { label += " #" + std::to_string(i + 1); break; }
-        const std::string id = d.id;
-        items.push_back({ label, [choose, id] { choose(id); } });
-    }
-    items.push_back({ std::string("Headset during VR Play: ") + (headsetAudioInVr_ ? "On (click to turn off)" : "Off (click to turn on)"),
-                      [this] {
-                          headsetAudioInVr_ = !headsetAudioInVr_;
-                          saveEditorState();
-                          HLOG(LogEditorScene, Log) << "Headset audio during VR Play: " << (headsetAudioInVr_ ? "on" : "off")
-                                                    << " (applies from the next Play)";
-                      } });
-    // HRTF(2026-11-06, Audio_Design.md 9-6): 누를 때마다 Auto → On → Off 로 바뀌고 바로 적용됩니다(다음 틱에 소리마다 사슬을 바꿈).
-    // HRTF 는 헤드폰 · 헤드셋용이라 기본(Auto)은 VR Play 동안만 켭니다.
-    static const char* const kHrtfLabels[] = { "Auto (VR Play only)", "On (headphones)", "Off (stereo panning)" };
-    items.push_back({ std::string("3D audio (HRTF): ") + kHrtfLabels[(int)hrtfMode_] + "  - now " + audio_->hrtfStatus() +
-                          " (click to change)",
-                      [this] {
-                          hrtfMode_ = hrtfMode_ == EHrtfMode::Auto ? EHrtfMode::On
-                                    : hrtfMode_ == EHrtfMode::On   ? EHrtfMode::Off : EHrtfMode::Auto;
-                          audio_->setHrtfMode(hrtfMode_);
-                          saveEditorState();
-                      } });
-    for (const auto& it : items) m.list.push_back(it.first);
-    m.onPick = [items](const std::string& label) {
-        for (const auto& it : items)
-            if (it.first == label) { it.second(); return; }
-    };
-    m.buttons.push_back({ HTEXT("Editor.Dialog", "Button.Close", "Close").toString(), {}, false, true });
-    openModal(std::move(m));
-}
-
-// ── 프로젝트 설정 창 (2026-11-24 PS1b) ─────────────────────────────────────────────
+// ── 프로젝트 설정 · 에디터 개인 설정 창 (PS1b · PS1d) ────────────────────────────────
 void EditorApp::openProjectSettings() {
     projectSettingsPanel_.reloadFiles();
     projectSettingsPanel_.markDirty();
@@ -221,6 +160,24 @@ void EditorApp::openProjectSettings() {
     const int px = wx + std::max(0, (ww - pw) / 2);
     const int py = wy + std::max(0, (wh - ph) / 2);
     dock_.showPanelFloating("ProjectSettings", pw, ph, px, py);
+}
+
+void EditorApp::openEditorPreferences(const std::string& category) {
+    if (!category.empty()) editorPreferencesPanel_.selectCategory(category);
+    editorPreferencesPanel_.markDirty();
+    if (dock_.contains("EditorPreferences")) {
+        dock_.showPanel("EditorPreferences");
+        return;
+    }
+    int wx = 100, wy = 100, ww = 1600, wh = 900;
+    if (ctx_.window) {
+        ctx_.window->getWindowPos(wx, wy);
+        ctx_.window->getWindowSize(ww, wh);
+    }
+    const int pw = 880, ph = 580;
+    const int px = wx + std::max(0, (ww - pw) / 2);
+    const int py = wy + std::max(0, (wh - ph) / 2);
+    dock_.showPanelFloating("EditorPreferences", pw, ph, px, py);
 }
 
 void EditorApp::openSceneDialog() {
@@ -359,6 +316,49 @@ bool EditorApp::requestClose() {
     // 없이 끝나면(취소 · 저장 실패 · 닫기 승인) flushModal 이 지웁니다.
     closeFlow_ = modalOpen();
     return false;
+}
+
+bool EditorApp::canRestart() const {
+    return (!floatsHidden_ && !headlessRun_) || restartDryRun_;
+}
+
+void EditorApp::requestRestart() {
+    if (!canRestart()) return;
+    if (playState_ != EPlayState::Editor) stopPlay();
+    if (restartDryRun_) {
+        performRestart();
+        return;
+    }
+    guardUnsaved(HTEXT("Editor.Dialog", "Verb.Restarting", "restarting"), [this] {
+        performRestart();
+    });
+}
+
+void EditorApp::performRestart() {
+    saveEditorState();
+    dock_.saveLayout();
+
+    const fs::path exe = hprojops::currentExecutablePath();
+    std::vector<std::string> args;
+    args.push_back(exe.empty() ? std::string("HarukaEngine.exe") : hutf::fromUtf16(exe.c_str()));
+    const uint32_t pid = hprojops::currentProcessId();
+    for (std::string& a : hopt::filterRestartArgs(rawCliArgs_, pid))
+        args.push_back(std::move(a));
+
+    const std::string cmdLine = hprojops::formatCommandLine(args);
+    if (restartDryRun_) {
+        HLOG(LogEditorScene, Log) << "Restart (dry-run): " << cmdLine;
+        return;
+    }
+
+    HLOG(LogEditorScene, Log) << "Restarting editor: " << cmdLine;
+    const hprojops::LaunchResult lr = hprojops::launchExecutable(args, {}, false);
+    if (!lr.launched) {
+        HLOG(LogEditorScene, Error) << "Restart failed: " << lr.error;
+        return;
+    }
+    quitApproved_ = true;
+    if (ctx_.window) ctx_.window->setShouldClose(true);
 }
 
 void EditorApp::cancelModalNow() {

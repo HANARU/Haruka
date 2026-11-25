@@ -1553,3 +1553,167 @@ msgctxt "Launcher,Title"
 msgid "Haruka Launcher"
 msgstr ""
 
+
+msgctxt "Editor.Menu,Section.Editor"
+msgid "Editor"
+msgstr ""
+
+msgctxt "Editor.Menu,File.Restart"
+msgid "Restart Editor"
+msgstr ""
+
+msgctxt "Editor.Dialog,Verb.Restarting"
+msgid "restarting"
+msgstr ""
+
+msgctxt "Editor.Settings,RestartNow"
+msgid "Restart Now"
+msgstr ""
+
+msgctxt "Editor.Dialog,ProjectSettings.Status.RestartNeeded"
+msgid "This run: headset connected - restart required"
+msgstr ""
+
+msgctxt "Editor.Toolbar,PlayTip.RestartNeeded"
+msgid "Play (Desktop: headset connected - restart required)"
+msgstr ""
+
+msgctxt "Editor.Viewport,VrConnectedBanner"
+msgid "VR headset connected. Restart the editor to use VR."
+msgstr ""
+
+msgctxt "Editor.Menu,Edit.EditorPreferences"
+msgid "Editor Preferences..."
+msgstr ""
+
+msgctxt "Editor.Panels,EditorPreferences"
+msgid "Editor Preferences"
+msgstr ""
+
+msgctxt "Editor.Preferences,Group.General"
+msgid "General"
+msgstr ""
+
+msgctxt "Editor.Preferences,Group.Audio"
+msgid "Audio"
+msgstr ""
+
+msgctxt "Editor.Preferences,Cat.RegionLanguage"
+msgid "Region & Language"
+msgstr ""
+
+msgctxt "Editor.Preferences,CatDesc.RegionLanguage"
+msgid "Editor display language."
+msgstr ""
+
+msgctxt "Editor.Preferences,Cat.Viewport"
+msgid "Viewport"
+msgstr ""
+
+msgctxt "Editor.Preferences,CatDesc.Viewport"
+msgid "Viewport gizmo and interaction preferences."
+msgstr ""
+
+msgctxt "Editor.Preferences,Cat.Audio"
+msgid "Audio"
+msgstr ""
+
+msgctxt "Editor.Preferences,CatDesc.Audio"
+msgid "Editor audio output device, VR headset routing, and 3D spatialization."
+msgstr ""
+
+msgctxt "Editor.Preferences,Sec.Language"
+msgid "Language"
+msgstr ""
+
+msgctxt "Editor.Preferences,Key.culture"
+msgid "Editor Language"
+msgstr ""
+
+msgctxt "Editor.Preferences,Help.culture"
+msgid "Display language for editor menus, panels, and dialogs."
+msgstr ""
+
+msgctxt "Editor.Preferences,Sec.Gizmo"
+msgid "Gizmo"
+msgstr ""
+
+msgctxt "Editor.Preferences,Key.gizmoSize"
+msgid "Gizmo Size"
+msgstr ""
+
+msgctxt "Editor.Preferences,Help.gizmoSize"
+msgid "Transform gizmo screen scale (Small, Medium, or Large)."
+msgstr ""
+
+msgctxt "Editor.Preferences,GizmoSize.Small"
+msgid "Small"
+msgstr ""
+
+msgctxt "Editor.Preferences,GizmoSize.Medium"
+msgid "Medium"
+msgstr ""
+
+msgctxt "Editor.Preferences,GizmoSize.Large"
+msgid "Large"
+msgstr ""
+
+msgctxt "Editor.Preferences,Sec.Output"
+msgid "Output"
+msgstr ""
+
+msgctxt "Editor.Preferences,Key.audioOutput"
+msgid "Output Device"
+msgstr ""
+
+msgctxt "Editor.Preferences,Help.audioOutput"
+msgid "Audio playback device used by the editor (empty = system default)."
+msgstr ""
+
+msgctxt "Editor.Preferences,Audio.SystemDefault"
+msgid "System default"
+msgstr ""
+
+msgctxt "Editor.Preferences,Sec.VrAudio"
+msgid "VR Audio"
+msgstr ""
+
+msgctxt "Editor.Preferences,Key.audioHeadsetInVr"
+msgid "Headset Audio During VR Play"
+msgstr ""
+
+msgctxt "Editor.Preferences,Help.audioHeadsetInVr"
+msgid "Route editor audio to the VR headset during VR Play (applies from the next Play)."
+msgstr ""
+
+msgctxt "Editor.Preferences,Sec.Spatialization"
+msgid "Spatialization"
+msgstr ""
+
+msgctxt "Editor.Preferences,Key.audioHrtf"
+msgid "3D Audio (HRTF)"
+msgstr ""
+
+msgctxt "Editor.Preferences,Help.audioHrtf"
+msgid "Binaural HRTF mode: Auto (VR Play only), On (headphones), or Off (stereo panning)."
+msgstr ""
+
+msgctxt "Editor.Preferences,Hrtf.Auto"
+msgid "Auto (VR Play only)"
+msgstr ""
+
+msgctxt "Editor.Preferences,Hrtf.On"
+msgid "On (headphones)"
+msgstr ""
+
+msgctxt "Editor.Preferences,Hrtf.Off"
+msgid "Off (stereo panning)"
+msgstr ""
+
+msgctxt "Editor.Preferences,AudioStatus"
+msgid "Now playing on: {0}{1}  |  HRTF: {2}"
+msgstr ""
+
+msgctxt "Editor.Preferences,AudioStatus.Headset"
+msgid " (headset during VR Play)"
+msgstr ""
